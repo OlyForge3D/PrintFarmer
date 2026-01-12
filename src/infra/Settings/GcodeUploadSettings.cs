@@ -11,7 +11,7 @@ namespace Farm.Infrastructure.Settings
     {
         public const string SectionName = "GcodeUpload";
         public static string SectionKey => SectionName;
-        private static readonly List<string> _defaultExtensions = new() { ".gcode", ".bgcode" };
+        private static readonly List<string> _defaultExtensions = new() { ".gcode" };
 
         [SettingDisplay(Name = "Allowed Extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
         [JsonPropertyName("allowedExtensions")]

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Farm.Backend.Plugin.Moonraker</RootNamespace>
+    <AssemblyName>Farm.Backend.Plugin.Moonraker</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../../discovery/Farm.Shared.Discovery.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,8 +1,8 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,7 +31,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
     private readonly IMemoryCache _cache = cache;
     private readonly CatalogCacheOptions _options = options.Value;
     private readonly IServiceProvider _services = services;
-    private Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>? _dbFactory;
+    private IDbContextFactory<AppDbContext>? _dbFactory;
 
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
@@ -39,7 +39,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
 
     public async Task<(IReadOnlyList<ManufacturerDto> list, string etag)> GetManufacturersAsync(CancellationToken ct)
     {
-        if (_cache.TryGetValue<(IReadOnlyList<ManufacturerDto> list, string etag)>(ManufacturersKey, out (IReadOnlyList<ManufacturerDto> list, string etag) cached))
+        if (_cache.TryGetValue(ManufacturersKey, out (IReadOnlyList<ManufacturerDto> list, string etag) cached))
         {
             return cached;
         }
@@ -48,7 +48,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         // scenarios register or mutate DbContextFactory registration at test-host
         // build time; resolving lazily avoids forcing the factory to exist during
         // singleton validation/build-time checks.
-        var dbFactory = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<AppDbContext> dbFactory = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name)).ToListAsync(ct);
@@ -60,15 +60,15 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
     public async Task<(IReadOnlyList<PrinterModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         string key = manufacturerId is Guid mid ? ModelsKey(mid) : ModelsAllKey;
-        if (_cache.TryGetValue<(IReadOnlyList<PrinterModelDto> list, string etag)>(key, out (IReadOnlyList<PrinterModelDto> list, string etag) cached))
+        if (_cache.TryGetValue(key, out (IReadOnlyList<PrinterModelDto> list, string etag) cached))
         {
             return cached;
         }
 
-        var dbFactory2 = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<AppDbContext> dbFactory2 = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
-        IQueryable<PrinterModel> q = db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+        IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
         if (manufacturerId is Guid mid2)
         {
             q = q.Where(m => m.ManufacturerId == mid2);
@@ -92,9 +92,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                 m.NumberOfExtruders,
                 m.SupportsAutoLeveling,
                 // Temperature ranges
-                m.MinHotendTemp,
                 m.MaxHotendTemp,
-                m.MinBedTemp,
                 m.MaxBedTemp,
                 // Speed capabilities
                 m.MaxPrintSpeed)).ToListAsync(ct);

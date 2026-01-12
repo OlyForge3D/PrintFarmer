@@ -8,13 +8,15 @@ export interface ImportSelectedGcodeFilesDto {
 // Result DTO for G-code harvest import
 export interface GcodeHarvestResultDto {
   operationId: string;
-  importedCount: number;
-  skippedCount: number;
-  failedCount: number;
+  success: boolean;
+  message: string;
+  discoveredFiles: number;
+  importedFiles: number;
+  errors?: string[];
   importedFileIds: string[];
   skippedFileIds: string[];
   failedFileIds: string[];
-  errors?: Record<string, string>;
+  errorDetails?: Record<string, string>;
 }
 export interface DiscoveredGcodeFileDto {
   id: string;
@@ -45,12 +47,12 @@ export interface DiscoveredGcodeFileDto {
 }
 
 export enum HarvestFileStatus {
-  Pending = 0,
-  InProgress = 1,
-  Complete = 2,
-  Failed = 3,
-  Cancelled = 4,
-  Skipped = 5
+  Pending = 'Pending',
+  InProgress = 'InProgress',
+  Complete = 'Complete',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
+  Skipped = 'Skipped',
 }
 // PrintJobStatusDto for Moonraker print job status
 export interface PrintJobStatusDto {
@@ -66,11 +68,14 @@ export interface Printer {
   id: string;
   name: string;
   serverUrl: string;
+  frontendUrl?: string;
   notes?: string;
   isOnline: boolean;
   isReachable: boolean;
   state?: string;
+  manufacturerId?: string;
   manufacturerName?: string;
+  modelId?: string;
   modelName?: string;
   progress?: number;
   jobName?: string;
@@ -84,6 +89,7 @@ export interface Printer {
   bedTemp?: number;
   hotendTarget?: number;
   bedTarget?: number;
+  homedAxes?: string;
   backend: PrinterBackend;
   apiKey?: string;
   originalServerUrl?: string;
@@ -92,6 +98,7 @@ export interface Printer {
   backendPort?: number;
   frontendPort?: number;
   inMaintenance?: boolean;
+  isEnabled?: boolean;
 }
 
 export interface PrinterCameraUrls {
@@ -99,6 +106,23 @@ export interface PrinterCameraUrls {
   name: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+}
+
+export interface PrinterBackendCapabilitiesDto {
+  printerId: string;
+  printerName: string;
+  backend: PrinterBackend;
+  supportsCamera: boolean;
+  supportsFileDownload: boolean;
+  supportsFileList: boolean;
+  supportsFileUpload: boolean;
+  supportsStartPrint: boolean;
+  supportsControlOperations: boolean;
+  supportsFileMetadata: boolean;
+  supportsMovement: boolean;
+  supportsTemperatureControl: boolean;
+  supportsPrinterInformation: boolean;
+  supportsHistory: boolean;
 }
 
 export interface PrinterFast {
@@ -116,27 +140,56 @@ export interface PrinterFast {
   ipAddress?: string;
   backendPort?: number;
   frontendPort?: number;
+  inMaintenance?: boolean;
+  isEnabled?: boolean;
+  // Camera URLs from database (discovered during printer registration)
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
+  // Temperature data (may be populated from real-time status)
+  hotendTemp?: number;
+  bedTemp?: number;
+  hotendTarget?: number;
+  bedTarget?: number;
+  // Position data
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 export enum PrinterBackend {
-  Moonraker = 0,
-  PrusaLink = 1,
-  SDCP = 2,
-  OctoPrint = 3
+  Unknown = 0,
+  Moonraker = 1,
+  PrusaLink = 2,
+  SDCP = 3,
+  OctoPrint = 4,
 }
 
 export enum MotionType {
   Cartesian = 0,
   CoreXY = 1,
   Delta = 2,
-  Unknown = 99
+  Unknown = 99,
 }
 
 // String enum types for API responses (enums are serialized as strings)
-export type PrinterBackendString = 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
-export type MotionTypeString = 'Cartesian' | 'CoreXY' | 'Delta' | 'Unknown';
+export type PrinterBackendString =
+  | "Moonraker"
+  | "PrusaLink"
+  | "SDCP"
+  | "OctoPrint";
+export type MotionTypeString = "Cartesian" | "CoreXY" | "Delta" | "Unknown";
 
 export interface PrinterSpoolInfo {
+  hasActiveSpool?: boolean;
+  activeSpoolId?: number;
+  spoolName?: string;
+  material?: string;
+  colorHex?: string;
+  filamentName?: string;
+  vendor?: string;
+  remainingWeightG?: number;
+  spoolInUse?: boolean;
+  // Legacy properties (may still be used)
   id?: number;
   filament?: FilamentInfo;
   used_length?: number;
@@ -151,10 +204,16 @@ export interface PrinterWithCapabilitiesDto {
   printerId: string;
   printerName: string;
   printerModel: string;
-  capabilities?: PrinterCapabilitiesDto | null;
+  capabilities?: PrinterCapabilitiesExportDto | null; // Lean export format (no duplicate printerId/printerName)
   manufacturerName?: string | null;
   backend?: PrinterBackend | null;
   ipAddress?: string | null;
+  // Import-friendly fields (for re-importing exported printers)
+  serverUrl?: string | null; // Base URL without port (e.g., "http://192.168.1.100")
+  backendPort?: number | null; // Backend API port (e.g., 7125 for Moonraker)
+  frontendPort?: number | null; // Frontend port if applicable (e.g., 5000 for PrusaLink)
+  apiKey?: string | null;
+  notes?: string | null;
 }
 
 export interface FilamentInfo {
@@ -230,6 +289,14 @@ export interface PrinterStatusUpdate {
   spoolInfo?: PrinterSpoolInfo;
 }
 
+// File information with thumbnail
+export interface PrinterFileDto {
+  fileName: string;
+  thumbnailUrl?: string;
+  modified?: number; // Unix timestamp in seconds (only for Moonraker)
+  sizeBytes?: number; // File size in bytes (only for Moonraker)
+}
+
 // DTOs for API operations
 export interface CreatePrinterDto {
   name: string;
@@ -253,7 +320,7 @@ export interface CreatePrinterDto {
 export interface BulkImportResultItem {
   index: number;
   name: string;
-  status: 'Imported' | 'Skipped' | 'Failed';
+  status: "Pending" | "Success" | "Skipped" | "Failed";
   id?: string;
   reason?: string;
 }
@@ -261,12 +328,13 @@ export interface BulkImportResultItem {
 export interface BulkImportResponse {
   importedCount: number;
   skippedCount: number;
+  failureCount: number; 
   results: BulkImportResultItem[];
 }
 
 export interface UpdatePrinterDto {
-  name: string;
-  serverUrl: string;
+  name?: string;
+  serverUrl?: string;
   originalServerUrl?: string;
   notes?: string;
   manufacturerId?: string;
@@ -296,6 +364,7 @@ export interface UpdatePrinterDto {
   maxPrintSpeed?: number;
   backendPort?: number;
   frontendPort?: number;
+  isEnabled?: boolean;
 }
 
 export interface ManufacturerDto {
@@ -313,7 +382,7 @@ export interface PrinterModelDto {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypes?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -329,6 +398,28 @@ export interface PrinterModelDto {
 }
 
 // Printer capabilities interface
+export interface PrinterCapabilitiesExportDto {
+  id: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+  maxBuildVolumeX?: number;
+  maxBuildVolumeY?: number;
+  maxBuildVolumeZ?: number;
+  hasHeatedBed: boolean;
+  hasEnclosure: boolean;
+  multiMaterial: boolean;
+  supportsAutoLeveling: boolean;
+  numberOfExtruders: number;
+  minHotendTemp?: number;
+  maxHotendTemp?: number;
+  minBedTemp?: number;
+  maxBedTemp?: number;
+  currentMaterial?: string;
+  currentSpoolId?: number;
+  isAvailable: boolean;
+  lastUpdated: Date;
+}
+
 export interface PrinterCapabilitiesDto {
   id: string;
   printerId: string;
@@ -373,6 +464,8 @@ export interface PrinterDetails {
   apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
+  backendPort?: number | null;
+  frontendPort?: number | null;
   capabilities?: PrinterCapabilitiesDto;
 }
 
@@ -397,7 +490,7 @@ export interface FilamentType {
 // Health status response shapes (discriminated)
 // Basic health (/healthz, /api/healthz)
 export interface BasicHealthStatus {
-  kind: 'basic';
+  kind: "basic";
   status: string; // "ok"
 }
 
@@ -423,10 +516,10 @@ export interface StartupStatus {
 }
 
 export interface DetailedHealthStatus {
-  kind: 'detailed';
-  status: string;                 // Overall status
-  totalChecksDuration: string;    // Overall duration
-  startup?: StartupStatus;        // Startup initialization status
+  kind: "detailed";
+  status: string; // Overall status
+  totalChecksDuration: string; // Overall duration
+  startup?: StartupStatus; // Startup initialization status
   results: Record<string, DetailedHealthStatusEntry>;
 }
 
@@ -434,14 +527,18 @@ export interface DetailedHealthStatus {
 export type HealthStatus = BasicHealthStatus | DetailedHealthStatus;
 
 // Runtime type guard helpers
-export function isDetailedHealthStatus(h: HealthStatus | undefined | null): h is DetailedHealthStatus {
-  if (!h || h.kind !== 'detailed') return false;
+export function isDetailedHealthStatus(
+  h: HealthStatus | undefined | null
+): h is DetailedHealthStatus {
+  if (!h || h.kind !== "detailed") return false;
   const candidate: unknown = (h as unknown as { results?: unknown }).results;
-  return typeof candidate === 'object' && candidate !== null;
+  return typeof candidate === "object" && candidate !== null;
 }
 
-export function isBasicHealthStatus(h: HealthStatus | undefined | null): h is BasicHealthStatus {
-  return !!h && h.kind === 'basic';
+export function isBasicHealthStatus(
+  h: HealthStatus | undefined | null
+): h is BasicHealthStatus {
+  return !!h && h.kind === "basic";
 }
 
 export interface FilamentTypeDto {
@@ -483,7 +580,7 @@ export interface UpdateModelRequest {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -507,7 +604,7 @@ export interface CreateModelRequest {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -537,15 +634,16 @@ export interface ResolveHostnameResponse {
 // G-code file DTOs
 export enum GcodeSource {
   Upload = 0,
-  Harvest = 1
+  Harvest = 1,
 }
 
-export interface GcodeFile {
+// Full G-code library file (domain model with metadata)
+export interface GcodeLibraryFile {
   id: string;
-  originalFileName: string;
-  displayName: string;
-  fileSizeBytes: number;
+  fileName: string;
+  fileSize: number;
   uploadedAt: Date;
+  thumbnailUrl?: string;
   source: GcodeSource;
   sourcePrinterId?: string;
   sourcePrinterName?: string;
@@ -568,10 +666,10 @@ export interface GcodeFile {
 
 // G-code harvest operations
 export enum GcodeHarvestStatus {
-  Running = 'Running',
-  Completed = 'Completed',
-  Failed = 'Failed',
-  Cancelled = 'Cancelled'
+  Running = "Running",
+  Completed = "Completed",
+  Failed = "Failed",
+  Cancelled = "Cancelled",
 }
 
 export interface HarvestOptions {
@@ -579,7 +677,7 @@ export interface HarvestOptions {
   fileTypes: string[];
   minFileSize: number;
   maxFileAge?: number;
-  duplicateHandling: 'skip' | 'overwrite' | 'rename';
+  duplicateHandling: "skip" | "overwrite" | "rename";
 }
 
 export interface GcodeHarvestOperation {
@@ -612,7 +710,7 @@ export interface HarvestProgress {
   filesProcessed: number;
   filesFound: number;
   currentFile?: string;
-  phase: 'discovering' | 'processing' | 'completing';
+  phase: "discovering" | "processing" | "completing";
 }
 
 // SignalR real-time harvest update envelope
@@ -627,7 +725,7 @@ export interface HarvestUpdateDto {
   duplicatesSkipped?: number;
   progressPercent?: number; // convenience precomputed value (0-100)
   currentFile?: string;
-  phase?: 'discovering' | 'processing' | 'completing';
+  phase?: "discovering" | "processing" | "completing";
   startedAt?: string;
   completedAt?: string;
   error?: string;
@@ -649,27 +747,62 @@ export interface StartBulkHarvestRequest {
   options: HarvestOptions;
 }
 
+// Lightweight file browser entry for hierarchical navigation
 export interface GcodeFile {
   id: string;
   path: string;
-  name: string;
-  size: number;
-  modifiedAt: Date;
+  fileName: string; // GUID-based filename for internal storage
+  name?: string; // Original filename uploaded by user (for display)
+  fileSize: number;
+  uploadedAt: Date;
   isDirectory: boolean;
   harvestOperationId?: string;
+  thumbnailUrl?: string;
+  tags?: Array<{ id: string; name: string; color?: string; description?: string }>; // Tags applied to this gcode file
+  // Extracted metadata from G-code
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+  extractedNozzleDiameter?: number;
+  extractedMaterial?: string;
+  extractedPrinterModel?: string;
+  extractedPrinterModelName?: string; // Raw extracted printer model name (fallback if resolution failed)
+  extractedHotendTemp?: number;
+  extractedBedTemp?: number;
 }
 
 export interface GetGcodeFilesRequest {
   path?: string;
   harvestId?: string;
   printerId?: string;
-  sortBy?: 'name' | 'size' | 'date';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: "name" | "size" | "date";
+  sortOrder?: "asc" | "desc";
   search?: string;
 }
 
 export interface GetGcodeFilesResponse {
   files: GcodeFile[];
+  totalFiles: number;
+  totalSize: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  totalItems?: number;
+}
+
+// 3D Model file entry (hierarchical browser)
+export interface Model3DFile {
+  path: string;
+  name: string;
+  size: number;
+  modifiedAt: Date;
+  isDirectory: boolean;
+  thumbnailPath?: string;
+}
+
+export interface Model3DListResponse {
+  files: Model3DFile[];
   totalFiles: number;
   totalSize: number;
   page?: number;
@@ -691,7 +824,7 @@ export enum JobQueueStatus {
   InProgress = 1,
   Completed = 2,
   Failed = 3,
-  Cancelled = 4
+  Cancelled = 4,
 }
 
 export interface JobQueuePrintJob {
@@ -735,7 +868,9 @@ export interface ApiError {
 
 // Authentication types
 export interface LoginRequest {
-  username: string;
+  // Accept either `username` (legacy) or `usernameOrEmail` (backend contract)
+  username?: string;
+  usernameOrEmail?: string;
   password: string;
 }
 
@@ -769,9 +904,37 @@ export interface UserDto {
   permissions: string[];
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  email: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface ResetPasswordResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+  confirmNewPassword: string;
+}
+
 export interface DiscoveredPrinterDto {
   ipAddress: string;
-  port: number;
+  backendPort?: number | null;
+  frontendPort?: number | null;
   serverUrl: string;
   backend: PrinterBackend;
   name: string;
@@ -779,6 +942,8 @@ export interface DiscoveredPrinterDto {
   model?: string;
   firmware?: string;
   version?: string;
+  cameraStreamUrl?: string | null;
+  cameraSnapshotUrl?: string | null;
 }
 
 // Network discovery settings
@@ -792,15 +957,16 @@ export interface NetworkDiscoverySettingsDto {
 
 // Discovery streaming types
 export enum DiscoveryStatus {
-  Starting = 'Starting',
-  Scanning = 'Scanning',
-  Completed = 'Completed',
-  Cancelled = 'Cancelled',
-  Error = 'Error'
+  Starting = "Starting",
+  Scanning = "Scanning",
+  Completed = "Completed",
+  Cancelled = "Cancelled",
+  Error = "Error",
 }
 
 export interface StartDiscoveryRequest {
   backends?: PrinterBackend[];
+  autoRegister?: boolean;
 }
 
 export interface DiscoveryProgressDto {
@@ -844,6 +1010,7 @@ export interface MoveRequest {
 export interface CommandResult {
   success: boolean;
   error?: string;
+  message?: string;
 }
 
 // Failure detail for an individual file during multi-upload.
@@ -854,7 +1021,7 @@ export interface MultiUploadFailure {
 
 // Response for multi-file upload endpoint.
 export interface MultiUploadResponse {
-  created: GcodeFile[];
+  created: GcodeLibraryFile[];
   failed: MultiUploadFailure[];
   succeededCount: number;
   failedCount: number;
@@ -909,4 +1076,87 @@ export interface AuxiliaryTotals {
   totalValue: number;
   description: string;
   units?: string;
+}
+
+// File Consistency Types
+export enum FileHealthStatus {
+  Unknown = 0,
+  Healthy = 1,
+  Missing = 2,
+  Corrupted = 3,
+  Inaccessible = 4,
+}
+
+export enum FileAuditType {
+  Model3D = 0,
+  GcodeFile = 1,
+  OrphanedFiles = 2,
+  FullAudit = 3,
+}
+
+export interface FileHealthSummaryDto {
+  totalModel3DFiles: number;
+  model3DHealthy: number;
+  model3DMissing: number;
+  model3DCorrupted: number;
+  totalGcodeFiles: number;
+  gcodeHealthy: number;
+  gcodeMissing: number;
+  gcodeCorrupted: number;
+  lastHealthyAuditDate?: string;
+  overallHealthPercentage: number;
+}
+
+export interface FileHealthAuditDto {
+  auditId: string;
+  auditDate: string;
+  auditType: FileAuditType;
+  filesChecked: number;
+  validCount: number;
+  missingCount: number;
+  corruptedCount: number;
+  orphanedCount: number;
+  hasIssues: boolean;
+  summaryMessage: string;
+  missingFileIds?: string[];
+  corruptedFileIds?: string[];
+  orphanedPaths?: string[];
+}
+
+export interface FileIssuesSummaryDto {
+  missingFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastHealthCheckDate?: string;
+  }>;
+  corruptedFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastVerificationResult?: string;
+  }>;
+  inaccessibleFiles: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    lastHealthCheckDate?: string;
+  }>;
+  totalIssues: number;
+}
+
+export interface FileHealthDetailDto {
+  fileId: string;
+  fileName: string;
+  fileType: string; // "Model3D" or "GcodeFile"
+  filePath?: string;
+  fileSize?: number;
+  currentHealthStatus: FileHealthStatus;
+  lastHealthCheckDate?: string;
+  lastVerificationResult?: string;
+  verificationHistory: Array<{
+    date: string;
+    status: FileHealthStatus;
+    details?: string;
+  }>;
 }

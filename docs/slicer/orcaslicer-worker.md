@@ -28,8 +28,22 @@ Shared variables are defined centrally in `docs/slicer/worker-environment.md` (a
 | (Host port mapping)        | External host port via compose           | 8081 -> 8080 (example)           |
 | `Worker__OrcaSlicerPath`   | Orca binary path override                | `/usr/local/bin/orcaslicer`      |
 | `Worker__WorkingDirectory` | Temp working dir for jobs                | `/app/temp`                      |
-| `Worker__StorageEndpoint`  | API endpoint for artifact uploads        | `http://api:8080` (compose net)  |
+| `Worker__StorageEndpoint`  | API endpoint for artifact uploads        | `http://api:5245` (compose net)  |
+| `Worker__MaxConcurrentJobs`| Maximum concurrent slicing jobs          | `1`                              |
 | `ConnectionStrings__Redis` | Redis connection (job queue, pub/sub)    | `redis:6379` in compose / local  |
+
+### Worker Registration Variables (New - Phase 3)
+
+The worker now registers itself with the central slicer registry API on startup:
+
+| Variable                            | Description                              | Default                |
+| ----------------------------------- | ---------------------------------------- | ---------------------- |
+| `SlicerRegistry__ApiBaseUrl`        | Base URL of the API registry endpoint    | `http://api:5245`      |
+| `SlicerRegistry__ServiceName`       | Name to register under                   | `orcaslicer-worker`    |
+| `SlicerRegistry__Version`           | Version string for this worker           | `1.0.0`                |
+| `SlicerRegistry__Host`              | Worker's public URL                      | `http://orcaslicer-worker:8080` |
+| `SlicerRegistry__HeartbeatIntervalSeconds` | Heartbeat frequency (seconds)     | `30`                   |
+| `SlicerRegistry__ApiKey`            | Optional API key for authentication      | (empty)                |
 
 ## Health Endpoints
 
@@ -52,11 +66,28 @@ docker run --rm -p 8081:8080 \
   printfarmer/orcaslicer-worker
 ```
 
+## Worker Registration Flow
+
+**New in Phase 3 (Oct 2025):** The worker now registers itself with the central slicer registry on startup:
+
+1. **Startup**: Worker waits 5 seconds for initialization, then calls `POST /api/slicers/register`
+2. **Registration**: API returns a `serviceId` and `apiKey` that the worker stores in memory
+3. **Heartbeat**: Every 30 seconds (configurable), worker calls `POST /api/slicers/{id}/heartbeat` with:
+   - Current status (`Online`, `Busy`, or `Draining`)
+   - Free capacity slots (calculated from `MaxConcurrentJobs - ActiveJobs`)
+4. **Shutdown**: On SIGTERM, worker calls `POST /api/slicers/{id}/deregister` before exiting
+
+This enables the UI to:
+- Display available slicing workers in real-time
+- Show capacity and queue depth per worker
+- Route jobs to workers with available capacity
+
 ## Future Enhancements
 
 - SBOM & provenance attestation per image
 - Multi-arch (amd64 + arm64) build matrix
 - Cached AppImage acquisition via build args / ARG override
+- Worker UI embedding for advanced slicer configuration
 
 ## Migration Notes
 

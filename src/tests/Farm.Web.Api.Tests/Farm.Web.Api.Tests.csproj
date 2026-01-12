@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   <NoWarn>$(NoWarn);S2699</NoWarn>
+  <!-- Default quick-run filter: exclude Docker tests unless explicitly overridden -->
+  <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <!-- Enable deterministic per-project coverlet outputs (lcov) so CI can merge them predictably -->
@@ -15,6 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
   <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.8" />
   <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.8" />
@@ -41,6 +44,21 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
-    <ProjectReference Include="..\..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\import\Farm.Importing.csproj" />
+    <ProjectReference Include="..\..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Moonraker\Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.PrusaLink\Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Sdcp\Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.OctoPrint\Farm.Backend.Plugin.OctoPrint.csproj" />
+  </ItemGroup>
+
+  <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->
+  <ItemGroup>
+    <Compile Remove="SlicerServices\OrcaSlicerDockerIntegrationTests.cs" />
+    <Compile Remove="SlicerServices\PrusaSlicerDockerIntegrationTests.cs" />
+    <Compile Remove="SlicerServices\SlicerWorkerDockerCommonTests.cs" />
+    <Compile Remove="Util\DockerTestHelpers.cs" />
   </ItemGroup>
 </Project>

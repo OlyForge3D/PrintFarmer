@@ -1,4 +1,4 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Slicer.Worker.Core;
@@ -81,4 +81,26 @@ public class WorkerStateService : IWorkerStateService
 public static class WorkerIdentity
 {
     public static string Create() => Environment.MachineName + "-" + Environment.ProcessId;
+}
+
+/// <summary>
+/// Generic interface for slicer profile discovery services.
+/// Each slicer worker implements this interface to expose profiles from its local installation.
+/// </summary>
+public interface ISlicerProfilesService
+{
+    /// <summary>
+    /// Discover and list all available machine profiles from the slicer's local installation.
+    /// </summary>
+    Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Discover and list all available filament profiles from the slicer's local installation.
+    /// </summary>
+    Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Discover and list all available process profiles from the slicer's local installation.
+    /// </summary>
+    Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default);
 }

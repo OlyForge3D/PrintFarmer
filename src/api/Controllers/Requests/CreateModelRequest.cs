@@ -1,7 +1,7 @@
 ﻿namespace Farm.Web.Api.Controllers.Requests;
 
 using System.ComponentModel.DataAnnotations;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 public record CreateModelRequest(

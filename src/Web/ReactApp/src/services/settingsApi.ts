@@ -1,10 +1,20 @@
 import axios from 'axios';
-import type { SettingMetadata } from '../components/SettingsPagelet';
+import type { SettingMetadata } from '@/components/SettingsPagelet';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
+});
+
+// Add auth token interceptor
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth-token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export async function fetchSettingsMetadata(): Promise<SettingMetadata[]> {

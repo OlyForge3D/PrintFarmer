@@ -29,7 +29,7 @@ Both HTTP and HTTPS server blocks now include:
 
 ```nginx
 location = /health {
-    proxy_pass http://api:8080/health;
+  proxy_pass http://api:5245/health;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header Accept application/json;
@@ -42,7 +42,7 @@ Updated to include proper headers:
 
 ```nginx
 location = /healthz {
-    proxy_pass http://api:8080/healthz;
+  proxy_pass http://api:5245/healthz;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header Accept application/json;

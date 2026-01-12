@@ -1,11 +1,12 @@
-import { 
-  HubConnection, 
-  HubConnectionBuilder, 
+import {
+  HubConnection,
+  HubConnectionBuilder,
   HubConnectionState,
-  LogLevel 
+  LogLevel
 } from '@microsoft/signalr';
-import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
+import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
 import { apiClient } from '@/services/api';
+import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -16,7 +17,25 @@ export type HarvestFileProgress = {
   totalBytes: number;
   percent: number;
 };
+export type HarvestOperationProgress = {
+  operationId: string;
+  filesFound: number;
+  filesProcessed: number;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+};
+export type HarvestOperationCompletedEvent = {
+  operationId: string;
+  status: string;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+  completedAt: string;
+};
 type HarvestFileProgressCallback = (progress: HarvestFileProgress) => void;
+type HarvestOperationProgressCallback = (progress: HarvestOperationProgress) => void;
+type HarvestOperationCompletedCallback = (evt: HarvestOperationCompletedEvent) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
 // HarvestFileDiscovered event type
@@ -26,17 +45,81 @@ export type HarvestFileDiscoveredEvent = {
   fileName: string;
   filePath: string;
   fileSize: number;
+  modifiedAt?: string;
   status?: string;
   error?: string;
   thumbnailUrl?: string;
   extractedSlicer?: string;
+  extractedSlicerVersion?: string;
   extractedMaterial?: string;
+  extractedNozzleDiameter?: number;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
 };
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
+// Harvest file updated event type (includes status and error information)
+export type HarvestFileUpdatedEvent = {
+  id: string;
+  operationId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  status: string;
+  error?: string;
+  completedAt?: string;
+  thumbnailUrl?: string;
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedMaterial?: string;
+  extractedNozzleDiameter?: number;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+};
+type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
+
+// Single file harvest event types
+export type SingleFileHarvestStartEvent = {
+  fileName: string;
+  timestamp: string;
+};
+
+export type SingleFileHarvestProgressEvent = {
+  fileName: string;
+  percentComplete: number;
+  message: string;
+  timestamp: string;
+};
+
+export type SingleFileHarvestCompleteEvent = {
+  fileName: string;
+  success: boolean;
+  message: string;
+  timestamp: string;
+};
+
+type SingleFileHarvestStartCallback = (evt: SingleFileHarvestStartEvent) => void;
+type SingleFileHarvestProgressCallback = (evt: SingleFileHarvestProgressEvent) => void;
+type SingleFileHarvestCompleteCallback = (evt: SingleFileHarvestCompleteEvent) => void;
+
+// Harvest discovery restart event type
+export type HarvestDiscoveryRestartedEvent = {
+  operationId: string;
+  status: string;
+  restartedAt: string;
+};
+type HarvestDiscoveryRestartedCallback = (evt: HarvestDiscoveryRestartedEvent) => void;
+
+// Harvest discovery complete event type
+export type HarvestDiscoveryCompleteEvent = {
+  operationId: string;
+  totalFilesDiscovered: number;
+  completedAt: string;
+};
+type HarvestDiscoveryCompleteCallback = (evt: HarvestDiscoveryCompleteEvent) => void;
+
 export class SignalRService {
   private connection: HubConnection | null = null;
-  private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
@@ -46,7 +129,16 @@ export class SignalRService {
   // Event handlers
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
   private harvestUpdateCallbacks: HarvestUpdateCallback[] = [];
+  private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
+  private harvestFileUpdatedCallbacks: HarvestFileUpdatedCallback[] = [];
   private harvestFileProgressCallbacks: HarvestFileProgressCallback[] = [];
+  private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
+  private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
+  private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
+  private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
+  private singleFileHarvestStartCallbacks: SingleFileHarvestStartCallback[] = [];
+  private singleFileHarvestProgressCallbacks: SingleFileHarvestProgressCallback[] = [];
+  private singleFileHarvestCompleteCallbacks: SingleFileHarvestCompleteCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
@@ -94,7 +186,7 @@ export class SignalRService {
 
   private buildConnection(): void {
     // Use harvest hub for harvest events, printers hub for discovery
-    const harvestSignalrUrl = import.meta.env.VITE_SIGNALR_HARVEST_URL || 'http://localhost:5245/hubs/harvest';
+    const harvestSignalrUrl = getHubUrl('/hubs/harvest');
     if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
       console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     }
@@ -129,11 +221,66 @@ export class SignalRService {
     };
   }
 
+  // ============ Harvest File Updated Event Subscription ============
+  onHarvestFileUpdated(callback: HarvestFileUpdatedCallback): () => void {
+    this.harvestFileUpdatedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestFileUpdatedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestFileUpdatedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Operation Progress Event Subscription ============
+  onHarvestOperationProgress(callback: HarvestOperationProgressCallback): () => void {
+    this.harvestOperationProgressCallbacks.push(callback);
+    return () => {
+      const index = this.harvestOperationProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestOperationProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Operation Completed Event Subscription ============
+  onHarvestOperationCompleted(callback: HarvestOperationCompletedCallback): () => void {
+    this.harvestOperationCompletedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestOperationCompletedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestOperationCompletedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Discovery Restarted Event Subscription ============
+  onHarvestDiscoveryRestarted(callback: HarvestDiscoveryRestartedCallback): () => void {
+    this.harvestDiscoveryRestartedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestDiscoveryRestartedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestDiscoveryRestartedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Discovery Complete Event Subscription ============
+  onHarvestDiscoveryComplete(callback: HarvestDiscoveryCompleteCallback): () => void {
+    this.harvestDiscoveryCompleteCallbacks.push(callback);
+    return () => {
+      const index = this.harvestDiscoveryCompleteCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestDiscoveryCompleteCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // Connection lifecycle events
   private setupEventHandlers(): void {
     if (!this.connection) return;
     // Harvest events (harvest hub)
-  this.connection.on('harvestfilediscovered', (evt: HarvestFileDiscoveredEvent) => {
+    this.connection.on('harvestfilediscovered', (evt: HarvestFileDiscoveredEvent) => {
       this.harvestFileDiscoveredCallbacks.forEach(callback => {
         try {
           callback(evt);
@@ -142,7 +289,15 @@ export class SignalRService {
         }
       });
     });
-
+    this.connection.on('harvestfileupdated', (evt: HarvestFileUpdatedEvent) => {
+      this.harvestFileUpdatedCallbacks.forEach(callback => {
+        try {
+          callback(evt);
+        } catch (error) {
+          console.error('Error in harvestfileupdated callback:', error);
+        }
+      });
+    });
     this.connection.onclose((error) => {
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.warn('SignalR connection closed', error);
@@ -166,7 +321,7 @@ export class SignalRService {
     });
 
     // Business event handlers (harvest hub)
-  this.connection.on('harvestupdate', (operationId: string, status: HarvestUpdateDto) => {
+    this.connection.on('harvestupdate', (operationId: string, status: HarvestUpdateDto) => {
       this.harvestUpdateCallbacks.forEach(callback => {
         try {
           callback(operationId, status);
@@ -177,7 +332,7 @@ export class SignalRService {
     });
 
     // NEW: Per-file progress event
-  this.connection.on('harvestfileprogress', (progress: HarvestFileProgress) => {
+    this.connection.on('harvestfileprogress', (progress: HarvestFileProgress) => {
       this.harvestFileProgressCallbacks.forEach(callback => {
         try {
           callback(progress);
@@ -187,7 +342,127 @@ export class SignalRService {
       });
     });
 
-  this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
+    // NEW: Operation progress event (overall harvest progress)
+    this.connection.on('harvestoperationprogress', (progress: HarvestOperationProgress) => {
+      this.harvestOperationProgressCallbacks.forEach(callback => {
+        try {
+          callback(progress);
+        } catch (error) {
+          console.error('Error in harvest operation progress callback:', error);
+        }
+      });
+    });
+
+    // NEW: Operation cancelled event
+    this.connection.on('harvestoperationcancelled', (data: { operationId: string; status: string; completedAt: string }) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest operation cancelled:', data.operationId);
+      }
+      // Trigger operation progress callback to update UI
+      this.harvestOperationProgressCallbacks.forEach(callback => {
+        try {
+          callback({
+            operationId: data.operationId,
+            filesFound: 0,
+            filesProcessed: 0,
+            filesAdded: 0,
+            filesSkipped: 0,
+            filesErrored: 0
+          });
+        } catch (error) {
+          console.error('Error in harvest operation cancelled callback:', error);
+        }
+      });
+    });
+
+    // NEW: Discovery restarted event
+    this.connection.on('harvestdiscoveryrestarted', (data: HarvestDiscoveryRestartedEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest discovery restarted:', data.operationId);
+      }
+      // Notify all restart callbacks
+      this.harvestDiscoveryRestartedCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest discovery restarted callback:', error);
+        }
+      });
+    });
+
+    // NEW: Discovery complete event
+    this.connection.on('harvestdiscoverycomplete', (data: HarvestDiscoveryCompleteEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest discovery completed:', data.operationId, 'Total files:', data.totalFilesDiscovered);
+      }
+      // Notify all complete callbacks
+      this.harvestDiscoveryCompleteCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest discovery complete callback:', error);
+        }
+      });
+    });
+
+    // NEW: Operation completed event (from HarvestWorkerService)
+    this.connection.on('harvestoperationcompleted', (data: HarvestOperationCompletedEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest operation completed:', data.operationId, 'Added:', data.filesAdded, 'Skipped:', data.filesSkipped, 'Errored:', data.filesErrored);
+      }
+      // Notify all operation completed callbacks
+      this.harvestOperationCompletedCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest operation completed callback:', error);
+        }
+      });
+    });
+
+    // NEW: Single file harvest start event
+    this.connection.on('singlefileharveststart', (data: SingleFileHarvestStartEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest started:', data.fileName);
+      }
+      this.singleFileHarvestStartCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest start callback:', error);
+        }
+      });
+    });
+
+    // NEW: Single file harvest progress event
+    this.connection.on('singlefileharvestprogress', (data: SingleFileHarvestProgressEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest progress:', data.fileName, `${data.percentComplete}%`, data.message);
+      }
+      this.singleFileHarvestProgressCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest progress callback:', error);
+        }
+      });
+    });
+
+    // NEW: Single file harvest complete event
+    this.connection.on('singlefileharvestcomplete', (data: SingleFileHarvestCompleteEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest completed:', data.fileName, 'Success:', data.success, 'Message:', data.message);
+      }
+      this.singleFileHarvestCompleteCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest complete callback:', error);
+        }
+      });
+    });
+
+    this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
           callback(update);
@@ -318,7 +593,7 @@ export class SignalRService {
 
   onPrinterStatusUpdate(callback: PrinterStatusCallback): () => void {
     this.printerStatusCallbacks.push(callback);
-    
+
     // Return unsubscribe function
     return () => {
       const index = this.printerStatusCallbacks.indexOf(callback);
@@ -330,7 +605,7 @@ export class SignalRService {
 
   onHarvestUpdate(callback: HarvestUpdateCallback): () => void {
     this.harvestUpdateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.harvestUpdateCallbacks.indexOf(callback);
       if (index > -1) {
@@ -341,7 +616,7 @@ export class SignalRService {
 
   onJobQueueUpdate(callback: JobQueueUpdateCallback): () => void {
     this.jobQueueUpdateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.jobQueueUpdateCallbacks.indexOf(callback);
       if (index > -1) {
@@ -352,11 +627,45 @@ export class SignalRService {
 
   onConnectionStateChange(callback: ConnectionStateCallback): () => void {
     this.connectionStateCallbacks.push(callback);
-    
+
     return () => {
       const index = this.connectionStateCallbacks.indexOf(callback);
       if (index > -1) {
         this.connectionStateCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // NEW: Single file harvest event subscriptions
+  onSingleFileHarvestStart(callback: SingleFileHarvestStartCallback): () => void {
+    this.singleFileHarvestStartCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestStartCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestStartCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onSingleFileHarvestProgress(callback: SingleFileHarvestProgressCallback): () => void {
+    this.singleFileHarvestProgressCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onSingleFileHarvestComplete(callback: SingleFileHarvestCompleteCallback): () => void {
+    this.singleFileHarvestCompleteCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestCompleteCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestCompleteCallbacks.splice(index, 1);
       }
     };
   }
@@ -398,7 +707,7 @@ export class SignalRService {
   // Refresh SignalR settings and reconnect with new log level
   async refreshSettings(): Promise<void> {
     await this.loadSettings();
-    
+
     // If connection exists and is connected, recreate it with new settings
     if (this.connection && this.connection.state === HubConnectionState.Connected) {
       await this.connection.stop();
@@ -416,9 +725,16 @@ export class SignalRService {
     this.harvestUpdateCallbacks = [];
     this.harvestFileProgressCallbacks = [];
     this.harvestFileDiscoveredCallbacks = [];
+    this.harvestOperationProgressCallbacks = [];
+    this.harvestOperationCompletedCallbacks = [];
+    this.harvestDiscoveryRestartedCallbacks = [];
+    this.harvestDiscoveryCompleteCallbacks = [];
+    this.singleFileHarvestStartCallbacks = [];
+    this.singleFileHarvestProgressCallbacks = [];
+    this.singleFileHarvestCompleteCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
-    
+
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

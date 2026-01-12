@@ -1,7 +1,7 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
 
@@ -45,12 +45,18 @@ public class HarvestCompletionService(
     {
         // Use an async scope when awaiting EF Core calls to ensure proper async disposal
         await using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
+        await ProcessOperationsAsync(unitOfWork, ct);
+    }
+
+    /// <summary>
+    /// Testable hook that processes a batch of operations using an already-resolved Unit of Work.
+    /// </summary>
+    internal async Task ProcessOperationsAsync(IUnitOfWork unitOfWork, CancellationToken ct)
+    {
         // Find running operations that might be completed
-        List<GcodeHarvestOperation> runningOperations = await db.GcodeHarvestOperations
-            .Where(o => o.Status == GcodeHarvestStatus.Running && o.FilesFound > 0)
-            .ToListAsync(ct);
+        List<GcodeHarvestOperation> runningOperations = await unitOfWork.HarvestOperations.GetRunningOperationsWithFilesFoundAsync(ct);
 
         _logger.LogInformation($"Found {runningOperations.Count} running harvest operations to check", null, null);
 
@@ -62,9 +68,7 @@ public class HarvestCompletionService(
             _logger.LogInformation($"Operation {operation.Id}: Found={operation.FilesFound}, Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}, Processed={processedFiles}", null, null);
 
             // Get the count of discovered files for this operation
-            int discoveredFileCount = await db.HarvestDiscoveredFiles
-                .Where(d => d.HarvestOperationId == operation.Id)
-                .CountAsync(ct);
+            int discoveredFileCount = await unitOfWork.HarvestOperations.GetDiscoveredFilesCountAsync(operation.Id, ct);
 
             _logger.LogInformation($"Operation {operation.Id}: Found {discoveredFileCount} files in the DiscoveredGcodeFiles table", null, null);
 
@@ -76,7 +80,7 @@ public class HarvestCompletionService(
 
                 _logger.LogInformation($"Marking operation {operation.Id} as completed. Processed {processedFiles}/{operation.FilesFound} files", null, null);
 
-                _ = await db.SaveChangesAsync(ct);
+                await unitOfWork.SaveChangesAsync(ct);
             }
         }
     }

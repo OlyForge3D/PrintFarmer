@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure;
@@ -70,7 +72,7 @@ namespace Farm.Web.Api
             HashSet<string> suggestions = new(StringComparer.OrdinalIgnoreCase);
             try
             {
-                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                foreach (System.Net.NetworkInformation.NetworkInterface ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
                 {
                     if (ni.OperationalStatus != OperationalStatus.Up)
                     {
@@ -79,7 +81,7 @@ namespace Farm.Web.Api
                     IPInterfaceProperties props = ni.GetIPProperties();
                     foreach (UnicastIPAddressInformation ua in props.UnicastAddresses)
                     {
-                        if (ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
                         {
                             int prefix = 24;
                             if (ua.IPv4Mask is not null)
@@ -182,7 +184,7 @@ namespace Farm.Web.Api
                     catch { }
                     return Task.CompletedTask;
                 },
-                OnTokenValidated = context =>
+                OnTokenValidated = async context =>
                 {
                     string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
                     string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
@@ -196,9 +198,44 @@ namespace Farm.Web.Api
                         {
                             startupLogger?.LogInformation("[JWT][OnTokenValidated] user: {User} roles: {Roles}", sub, roles);
                         }
+
+                        // Check if token has been revoked. Prefer the raw token extracted from the Authorization header
+                        // (context.Token) because that matches the original JWT string used to compute the stored token hash.
+                        // Try to read raw token from Authorization header to ensure we compute the same hash
+                        string? token = null;
+                        try
+                        {
+                            string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
+                            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                token = authHeader["Bearer ".Length..].Trim();
+                            }
+                        }
+                        catch { }
+
+                        token ??= context.SecurityToken?.ToString();
+                        if (!string.IsNullOrEmpty(token))
+                        {
+                            ITokenRevocationService? tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
+                            if (tokenRevocationService != null)
+                            {
+                                bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);
+                                if (isRevoked)
+                                {
+                                    if (startupUls != null)
+                                    {
+                                        startupUls.LogWarning($"[JWT][OnTokenValidated] Token revoked for user: {sub}");
+                                    }
+                                    else
+                                    {
+                                        startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
+                                    }
+                                    context.Fail("This token has been revoked.");
+                                }
+                            }
+                        }
                     }
                     catch { }
-                    return Task.CompletedTask;
                 },
                 OnChallenge = context =>
                 {
@@ -221,7 +258,7 @@ namespace Farm.Web.Api
             };
         }
 
-        internal static async Task WriteHealthResponseAsync(Microsoft.AspNetCore.Http.HttpContext context, Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport report, Farm.Web.Api.Services.Interfaces.IStartupStatus? startup, Microsoft.Extensions.Hosting.IHostEnvironment hostEnvironment)
+        internal static async Task WriteHealthResponseAsync(HttpContext context, HealthReport report, IStartupStatus? startup, IHostEnvironment hostEnvironment)
         {
             context.Response.ContentType = "application/json";
             string result = JsonSerializer.Serialize(
@@ -264,10 +301,10 @@ namespace Farm.Web.Api
                 IServiceProvider sp = initScope.ServiceProvider;
 
                 // Resolve required services for DB initialization and call into the existing initializer
-                IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+                IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
                 AppDbContext db = sp.GetRequiredService<AppDbContext>();
-                IDatabaseInitializer dbInitializer = sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
-                IStartupStatus startupStatusResolved = sp.GetRequiredService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+                IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
+                IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
 
                 // This call ensures the database schema exists and runs seeding. Do this before any
                 // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
@@ -276,7 +313,7 @@ namespace Farm.Web.Api
                 // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
                 try
                 {
-                    ISettingsInitializationService settingsInit = sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsInitializationService>();
+                    ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
                     settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                     settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
                     app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");

@@ -1,18 +1,26 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AutoMapper;
+using Farm.Infrastructure;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Json;
+using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
-using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Infrastructure.Caching;
@@ -22,13 +30,10 @@ using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.DiscoveryProbes;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Json;
-using AutoMapper;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -40,12 +45,41 @@ using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using StackExchange.Redis;
-using Swashbuckle.AspNetCore.Swagger;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Register DLL import resolver for Lib3MF to handle cross-platform native library loading
+// Maps "lib3mf.dll" to platform-specific names: lib3mf.so (Linux), lib3mf.dylib (macOS), lib3mf.dll (Windows)
+// The assembly resolver can only be set once per AppDomain, so we attempt and catch if already set
+try
+{
+    NativeLibrary.SetDllImportResolver(typeof(Lib3MF.Internal.Lib3MFWrapper).Assembly, (name, assembly, searchPath) =>
+    {
+        if (name != "lib3mf.dll")
+        {
+            return IntPtr.Zero;
+        }
+
+        string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
+                         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
+
+        return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
+    });
+}
+catch (InvalidOperationException)
+{
+    // Resolver already set from a previous Program.cs invocation in the same AppDomain
+    // This is expected behavior in integration tests where multiple app instances are created
+    // The previously-set resolver will handle all library loading for this assembly
+}
+
+// Explicitly add environment variables with "PFARM__" prefix to configuration.
+// This allows settings like PFARM__Spoolman__BaseUrl to be recognized by the
+// configuration binding system. The "__" separator becomes ":" in the configuration hierarchy.
+// Example: PFARM__Spoolman__BaseUrl → Spoolman:BaseUrl configuration section
+builder.Configuration.AddEnvironmentVariables("PFARM__");
 
 // When running tests that use the shared in-memory SQLite fixture we may need
 // to register test-only services (pre-seed, fallback DbContextFactory, etc.)
@@ -58,7 +92,7 @@ try
 {
     if (string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase))
     {
-        builder.Host.UseDefaultServiceProvider(options =>
+        _ = builder.Host.UseDefaultServiceProvider(options =>
         {
             options.ValidateOnBuild = false;
             options.ValidateScopes = false;
@@ -70,29 +104,19 @@ catch
     // Best-effort; do not fail startup if environment or hosting APIs unavailable
 }
 
-// Register all PrintFarmer services
-builder.Services.AddPrintFarmerServices();
-
-// Register AutoMapper mapping profiles (POC)
-builder.Services.AddAutoMapper(typeof(Program).Assembly);
-
-// Register import parser & processor services (parser implementation moved to Farm.Importing)
-builder.Services.AddScoped<Farm.Importing.Services.Import.IImportParserService, Farm.Importing.Services.Import.ImportParserService>();
-
-// Adapters bridging API services to the importing project's adapter interfaces
-builder.Services.AddScoped<Farm.Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Farm.Web.Api.Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
-builder.Services.AddScoped<Farm.Importing.Services.Adapters.IDefaultCatalogAdapter, Farm.Web.Api.Services.Adapters.DefaultCatalogAdapter>();
-
-// Register the importing project's processor implementation now that it uses adapter abstractions
-builder.Services.AddScoped<Farm.Importing.Services.Import.IImportProcessorService, Farm.Importing.Services.Import.ImportProcessorService>();
-
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
+
+// Register all PrintFarmer services
+builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
+
+// Register SystemLog logger provider to capture all application logs to the database
+builder.Logging.AddSystemLogProvider(LogLevel.Information);
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
 // This ensures POCOs like DatabaseSettings are configured from env/config without needing AppDbContext.
-builder.Services.Configure<Farm.Infrastructure.Settings.DatabaseSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.DatabaseSettings.SectionName));
+builder.Services.Configure<DatabaseSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.DatabaseSettings.SectionName));
 builder.Services.AddPrintFarmerSettings();
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
@@ -124,20 +148,42 @@ builder.Services.AddControllers(options =>
     });
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
+builder.Services.AddOpenApi(options =>
 {
-    // Include XML documentation if generated (for enriched Swagger docs)
-    string xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    // CA3003: xmlFile is assembly name, not user input
-#pragma warning disable CA3003
-    string xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
-    if (System.IO.File.Exists(xmlPath))
-#pragma warning restore CA3003
+    // Configure OpenAPI document with JWT Bearer security
+    OpenApiSecurityScheme securityScheme = new OpenApiSecurityScheme
     {
-        options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
-    }
-    options.SchemaFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleSchemaFilter>();
-    options.OperationFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleOperationFilter>();
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
+    };
+
+    _ = options.AddOperationTransformer((operation, api, ct) =>
+    {
+        operation.Security ??= [];
+        operation.Security.Add(new()
+        {
+            [new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            }] = []
+        });
+        return Task.CompletedTask;
+    });
+
+    _ = options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Components ??= new();
+        document.Components.SecuritySchemes["Bearer"] = securityScheme;
+        return Task.CompletedTask;
+    });
 });
 
 // CORS configuration for API access
@@ -166,8 +212,22 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure OpenTelemetry
-builder.Services.AddOpenTelemetry()
+// Configure OpenTelemetry (skippable for tests)
+bool disableTelemetry = false;
+try
+{
+    string? disableEnv = Environment.GetEnvironmentVariable("DISABLE_TELEMETRY");
+    if (!string.IsNullOrEmpty(disableEnv) && string.Equals(disableEnv, "true", StringComparison.OrdinalIgnoreCase))
+    {
+        disableTelemetry = true;
+    }
+}
+catch { /* best-effort */ }
+
+// Also skip telemetry when running under the 'Testing' environment to avoid external exporters
+if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+{
+    _ = builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
         _ = resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
@@ -234,13 +294,18 @@ builder.Services.AddOpenTelemetry()
         _ = metrics.AddAspNetCoreInstrumentation()
                .AddHttpClientInstrumentation()
                .AddRuntimeInstrumentation()
-               .AddMeter("PrintFarmer.*");
+               .AddMeter("PrintFarmer.Artifacts")
+               .AddMeter("PrintFarmer.Slicing")
+               .AddMeter("PrintFarmer.API");
 
         // Add console exporter for development
         if (builder.Environment.IsDevelopment())
         {
             _ = metrics.AddConsoleExporter();
         }
+
+        // Add Prometheus exporter for /metrics endpoint
+        _ = metrics.AddPrometheusExporter();
 
         // Add OTLP exporter for metrics
         string? otlpEndpoint = builder.Configuration.GetValue<string>("OpenTelemetry:OTLP:Endpoint");
@@ -258,8 +323,29 @@ builder.Services.AddOpenTelemetry()
         }
     });
 
+} // end skip-telemetry guard
+
 // SignalR for real-time updates
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    // Ensure single parallel invocation to prevent race conditions
+    options.MaximumParallelInvocationsPerClient = 1;
+})
+.AddJsonProtocol(options =>
+{
+    // CRITICAL: Use SAME JSON configuration as Controllers for consistency
+    // This ensures SignalR broadcasts use camelCase property names matching client expectations
+    options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.PayloadSerializerOptions.WriteIndented = false;
+    options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+
+    // Register custom converters for complex types
+    options.PayloadSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
+    options.PayloadSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+
+    // Default string enum converter
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 // Health checks
 builder.Services.AddHealthChecks()
@@ -269,6 +355,26 @@ builder.Services.AddHealthChecks()
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// File Management Services
+builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
+
+// 3MF to STL Conversion Service
+builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
+
+// Print Queue Service
+builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintQueueService, Farm.Api.Services.PrintQueue.PrintQueueService>();
+
+// Job Scheduling Service (Phase 4.1)
+builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
+
+// Prediction Service (Phase 4.2)
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobStatisticsRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobStatisticsRepository>();
+builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
+
+// Retry Service (Phase 4.4)
+builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infrastructure.Services.RetryService>();
 
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
@@ -319,6 +425,38 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     _ = builder.Services.AddHostedService<SpaDevServerWatcher>();
 }
 
+// Register background services for distributed slicing
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
+// Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
+builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>(builder.Configuration.GetSection("JobDispatchRetry"));
+// Circuit breaker for worker failure tracking
+builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
+builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
+// Stale worker cleanup service
+builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
+
+// Register asset service for OrcaSlicer printer images and bed textures
+builder.Services.AddSingleton<IAssetService, AssetService>();
+
+// Register file consistency audit background service
+// Runs hourly to detect orphaned/missing/corrupted files
+builder.Services.AddHostedService(sp =>
+{
+    IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+    IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+    IConfiguration config = sp.GetRequiredService<IConfiguration>();
+    string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+    string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
+    return new Farm.Web.Api.Services.FileManagement.FileConsistencyAuditService(
+        scopeFactory,
+        logger,
+        modelStoragePath,
+        gcodeStoragePath);
+});
+
 // Add JWT Authentication
 builder.Services.AddAuthentication("Bearer")
     .AddJwtBearer("Bearer", options =>
@@ -348,7 +486,7 @@ builder.Services.AddAuthentication("Bearer")
         TokenValidationParameters tvp = new()
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
             ValidateIssuer = true,
             ValidIssuer = issuer,
             ValidateAudience = true,
@@ -383,6 +521,11 @@ builder.Services.AddAuthorization(options =>
         _ = policy.RequireAuthenticatedUser();
         _ = policy.RequireRole("farm_admin");
     });
+    options.AddPolicy("CanViewSliceQueue", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
+    });
 });
 
 // Register authorization handlers
@@ -390,7 +533,22 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
 #pragma warning disable S1075 // URIs should not be hardcoded
-builder.WebHost.UseUrls("http://0.0.0.0:5245");
+// Only bind HTTP listener in non-testing environments. When running integration
+// tests via WebApplicationFactory/TestServer the test host provides its own
+// in-memory server; calling UseUrls here can interfere with TestServer and
+// result in "server has not been started" errors in CreateClient().
+try
+{
+    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    {
+        _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
+    }
+}
+catch
+{
+    // Best-effort; do not fail startup if env APIs are not available in some hosts
+}
 #pragma warning restore S1075 // URIs should not be hardcoded
 // Capture a few startup/root services from the service collection before building the
 // final application service provider. This avoids sprinkling `app.Services.GetService`
@@ -398,12 +556,32 @@ builder.WebHost.UseUrls("http://0.0.0.0:5245");
 // use the services safely. We build a temporary provider (disposed immediately)
 // and stash references to services that are safe to keep for the lifetime of the
 // process (loggers, unified logging, temp path provider, startup status).
-Farm.Infrastructure.Telemetry.IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
-Microsoft.Extensions.Logging.ILogger<Program>? _capturedStartupLogger = null;
+IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
+ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
-Farm.Web.Api.Services.Interfaces.IStartupStatus? _capturedStartupStatus = null;
+IStartupStatus? _capturedStartupStatus = null;
 
-WebApplication app = builder.Build();
+WebApplication app;
+try
+{
+    app = builder.Build();
+}
+catch (Exception ex)
+{
+    try
+    {
+        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+#pragma warning disable CA1303
+            Console.WriteLine("Program.cs: Build() threw during test startup:");
+            Console.WriteLine(ex.ToString());
+#pragma warning restore CA1303
+        }
+    }
+    catch { }
+    throw;
+}
 
 // Populate previously-deferred startup captures using the built application service provider.
 // Use CreateAsyncScope to resolve scoped/singleton services safely without calling BuildServiceProvider on the service collection.
@@ -411,14 +589,49 @@ try
 {
     await using AsyncServiceScope _captureScope = app.Services.CreateAsyncScope();
     IServiceProvider _captureSp = _captureScope.ServiceProvider;
-    _capturedStartupUnifiedLogging = _captureSp.GetService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-    _capturedStartupLogger = _captureSp.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    _capturedStartupUnifiedLogging = _captureSp.GetService<IUnifiedLoggingService>();
+    _capturedStartupLogger = _captureSp.GetService<ILogger<Program>>();
     _capturedTempPathProvider = _captureSp.GetService<ITempPathProvider>();
-    _capturedStartupStatus = _captureSp.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+    _capturedStartupStatus = _captureSp.GetService<IStartupStatus>();
 }
 catch
 {
     // If capture fails, leave captured variables null and fall back to app-level resolution later.
+}
+
+// Configure artifact storage metrics thresholds and alerts
+try
+{
+    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<ArtifactsMetrics>();
+
+    if (artifactSettings.EnableStorageAlerts)
+    {
+        artifactMetrics.SetThresholds(artifactSettings.StorageWarningThresholdBytes, artifactSettings.StorageCriticalThresholdBytes);
+
+        // Subscribe to threshold events for logging
+        artifactMetrics.ThresholdExceeded += (sender, e) =>
+        {
+            ILogger<Program>? logger = app.Services.GetService<ILogger<Program>>();
+            string levelStr = e.Level switch
+            {
+                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
+                Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
+                _ => "UNKNOWN"
+            };
+
+            logger?.LogWarning(
+                "[ArtifactStorage] {Level} threshold exceeded: {CurrentGB:F2} GB (Warning: {WarningGB:F2} GB, Critical: {CriticalGB:F2} GB)",
+                levelStr,
+                e.CurrentBytes / (1024.0 * 1024 * 1024),
+                e.WarningThreshold / (1024.0 * 1024 * 1024),
+                e.CriticalThreshold / (1024.0 * 1024 * 1024));
+        };
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact storage thresholds");
 }
 
 // NOTE: Settings initialization from environment variables is performed
@@ -436,7 +649,7 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
     // Prefer startup-captured unified logging / logger when available to avoid creating
     // a scope inside the ApplicationStarted callback.
     IUnifiedLoggingService? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<IUnifiedLoggingService>();
-    Microsoft.Extensions.Logging.ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<ILogger<Program>>();
 
     _ = lifetime.ApplicationStarted.Register(() => ProgramHelpers.HandleDeferredConsoleRedirection(_deferredUls, _deferredLg));
 }
@@ -476,20 +689,15 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.UseSwagger();
-    _ = app.UseSwaggerUI();
+    _ = app.MapOpenApi();
 }
 
-// Always expose raw OpenAPI JSON at a stable path for tooling (even outside dev UI)
-app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider adp, ISwaggerProvider provider) =>
-{
-    // Delegate to internal swagger generator service (provider injected by DI)
-    OpenApiDocument doc = provider.GetSwagger("v1");
-    return Results.Json(doc);
-});
+// Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
 
 app.UseCors("Default");
 
+// Rate limiting for authentication endpoints
+app.UseMiddleware<AuthenticationRateLimitMiddleware>();
 
 // Authentication and Authorization
 app.UseAuthentication();
@@ -499,13 +707,30 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
+// Slicer registry events hub (worker registration, heartbeat, deregistration)
+// app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
+// Slicer progress hub for job processing progress events
+app.MapHub<SlicerProgressHub>("/hubs/slicers");
+
+// Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
+try
+{
+    if (app.Services.GetService<MeterProvider>() != null)
+    {
+        _ = app.MapPrometheusScrapingEndpoint();
+    }
+}
+catch
+{
+    // In minimal test environments MeterProvider may be absent; skip exposing metrics
+}
 
 // Health checks
 // Capture host environment and resolve startup status from the root service provider (app.Services)
 // Use app.Environment directly instead of resolving IHostEnvironment from the service provider
 IHostEnvironment _programHostEnvironment = app.Environment;
 // Resolve IStartupStatus once from the root provider (it's a singleton-like service used for diagnostics)
-Farm.Web.Api.Services.Interfaces.IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<IStartupStatus>();
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
@@ -532,10 +757,9 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // Network discovery settings now available via UnifiedSettingsController:
 // GET /api/settings/network-discovery  
 // POST /api/settings/network-discovery
-// (Legacy endpoints removed - use unified controller instead)
-app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] Farm.Infrastructure.Settings.NetworkDiscoverySettings body) =>
+app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
-    NetworkValidationResult validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
+    NetworkValidationResult validation = NetworkValidationService.ValidateSettings(body);
     return Results.Ok(new
     {
         isValid = validation.IsValid,
@@ -548,14 +772,13 @@ app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Au
 // SignalR settings now available via UnifiedSettingsController:
 // GET /api/settings/signalr
 // POST /api/settings/signalr
-// (Legacy endpoints removed - use unified controller instead)
-app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
-app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
+app.MapPost("/api/network-discovery/auto-detect", [Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
+app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "RequireAdmin")] ([FromServices] ISettingsService settingsService) =>
 {
     // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
     string? rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
     string? portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
-    NetworkDiscoverySettings current = settingsService.Get<Farm.Infrastructure.Settings.NetworkDiscoverySettings>() ?? new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
+    NetworkDiscoverySettings current = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
     // TODO: Update logic for new NetworkDiscoverySettings properties if needed
     settingsService.Save(current);
     return Results.Ok(current);
@@ -564,24 +787,6 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.A
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
-app.MapGet("/diagnostics/temp-root", ([FromServices] IWebHostEnvironment env, [FromServices] ITempPathProvider provider) =>
-    env.IsProduction()
-        ? Results.StatusCode(StatusCodes.Status404NotFound)
-        : Results.Ok(new { tempRoot = provider.GetTempRoot() })
-);
-// Combined diagnostics (non-sensitive) for UI consumption
-app.MapGet("/api/diagnostics/summary", ([FromServices] Farm.Web.Api.Services.Interfaces.ISpoolmanService spoolmanSvc, [FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
-{
-    SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
-    NetworkDiscoverySettings discovery = settingsService.Get<Farm.Infrastructure.Settings.NetworkDiscoverySettings>() ?? new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
-    return Results.Ok(new
-    {
-        spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
-        discovery
-    });
-});
-// Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
-app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
@@ -616,17 +821,18 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         [nameof(db.Printers)] = await db.Printers.CountAsync(ct),
         [nameof(db.Spools)] = await db.Spools.CountAsync(ct),
         [nameof(db.Manufacturers)] = await db.Manufacturers.CountAsync(ct),
-        [nameof(db.Models)] = await db.Models.CountAsync(ct),
+        [nameof(db.PrinterModels)] = await db.PrinterModels.CountAsync(ct),
         [nameof(db.FilamentTypes)] = await db.FilamentTypes.CountAsync(ct),
         [nameof(db.PrinterModelFilamentTypes)] = await db.PrinterModelFilamentTypes.CountAsync(ct),
         [nameof(db.SpoolmanConfigs)] = await db.SpoolmanConfigs.CountAsync(ct),
         [nameof(db.GcodeFiles)] = await db.GcodeFiles.CountAsync(ct),
         [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
-        [nameof(db.PrinterCapabilities)] = await db.PrinterCapabilities.CountAsync(ct),
         [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
         [nameof(db.HarvestDiscoveredFiles)] = await db.HarvestDiscoveredFiles.CountAsync(ct),
         [nameof(db.Models3D)] = await db.Models3D.CountAsync(ct),
-        [nameof(db.SlicerProfiles)] = await db.SlicerProfiles.CountAsync(ct),
+        [nameof(db.ProcessProfiles)] = await db.ProcessProfiles.CountAsync(ct),
+        [nameof(db.MachineProfiles)] = await db.MachineProfiles.CountAsync(ct),
+        [nameof(db.FilamentProfiles)] = await db.FilamentProfiles.CountAsync(ct),
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),
@@ -713,11 +919,104 @@ if (isMonolithicDeployment)
     }
 }
 
-// Initialize database (ensures schema exists before resolving SettingsService)
-// Delegate initialization to ProgramHelpers to keep Program.cs minimal and avoid nested blocks (addresses S1199)
-await ProgramHelpers.InitializeDatabaseAsync(app);
+// Configure static file serving for artifacts if enabled
+try
+{
+    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    if (artifactSettings.EnableStaticServing)
+    {
+        string artifactPath = Path.IsPathRooted(artifactSettings.RootPath)
+            ? artifactSettings.RootPath
+            : Path.Combine(app.Environment.ContentRootPath, artifactSettings.RootPath);
 
-await app.RunAsync();
+        if (Directory.Exists(artifactPath))
+        {
+            _ = app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(artifactPath),
+                RequestPath = "/artifacts",
+                OnPrepareResponse = ctx =>
+                {
+                    // Cache artifacts for 1 hour (they are immutable once created)
+                    ctx.Context.Response.Headers.Append("Cache-Control", "public, max-age=3600");
+                },
+                ServeUnknownFileTypes = true,
+                DefaultContentType = "application/octet-stream"
+            });
+            app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+        }
+        else
+        {
+            app.Logger.LogWarning("[Startup] Artifact static serving enabled but path does not exist: {Path}", artifactPath);
+        }
+    }
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "[Startup] Failed to configure artifact static file serving");
+}
+
+// Initialize database (ensures schema exists before resolving SettingsService)
+// Always run in all environments including Testing so integration tests have schema & seed data available.
+try
+{
+    await ProgramHelpers.InitializeDatabaseAsync(app);
+}
+catch (Exception ex)
+{
+    // Emit diagnostic details in Testing environment but still surface the failure to the test host.
+    try
+    {
+        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+#pragma warning disable CA1303
+            Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
+            Console.WriteLine(ex.ToString());
+#pragma warning restore CA1303
+        }
+    }
+    catch { }
+    throw;
+}
+
+// Ensure storage directories exist (creates gcode, models, profiles directories if they don't exist)
+try
+{
+    await using AsyncServiceScope storageScope = app.Services.CreateAsyncScope();
+    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
+    await storagePathService.EnsureDirectoriesExistAsync();
+}
+catch (Exception ex)
+{
+    _capturedStartupUnifiedLogging?.LogError(ex, "Failed to ensure storage directories exist");
+    throw;
+}
+
+// In test environments the test host (WebApplicationFactory/TestServer) manages the server lifecycle.
+// Avoid calling RunAsync when running under the 'Testing' environment to prevent interfering with the test host.
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    await app.RunAsync();
+}
+else
+{
+    // For integration tests we still need the server pipeline configured so TestServer can dispatch requests.
+    // Start the app without blocking the test host.
+    try
+    {
+        await app.StartAsync();
+#pragma warning disable CA1303
+        Console.WriteLine("Program.cs: Started app for Testing environment (non-blocking StartAsync)");
+#pragma warning restore CA1303
+    }
+    catch (Exception ex)
+    {
+#pragma warning disable CA1303
+        Console.WriteLine("Program.cs: StartAsync failed in Testing environment: " + ex.Message);
+#pragma warning restore CA1303
+        throw;
+    }
+}
 
 // Expose Program for WebApplicationFactory in tests
 [SuppressMessage("Design", "CA1052:Static holder types should be Static or NotInheritable", Justification = "Public partial Program required for WebApplicationFactory in tests and minimal hosting model.")]
@@ -730,6 +1029,34 @@ public partial class Program
         WriteIndented = false
     };
     protected Program() { }
+}
+
+// Small test-only startup filter used from Program when running under Testing
+namespace Farm.Web.Api.Testing
+{
+    using System.IO;
+    using System.Text;
+
+    internal sealed class TestStartupFilter : IStartupFilter
+    {
+        private readonly System.Action _onConfigure;
+
+        public TestStartupFilter(System.Action onConfigure)
+        {
+            _onConfigure = onConfigure ?? throw new ArgumentNullException(nameof(onConfigure));
+        }
+
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+        {
+            return app =>
+            {
+                try
+                { _onConfigure(); }
+                catch { }
+                next(app);
+            };
+        }
+    }
 }
 
 

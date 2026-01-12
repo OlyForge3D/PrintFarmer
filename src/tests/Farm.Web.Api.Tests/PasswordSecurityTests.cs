@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Authentication;
+﻿using System.Diagnostics;
+using Farm.Infrastructure.Services.Authentication;
 
 namespace Farm.Web.Api.Tests;
 
@@ -13,11 +14,11 @@ public class PasswordSecurityTests
         const string password = "TestPassword123!";
 
         // Act
-        var hash = _passwordHashingService.HashPassword(password);
+        string hash = _passwordHashingService.HashPassword(password);
 
         // Assert
-        hash.Should().NotBeNullOrEmpty();
-        hash.Should().NotBe(password); // Hash should not be the same as the original password
+        _ = hash.Should().NotBeNullOrEmpty();
+        _ = hash.Should().NotBe(password); // Hash should not be the same as the original password
     }
 
     [Fact]
@@ -27,13 +28,13 @@ public class PasswordSecurityTests
         const string password = "TestPassword123!";
 
         // Act
-        var hash1 = _passwordHashingService.HashPassword(password);
-        var hash2 = _passwordHashingService.HashPassword(password);
+        string hash1 = _passwordHashingService.HashPassword(password);
+        string hash2 = _passwordHashingService.HashPassword(password);
 
         // Assert
-        hash1.Should().NotBeNullOrEmpty();
-        hash2.Should().NotBeNullOrEmpty();
-        hash1.Should().NotBe(hash2); // Each hash should be unique due to salt
+        _ = hash1.Should().NotBeNullOrEmpty();
+        _ = hash2.Should().NotBeNullOrEmpty();
+        _ = hash1.Should().NotBe(hash2); // Each hash should be unique due to salt
     }
 
     [Fact]
@@ -41,13 +42,13 @@ public class PasswordSecurityTests
     {
         // Arrange
         const string password = "TestPassword123!";
-        var hash = _passwordHashingService.HashPassword(password);
+        string hash = _passwordHashingService.HashPassword(password);
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(password, hash);
+        bool isValid = _passwordHashingService.VerifyPassword(password, hash);
 
         // Assert
-        isValid.Should().BeTrue();
+        _ = isValid.Should().BeTrue();
     }
 
     [Fact]
@@ -56,13 +57,13 @@ public class PasswordSecurityTests
         // Arrange
         const string originalPassword = "TestPassword123!";
         const string wrongPassword = "WrongPassword123!";
-        var hash = _passwordHashingService.HashPassword(originalPassword);
+        string hash = _passwordHashingService.HashPassword(originalPassword);
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(wrongPassword, hash);
+        bool isValid = _passwordHashingService.VerifyPassword(wrongPassword, hash);
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Fact]
@@ -70,13 +71,13 @@ public class PasswordSecurityTests
     {
         // Arrange
         const string originalPassword = "TestPassword123!";
-        var hash = _passwordHashingService.HashPassword(originalPassword);
+        string hash = _passwordHashingService.HashPassword(originalPassword);
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword("", hash);
+        bool isValid = _passwordHashingService.VerifyPassword("", hash);
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Fact]
@@ -84,13 +85,13 @@ public class PasswordSecurityTests
     {
         // Arrange
         const string originalPassword = "TestPassword123!";
-        var hash = _passwordHashingService.HashPassword(originalPassword);
+        string hash = _passwordHashingService.HashPassword(originalPassword);
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(null!, hash);
+        bool isValid = _passwordHashingService.VerifyPassword(null!, hash);
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Fact]
@@ -101,10 +102,10 @@ public class PasswordSecurityTests
         const string invalidHash = "invalid-hash";
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(password, invalidHash);
+        bool isValid = _passwordHashingService.VerifyPassword(password, invalidHash);
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Fact]
@@ -114,10 +115,10 @@ public class PasswordSecurityTests
         const string password = "TestPassword123!";
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(password, "");
+        bool isValid = _passwordHashingService.VerifyPassword(password, "");
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Theory]
@@ -131,19 +132,19 @@ public class PasswordSecurityTests
     {
         // Arrange
         const string originalPassword = "TestPassword123!";
-        var hash = _passwordHashingService.HashPassword(originalPassword);
+        string hash = _passwordHashingService.HashPassword(originalPassword);
 
         // Act
-        var isValid = _passwordHashingService.VerifyPassword(testPassword, hash);
+        bool isValid = _passwordHashingService.VerifyPassword(testPassword, hash);
 
         // Assert
         if (testPassword == originalPassword)
         {
-            isValid.Should().BeTrue();
+            _ = isValid.Should().BeTrue();
         }
         else
         {
-            isValid.Should().BeFalse();
+            _ = isValid.Should().BeFalse();
         }
     }
 
@@ -159,12 +160,12 @@ public class PasswordSecurityTests
     public void PasswordHashing_VariousLengths_ShouldWorkCorrectly(string password)
     {
         // Act
-        var hash = _passwordHashingService.HashPassword(password);
-        var isValid = _passwordHashingService.VerifyPassword(password, hash);
+        string hash = _passwordHashingService.HashPassword(password);
+        bool isValid = _passwordHashingService.VerifyPassword(password, hash);
 
         // Assert
-        hash.Should().NotBeNullOrEmpty();
-        isValid.Should().BeTrue();
+        _ = hash.Should().NotBeNullOrEmpty();
+        _ = isValid.Should().BeTrue();
     }
 
     [Theory]
@@ -178,12 +179,12 @@ public class PasswordSecurityTests
     public void PasswordHashing_SpecialCharacters_ShouldWorkCorrectly(string password)
     {
         // Act
-        var hash = _passwordHashingService.HashPassword(password);
-        var isValid = _passwordHashingService.VerifyPassword(password, hash);
+        string hash = _passwordHashingService.HashPassword(password);
+        bool isValid = _passwordHashingService.VerifyPassword(password, hash);
 
         // Assert
-        hash.Should().NotBeNullOrEmpty();
-        isValid.Should().BeTrue();
+        _ = hash.Should().NotBeNullOrEmpty();
+        _ = isValid.Should().BeTrue();
     }
 
     [Fact]
@@ -194,35 +195,35 @@ public class PasswordSecurityTests
         const int iterations = 10;
 
         // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        Stopwatch stopwatch = Stopwatch.StartNew();
 
         for (int i = 0; i < iterations; i++)
         {
-            var hash = _passwordHashingService.HashPassword(password);
-            var isValid = _passwordHashingService.VerifyPassword(password, hash);
-            isValid.Should().BeTrue();
+            string hash = _passwordHashingService.HashPassword(password);
+            bool isValid = _passwordHashingService.VerifyPassword(password, hash);
+            _ = isValid.Should().BeTrue();
         }
 
         stopwatch.Stop();
 
         // Assert - Should complete 10 hash+verify cycles in reasonable time
-        stopwatch.ElapsedMilliseconds.Should().BeLessThan(10000); // Less than 10 seconds for 10 iterations
+        _ = stopwatch.ElapsedMilliseconds.Should().BeLessThan(10000); // Less than 10 seconds for 10 iterations
     }
 
     [Fact]
     public void HashPassword_NullPassword_ShouldThrowException()
     {
         // Act & Assert
-        var action = () => _passwordHashingService.HashPassword(null!);
-        action.Should().Throw<ArgumentException>();
+        Func<string> action = () => _passwordHashingService.HashPassword(null!);
+        _ = action.Should().Throw<ArgumentException>();
     }
 
     [Fact]
     public void HashPassword_EmptyPassword_ShouldThrowException()
     {
         // Act & Assert
-        var action = () => _passwordHashingService.HashPassword("");
-        action.Should().Throw<ArgumentException>();
+        Func<string> action = () => _passwordHashingService.HashPassword("");
+        _ = action.Should().Throw<ArgumentException>();
     }
 
     [Fact]
@@ -232,21 +233,21 @@ public class PasswordSecurityTests
         const string password = "TestPassword123!";
 
         // Act
-        var hash1 = _passwordHashingService.HashPassword(password);
-        var hash2 = _passwordHashingService.HashPassword(password);
+        string hash1 = _passwordHashingService.HashPassword(password);
+        string hash2 = _passwordHashingService.HashPassword(password);
 
         // Assert - Both hashes should be valid format (though different due to salt)
-        hash1.Should().NotBeNullOrEmpty();
-        hash2.Should().NotBeNullOrEmpty();
-        hash1.Should().NotBe(hash2);
+        _ = hash1.Should().NotBeNullOrEmpty();
+        _ = hash2.Should().NotBeNullOrEmpty();
+        _ = hash1.Should().NotBe(hash2);
 
         // Both should verify correctly
-        _passwordHashingService.VerifyPassword(password, hash1).Should().BeTrue();
-        _passwordHashingService.VerifyPassword(password, hash2).Should().BeTrue();
+        _ = _passwordHashingService.VerifyPassword(password, hash1).Should().BeTrue();
+        _ = _passwordHashingService.VerifyPassword(password, hash2).Should().BeTrue();
 
         // Cross-verification should fail (hash1 with password shouldn't verify with hash2)
-        _passwordHashingService.VerifyPassword(password + "wrong", hash1).Should().BeFalse();
-        _passwordHashingService.VerifyPassword(password + "wrong", hash2).Should().BeFalse();
+        _ = _passwordHashingService.VerifyPassword(password + "wrong", hash1).Should().BeFalse();
+        _ = _passwordHashingService.VerifyPassword(password + "wrong", hash2).Should().BeFalse();
     }
 
     [Fact]
@@ -257,20 +258,20 @@ public class PasswordSecurityTests
         const int numberOfHashes = 5;
 
         // Act
-        var hashes = new List<string>();
+        List<string> hashes = new List<string>();
         for (int i = 0; i < numberOfHashes; i++)
         {
             hashes.Add(_passwordHashingService.HashPassword(password));
         }
 
         // Assert
-        hashes.Should().HaveCount(numberOfHashes);
-        hashes.Should().OnlyHaveUniqueItems(); // All hashes should be unique
+        _ = hashes.Should().HaveCount(numberOfHashes);
+        _ = hashes.Should().OnlyHaveUniqueItems(); // All hashes should be unique
 
         // All hashes should verify the original password
-        foreach (var hash in hashes)
+        foreach (string hash in hashes)
         {
-            _passwordHashingService.VerifyPassword(password, hash).Should().BeTrue();
+            _ = _passwordHashingService.VerifyPassword(password, hash).Should().BeTrue();
         }
     }
 }

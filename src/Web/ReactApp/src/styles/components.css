@@ -1,74 +1,163 @@
-/* Component-specific styles to ensure all necessary classes are included */
+/* =============================================================================
+   PrintFarmer Component Styling Library
+   Theme-aware utility classes for consistent control styling across themes
+   ============================================================================= */
 
-/* Ensure these classes are always available */
-@layer components {
-  /* Background colors */
-  .bg-white { background-color: rgb(255 255 255); }
-  .bg-gray-50 { background-color: rgb(249 250 251); }
-  .bg-gray-100 { background-color: rgb(243 244 246); }
-  .bg-gray-200 { background-color: rgb(229 231 235); }
-  .bg-gray-300 { background-color: rgb(209 213 219); }
-  .bg-gray-600 { background-color: rgb(75 85 99); }
-  .bg-gray-700 { background-color: rgb(55 65 81); }
-  .bg-blue-50 { background-color: rgb(239 246 255); }
-  .bg-blue-100 { background-color: rgb(219 234 254); }
-  .bg-blue-500 { background-color: rgb(59 130 246); }
-  .bg-blue-600 { background-color: rgb(37 99 235); }
-  .bg-blue-700 { background-color: rgb(29 78 216); }
-  .bg-green-50 { background-color: rgb(240 253 244); }
-  .bg-green-100 { background-color: rgb(220 252 231); }
-  .bg-green-600 { background-color: rgb(22 163 74); }
-  .bg-red-50 { background-color: rgb(254 242 242); }
-  .bg-red-100 { background-color: rgb(254 226 226); }
-  .bg-red-500 { background-color: rgb(239 68 68); }
-  .bg-yellow-50 { background-color: rgb(254 252 232); }
-  .bg-yellow-100 { background-color: rgb(254 249 195); }
+/* ============ INPUT/SELECT/TEXTAREA BASE STYLES ============ */
+.pf-control-base {
+  background-color: var(--pf-control-bg);
+  border: 1px solid var(--pf-control-border);
+  color: var(--pf-control-text);
+  border-radius: 0.375rem; /* 6px */
+  padding: 0.5rem;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
 
-  /* Text colors */
-  .text-white { color: rgb(255 255 255); }
-  .text-black { color: rgb(0 0 0); }
-  .text-gray-400 { color: rgb(156 163 175); }
-  .text-gray-500 { color: rgb(107 114 128); }
-  .text-gray-600 { color: rgb(75 85 99); }
-  .text-gray-700 { color: rgb(55 65 81); }
-  .text-gray-800 { color: rgb(31 41 55); }
-  .text-gray-900 { color: rgb(17 24 39); }
-  .text-blue-500 { color: rgb(59 130 246); }
-  .text-blue-600 { color: rgb(37 99 235); }
-  .text-blue-700 { color: rgb(29 78 216); }
-  .text-blue-800 { color: rgb(30 64 175); }
-  .text-green-600 { color: rgb(22 163 74); }
-  .text-green-800 { color: rgb(22 101 52); }
-  .text-red-500 { color: rgb(239 68 68); }
-  .text-red-600 { color: rgb(220 38 38); }
-  .text-red-700 { color: rgb(185 28 28); }
-  .text-red-800 { color: rgb(153 27 27); }
-  .text-yellow-600 { color: rgb(202 138 4); }
-  .text-yellow-800 { color: rgb(133 77 14); }
+.pf-control-base:hover:not(:disabled) {
+  border-color: var(--pf-control-border-hover);
+}
 
-  /* Border colors */
-  .border-gray-200 { border-color: rgb(229 231 235); }
-  .border-gray-300 { border-color: rgb(209 213 219); }
-  .border-blue-200 { border-color: rgb(191 219 254); }
-  .border-blue-300 { border-color: rgb(147 197 253); }
-  .border-green-300 { border-color: rgb(134 239 172); }
-  .border-red-300 { border-color: rgb(252 165 165); }
-  .border-yellow-300 { border-color: rgb(253 224 71); }
+.pf-control-base:focus {
+  outline: none;
+  border-color: var(--pf-control-border-focus);
+  box-shadow: 0 0 0 var(--pf-control-focus-ring-width) var(--pf-control-focus-ring);
+}
 
-  /* Hover states */
-  .hover\:bg-gray-200:hover { background-color: rgb(229 231 235); }
-  .hover\:bg-gray-300:hover { background-color: rgb(209 213 219); }
-  .hover\:bg-gray-700:hover { background-color: rgb(55 65 81); }
-  .hover\:bg-blue-700:hover { background-color: rgb(29 78 216); }
-  .hover\:text-gray-700:hover { color: rgb(55 65 81); }
-  .hover\:text-blue-700:hover { color: rgb(29 78 216); }
-  .hover\:text-red-700:hover { color: rgb(185 28 28); }
+.pf-control-base::placeholder {
+  color: var(--pf-control-placeholder);
+}
 
-  /* Focus states */
-  .focus\:ring-blue-500:focus { --tw-ring-color: rgb(59 130 246); }
-  .focus\:border-blue-500:focus { border-color: rgb(59 130 246); }
+.pf-control-base:disabled {
+  background-color: var(--pf-control-disabled-bg);
+  color: var(--pf-control-disabled-text);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 
-  /* Disabled states */
-  .disabled\:bg-gray-300:disabled { background-color: rgb(209 213 219); }
-  .disabled\:bg-gray-50:disabled { background-color: rgb(249 250 251); }
+/* ============ VALIDATION STATES ============ */
+.pf-control-error {
+  border-color: var(--pf-validation-error-border);
+  background-color: var(--pf-validation-error-bg);
+}
+
+.pf-control-error:focus {
+  border-color: var(--pf-validation-error-border);
+  box-shadow: 0 0 0 var(--pf-control-focus-ring-width) rgba(220, 38, 38, 0.3);
+}
+
+.pf-control-success {
+  border-color: var(--pf-validation-success-border);
+}
+
+.pf-control-success:focus {
+  border-color: var(--pf-validation-success-border);
+  box-shadow: 0 0 0 var(--pf-control-focus-ring-width) rgba(16, 185, 129, 0.3);
+}
+
+/* ============ BUTTON VARIANT CLASSES ============ */
+.pf-btn-primary {
+  background-color: var(--pf-button-primary-bg);
+  color: var(--pf-button-primary-text);
+  border: 1px solid var(--pf-button-primary-border);
+  font-weight: 600;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.pf-btn-primary:hover:not(:disabled) {
+  background-color: var(--pf-button-primary-hover);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.pf-btn-primary:active:not(:disabled) {
+  background-color: var(--pf-button-primary-active);
+}
+
+.pf-btn-secondary {
+  background-color: var(--pf-button-secondary-bg);
+  color: var(--pf-button-secondary-text);
+  border: 1px solid var(--pf-button-secondary-border);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.pf-btn-secondary:hover:not(:disabled) {
+  background-color: var(--pf-button-secondary-hover);
+  border-color: var(--pf-control-border-hover);
+}
+
+.pf-btn-secondary:active:not(:disabled) {
+  background-color: var(--pf-button-secondary-active);
+}
+
+.pf-btn-danger {
+  background-color: var(--pf-button-danger-bg);
+  color: var(--pf-button-danger-text);
+  border: 1px solid var(--pf-button-danger-border);
+  font-weight: 600;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.pf-btn-danger:hover:not(:disabled) {
+  background-color: var(--pf-button-danger-hover);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.pf-btn-danger:active:not(:disabled) {
+  background-color: var(--pf-button-danger-active);
+}
+
+/* ============ FOCUS/FOCUS-VISIBLE UTILITIES ============ */
+.pf-focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 var(--pf-control-focus-ring-width) var(--pf-control-focus-ring);
+}
+
+.pf-focus-ring-offset {
+  box-shadow: 
+    0 0 0 var(--pf-control-focus-ring-width) var(--pf-control-focus-ring),
+    0 0 0 4px var(--pf-control-focus-ring-offset);
+}
+
+/* ============ DISABLED STATE UTILITIES ============ */
+.pf-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ============ REDUCED MOTION SUPPORT ============ */
+@media (prefers-reduced-motion: reduce) {
+  /* Disable all animations and transitions for users who prefer reduced motion */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Ensure focus rings still visible but without animations */
+  .pf-focus-ring,
+  .pf-focus-ring-offset,
+  .pf-control-base:focus {
+    animation: none;
+    transition: none;
+  }
+
+  /* Preserve essential hover/active states without transitions */
+  .pf-btn-primary:hover,
+  .pf-btn-secondary:hover,
+  .pf-btn-danger:hover,
+  .pf-control-base:hover {
+    transition: none;
+    animation: none;
+  }
+
+  /* Disable skeleton/shimmer animation */
+  @keyframes skeleton-shimmer {
+    0% { opacity: 1; }
+    50% { opacity: 1; }
+    100% { opacity: 1; }
+  }
 }

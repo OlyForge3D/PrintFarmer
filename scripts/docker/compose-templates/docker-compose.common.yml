@@ -1,0 +1,70 @@
+# Shared Docker Compose Definitions for PrintFarmer
+# This file contains anchor definitions that are injected by compose-generator.sh
+# into generated docker-compose.yml files to ensure consistency across deployments
+
+# Health check definitions
+x-api-healthcheck: &api-healthcheck
+  test: ["CMD", "sh", "-c", "curl -f http://api:5245/health | grep -q 'Healthy'"]
+  interval: 30s
+  timeout: 15s
+  retries: 5
+  start_period: 120s
+
+x-worker-healthcheck: &worker-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 90s
+
+x-frontend-healthcheck: &frontend-healthcheck
+  test: ["CMD", "curl", "-f", "http://frontend:80/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+x-nginx-healthcheck: &nginx-healthcheck
+  test: ["CMD", "curl", "-f", "http://nginx-proxy:80/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+# Build definitions
+# When USE_PREBUILT_ORCA_BINARIES=true and orcaslicer-binaries:VERSION image exists,
+# Docker will use the prebuilt image instead of downloading from GitHub
+x-orcaslicer-build: &orcaslicer-build
+  context: .
+  dockerfile: Dockerfile.multistage
+  target: orcaslicer-worker
+  args:
+    ALLOW_STUB: "false"
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+
+# Volume definitions
+x-worker-volumes: &worker-volumes
+  - printfarmer-orcaslicer-temp:/app/temp
+  - printfarmer-gcode-storage:/app/gcode
+
+# OrcaSlicer deployment constraints
+x-worker-deployment: &worker-deployment
+  resources:
+    limits:
+      cpus: "1.0"
+      memory: 1024M
+    reservations:
+      cpus: "0.25"
+      memory: 256M
+
+x-worker-security: &worker-security
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  ulimits:
+    nofile: 1024
+
+# Network definition
+x-printfarmer-network: &printfarmer-network
+  name: printfarmer-network
+  driver: bridge

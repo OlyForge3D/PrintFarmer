@@ -1,0 +1,21 @@
+# Dockerfile for pre-caching upgraded PostgreSQL Alpine base image
+# Usage: docker build -f Dockerfile.base-postgres -t postgres:16-alpine-upgraded .
+# Then: docker save -o postgres-16-alpine-upgraded.tar postgres:16-alpine-upgraded
+# This image is used as the database service in docker-compose
+
+FROM postgres:16-alpine
+
+# Cache-busting argument: change this to force fresh apk updates
+# Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
+ARG CACHE_BUST=latest
+
+# Update and upgrade all packages, then clean cache
+# This creates a fully-patched base image that can be cached offline
+RUN echo "Cache bust: ${CACHE_BUST}" && \
+    apk update && \
+    apk upgrade && \
+    apk cache clean && \
+    rm -rf /tmp/* /var/tmp/*
+
+# Set a label to identify this as a pre-cached image
+LABEL prebuild="true" purpose="base-image" updated="true"

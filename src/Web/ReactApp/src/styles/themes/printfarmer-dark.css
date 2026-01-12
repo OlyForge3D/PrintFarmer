@@ -1,0 +1,134 @@
+/* =============================================================================
+   PrintFarmer Original Dark Theme
+   ============================================================================= */
+
+[data-theme="printfarmer-dark"] {
+  /* Color system metadata */
+  --pf-theme-name: 'printfarmer-dark';
+  
+  /* Primary background colors */
+  --pf-bg-0: #0b1020;           /* Main page background */
+  --pf-bg-1: #0f172a;           /* Secondary background (cards) */
+  --pf-bg-2: #111827;           /* Tertiary background */
+  --pf-panel: #0e1528;          /* Panel background */
+  
+  /* Border and divider colors */
+  --pf-border: #243145;         /* Main border color */
+  --pf-border-light: #475569;   /* Light border */
+  --pf-border-medium: #334155;  /* Medium border */
+  --pf-border-dark: #1f2937;    /* Dark border */
+  --pf-border-gray: #64748b;    /* Gray border */
+  
+  /* Text colors with proper contrast ratios */
+  --pf-text-primary: #e5e7eb;   /* Primary text (4.5:1 on dark bg) */
+  --pf-text-secondary: #9ca3af; /* Secondary text (3:1 on dark bg) */
+  --pf-text-tertiary: #6b7280;  /* Tertiary text/muted */
+  --pf-text-light: #cbd5e1;     /* Light text */
+  --pf-text-muted: #94a3b8;     /* Muted text */
+  
+  /* Accent and brand colors - Separate values for text vs background usage */
+  --pf-accent: #10b981;         /* Bright accent for text on dark backgrounds */
+  --pf-accent-bg: #047857;      /* Dark accent for button backgrounds with white text */
+  --pf-accent-hover: #036b4b;   /* Darker green for button hover */
+  --pf-accent-2: #1d4ed8;       /* Darker blue for better contrast */
+  --pf-success: #10b981;        /* Bright success for text */
+  --pf-success-bg: #047857;     /* Dark success for button backgrounds */
+  --pf-success-hover: #065f46;  /* Success hover state */
+  --pf-error-hover: #991b1b;    /* Darker red for error button hover */
+  --pf-link: #60a5fa;           /* Lighter blue for links on dark */
+  
+  /* Semantic status colors */
+  --pf-status-online-bg: #064e3b;
+  --pf-status-online-text: #d1fae5;
+  --pf-status-online-border: #065f46;
+  --pf-status-offline-bg: #450a0a;
+  --pf-status-offline-text: #fee2e2;
+  --pf-status-offline-border: #7f1d1d;
+  
+  /* Error and warning colors - Updated for better accessibility */
+  --pf-error: #dc2626;          /* Darker red for better contrast */
+  --pf-error-bg: #450a0a;
+  --pf-error-text: #fee2e2;
+  --pf-error-border: #7f1d1d;
+  --pf-warning: #d97706;        /* Darker orange for better contrast */
+  --pf-warning-text: #fecaca;
+  
+  /* Loading and disabled states */
+  --pf-loading: #93c5fd;
+  --pf-loading-border: #2563eb;
+  --pf-disabled: #9ca3af;
+  
+  /* Gradient colors for buttons and cards - Updated for accessibility */
+  --pf-gradient-primary-start: #172036;
+  --pf-gradient-primary-end: #0f172a;
+  --pf-gradient-secondary-start: #1a2542;
+  --pf-gradient-secondary-end: #111b30;
+  --pf-gradient-success-start: #047857;    /* Updated to match accessible accent */
+  --pf-gradient-success-end: #065f46;      /* Updated to match accessible success-hover */
+  --pf-gradient-green-start: #16a34a;
+  --pf-gradient-green-end: #15803d;
+  --pf-gradient-green-active-start: #15803d;
+  --pf-gradient-green-active-end: #14532d;
+  --pf-gradient-gray-start: #64748b;
+  --pf-gradient-gray-end: #475569;
+  --pf-gradient-gray-dark-start: #4a5668;
+  --pf-gradient-gray-dark-end: #334155;
+  
+  /* Focus and interaction states */
+  --pf-focus-ring: rgba(37, 99, 235, 0.5);
+  --pf-focus-ring-offset: #0b1020;
+  --pf-hover-overlay: rgba(255, 255, 255, 0.05);
+  --pf-active-overlay: rgba(255, 255, 255, 0.1);
+
+  /* Skeleton / shimmer surfaces */
+  --pf-skeleton-bg: #1e293b;          /* Neutral surface for skeleton blocks */
+  --pf-skeleton-bg-alt: #243145;       /* Slight variation for layered skeletons */
+  --pf-skeleton-accent: #334155;       /* Accent bar / progress shimmer */
+  --pf-focus-outline: var(--pf-accent-2);
+  
+  /* ========== CONTROL STYLING VARIABLES ========== */
+  /* Input/Select/Textarea Controls */
+  --pf-control-bg: #0f172a;            /* Input background */
+  --pf-control-border: #334155;        /* Input border default */
+  --pf-control-border-hover: #475569;  /* Input border on hover */
+  --pf-control-border-focus: #60a5fa;  /* Input border on focus */
+  --pf-control-text: #e5e7eb;          /* Input text color */
+  --pf-control-placeholder: #6b7280;   /* Placeholder text */
+  --pf-control-disabled-bg: #0b1020;   /* Disabled control background */
+  --pf-control-disabled-text: #6b7280; /* Disabled control text */
+  
+  /* Focus Ring */
+  --pf-control-focus-ring: rgba(96, 165, 250, 0.5);  /* Blue focus ring for light theme compatibility */
+  --pf-control-focus-ring-offset: #0b1020;  /* Offset background */
+  --pf-control-focus-ring-width: 2px;
+  
+  /* Button States (Primary variant) */
+  --pf-button-primary-bg: #047857;
+  --pf-button-primary-hover: #036b4b;
+  --pf-button-primary-active: #065f46;
+  --pf-button-primary-text: #ffffff;
+  --pf-button-primary-border: #047857;
+  
+  /* Button States (Secondary variant) */
+  --pf-button-secondary-bg: #111827;
+  --pf-button-secondary-hover: #0f172a;
+  --pf-button-secondary-active: #0d1117;
+  --pf-button-secondary-text: #e5e7eb;
+  --pf-button-secondary-border: #334155;
+  
+  /* Button States (Danger variant) */
+  --pf-button-danger-bg: #dc2626;
+  --pf-button-danger-hover: #991b1b;
+  --pf-button-danger-active: #7f1d1d;
+  --pf-button-danger-text: #ffffff;
+  --pf-button-danger-border: #dc2626;
+  
+  /* Validation States */
+  --pf-validation-error-bg: rgba(220, 38, 38, 0.1);  /* Light red background */
+  --pf-validation-error-border: #dc2626;
+  --pf-validation-error-text: #fecaca;
+  --pf-validation-success-border: #10b981;
+  --pf-validation-success-text: #d1fae5;
+  
+  color-scheme: dark;
+}

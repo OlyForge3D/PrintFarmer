@@ -1,0 +1,19 @@
+  database:
+    image: postgres:16-alpine
+    container_name: printfarmer-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-farm}
+      POSTGRES_USER: ${POSTGRES_USER:-farmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-farmpass}
+    volumes:
+      - printfarmer-database:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-farmuser} -d ${POSTGRES_DB:-farm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - printfarmer-network

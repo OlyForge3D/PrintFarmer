@@ -9,7 +9,7 @@ public class WorkerLivenessHealthCheck(IUnifiedLoggingService logger) : IHealthC
     {
         try
         {
-            var uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            TimeSpan uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
             logger.LogDebug($"Liveness check - Worker up {uptime}");
             return Task.FromResult(HealthCheckResult.Healthy("Worker process alive", new Dictionary<string, object>
             {

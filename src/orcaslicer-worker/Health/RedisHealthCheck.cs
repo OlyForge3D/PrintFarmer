@@ -1,19 +1,11 @@
 ﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
-using StackExchange.Redis;
 
 namespace Farm.OrcaSlicer.Worker.Health;
 
-internal sealed class RedisHealthCheck(IConnectionMultiplexer redis) : IHealthCheck
+// Redis health check removed. Keep a lightweight stub to avoid breaking builds
+// in environments where health check registration may still reference this type.
+internal sealed class RedisHealthCheck : IHealthCheck
 {
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            return Task.FromResult(redis.IsConnected ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Redis not connected"));
-        }
-        catch (Exception ex)
-        {
-            return Task.FromResult(HealthCheckResult.Unhealthy("Redis connection failed", ex));
-        }
-    }
+        => Task.FromResult(HealthCheckResult.Healthy("redis-check-removed"));
 }

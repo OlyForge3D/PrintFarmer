@@ -3,6 +3,20 @@ set -e
 
 echo "🚀 Setting up PrintFarmer React Development Environment..."
 
+# Support an optional --verify flag or DEVCONTAINER_VERIFY env var to run smoke-tests after provisioning
+DEVCONTAINER_VERIFY=${DEVCONTAINER_VERIFY:-0}
+if [ "$#" -gt 0 ]; then
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --verify)
+                DEVCONTAINER_VERIFY=1
+                shift
+                ;;
+            *) shift ;;
+        esac
+    done
+fi
+
 if [ "${SKIP_APT:-0}" != "1" ]; then
     # Update system packages
     echo "📦 Updating system packages..."
@@ -150,3 +164,28 @@ echo "   • React Migration: ./REACT_MIGRATION_README.md"
 echo "   • Docker Deployment: ./DOCKER_DEPLOYMENT_README.md"
 echo "   • GitHub Issues: ./.github/issues/"
 echo ""
+
+# Optional verification step: lightweight smoke tests to confirm runtime tooling
+if [ "${DEVCONTAINER_VERIFY}" = "1" ] || [ "${DEVCONTAINER_VERIFY,,}" = "true" ]; then
+    echo "🔍 Running optional devcontainer verification (DEVCONTAINER_VERIFY=${DEVCONTAINER_VERIFY})..."
+    echo "• dotnet --info"
+    dotnet --info || true
+    echo "• node --version"
+    node --version || true
+    echo "• npm --version"
+    npm --version || true
+    echo "• git --version"
+    git --version || true
+
+    # Small API build smoke test if solution present
+    if [ -f "src/farm-web.sln" ]; then
+        echo "🔨 Running small dotnet build smoke test (API project)"
+        pushd src >/dev/null
+        dotnet restore ./farm-web.sln || true
+        dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore || true
+        popd >/dev/null
+    else
+        echo "ℹ️  Solution file not found; skipping build smoke test"
+    fi
+    echo "✅ Devcontainer verification complete"
+fi

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -85,29 +86,29 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         // Add context to telemetry
         if (activity != null)
         {
-            activity.SetTag("log.level", level.ToString());
-            activity.SetTag("log.category", category);
-            activity.SetTag("log.message", message);
+            _ = activity.SetTag("log.level", level.ToString());
+            _ = activity.SetTag("log.category", category);
+            _ = activity.SetTag("log.message", message);
             if (!string.IsNullOrEmpty(correlationId))
             {
-                activity.SetTag("log.correlationId", correlationId);
+                _ = activity.SetTag("log.correlationId", correlationId);
             }
             if (metadata != null)
             {
-                activity.SetTag("log.metadata", System.Text.Json.JsonSerializer.Serialize(metadata));
+                _ = activity.SetTag("log.metadata", JsonSerializer.Serialize(metadata));
             }
             if (context != null)
             {
-                activity.SetTag("log.context", System.Text.Json.JsonSerializer.Serialize(context));
+                _ = activity.SetTag("log.context", JsonSerializer.Serialize(context));
             }
             if (exception != null)
             {
-                activity.SetTag("error", true);
-                activity.SetTag("exception.type", exception.GetType().Name);
-                activity.SetTag("exception.message", exception.Message);
-                activity.SetTag("exception.stackTrace", exception.StackTrace);
-                activity.AddException(exception);
-                activity.SetStatus(ActivityStatusCode.Error, exception.Message);
+                _ = activity.SetTag("error", true);
+                _ = activity.SetTag("exception.type", exception.GetType().Name);
+                _ = activity.SetTag("exception.message", exception.Message);
+                _ = activity.SetTag("exception.stackTrace", exception.StackTrace);
+                _ = activity.AddException(exception);
+                _ = activity.SetStatus(ActivityStatusCode.Error, exception.Message);
             }
         }
 
@@ -115,12 +116,12 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         if (exception != null)
         {
             _logger.Log(level, exception, "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata} Context: {Context}",
-                category, message, correlationId ?? "None", metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None", context ?? "None");
+                category, message, correlationId ?? "None", metadata != null ? JsonSerializer.Serialize(metadata) : "None", context ?? "None");
         }
         else
         {
             _logger.Log(level, "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata} Context: {Context}",
-                category, message, correlationId ?? "None", metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None", context ?? "None");
+                category, message, correlationId ?? "None", metadata != null ? JsonSerializer.Serialize(metadata) : "None", context ?? "None");
         }
     }
 
@@ -130,26 +131,26 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
 
         if (activity != null)
         {
-            activity.SetTag("log.level", level.ToString());
-            activity.SetTag("log.category", category);
-            activity.SetTag("log.message", message);
+            _ = activity.SetTag("log.level", level.ToString());
+            _ = activity.SetTag("log.category", category);
+            _ = activity.SetTag("log.message", message);
             if (!string.IsNullOrEmpty(correlationId))
             {
-                activity.SetTag("log.correlationId", correlationId);
+                _ = activity.SetTag("log.correlationId", correlationId);
             }
             if (metadata != null)
             {
-                activity.SetTag("log.metadata", System.Text.Json.JsonSerializer.Serialize(metadata));
+                _ = activity.SetTag("log.metadata", JsonSerializer.Serialize(metadata));
             }
         }
 
         // Log to structured logger with telemetry context (file/console)
-        var loggerArgs = new object?[]
+        object?[] loggerArgs = new object?[]
         {
             category,
             message,
             correlationId ?? "None",
-            metadata != null ? System.Text.Json.JsonSerializer.Serialize(metadata) : "None"
+            metadata != null ? JsonSerializer.Serialize(metadata) : "None"
         };
         if (exception != null)
         {

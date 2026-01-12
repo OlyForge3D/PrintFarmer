@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -8,635 +9,47 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Annotations;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Reflection;
 
 namespace Farm.Web.Api.Controllers;
 
 /// <summary>
-/// Provides endpoints for managing 3D printers and their operations.
-/// Supports Moonraker, PrusaLink, and SDCP printer backends.
+/// API controller for managing printers and printer-related operations.
+/// Provides endpoints for CRUD operations, printer status monitoring, file management,
+/// job control, history tracking, and discovery of new printers.
+/// Integrates with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
 /// </summary>
 [ApiController]
 [Route("api/printers")]
-[Tags("Printers")]
-public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, INetworkDiscoveryService networkDiscovery, IUnifiedLoggingService logger, IValidator<CreatePrinterDto> validator, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, IHttpClientFactory httpClientFactory, Farm.Importing.Services.Import.IImportParserService importParser, Farm.Importing.Services.Import.IImportProcessorService importProcessor) : ControllerBase
+public class PrintersController(
+    IUnifiedLoggingService logger,
+    Farm.Infrastructure.Services.Printers.IPrintersService printersService,
+    Services.Catalog.ICatalogService catalogService,
+    Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
+    IValidator<CreatePrinterDto> validator,
+    Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
+    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService)
+    : ControllerBase
 {
-    private readonly AppDbContext db = db;
-    private readonly IMoonrakerClient moon = moon;
-    private readonly IPrusaLinkClient prusa = prusa;
-    private readonly ISdcpClient sdcp = sdcp;
-    private readonly IOctoPrintClient octoprint = octoprint;
-    private readonly INetworkDiscoveryService networkDiscovery = networkDiscovery;
     private readonly IUnifiedLoggingService _logger = logger;
-    private readonly IValidator<CreatePrinterDto> validator = validator;
-    private readonly ICircuitBreakerService circuitBreaker = circuitBreaker;
-    private readonly IPrinterCapabilityDiscoveryService capabilityDiscovery = capabilityDiscovery;
-    private readonly IDefaultCatalogService defaultCatalog = defaultCatalog;
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly Farm.Importing.Services.Import.IImportParserService _importParser = importParser;
-    private readonly Farm.Importing.Services.Import.IImportProcessorService _importProcessor = importProcessor;
-
-    // Export options using a TypeInfoResolver that honors ImportExportAttribute
-    private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        TypeInfoResolver = new Farm.Web.Api.Serialization.ImportExportTypeInfoResolver(),
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
-
-    // NOTE: import deserialization now lives in Farm.Importing; controller no longer needs cached import JsonSerializerOptions
-
-    // Feature flag: when enabled we swallow transient startup DB errors for /fast endpoint and return empty list.
-    private static readonly bool FastEndpointDefensive =
-        (Environment.GetEnvironmentVariable("PF_FAST_ENDPOINT_DEFENSIVE") ?? "true")
-            .Equals("true", StringComparison.OrdinalIgnoreCase);
-    private static string EnsureLocalSuffix(string host)
-    {
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            return host;
-        }
-        return System.Net.IPAddress.TryParse(host, out _) ?
-            host :
-            host.Contains('.', StringComparison.Ordinal) ? host : host + ".local";
-    }
-
-    private static string NormalizeServerUrl(string? input, int defaultPort)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-            return string.Empty;
-        string trimmed = input.Trim();
-        // Ensure scheme
-        if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            trimmed = "http://" + trimmed;
-        }
-
-        try
-        {
-            Uri uri = new Uri(trimmed);
-            // If port is not specified, append default port for comparison purposes
-            int port = uri.IsDefaultPort ? defaultPort : uri.Port;
-            UriBuilder ub = new UriBuilder(uri)
-            {
-                Port = port
-            };
-            // Return without trailing slash for stable comparisons
-            return ub.Uri.ToString().TrimEnd('/');
-        }
-        catch
-        {
-            return trimmed;
-        }
-    }
-
-    // Helper to write a single CSV row to the provided PipeWriter. Extracted to reduce nesting and improve testability.
-    private static async Task WriteCsvRowAsync(System.IO.Pipelines.PipeWriter pipeWriter, string[] prefixFields, List<System.Reflection.PropertyInfo> capPropInfos, Farm.Infrastructure.Domain.PrinterCapabilities? cap, CancellationToken ct)
-    {
-        // Write a string value to the pipe as UTF8 without allocating intermediate strings when possible.
-        static void WriteBytes(System.IO.Pipelines.PipeWriter pw, ReadOnlySpan<char> value)
-        {
-            if (value.Length == 0)
-            {
-                // write nothing (empty field)
-                return;
-            }
-
-            // Reserve a span and copy as UTF8
-            int maxBytes = Math.Max(1, value.Length * 4);
-            Span<byte> span = pw.GetSpan(maxBytes);
-            int written = Encoding.UTF8.GetBytes(value, span);
-            pw.Advance(written);
-        }
-
-        // Helper to write a field followed by a delimiter
-        static void WriteField(System.IO.Pipelines.PipeWriter pw, string value, byte delimiter)
-        {
-            WriteBytes(pw, value.AsSpan());
-            Span<byte> dspan = pw.GetSpan(1);
-            dspan[0] = delimiter;
-            pw.Advance(1);
-        }
-
-        // Write prefix fields (already escaped by caller)
-        for (int i = 0; i < prefixFields.Length; i++)
-        {
-            string val = prefixFields[i] ?? string.Empty;
-            WriteField(pipeWriter, val, (byte)',');
-        }
-
-        // Write capability properties
-        for (int i = 0; i < capPropInfos.Count; i++)
-        {
-            System.Reflection.PropertyInfo prop = capPropInfos[i];
-            string? raw = cap == null ? null : prop.GetValue(cap)?.ToString();
-            string escaped = EscapeCsvValue(raw);
-            // If last capability field, terminate with newline
-            byte delim = (i == capPropInfos.Count - 1) ? (byte)'\n' : (byte)',';
-            WriteField(pipeWriter, escaped, delim);
-        }
-
-        // If there are no capability properties, ensure we end the line
-        if (capPropInfos.Count == 0)
-        {
-            Span<byte> n = pipeWriter.GetSpan(1);
-            n[0] = (byte)'\n';
-            pipeWriter.Advance(1);
-        }
-
-        await pipeWriter.FlushAsync(ct);
-    }
-
-    // Helper to write CSV header to the provided PipeWriter
-    private static async Task WriteCsvHeaderAsync(System.IO.Pipelines.PipeWriter pipeWriter, List<string> headerParts, CancellationToken ct)
-    {
-        string headerLine = string.Join(',', headerParts) + "\n";
-        Span<byte> span = pipeWriter.GetSpan(headerLine.Length * 4);
-        int written = Encoding.UTF8.GetBytes(headerLine.AsSpan(), span);
-        pipeWriter.Advance(written);
-        await pipeWriter.FlushAsync(ct);
-    }
-
-    /// <summary>
-    /// Retrieves all printers with their current status information.
-    /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>A list of all printers with their current status, including online/offline state, print progress, and temperatures</returns>
-    /// <response code="200">Returns the list of printers with status information</response>
-    /// <response code="500">If there was an internal server error</response>
-    [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterDto>>> GetAllAsync(CancellationToken ct)
-    {
-        List<Printer> items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
-
-        // Use aggressive timeouts and circuit breaker patterns for bulk status loading
-        using CancellationTokenSource fastTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        fastTimeoutCts.CancelAfter(TimeSpan.FromSeconds(2)); // Aggressive 2-second timeout for bulk operations
-
-        PrinterDto[] dtos = await Task.WhenAll(items.Select(async p =>
-        {
-            try
-            {
-                if (p.Backend == 1) // PrusaLink
-                {
-                    CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
-                    PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                        await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), fastTimeoutCts.Token);
-                    return new PrinterDto(
-                        Id: p.Id,
-                        Name: p.Name,
-                        ServerUrl: p.ServerUrl,
-                        Notes: p.Notes,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        ManufacturerName: p.Manufacturer?.Name,
-                        ModelName: p.Model?.Name,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl,
-                        Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                        ApiKey: p.ApiKey,
-                        OriginalServerUrl: p.OriginalServerUrl,
-                        IpAddress: p.IpAddress
-                    );
-                }
-                else if (p.Backend == 2) // SDCP
-                {
-                    CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
-                    PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                        await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), fastTimeoutCts.Token);
-                    return new PrinterDto(
-                        Id: p.Id,
-                        Name: p.Name,
-                        ServerUrl: p.ServerUrl,
-                        Notes: p.Notes,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        ManufacturerName: p.Manufacturer?.Name,
-                        ModelName: p.Model?.Name,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl,
-                        X: status.X,
-                        Y: status.Y,
-                        Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
-                        Backend: Farm.Web.Shared.PrinterBackend.SDCP,
-                        ApiKey: p.ApiKey,
-                        OriginalServerUrl: p.OriginalServerUrl,
-                        IpAddress: p.IpAddress
-                    );
-                }
-                else if (p.Backend == 3) // OctoPrint
-                {
-                    CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"octoprint-{p.Id}");
-                    // Fetch both printer and job status
-                    string printerJson = await breaker.ExecuteAsync(async ct =>
-                        await octoprint.GetPrinterStateAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
-                    string jobJson = await breaker.ExecuteAsync(async ct =>
-                        await octoprint.GetJobStatusAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
-                    // Plugin detection: query /api/plugins
-                    string pluginsJson = string.Empty;
-                    bool hasPositionPlugin = false;
-                    bool hasSpoolManager = false;
-                    bool hasSpoolmanPlugin = false;
-                    try
-                    {
-                        HttpRequestMessage pluginsRequest = new(HttpMethod.Get, $"{p.ServerUrl.TrimEnd('/')}/api/plugins");
-                        pluginsRequest.Headers.Add("X-Api-Key", p.ApiKey ?? string.Empty);
-                        HttpResponseMessage pluginsResponse = await octoprint.SendAsync(pluginsRequest, fastTimeoutCts.Token);
-                        pluginsJson = await pluginsResponse.Content.ReadAsStringAsync();
-                    }
-                    catch { }
-
-                    if (!string.IsNullOrWhiteSpace(pluginsJson))
-                    {
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(pluginsJson);
-                            JsonElement root = doc.RootElement;
-                            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("plugins", out JsonElement pluginsProp))
-                            {
-                                foreach (JsonElement plugin in pluginsProp.EnumerateArray())
-                                {
-                                    if (plugin.TryGetProperty("key", out JsonElement keyProp))
-                                    {
-                                        string? key = keyProp.GetString();
-                                        if (!string.IsNullOrEmpty(key))
-                                        {
-                                            if (key.Equals("display_current_position", StringComparison.OrdinalIgnoreCase) || key.Equals("positioninfo", StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                hasPositionPlugin = true;
-                                            }
-                                            if (key.Equals("spoolmanager", StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                hasSpoolManager = true;
-                                            }
-                                            if (key.Equals("spoolman", StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                hasSpoolmanPlugin = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-
-                    // Parse printer state
-                    bool isOnline = false;
-                    string? state = null;
-                    double? hotendTemp = null;
-                    double? bedTemp = null;
-                    double? hotendTarget = null;
-                    double? bedTarget = null;
-                    double? x = null, y = null, z = null;
-                    PrinterSpoolInfoDto? spoolInfo = null;
-                    if (!string.IsNullOrWhiteSpace(printerJson))
-                    {
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(printerJson);
-                            JsonElement root = doc.RootElement;
-                            if (root.TryGetProperty("state", out JsonElement stateProp))
-                            {
-                                state = stateProp.GetString();
-                                isOnline = state != null && state != "Offline";
-                            }
-                            if (root.TryGetProperty("temperature", out JsonElement tempProp))
-                            {
-                                if (tempProp.TryGetProperty("tool0", out JsonElement tool0))
-                                {
-                                    if (tool0.TryGetProperty("actual", out JsonElement actual))
-                                    {
-                                        hotendTemp = actual.GetDouble();
-                                    }
-                                    if (tool0.TryGetProperty("target", out JsonElement target))
-                                    {
-                                        hotendTarget = target.GetDouble();
-                                    }
-                                }
-                                if (tempProp.TryGetProperty("bed", out JsonElement bed))
-                                {
-                                    if (bed.TryGetProperty("actual", out JsonElement actual))
-                                    {
-                                        bedTemp = actual.GetDouble();
-                                    }
-                                    if (bed.TryGetProperty("target", out JsonElement target))
-                                    {
-                                        bedTarget = target.GetDouble();
-                                    }
-                                }
-                            }
-
-                            // X/Y/Z position plugin support
-                            if (hasPositionPlugin && root.TryGetProperty("position", out JsonElement posProp))
-                            {
-                                if (posProp.TryGetProperty("x", out JsonElement xProp))
-                                {
-                                    x = xProp.GetDouble();
-                                }
-                                if (posProp.TryGetProperty("y", out JsonElement yProp))
-                                {
-                                    y = yProp.GetDouble();
-                                }
-                                if (posProp.TryGetProperty("z", out JsonElement zProp))
-                                {
-                                    z = zProp.GetDouble();
-                                }
-                            }
-
-                            // SpoolManager plugin support
-                            if (hasSpoolManager && root.TryGetProperty("spoolmanager", out JsonElement spoolProp))
-                            {
-                                // Map OctoPrint SpoolManager plugin fields to PrinterSpoolInfoDto
-                                spoolInfo = new PrinterSpoolInfoDto(
-                                    HasActiveSpool: true,
-                                    ActiveSpoolId: spoolProp.TryGetProperty("id", out JsonElement idProp) ? idProp.GetInt32() : null,
-                                    SpoolName: spoolProp.TryGetProperty("display_name", out JsonElement nameProp) ? nameProp.GetString() : null,
-                                    Material: spoolProp.TryGetProperty("material", out JsonElement matProp) ? matProp.GetString() : null,
-                                    ColorHex: spoolProp.TryGetProperty("color", out JsonElement colorProp) ? colorProp.GetString() : null,
-                                    FilamentName: spoolProp.TryGetProperty("type", out JsonElement typeProp) ? typeProp.GetString() : null,
-                                    Vendor: spoolProp.TryGetProperty("vendor", out JsonElement vendorProp) ? vendorProp.GetString() : null,
-                                    RemainingWeightG: spoolProp.TryGetProperty("remaining_weight", out JsonElement remProp) ? remProp.GetDouble() : null,
-                                    SpoolInUse: spoolProp.TryGetProperty("in_use", out JsonElement inUseProp) ? inUseProp.GetBoolean() : null
-                                );
-                            }
-
-                            // Spoolman plugin support (OctoPrint-Spoolman bridge)
-                            if (hasSpoolmanPlugin)
-                            {
-                                try
-                                {
-                                    HttpRequestMessage spoolmanRequest = new(HttpMethod.Get, $"{p.ServerUrl.TrimEnd('/')}/plugin/spoolman/api/v1/printer");
-                                    spoolmanRequest.Headers.Add("X-Api-Key", p.ApiKey ?? string.Empty);
-                                    HttpResponseMessage spoolmanResponse = await octoprint.SendAsync(spoolmanRequest, fastTimeoutCts.Token);
-                                    if (spoolmanResponse.IsSuccessStatusCode)
-                                    {
-                                        string spoolmanJson = await spoolmanResponse.Content.ReadAsStringAsync();
-                                        using JsonDocument spoolmanDoc = JsonDocument.Parse(spoolmanJson);
-                                        JsonElement spoolmanRoot = spoolmanDoc.RootElement;
-                                        // Map Spoolman fields to PrinterSpoolInfoDto (example fields, adjust as needed)
-                                        spoolInfo = new PrinterSpoolInfoDto(
-                                            HasActiveSpool: spoolmanRoot.TryGetProperty("has_active_spool", out JsonElement hasSpool) && hasSpool.GetBoolean(),
-                                            ActiveSpoolId: spoolmanRoot.TryGetProperty("active_spool_id", out JsonElement spoolId) ? spoolId.GetInt32() : null,
-                                            SpoolName: spoolmanRoot.TryGetProperty("spool_name", out JsonElement spoolName) ? spoolName.GetString() : null,
-                                            Material: spoolmanRoot.TryGetProperty("material", out JsonElement mat) ? mat.GetString() : null,
-                                            ColorHex: spoolmanRoot.TryGetProperty("color", out JsonElement color) ? color.GetString() : null,
-                                            FilamentName: spoolmanRoot.TryGetProperty("filament_name", out JsonElement filName) ? filName.GetString() : null,
-                                            Vendor: spoolmanRoot.TryGetProperty("vendor", out JsonElement vendor) ? vendor.GetString() : null,
-                                            RemainingWeightG: spoolmanRoot.TryGetProperty("remaining_weight_g", out JsonElement remG) ? remG.GetDouble() : null,
-                                            SpoolInUse: spoolmanRoot.TryGetProperty("spool_in_use", out JsonElement inUse) ? inUse.GetBoolean() : null
-                                        );
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch { }
-                    }
-
-                    // Parse job info
-                    double? progress = null;
-                    string? jobName = null;
-                    if (!string.IsNullOrWhiteSpace(jobJson))
-                    {
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(jobJson);
-                            JsonElement root = doc.RootElement;
-                            if (root.TryGetProperty("progress", out JsonElement progressProp))
-                            {
-                                if (progressProp.TryGetProperty("completion", out JsonElement completion))
-                                {
-                                    progress = completion.GetDouble();
-                                }
-                            }
-                            if (root.TryGetProperty("job", out JsonElement jobProp))
-                            {
-                                if (jobProp.TryGetProperty("file", out JsonElement fileProp))
-                                {
-                                    if (fileProp.TryGetProperty("name", out JsonElement nameProp))
-                                    {
-                                        jobName = nameProp.GetString();
-                                    }
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-
-                    return new PrinterDto(
-                        Id: p.Id,
-                        Name: p.Name,
-                        ServerUrl: p.ServerUrl,
-                        Notes: p.Notes,
-                        IsOnline: isOnline,
-                        State: state,
-                        ManufacturerName: p.Manufacturer?.Name,
-                        ModelName: p.Model?.Name,
-                        Progress: progress,
-                        JobName: jobName,
-                        ThumbnailUrl: null,
-                        CameraStreamUrl: await octoprint.GetCameraStreamUrlAsync(p.ServerUrl, p.ApiKey ?? string.Empty),
-                        CameraSnapshotUrl: null,
-                        HotendTemp: hotendTemp,
-                        BedTemp: bedTemp,
-                        HotendTarget: hotendTarget,
-                        BedTarget: bedTarget,
-                        X: x, // Will be populated if plugin is installed
-                        Y: y,
-                        Z: z,
-                        SpoolInfo: spoolInfo, // Will be populated if plugin is installed
-                        Backend: Farm.Web.Shared.PrinterBackend.OctoPrint,
-                        ApiKey: p.ApiKey,
-                        OriginalServerUrl: p.OriginalServerUrl,
-                        IpAddress: p.IpAddress
-                    );
-                }
-                else // Moonraker
-                {
-                    CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"moonraker-{p.Id}");
-                    PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                        await moon.GetCompositeStatusAsync(p.ServerUrl, ct), fastTimeoutCts.Token);
-                    PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, fastTimeoutCts.Token);
-                    return new PrinterDto(
-                        Id: p.Id,
-                        Name: p.Name,
-                        ServerUrl: p.ServerUrl,
-                        Notes: p.Notes,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        ManufacturerName: p.Manufacturer?.Name,
-                        ModelName: p.Model?.Name,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl,
-                        X: status.X,
-                        Y: status.Y,
-                        Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
-                        Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                        ApiKey: p.ApiKey,
-                        OriginalServerUrl: p.OriginalServerUrl,
-                        IpAddress: p.IpAddress,
-                        SpoolInfo: spoolInfo
-                    );
-                }
-            }
-            catch (OperationCanceledException) when (fastTimeoutCts.Token.IsCancellationRequested)
-            {
-                _logger.LogWarning($"Fast timeout occurred for printer {p.Name} ({p.Id})");
-                // Return offline printer for timeout cases
-                return CreateOfflinePrinterDto(p);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error getting status for printer {p.Name} ({p.Id}): {ex.Message}");
-                // Return offline printer for any error
-                return CreateOfflinePrinterDto(p);
-            }
-        }));
-        return Ok(dtos);
-    }
-
-    private static PrinterDto CreateOfflinePrinterDto(Printer p)
-    {
-        return new PrinterDto(
-            Id: p.Id,
-            Name: p.Name,
-            ServerUrl: p.ServerUrl,
-            Notes: p.Notes,
-            IsOnline: false,
-            State: null,
-            ManufacturerName: p.Manufacturer?.Name,
-            ModelName: p.Model?.Name,
-            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
-                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
-                     Farm.Web.Shared.PrinterBackend.Moonraker,
-            ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
-        );
-    }
-
-    private static bool PropertySuppressedForExport(System.Reflection.PropertyInfo? pi)
-    {
-        if (pi == null)
-        {
-            return false;
-        }
-
-        ImportExportAttribute? attr = pi.GetCustomAttributes(typeof(ImportExportAttribute), inherit: true).FirstOrDefault() as ImportExportAttribute;
-        return attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0;
-    }
-
-    /// <summary>
-    /// Retrieves basic information for all printers without detailed status.
-    /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>A lightweight list of all printers with basic information only</returns>
-    /// <response code="200">Returns the list of printers with basic information</response>
-    [HttpGet("basic")]
-    [ProducesResponseType(typeof(IEnumerable<PrinterBasicDto>), 200)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterBasicDto>>> GetBasicAsync(CancellationToken ct)
-    {
-        List<Printer> items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
-        List<PrinterBasicDto> dtos = items.Select(p => new PrinterBasicDto(
-            Id: p.Id,
-            Name: p.Name,
-            ServerUrl: p.ServerUrl,
-            Notes: p.Notes,
-            ManufacturerName: p.Manufacturer?.Name,
-            ModelName: p.Model?.Name,
-            Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
-                     p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
-                     Farm.Web.Shared.PrinterBackend.Moonraker,
-            ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
-        )).ToList();
-        return Ok(dtos);
-    }
-
-    /// <summary>
-    /// Retrieves all printers with cached information for fast loading.
-    /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>A list of all printers with cached information without real-time status or camera URLs</returns>
-    /// <response code="200">Returns the list of printers with cached information</response>
-    [HttpGet("fast")]
-    [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAllFastAsync(CancellationToken ct)
-    {
-        try
-        {
-            _logger.LogInformation($"[FAST] /api/printers/fast called. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}");
-            List<Printer> items = await db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).ToListAsync(ct);
-            _logger.LogDebug($"[FAST] Retrieved {items.Count} printers from DB.");
-
-            // Return all printers as offline initially - let the client load statuses progressively
-            List<PrinterFastDto> dtos = items.Select(p => new PrinterFastDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: false, // Default to offline, client will update via individual status calls
-                State: null,
-                ManufacturerName: p.Manufacturer?.Name,
-                ModelName: p.Model?.Name,
-                Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink :
-                         p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP :
-                         Farm.Web.Shared.PrinterBackend.Moonraker,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            )).ToList();
-            _logger.LogDebug($"[FAST] Returning {dtos.Count} PrinterFastDto objects to client.");
-
-            return Ok(dtos);
-        }
-        catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
-        {
-            _logger.LogWarning($"[FAST] Startup DB exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
-            return Ok(Array.Empty<PrinterFastDto>());
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/fast. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
-        }
-    }
+    private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
+    private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
+    private readonly Farm.Infrastructure.Repositories.Catalog.ICatalogRepository _catalogRepository = catalogRepository;
+    private readonly IValidator<CreatePrinterDto> _validator = validator;
+    private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -651,35 +64,10 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         try
         {
-            _logger.LogInformation($"[CAMERA-URLS] /api/printers/camera-urls called. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}");
-            List<Printer> items = await db.Printers.AsNoTracking().ToListAsync(ct);
-            _logger.LogDebug($"[CAMERA-URLS] Retrieved {items.Count} printers from DB.");
-
-            PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
-            {
-                string? streamUrl = null;
-                string? snapshotUrl = null;
-
-                // Only return camera URLs if we can verify the camera endpoints are actually available
-                if (await IsCameraAvailableAsync(p.ServerUrl, p.Backend, ct))
-                {
-                    streamUrl = GenerateStaticCameraStreamUrl(p.ServerUrl, p.Backend);
-                    snapshotUrl = GenerateStaticCameraSnapshotUrl(p.ServerUrl, p.Backend);
-                }
-
-                _logger.LogDebug($"[CAMERA-URLS] Printer {p.Name} ({p.Id}): streamUrl={{streamUrl}}, snapshotUrl={{snapshotUrl}}");
-                return new PrinterCameraUrlsDto(
-                    Id: p.Id,
-                    Name: p.Name,
-                    CameraStreamUrl: streamUrl,
-                    CameraSnapshotUrl: snapshotUrl
-                );
-            }));
-
-            _logger.LogDebug($"[CAMERA-URLS] Returning {dtos.Length} PrinterCameraUrlsDto objects to client.");
+            PrinterCameraUrlsDto[] dtos = await _printersService.GetCameraUrlsAsync(ct);
             return Ok(dtos.ToList());
         }
-        catch (Exception ex) when (FastEndpointDefensive && IsTransientStartupDbException(ex))
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
             _logger.LogWarning($"[CAMERA-URLS] Startup DB exception in /api/printers/camera-urls. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
             return Ok(Array.Empty<PrinterCameraUrlsDto>());
@@ -691,108 +79,305 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
-    /// <summary>
-    /// Checks if a camera is actually available for the given printer by testing the camera endpoint.
-    /// </summary>
-    /// <param name="serverUrl">The printer server URL</param>
-    /// <param name="backend">The printer backend type</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>True if camera is available, false otherwise</returns>
-    private async Task<bool> IsCameraAvailableAsync(string serverUrl, int backend, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return false;
-        }
-
-        try
-        {
-            // Test the snapshot URL with a short timeout
-            string? snapshotUrl = GenerateStaticCameraSnapshotUrl(serverUrl, backend);
-            if (string.IsNullOrWhiteSpace(snapshotUrl))
-            {
-                return false;
-            }
-
-            HttpClient httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(2); // Short timeout to avoid blocking
-
-            using HttpRequestMessage request = new(HttpMethod.Head, snapshotUrl);
-            using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-
-            // Camera is available if we get a successful response (2xx) or even a 4xx
-            // (404 might mean camera exists but no current image, 401/403 means auth required but camera exists)
-            // 5xx errors typically mean the camera service is not running/configured
-            return response.StatusCode < System.Net.HttpStatusCode.InternalServerError;
-        }
-        catch (Exception ex)
-        {
-            // Log the exception for debugging but don't expose it
-            _logger.LogDebug($"Camera availability check failed for printer {serverUrl} (backend {backend}): {ex.Message}");
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Generates static camera stream URL based on printer configuration without external API calls.
-    /// </summary>
-    private static string? GenerateStaticCameraStreamUrl(string serverUrl, int backend)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return null;
-        }
-
-        try
-        {
-            Uri baseUri = new(serverUrl);
-            return backend switch
-            {
-                0 => new Uri(baseUri, "/webcam/?action=stream").ToString(), // Moonraker
-                1 => new Uri(baseUri, "/webcam/?action=stream").ToString(), // PrusaLink (often same pattern)
-                2 => new Uri(baseUri, "/camera/stream").ToString(),         // SDCP
-                _ => new Uri(baseUri, "/webcam/?action=stream").ToString()  // Default to Moonraker pattern
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Generates static camera snapshot URL based on printer configuration without external API calls.
-    /// </summary>
-    private static string? GenerateStaticCameraSnapshotUrl(string serverUrl, int backend)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return null;
-        }
-
-        try
-        {
-            Uri baseUri = new(serverUrl);
-            return backend switch
-            {
-                0 => new Uri(baseUri, "/webcam/?action=snapshot").ToString(), // Moonraker
-                1 => new Uri(baseUri, "/webcam/?action=snapshot").ToString(), // PrusaLink (often same pattern)
-                2 => new Uri(baseUri, "/camera/snapshot").ToString(),         // SDCP
-                _ => new Uri(baseUri, "/webcam/?action=snapshot").ToString()  // Default to Moonraker pattern
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static bool IsTransientStartupDbException(Exception ex)
     {
         // SQLite "no such table" or other typical init race messages
         string msg = ex.GetBaseException().Message;
         return msg.Contains("no such table", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("database is locked", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Retrieves backend capabilities for all printers.
+    /// Indicates which features each backend (Moonraker, PrusaLink, etc.) supports.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Backend capabilities for all printers</returns>
+    /// <response code="200">Returns backend capabilities for all printers</response>
+    [HttpGet("backend-capabilities")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterBackendCapabilitiesDto>), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterBackendCapabilitiesDto>>> GetBackendCapabilitiesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
+            return Ok(capabilities);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return Ok(Array.Empty<PrinterBackendCapabilitiesDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves backend capabilities for a specific printer.
+    /// Indicates which features the printer's backend (Moonraker, PrusaLink, etc.) supports.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Backend capabilities for the specified printer</returns>
+    /// <response code="200">Returns backend capabilities for the printer</response>
+    /// <response code="404">Printer not found</response>
+    [HttpGet("{printerId}/backend-capabilities")]
+    [ProducesResponseType(typeof(PrinterBackendCapabilitiesDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterBackendCapabilitiesDto>> GetPrinterBackendCapabilitiesAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
+            if (capabilities == null)
+            {
+                return NotFound($"Printer with ID {printerId} not found");
+            }
+
+            return Ok(capabilities);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves a lightweight list of all printers with minimal data for quick loading.
+    /// This is the default GET endpoint for the printers resource.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <param name="includeDisabled">Return disabled printers as well (admin-only)</param>
+    /// <returns>A complete list of all printers with configuration and live status merged</returns>
+    /// <response code="200">Returns the list of complete printer data with live status</response>
+    [HttpGet]
+    [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
+    {
+        try
+        {
+            CompletePrinterDto[] dtos = await _printersService.GetAllCompleteDtosAsync(ct);
+            bool isAdmin = User.IsInRole("farm_admin");
+            if (isAdmin)
+            {
+                return Ok(dtos);
+            }
+
+            if (includeDisabled)
+            {
+                return Forbid();
+            }
+
+            // Filter to only enabled printers for normal users
+            List<CompletePrinterDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
+            return Ok(enabledDtos);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[GET] Startup DB exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return Ok(Array.Empty<CompletePrinterDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates multiple printers in a bulk operation.
+    /// </summary>
+    /// <param name="printers">Array of printer configurations to create</param>
+    /// <param name="duplicateHandling">How to handle duplicate printers: 'skip' (default), 'overwrite', or 'error'</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result of bulk import operation including created printers and errors</returns>
+    /// <response code="200">Returns bulk import results with created printers and any errors</response>
+    /// <response code="400">If the printer data is invalid</response>
+    /// <response code="500">If there was an error creating printers</response>
+    [HttpPost("bulk")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> BulkCreateAsync(
+        [FromBody] CreatePrinterDto[] printers,
+        [FromQuery] string? duplicateHandling = "skip",
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(printers);
+
+        if (printers.Length == 0)
+        {
+            return BadRequest(new { message = "At least one printer configuration is required" });
+        }
+
+        // Validate all printers first before delegating to service
+        Dictionary<int, List<string>> validationErrors = new Dictionary<int, List<string>>();
+        for (int i = 0; i < printers.Length; i++)
+        {
+            ValidationResult result = await _validator.ValidateAsync(printers[i], ct);
+            if (!result.IsValid)
+            {
+                validationErrors[i] = result.Errors.Select(e => e.ErrorMessage).ToList();
+            }
+        }
+
+        // If all printers failed validation, return error
+        if (validationErrors.Count == printers.Length)
+        {
+            string errorMessage = string.Join("; ", validationErrors.SelectMany(kvp =>
+                kvp.Value.Select(err => $"[Printer {kvp.Key}] {err}")));
+            _logger.LogWarning($"[BulkCreate] Validation failed for all printers: {errorMessage}");
+            return BadRequest(new { message = "All printers failed validation", errors = validationErrors });
+        }
+
+        try
+        {
+            // Delegate to service for actual creation logic
+            object result = await _printersService.BulkCreatePrintersAsync(printers, duplicateHandling ?? "skip", ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[BulkCreate] Bulk printer creation failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Bulk creation operation failed",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Imports printers from an uploaded CSV or JSON file with optional duplicate handling.
+    /// </summary>
+    /// <param name="file">The CSV or JSON file containing printer configurations</param>
+    /// <param name="duplicateHandling">How to handle duplicates: 'skip' (default), 'overwrite', or 'error'</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result of import operation including created printers and any errors</returns>
+    /// <response code="200">Returns import results with created printers and errors</response>
+    /// <response code="400">If the file is invalid or missing</response>
+    /// <response code="500">If there was an error importing printers</response>
+    [HttpPost("import")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    public async Task<IActionResult> ImportFromFileAsync(
+        [FromForm] IFormFile file,
+        [FromQuery] string? duplicateHandling = "skip",
+        CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { message = "No file provided or file is empty" });
+        }
+
+        string fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (fileExtension != ".csv" && fileExtension != ".json")
+        {
+            return BadRequest(new { message = "File must be CSV or JSON format" });
+        }
+
+        if (file.Length > 10 * 1024 * 1024) // 10MB limit
+        {
+            return BadRequest(new { message = "File is too large (max 10MB)" });
+        }
+
+        try
+        {
+            _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
+            using (var stream = file.OpenReadStream())
+            {
+                object result = await _printersService.ImportFromStreamAsync(stream, file.FileName, duplicateHandling ?? "skip", ct);
+                _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
+                return Ok(result);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"[Import] Validation error: {ex.Message}");
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning($"[Import] Invalid data error: {ex.Message}");
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Import] Import operation failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Import operation failed",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Gets the current print job status for a specific printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The current print job status if a job is running, otherwise null</returns>
+    /// <response code="200">Returns the print job status or null if no job running</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error retrieving job status</response>
+    [HttpGet("{id:guid}/printjob")]
+    [ProducesResponseType(typeof(PrintJobStatusDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            // Verify printer exists first
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            if (printer == null)
+            {
+                _logger.LogWarning($"[PrintJob] Printer {id} not found");
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
+            _logger.LogInformation($"[PrintJob] Getting print job status for printer {printer.Name}");
+
+            // Delegate to service for actual retrieval logic
+            PrintJobStatusDto? jobStatus = await _printersService.GetPrintJobStatusAsync(id, ct);
+
+            // Return the status (may be null if no active job)
+            return Ok(jobStatus);
+        }
+        catch (KeyNotFoundException)
+        {
+            _logger.LogWarning($"[PrintJob] Printer {id} not found");
+            return NotFound(new { message = $"Printer {id} not found" });
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning($"[PrintJob] Timeout retrieving print job status for printer {id}");
+            return Ok((object?)null); // Return null on timeout
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrintJob] Error getting print job status for printer {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to retrieve print job status",
+                error = ex.Message
+            });
+        }
     }
 
     /// <summary>
@@ -810,114 +395,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterStatusDto>> GetStatusAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (p is null)
+        try
+        {
+            PrinterStatusDto dto = await _printersService.GetStatusDtoAsync(id, ct);
+            return Ok(dto);
+        }
+        catch (KeyNotFoundException)
         {
             return NotFound();
         }
-
-        // Use moderate timeout for individual status checks (balance between responsiveness and accuracy)
-        using CancellationTokenSource statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        statusCts.CancelAfter(TimeSpan.FromSeconds(3)); // 3-second timeout for individual status
-
-        try
-        {
-            if (p.Backend == 1) // PrusaLink
-            {
-                CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
-                PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                    await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), statusCts.Token);
-                return new PrinterStatusDto(
-                    Id: p.Id,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl
-                );
-            }
-            else if (p.Backend == 2) // SDCP
-            {
-                CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
-                PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                    await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
-                return new PrinterStatusDto(
-                    Id: p.Id,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    X: status.X,
-                    Y: status.Y,
-                    Z: status.Z,
-                    HotendTemp: status.HotendTemp,
-                    BedTemp: status.BedTemp,
-                    HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget
-                );
-            }
-            else // Moonraker
-            {
-                CircuitBreaker breaker = circuitBreaker.GetCircuitBreaker($"moonraker-{p.Id}");
-                PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct =>
-                    await moon.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
-                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, statusCts.Token);
-                return new PrinterStatusDto(
-                    Id: p.Id,
-                    IsOnline: status.IsOnline,
-                    State: status.State,
-                    Progress: status.Progress,
-                    JobName: status.JobName,
-                    ThumbnailUrl: status.ThumbnailUrl,
-                    CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl,
-                    X: status.X,
-                    Y: status.Y,
-                    Z: status.Z,
-                    HotendTemp: status.HotendTemp,
-                    BedTemp: status.BedTemp,
-                    HotendTarget: status.HotendTarget,
-                    BedTarget: status.BedTarget,
-                    SpoolInfo: spoolInfo
-                );
-            }
-        }
-        catch (OperationCanceledException) when (statusCts.Token.IsCancellationRequested)
-        {
-            _logger.LogWarning($"Status timeout for printer {p.Id}");
-            // Return offline status for timeout cases
-            return new PrinterStatusDto(
-                Id: p.Id,
-                IsOnline: false,
-                State: null,
-                Progress: null,
-                JobName: null,
-                ThumbnailUrl: null,
-                CameraStreamUrl: null,
-                CameraSnapshotUrl: null,
-                SpoolInfo: null
-            );
-        }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Error getting status for printer {p.Id}: {ex.Message}");
-            // Return offline status if there's any error
-            return new PrinterStatusDto(
-                Id: p.Id,
-                IsOnline: false,
-                State: null,
-                Progress: null,
-                JobName: null,
-                ThumbnailUrl: null,
-                CameraStreamUrl: null,
-                CameraSnapshotUrl: null,
-                SpoolInfo: null
-            );
+            _logger.LogWarning($"Error getting status for printer {id}: {ex.Message}");
+            return new PrinterStatusDto(Id: id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
         }
     }
 
@@ -935,95 +425,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDto>> GetAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.Include(x => x.Manufacturer).Include(x => x.Model).FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (p is null)
+        try
+        {
+            PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(dto);
+        }
+        catch (KeyNotFoundException)
         {
             return NotFound();
         }
-        if (p.Backend == 1) // PrusaLink
+        catch (Exception ex)
         {
-            PrusaCompositeStatus status = await prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
-            return new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: p.Manufacturer?.Name,
-                ModelName: p.Model?.Name,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                Backend: Farm.Web.Shared.PrinterBackend.PrusaLink,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            );
-        }
-        else if (p.Backend == 2) // SDCP
-        {
-            PrinterCompositeStatus status = await sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
-            return new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: p.Manufacturer?.Name,
-                ModelName: p.Model?.Name,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                X: status.X,
-                Y: status.Y,
-                Z: status.Z,
-                HotendTemp: status.HotendTemp,
-                BedTemp: status.BedTemp,
-                HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget,
-                Backend: Farm.Web.Shared.PrinterBackend.SDCP,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress
-            );
-        }
-        else // Moonraker
-        {
-            PrinterCompositeStatus status = await moon.GetCompositeStatusAsync(p.ServerUrl, ct);
-            PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(p.ServerUrl, ct);
-            return new PrinterDto(
-                Id: p.Id,
-                Name: p.Name,
-                ServerUrl: p.ServerUrl,
-                Notes: p.Notes,
-                IsOnline: status.IsOnline,
-                State: status.State,
-                ManufacturerName: p.Manufacturer?.Name,
-                ModelName: p.Model?.Name,
-                Progress: status.Progress,
-                JobName: status.JobName,
-                ThumbnailUrl: status.ThumbnailUrl,
-                CameraStreamUrl: status.CameraStreamUrl,
-                CameraSnapshotUrl: status.CameraSnapshotUrl,
-                X: status.X,
-                Y: status.Y,
-                Z: status.Z,
-                HotendTemp: status.HotendTemp,
-                BedTemp: status.BedTemp,
-                HotendTarget: status.HotendTarget,
-                BedTarget: status.BedTarget,
-                Backend: Farm.Web.Shared.PrinterBackend.Moonraker,
-                ApiKey: p.ApiKey,
-                OriginalServerUrl: p.OriginalServerUrl,
-                IpAddress: p.IpAddress,
-                SpoolInfo: spoolInfo
-            );
+            _logger.LogError(ex, $"Failed to get printer {id}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get printer");
         }
     }
 
@@ -1041,43 +455,34 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.AsNoTracking()
-            .Include(x => x.Manufacturer)
-            .Include(x => x.Model)
-            .Include(x => x.Capabilities)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
         {
             return NotFound();
         }
 
-        PrinterCapabilitiesDto? capabilitiesDto = null;
-        if (p.Capabilities != null)
-        {
-            capabilitiesDto = new PrinterCapabilitiesDto(
-                p.Capabilities.Id,
-                p.Capabilities.PrinterId,
-                p.Name,
-                p.Capabilities.NozzleDiameter,
-                p.Capabilities.SupportedMaterials,
-                p.Capabilities.MaxBuildVolumeX,
-                p.Capabilities.MaxBuildVolumeY,
-                p.Capabilities.MaxBuildVolumeZ,
-                p.Capabilities.HasHeatedBed,
-                p.Capabilities.HasEnclosure,
-                p.Capabilities.MultiMaterial,
-                p.Capabilities.SupportsAutoLeveling,
-                p.Capabilities.NumberOfExtruders,
-                p.Capabilities.MinHotendTemp,
-                p.Capabilities.MaxHotendTemp,
-                p.Capabilities.MinBedTemp,
-                p.Capabilities.MaxBedTemp,
-                p.Capabilities.CurrentMaterial,
-                p.Capabilities.CurrentSpoolId,
-                p.Capabilities.IsAvailable,
-                p.Capabilities.LastUpdated
-            );
-        }
+        // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
+        PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
+            Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
+            p.Id,
+            p.Name,
+            null, // NozzleDiameter - now per-Toolhead, not printer-wide
+            null, // SupportedMaterials - now per-Toolhead, not printer-wide
+            p.MaxBuildVolumeX,
+            p.MaxBuildVolumeY,
+            p.MaxBuildVolumeZ,
+            p.HasHeatedBed,
+            p.HasEnclosure,
+            p.MultiMaterial,
+            p.SupportsAutoLeveling,
+            p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
+            null, // MaxHotendTemp - now per-Toolhead
+            p.MaxBedTemp,
+            p.CurrentMaterial,
+            p.CurrentSpoolId,
+            p.IsAvailable,
+            p.LastCapabilityUpdate
+        );
 
         return new PrinterDetailsDto(
             p.Id,
@@ -1124,7 +529,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         ArgumentNullException.ThrowIfNull(dto);
         // Validate input using FluentValidation
-        ValidationResult validationResult = await validator.ValidateAsync(dto, ct);
+        ValidationResult validationResult = await _validator.ValidateAsync(dto, ct);
         if (!validationResult.IsValid)
         {
             _logger.LogWarning($"Printer creation validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
@@ -1133,182 +538,135 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             {
                 ModelState.AddModelError(error.PropertyName, error.ErrorMessage);
             }
+
             return BadRequest(ModelState);
         }
 
         _logger.LogInformation($"Creating new printer: {dto.Name} ({dto.Backend})");
 
-        // resolve or create manufacturer/model
-        Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
-        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        // Delegate creation/business logic to the service
+        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+        return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
+    }
+
+    /// <summary>
+    /// Register printers discovered by the network discovery service.
+    /// Accepts both single printers and arrays for backward compatibility.
+    /// </summary>
+    /// <param name="discoveredPrinters">Discovered printer(s) to register</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of registered printers</returns>
+    /// <response code="200">Successfully registered discovered printer(s)</response>
+    /// <response code="400">Invalid printer data</response>
+    /// <response code="500">Server error</response>
+    [HttpPost("discovered")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterDto>>> RegisterDiscoveredAsync(
+        [FromBody] object? discoveredPrinters,
+        CancellationToken ct)
+    {
+        if (discoveredPrinters == null)
         {
-            string name = dto.NewManufacturerName!.Trim();
-            Manufacturer? existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
-            if (existing is null)
-            {
-                existing = new Manufacturer { Id = Guid.NewGuid(), Name = name };
-                _ = db.Manufacturers.Add(existing);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            manufacturerId = existing.Id;
+            return BadRequest("No printers provided");
         }
 
-        Guid modelId = dto.ModelId ?? Guid.Empty;
-        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
-        {
-            string mname = dto.NewModelName!.Trim();
-            PrinterModel? existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
-            if (existingModel is null)
-            {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
-                _ = db.Models.Add(existingModel);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            modelId = existingModel.Id;
-        }
+        // Parse input - could be single DiscoveredPrinterDto or array
+        List<DiscoveredPrinterDto> printers = new();
 
-        // Use default catalog entries if manufacturer or model are still empty
-        if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
+        if (discoveredPrinters is List<DiscoveredPrinterDto> list)
         {
-            (Guid defaultManufacturerId, Guid defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
-            if (manufacturerId == Guid.Empty)
-            {
-                manufacturerId = defaultManufacturerId;
-            }
-            if (modelId == Guid.Empty)
-            {
-                modelId = defaultModelId;
-            }
+            printers.AddRange(list);
         }
-
-        // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
-        int defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 :
-                         dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
-        string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
-        string resolvedBase = normalizedInput;
-        string? resolvedIp = null;
-        try
+        else if (discoveredPrinters is DiscoveredPrinterDto single)
         {
-            Uri uri = new(normalizedInput);
-            if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+            printers.Add(single);
+        }
+        else if (discoveredPrinters is JsonElement jsonElem)
+        {
+            // Handle JSON deserialization
+            try
             {
-                string hostToResolve = EnsureLocalSuffix(uri.Host);
-                IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
-                IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
-                if (firstIp is not null)
+                JsonSerializerOptions options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                if (jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
-                    UriBuilder ub = new(uri)
+                    DiscoveredPrinterDto[]? array = JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
+                    if (array != null)
                     {
-                        Host = firstIp.ToString()
-                    };
-                    resolvedBase = ub.Uri.ToString().TrimEnd('/');
-                    resolvedIp = firstIp.ToString();
-                }
-            }
-            else
-            {
-                resolvedIp = uri.Host;
-            }
-        }
-        catch { }
-
-        Printer p = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = dto.Name,
-            ServerUrl = resolvedBase,
-            OriginalServerUrl = normalizedInput,
-            IpAddress = resolvedIp,
-            Notes = dto.Notes,
-            ManufacturerId = manufacturerId,
-            ModelId = modelId,
-            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
-                : dto.DateAcquired,
-            Backend = (int)dto.Backend,
-            ApiKey = dto.ApiKey
-        };
-        _ = db.Printers.Add(p);
-        _ = await db.SaveChangesAsync(ct);
-
-        _logger.LogInformation($"Successfully created printer: {p.Name} with ID {p.Id}");
-
-        // Auto-discover capabilities for the newly created printer
-        try
-        {
-            _logger.LogInformation($"Starting capability discovery for newly created printer: {p.Name} ({p.Id})");
-
-            // Reload the printer with includes for proper discovery
-            Printer? printerForDiscovery = await db.Printers
-                .Include(pr => pr.Manufacturer)
-                .Include(pr => pr.Model)
-                .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-
-            if (printerForDiscovery != null)
-            {
-                PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
-                if (discoveredCapabilities != null)
-                {
-                    _logger.LogInformation($"Successfully discovered and saved capabilities for printer: {p.Name} ({p.Id})");
+                        printers.AddRange(array);
+                    }
                 }
                 else
                 {
-                    _logger.LogWarning($"Failed to discover capabilities for printer: {p.Name} ({p.Id}) - capabilities will need to be added manually");
+                    DiscoveredPrinterDto? obj = JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
+                    if (obj != null)
+                    {
+                        printers.Add(obj);
+                    }
                 }
             }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse discovered printers JSON");
+                return BadRequest("Invalid printer data format");
+            }
         }
-        catch (Exception ex)
+
+        if (!printers.Any())
         {
-            _logger.LogError($"Error during capability discovery for newly created printer: {p.Name} ({p.Id}) - printer was created successfully but capabilities discovery failed. Exception: {ex.Message}");
-            // Don't fail the printer creation if capability discovery fails - user can manually add capabilities or trigger discovery later
+            return BadRequest("No valid printers provided");
         }
 
-        // Get manufacturer and model names for the response
-        string? manufacturerName = null;
-        string? modelName = null;
+        List<PrinterDto> registered = new List<PrinterDto>();
 
-        if (manufacturerId != Guid.Empty)
+        foreach (DiscoveredPrinterDto discovered in printers)
         {
-            Manufacturer? manufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Id == manufacturerId, ct);
-            manufacturerName = manufacturer?.Name;
+            try
+            {
+                _logger.LogInformation(
+                    $"Processing discovered printer: {discovered.Name} " +
+                    $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
+
+                // Check if printer already exists by IP address
+                Printer? existing = await _printersService.FindByIpAddressAsync(discovered.ServerUrl, ct);
+
+                if (existing != null)
+                {
+                    _logger.LogInformation($"Printer already registered: {existing.Name} (IP: {existing.IpAddress})");
+                    PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
+                    if (existingDto != null)
+                    {
+                        registered.Add(existingDto);
+                    }
+                    continue;
+                }
+
+                // Create new printer from discovered data, preserving all discovered metadata
+                CreatePrinterDto createDto = CreatePrinterDto.FromDiscovered(discovered);
+
+                ValidationResult validationResult = await _validator.ValidateAsync(createDto, ct);
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        $"Discovered printer validation failed: {string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+                    continue;
+                }
+
+                // Create the printer
+                PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(createDto, ct);
+                registered.Add(created);
+
+                _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Name}");
+                // Continue with next printer on error
+            }
         }
 
-        if (modelId != Guid.Empty)
-        {
-            PrinterModel? model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
-            modelName = model?.Name;
-        }
-
-        // Return the created printer without attempting to fetch status
-        // Status will be fetched later when needed (like in the printers list)
-        PrinterDto printerDto = new(
-            Id: p.Id,
-            Name: p.Name,
-            ServerUrl: p.ServerUrl,
-            Notes: p.Notes,
-            IsOnline: false, // Default to offline, will be updated by background services
-            State: "Unknown",
-            ManufacturerName: manufacturerName,
-            ModelName: modelName,
-            Progress: null,
-            JobName: null,
-            ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            CameraSnapshotUrl: null,
-            X: null,
-            Y: null,
-            Z: null,
-            HotendTemp: null,
-            BedTemp: null,
-            HotendTarget: null,
-            BedTarget: null,
-            Backend: dto.Backend, // Use the requested backend (ensures OctoPrint is set correctly)
-            ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
-        );
-
-        return CreatedAtRoute("GetPrinterById", new { id = p.Id }, printerDto);
+        return Ok(registered);
     }
 
     /// <summary>
@@ -1327,31 +685,30 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDto>> SetMaintenanceModeAsync(Guid id, [FromBody] bool inMaintenance, CancellationToken ct)
     {
-        Printer? printer = await db.Printers.FindAsync([id], ct);
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
         if (printer is null)
         {
             return NotFound();
         }
         printer.InMaintenance = inMaintenance;
-        _ = await db.SaveChangesAsync(ct);
+        await _printersService.SaveChangesAsync(ct);
 
         // Optionally, you may want to return the updated DTO with more info
         string? manufacturerName = null;
         string? modelName = null;
         if (printer.ManufacturerId != Guid.Empty)
         {
-            Manufacturer? man = await db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(m => m.Id == printer.ManufacturerId, ct);
+            ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(printer.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
         if (printer.ModelId != Guid.Empty)
         {
-            PrinterModel? mod = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == printer.ModelId, ct);
+            PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
             modelName = mod?.Name;
         }
         PrinterDto dto = new(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: false,
             State: "Unknown",
@@ -1372,9 +729,45 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Backend: (PrinterBackend)printer.Backend,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Refreshes camera URLs for a printer by querying the backend API.
+    /// Use this to update camera configuration after adding or modifying cameras on a printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The updated printer DTO with refreshed camera URLs</returns>
+    /// <response code="200">Returns the updated printer with camera URLs</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error refreshing camera URLs</response>
+    [HttpPost("{id:guid}/refresh-cameras")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
+            if (result == null)
+            {
+                return NotFound();
+            }
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to refresh camera URLs for printer {id}");
+            return StatusCode(500, "Failed to refresh camera URLs");
+        }
     }
 
     /// <summary>
@@ -1396,7 +789,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<PrinterDto>> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        Printer? p = await db.Printers.FindAsync([id], ct);
+        Printer? p = await _printersService.FindByIdAsync(id, ct);
         if (p is null)
         {
             return NotFound();
@@ -1406,79 +799,68 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             string name = dto.NewManufacturerName!.Trim();
-            Manufacturer? existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
-            if (existing is null)
-            {
-                existing = new Manufacturer { Id = Guid.NewGuid(), Name = name };
-                _ = db.Manufacturers.Add(existing);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            manufacturerId = existing.Id;
+            // ICatalogRepository does not expose GetManufacturerByName; create via CatalogService
+            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
+            manufacturerId = created.Id;
         }
 
         Guid modelId = dto.ModelId ?? p.ModelId;
         if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
-            PrinterModel? existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
-            if (existingModel is null)
-            {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
-                _ = db.Models.Add(existingModel);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            modelId = existingModel.Id;
+            CreateModelRequest createReq = new CreateModelRequest(
+                ManufacturerId: manufacturerId,
+                Name: mname,
+                Type: null,
+                MaxX: null,
+                MaxY: null,
+                MaxZ: null,
+                DefaultBackend: null,
+                SupportedFilamentTypeIds: Array.Empty<Guid>());
+            PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct);
+            modelId = createdModel.Id;
         }
 
         // Use default catalog entries if manufacturer or model are still empty
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
-            (Guid defaultManufacturerId, Guid defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
             if (manufacturerId == Guid.Empty)
             {
-                manufacturerId = defaultManufacturerId;
+                Guid? unknownMfgId = await _catalogRepository.GetUnknownManufacturerIdAsync(ct);
+                if (!unknownMfgId.HasValue)
+                {
+                    throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
+                }
+                manufacturerId = unknownMfgId.Value;
             }
             if (modelId == Guid.Empty)
             {
-                modelId = defaultModelId;
+                Guid? unknownModelId = await _catalogRepository.GetUnknownModelIdAsync(ct);
+                if (!unknownModelId.HasValue)
+                {
+                    throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
+                }
+                modelId = unknownModelId.Value;
             }
         }
 
-        p.Name = dto.Name;
-        int defaultPort = dto.Backend.HasValue ?
-            (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 :
-             dto.Backend.Value == PrinterBackend.SDCP ? 80 : 7125) :
-            (p.Backend == 1 ? 80 : p.Backend == 2 ? 80 : 7125);
-        string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
-        string resolvedBase = normalizedInput;
-        string? resolvedIp = null;
-        try
+        // Only update Name if provided
+        if (!string.IsNullOrWhiteSpace(dto.Name))
         {
-            Uri uri = new(normalizedInput);
-            if (!System.Net.IPAddress.TryParse(uri.Host, out _))
-            {
-                string hostToResolve = EnsureLocalSuffix(uri.Host);
-                IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
-                IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
-                if (firstIp is not null)
-                {
-                    UriBuilder ub = new(uri)
-                    {
-                        Host = firstIp.ToString()
-                    };
-                    resolvedBase = ub.Uri.ToString().TrimEnd('/');
-                    resolvedIp = firstIp.ToString();
-                }
-            }
-            else
-            {
-                resolvedIp = uri.Host;
-            }
+            p.Name = dto.Name;
         }
-        catch { }
-        p.ServerUrl = resolvedBase;
-        p.OriginalServerUrl = normalizedInput;
-        p.IpAddress = resolvedIp;
+
+        // Only resolve hostname if a new ServerUrl is provided
+        if (!string.IsNullOrWhiteSpace(dto.ServerUrl))
+        {
+            // Delegate normalization and optional hostname resolution to the PrintersService
+            PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
+            ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
+            p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
+            p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
+            p.IpAddress = resolveResp.ResolvedIp;
+        }
+
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -1495,59 +877,65 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             p.ApiKey = dto.ApiKey;
         }
 
-        // Update or create printer capabilities
-        PrinterCapabilities? capabilities = await db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == id, ct);
-        if (capabilities == null)
+        // Update port settings
+        if (dto.BackendPort.HasValue)
         {
-            capabilities = new PrinterCapabilities
-            {
-                Id = Guid.NewGuid(),
-                PrinterId = id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _ = db.PrinterCapabilities.Add(capabilities);
+            p.BackendPort = dto.BackendPort.Value;
+        }
+        if (dto.FrontendPort.HasValue)
+        {
+            p.FrontendPort = dto.FrontendPort.Value;
         }
 
-        // Update capability fields from DTO
-        capabilities.NozzleDiameter = dto.NozzleDiameter;
-        capabilities.SupportedMaterials = dto.SupportedMaterials;
-        capabilities.MaxBuildVolumeX = dto.MaxBuildVolumeX;
-        capabilities.MaxBuildVolumeY = dto.MaxBuildVolumeY;
-        capabilities.MaxBuildVolumeZ = dto.MaxBuildVolumeZ;
-        capabilities.HasHeatedBed = dto.HasHeatedBed ?? true;
-        capabilities.HasEnclosure = dto.HasEnclosure ?? false;
-        capabilities.MultiMaterial = dto.MultiMaterial ?? false;
-        capabilities.NumberOfExtruders = dto.NumberOfExtruders ?? 1;
-        capabilities.MinHotendTemp = dto.MinHotendTemp;
-        capabilities.MaxHotendTemp = dto.MaxHotendTemp;
-        capabilities.MinBedTemp = dto.MinBedTemp;
-        capabilities.MaxBedTemp = dto.MaxBedTemp;
-        capabilities.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? false;
-        capabilities.MaxPrintSpeed = dto.MaxPrintSpeed;
-        capabilities.LastUpdated = DateTime.UtcNow;
-        capabilities.UpdatedAt = DateTime.UtcNow;
+        // Update IsEnabled if provided
+        if (dto.IsEnabled.HasValue)
+        {
+            p.IsEnabled = dto.IsEnabled.Value;
+        }
 
-        _ = await db.SaveChangesAsync(ct);
+        // Update hardware specs on the Printer entity (merged from legacy PrinterCapabilities)
+        p.MaxBuildVolumeX = dto.MaxBuildVolumeX ?? p.MaxBuildVolumeX;
+        p.MaxBuildVolumeY = dto.MaxBuildVolumeY ?? p.MaxBuildVolumeY;
+        p.MaxBuildVolumeZ = dto.MaxBuildVolumeZ ?? p.MaxBuildVolumeZ;
+        p.HasHeatedBed = dto.HasHeatedBed ?? p.HasHeatedBed;
+        p.HasEnclosure = dto.HasEnclosure ?? p.HasEnclosure;
+        p.MultiMaterial = dto.MultiMaterial ?? p.MultiMaterial;
+        p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
+
+        p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
+        p.LastCapabilityUpdate = DateTime.UtcNow;
+
+        // Update primary toolhead specs if provided
+        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
+        if (primaryToolhead != null)
+        {
+            primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
+            primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+
+            primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
+            primaryToolhead.UpdatedAt = DateTime.UtcNow;
+        }
 
         // Build updated manufacturer/model names
         string? manufacturerName = null;
         string? modelName = null;
         if (p.ManufacturerId != Guid.Empty)
         {
-            Manufacturer? man = await db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ManufacturerId, ct);
+            ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(p.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
         if (p.ModelId != Guid.Empty)
         {
-            PrinterModel? mod = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == p.ModelId, ct);
+            PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
             modelName = mod?.Name;
         }
+
+        // Save all changes (printer + toolhead updates)
+        await _printersService.SaveChangesAsync(ct);
 
         PrinterDto dtoResponse = new(
             Id: p.Id,
             Name: p.Name,
-            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: false,
             State: "Unknown",
@@ -1568,7 +956,11 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
+            IpAddress: p.IpAddress,
+            BackendPort: p.BackendPort,
+            FrontendPort: p.FrontendPort,
+            BackendUrl: p.BackendUrl,
+            FrontendUrl: p.FrontendUrl
         );
 
         return Ok(dtoResponse);
@@ -1584,47 +976,22 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     /// <response code="400">If the hostname resolution fails or URL is invalid</response>
     /// <response code="500">If there was an error during hostname resolution</response>
     [HttpPost("resolve")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.ResolveHostnameResponse), 200)]
+    [ProducesResponseType(typeof(ResolveHostnameResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.ResolveHostnameResponse>> ResolveHostAsync([FromBody] Farm.Web.Shared.ResolveHostnameRequest body, CancellationToken ct)
+    public async Task<ActionResult<ResolveHostnameResponse>> ResolveHostAsync([FromBody] ResolveHostnameRequest body, CancellationToken ct)
     {
         if (body is null)
         {
             return BadRequest("Request body is required.");
         }
-        int defaultPort = body.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 :
-                         body.Backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
-        string normalized = NormalizeServerUrl(body.ServerUrl, defaultPort);
+        // Delegate hostname normalization and resolution to the service
         try
         {
-            Uri uri = new(normalized);
-            string host = uri.Host;
-            if (!System.Net.IPAddress.TryParse(host, out _))
-            {
-                host = EnsureLocalSuffix(host);
-            }
-            string? ip = null;
-            try
-            {
-                if (!System.Net.IPAddress.TryParse(host, out _))
-                {
-                    IPAddress[] addrs = await System.Net.Dns.GetHostAddressesAsync(host, ct);
-                    IPAddress? firstIp = Array.Find(addrs, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addrs.Length > 0 ? addrs[0] : null);
-                    ip = firstIp?.ToString();
-                }
-                else
-                {
-                    ip = host;
-                }
-            }
-            catch { }
-
-            UriBuilder ub = new(uri) { Host = ip ?? uri.Host };
-            string baseUrl = ub.Uri.ToString().TrimEnd('/');
-            return new Farm.Web.Shared.ResolveHostnameResponse(normalized, ip, baseUrl);
+            ResolveHostnameResponse resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);
+            return Ok(resp);
         }
-        catch
+        catch (ArgumentException)
         {
             return BadRequest("Invalid URL");
         }
@@ -1648,55 +1015,41 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     public async Task<ActionResult<PrinterCapabilitiesDto>> GetModelDefaultCapabilitiesAsync(Guid modelId, CancellationToken ct)
     {
         // Load model to verify it exists and get capability data
-        PrinterModel? model = await db.Models
-            .Include(m => m.Manufacturer)
-            .Include(m => m.SupportedFilamentTypes)
-                .ThenInclude(sft => sft.FilamentType)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(m => m.Id == modelId, ct);
-
-        if (model is null)
+        PrinterModelDto? modelDto = await _catalogService.GetModelByIdAsync(modelId, ct);
+        if (modelDto == null)
         {
             return NotFound($"Printer model with ID {modelId} not found");
         }
 
+        // Map modelDto to a lightweight shape consistent with previous behavior
+        // Note: modelDto contains ManufacturerName, SupportedFilamentTypes and capability fields
+
         try
         {
-            // Build capabilities directly from model data
-            // Check if model has any meaningful capability data
-            bool hasCapabilityData = model.MaxX.HasValue || model.MaxY.HasValue || model.MaxZ.HasValue ||
-                                      model.DefaultNozzleDiameter.HasValue || model.MaxHotendTemp.HasValue ||
-                                      model.MaxBedTemp.HasValue || model.SupportedFilamentTypes?.Any() == true;
+            bool hasCapabilityData = modelDto.MaxX.HasValue || modelDto.MaxY.HasValue || modelDto.MaxZ.HasValue ||
+                                     modelDto.DefaultNozzleDiameter.HasValue || modelDto.MaxHotendTemp.HasValue ||
+                                     modelDto.MaxBedTemp.HasValue || (modelDto.SupportedFilamentTypes != null && modelDto.SupportedFilamentTypes.Length > 0);
 
             if (!hasCapabilityData)
             {
-                return NoContent(); // Model exists but has no capability data
+                return NoContent();
             }
 
-            // Get supported materials from filament types
-            string[] supportedMaterials = model.SupportedFilamentTypes?
-                .Where(sft => sft.FilamentType != null)
-                .Select(sft => sft.FilamentType!.Name)
-                .ToArray() ?? Array.Empty<string>();
-
-            // Map model data to DTO
             PrinterCapabilitiesDto dto = new(
-                Id: Guid.Empty, // Not persisted yet
+                Id: Guid.Empty,
                 PrinterId: Guid.Empty,
-                PrinterName: model.Name,
-                NozzleDiameter: model.DefaultNozzleDiameter,
-                SupportedMaterials: supportedMaterials,
-                MaxBuildVolumeX: model.MaxX,
-                MaxBuildVolumeY: model.MaxY,
-                MaxBuildVolumeZ: model.MaxZ,
-                HasHeatedBed: model.HasHeatedBed,
-                HasEnclosure: model.HasEnclosure,
-                MultiMaterial: model.MultiMaterial,
-                NumberOfExtruders: model.NumberOfExtruders,
-                MinHotendTemp: model.MinHotendTemp,
-                MaxHotendTemp: model.MaxHotendTemp,
-                MinBedTemp: model.MinBedTemp,
-                MaxBedTemp: model.MaxBedTemp,
+                PrinterName: modelDto.Name,
+                NozzleDiameter: modelDto.DefaultNozzleDiameter,
+                    SupportedMaterials: modelDto.SupportedFilamentTypes ?? Array.Empty<string>(),
+                MaxBuildVolumeX: modelDto.MaxX,
+                MaxBuildVolumeY: modelDto.MaxY,
+                MaxBuildVolumeZ: modelDto.MaxZ,
+                HasHeatedBed: modelDto.HasHeatedBed,
+                HasEnclosure: modelDto.HasEnclosure,
+                MultiMaterial: modelDto.MultiMaterial,
+                NumberOfExtruders: modelDto.NumberOfExtruders,
+                MaxHotendTemp: modelDto.MaxHotendTemp,
+                MaxBedTemp: modelDto.MaxBedTemp,
                 CurrentMaterial: null,
                 CurrentSpoolId: null,
                 IsAvailable: true,
@@ -1727,13 +1080,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
+        Printer? p = await _printersService.FindByIdAsync(id, ct);
         if (p is null)
         {
             return NotFound();
         }
-        _ = db.Printers.Remove(p);
-        _ = await db.SaveChangesAsync(ct);
+        await _printersService.RemoveAsync(p, ct);
         return NoContent();
     }
 
@@ -1753,18 +1105,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<IActionResult> GetSnapshotAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
-        {
-            return NotFound();
-        }
-
-        byte[]? bytes = await moon.GetCameraSnapshotAsync(p.ServerUrl, ct);
+        byte[]? bytes = await _printersService.GetCameraSnapshotAsync(id, ct);
         return bytes is null ? NotFound() : File(bytes, "image/jpeg");
     }
 
     /// <summary>
-    /// Homes all axes of the specified printer.
+    /// Homes all axes (X, Y, Z) of the specified printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer</param>
     /// <param name="ct">Cancellation token for the operation</param>
@@ -1778,13 +1124,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.SendHomeAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.SendHomeAsync(p.ServerUrl, ct);
-        return new CommandResult(ok, ok ? null : "Failed to send home command");
+        return new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1802,28 +1147,35 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.HomeXYAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.HomeXYAsync(p.ServerUrl, ct);
-        return new CommandResult(ok, ok ? null : "Failed to home XY");
+        return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Homes the Z axis of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the Z-axis homing operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the homing command</response>
     [HttpPost("{id:guid}/homez")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.HomeZAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.HomeZAsync(p.ServerUrl, ct);
-        return new CommandResult(ok, ok ? null : "Failed to home Z");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/temps")]
@@ -1837,13 +1189,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             return BadRequest("Request body is required.");
         }
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.SetTempsAsync(p.ServerUrl, targets.Hotend, targets.Bed, ct);
-        return new CommandResult(ok, ok ? null : "Failed to set temperatures");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/move")]
@@ -1857,13 +1208,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             return BadRequest("Request body is required.");
         }
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.MoveAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
-        return new CommandResult(ok, ok ? null : "Failed to move");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/moveto")]
@@ -1877,13 +1227,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         {
             return BadRequest("Request body is required.");
         }
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
+        if (!ok)
         {
             return NotFound();
         }
-        bool ok = await moon.MoveToAsync(p.ServerUrl, req.X, req.Y, req.Z, req.F, ct);
-        return new CommandResult(ok, ok ? null : "Failed to move to position");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/pause")]
@@ -1892,15 +1241,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.PauseAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        bool ok = p.Backend == 2 ? await sdcp.PausePrintAsync(p.ServerUrl, ct) : await moon.PauseAsync(p.ServerUrl, ct);
-
-        return new CommandResult(ok, ok ? null : "Failed to pause");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/resume")]
@@ -1909,15 +1255,12 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.ResumeAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        bool ok = p.Backend == 2 ? await sdcp.ResumePrintAsync(p.ServerUrl, ct) : await moon.ResumeAsync(p.ServerUrl, ct);
-
-        return new CommandResult(ok, ok ? null : "Failed to resume");
+        return new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/emergency-stop")]
@@ -1926,136 +1269,178 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.EmergencyStopAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        bool ok = p.Backend == 2 ? await sdcp.CancelPrintAsync(p.ServerUrl, ct) : await moon.EmergencyStopAsync(p.ServerUrl, ct);
-
-        return new CommandResult(ok, ok ? null : "Failed to emergency stop");
+        return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Stops the print on the specified printer (alias for emergency-stop for frontend compatibility).
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the stop operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the stop command</response>
+    /// <remarks>
+    /// This endpoint is an alias for /emergency-stop provided for frontend compatibility.
+    /// Both endpoints execute the same emergency-stop operation.
+    /// </remarks>
+    [HttpPost("{id:guid}/stop")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> StopAsync(Guid id, CancellationToken ct)
+    {
+        // Alias for emergency-stop for compatibility with frontend
+        return await EmergencyStopAsync(id, ct);
+    }
+
+    /// <summary>
+    /// Restarts the firmware/MCU of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the firmware restart operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the restart command</response>
+    /// <remarks>
+    /// Restarts the printer's firmware/MCU without a full power cycle.
+    /// This operation is typically used to recover from firmware issues.
+    /// </remarks>
     [HttpPost("{id:guid}/firmware-restart")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.FirmwareRestartAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        // Only Moonraker/Klipper supports firmware restart
-        if (p.Backend != 0) // Not Moonraker
-        {
-            return BadRequest("Firmware restart is only supported for Moonraker/Klipper printers");
-        }
-
-        bool ok = await moon.FirmwareRestartAsync(p.ServerUrl, ct);
-        return new CommandResult(ok, ok ? null : "Failed to restart firmware");
+        return new CommandResult(true, null);
     }
 
-    // Print job control
-    [HttpPost("{id:guid}/print/start")]
+    /// <summary>
+    /// Disables the stepper motors of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the disable motors operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the disable motors command</response>
+    /// <remarks>
+    /// Disables all stepper motors, allowing manual movement of printer axes.
+    /// Motors will remain disabled until explicitly re-enabled via homing or other operations.
+    /// </remarks>
+    [HttpPost("{id:guid}/disable-motors")]
     [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] Farm.Web.Api.Controllers.Requests.StartPrintRequest request, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
-        if (request is null)
-        {
-            return BadRequest("Request body is required.");
-        }
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.DisableMotorsAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        if (p.Backend == 2) // SDCP
-        {
-            bool ok = await sdcp.StartPrintAsync(p.ServerUrl, request.Filename, ct);
-            return new CommandResult(ok, ok ? null : "Failed to start print");
-        }
-
-        return new CommandResult(false, "Start print not implemented for this printer type");
+        return new CommandResult(true, null);
     }
 
     // Camera control endpoints
+    /// <summary>
+    /// Enables camera functionality on the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the enable camera operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error enabling the camera</response>
+    /// <remarks>
+    /// Enables camera streaming and snapshot functionality on the printer.
+    /// Camera must be physically connected and configured in the printer backend for this to work.
+    /// </remarks>
     [HttpPost("{id:guid}/camera/enable")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.EnableCameraAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        if (p.Backend == 2) // SDCP
-        {
-            bool ok = await sdcp.EnableCameraAsync(p.ServerUrl, ct);
-            return new CommandResult(ok, ok ? null : "Failed to enable camera");
-        }
-
-        return new CommandResult(false, "Camera control not supported for this printer type");
+        return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Disables camera functionality on the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the disable camera operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error disabling the camera</response>
+    /// <remarks>
+    /// Disables camera streaming and snapshot functionality on the printer.
+    /// Can be used to reduce network load or disable camera access temporarily.
+    /// </remarks>
     [HttpPost("{id:guid}/camera/disable")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        bool ok = await _printersService.DisableCameraAsync(id, ct);
+        if (!ok)
         {
             return NotFound();
         }
-
-        if (p.Backend == 2) // SDCP
-        {
-            bool ok = await sdcp.DisableCameraAsync(p.ServerUrl, ct);
-            return new CommandResult(ok, ok ? null : "Failed to disable camera");
-        }
-
-        return new CommandResult(false, "Camera control not supported for this printer type");
+        return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Retrieves the camera stream and snapshot URLs for the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported)</returns>
+    /// <response code="200">Returns the camera URLs</response>
+    /// <response code="404">If the printer with the specified ID was not found or camera is not available</response>
+    /// <remarks>
+    /// Returns the URLs for live camera streaming and snapshot capture.
+    /// Either or both URLs may be null depending on printer capabilities and configuration.
+    /// Frontend should validate URL accessibility before attempting to load.
+    /// </remarks>
     [HttpGet("{id:guid}/camera/url")]
     [ProducesResponseType(typeof(CameraUrlResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FindAsync([id], ct);
-        if (p is null)
+        (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
+        if (streamUrl == null && snapshotUrl == null)
         {
             return NotFound();
         }
-
-        if (p.Backend == 2) // SDCP
-        {
-            string? streamUrl = await sdcp.GetCameraUrlAsync(p.ServerUrl, ct);
-            string? snapshotUrl = await sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct);
-            return new CameraUrlResult(streamUrl, snapshotUrl);
-        }
-
-        return new CameraUrlResult(null, null);
+        return new CameraUrlResult(streamUrl, snapshotUrl);
     }
 
     [HttpPost("{id:guid}/files/upload")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.UploadGcodeResultDto), 200)]
+    [ProducesResponseType(typeof(UploadGcodeResultDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.UploadGcodeResultDto>> UploadGcodeAsync(Guid id, [FromForm] IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<UploadGcodeResultDto>> UploadGcodeAsync(Guid id, [FromForm] IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
         {
@@ -2067,26 +1452,17 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             return BadRequest("File must be a .gcode file");
         }
 
-        Printer? p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (p == null)
-        {
-            return NotFound();
-        }
-
         try
         {
             await using Stream fileStream = file.OpenReadStream();
-            bool success = (PrinterBackend)p.Backend switch
-            {
-                PrinterBackend.Moonraker => await moon.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, ct),
-                PrinterBackend.PrusaLink => await prusa.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, p.ApiKey, ct),
-                PrinterBackend.SDCP => await sdcp.UploadGcodeAsync(p.ServerUrl, file.FileName, fileStream, ct),
-                _ => false
-            };
+            bool success = await _printersService.UploadGcodeAsync(id, file.FileName, fileStream, ct);
 
-            return success
-                ? Ok(new Farm.Web.Shared.UploadGcodeResultDto("File uploaded successfully", file.FileName))
-                : StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload file to printer");
+            if (!success)
+            {
+                return NotFound();
+            }
+
+            return Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
         }
         catch (Exception ex)
         {
@@ -2095,28 +1471,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     }
 
     [HttpGet("{id:guid}/files")]
-    [ProducesResponseType(typeof(string[]), 200)]
+    [ProducesResponseType(typeof(PrinterFileDto[]), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<string[]>> GetFileListAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterFileDto[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (p == null)
-        {
-            return NotFound();
-        }
-
         try
         {
-            string[] files = (PrinterBackend)p.Backend switch
-            {
-                PrinterBackend.Moonraker => await moon.GetFileListAsync(p.ServerUrl, ct),
-                PrinterBackend.PrusaLink => await prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct),
-                PrinterBackend.SDCP => await sdcp.GetFileListAsync(p.ServerUrl, ct),
-                _ => []
-            };
-
+            PrinterFileDto[] files = await _printersService.GetFileListAsync(id, ct);
             return Ok(files);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
         }
         catch (Exception ex)
         {
@@ -2124,250 +1491,166 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         }
     }
 
-    [HttpPost("{id:guid}/files/{fileName}/print")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.StartPrintResultDto), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.StartPrintResultDto>> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
+    /// <summary>
+    /// Downloads a file from a printer's storage
+    /// </summary>
+    /// <param name="id">Printer ID</param>
+    /// <param name="filename">The filename to download (filename query parameter)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>File content</returns>
+    /// <response code="200">File content</response>
+    /// <response code="400">Invalid filename</response>
+    /// <response code="404">Printer or file not found</response>
+    /// <response code="500">Download failed</response>
+    [HttpGet("{id:guid}/files/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> DownloadFileAsync(Guid id, [FromQuery] string filename, CancellationToken ct)
     {
-        Printer? p = await db.Printers.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (p == null)
+        if (string.IsNullOrWhiteSpace(filename))
         {
-            return NotFound();
+            return BadRequest(new { error = "filename query parameter is required" });
         }
 
         try
         {
-            bool success = ((PrinterBackend)p.Backend) switch
+            byte[]? fileContent = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
+            if (fileContent == null)
             {
-                PrinterBackend.Moonraker => await moon.StartPrintAsync(p.ServerUrl, fileName, ct),
-                PrinterBackend.PrusaLink => await prusa.StartPrintAsync(p.ServerUrl, fileName, p.ApiKey, ct),
-                PrinterBackend.SDCP => await sdcp.StartPrintAsync(p.ServerUrl, fileName, ct),
-                _ => false
-            };
+                return NotFound(new { error = $"File not found: {filename}" });
+            }
 
-            return success
-                ? Ok(new Farm.Web.Shared.StartPrintResultDto("Print started successfully", fileName))
-                : StatusCode(StatusCodes.Status500InternalServerError, "Failed to start print");
+            // Return the file with appropriate content type
+            string contentType = "application/octet-stream";
+            if (filename.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ||
+                filename.EndsWith(".gco", StringComparison.OrdinalIgnoreCase))
+            {
+                contentType = "text/plain"; // Or "application/x-gcode" if needed
+            }
+
+            return File(fileContent, contentType, filename);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Printer not found" });
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to start print: {ex.Message}");
+            _logger.LogError(ex, $"Failed to download file {filename} from printer {id}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = $"Download failed: {ex.Message}" });
         }
     }
 
-    // Helper record moved to top-level file
-
-    // Helper method to get spool information for Moonraker printers
-    private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
+    // File operations with body-based parameters (handles special characters in filenames)
+    [HttpPost("{id:guid}/print")]
+    [ProducesResponseType(typeof(StartPrintResultDto), 200)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 500)]
+    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(request?.FileName))
+        {
+            return BadRequest(new CommandResult(false, "fileName is required"));
+        }
+
         try
         {
-            // Get the active spool ID from Moonraker
-            int? activeSpoolId = await moon.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
-            if (activeSpoolId == null)
+            bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
+            if (!success)
             {
-                return new PrinterSpoolInfoDto(HasActiveSpool: false);
+                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
             }
-
-            // Get spool details from Spoolman via Moonraker
-            string? spoolDetailsJson = await moon.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
-            if (string.IsNullOrWhiteSpace(spoolDetailsJson))
-            {
-                return new PrinterSpoolInfoDto(
-                    HasActiveSpool: true,
-                    ActiveSpoolId: activeSpoolId
-                );
-            }
-
-            // Parse the JSON response to extract spool information
-            try
-            {
-                using JsonDocument doc = System.Text.Json.JsonDocument.Parse(spoolDetailsJson);
-                JsonElement root = doc.RootElement;
-
-                string? spoolName = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
-                string? material = root.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
-                string? colorHex = root.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
-                double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == System.Text.Json.JsonValueKind.Number
-                    ? weightEl.GetDouble() : (double?)null;
-
-                // Check if filament information is nested
-                string? filamentName = null;
-                string? vendor = null;
-                if (root.TryGetProperty("filament", out JsonElement filamentEl) && filamentEl.ValueKind == System.Text.Json.JsonValueKind.Object)
-                {
-                    filamentName = filamentEl.TryGetProperty("name", out JsonElement fnameEl) ? fnameEl.GetString() : null;
-                    if (filamentEl.TryGetProperty("vendor", out JsonElement vendorEl) && vendorEl.ValueKind == System.Text.Json.JsonValueKind.Object)
-                    {
-                        vendor = vendorEl.TryGetProperty("name", out JsonElement vNameEl) ? vNameEl.GetString() : null;
-                    }
-                }
-
-                return new PrinterSpoolInfoDto(
-                    HasActiveSpool: true,
-                    ActiveSpoolId: activeSpoolId,
-                    SpoolName: spoolName,
-                    Material: material,
-                    ColorHex: colorHex,
-                    FilamentName: filamentName,
-                    Vendor: vendor,
-                    RemainingWeightG: remainingWeight,
-                    SpoolInUse: true
-                );
-            }
-            catch
-            {
-                // If JSON parsing fails, return basic info
-                return new PrinterSpoolInfoDto(
-                    HasActiveSpool: true,
-                    ActiveSpoolId: activeSpoolId
-                );
-            }
+            return Ok(new CommandResult(true, "Print started successfully"));
         }
-        catch
+        catch (Exception ex)
         {
-            // If any Spoolman operations fail, just return no spool info
-            return new PrinterSpoolInfoDto(HasActiveSpool: false);
+            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to start print: {ex.Message}"));
+        }
+    }
+
+    [HttpDelete("{id:guid}/files")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 500)]
+    public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(request?.FileName))
+        {
+            return BadRequest(new CommandResult(false, "fileName is required"));
+        }
+
+        try
+        {
+            bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
+            if (!success)
+            {
+                return Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"));
+            }
+            return Ok(new CommandResult(true, "File deleted successfully"));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to delete file: {ex.Message}"));
         }
     }
 
     // ===== HISTORY ENDPOINTS =====
 
     [HttpGet("{id}/history")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.HistoryListResponse), 200)]
+    [ProducesResponseType(typeof(HistoryListResponse), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
-        if (printer == null)
-        {
-            return NotFound();
-        }
-
-        if (printer.Backend != (int)PrinterBackend.Moonraker)
-        {
-            // For non-Moonraker printers, return empty history for now
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
-        }
-
         try
         {
-            Services.HistoryListResponse? moonrakerResponse = await moon.GetHistoryListAsync(printer.ServerUrl, limit, start, since, before, order, ct);
-            if (moonrakerResponse == null)
-            {
-                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
-            }
-
-            // Convert from Moonraker models to shared models
-            Shared.HistoryJob[] jobs = moonrakerResponse.Jobs.Select(j => new Farm.Web.Shared.HistoryJob
-            {
-                JobId = j.JobId,
-                Exists = j.Exists,
-                EndTime = j.EndTime,
-                FilamentUsed = j.FilamentUsed,
-                Filename = j.Filename,
-                Metadata = j.Metadata,
-                PrintDuration = j.PrintDuration,
-                Status = j.Status,
-                StartTime = j.StartTime,
-                TotalDuration = j.TotalDuration,
-                User = j.User,
-                AuxiliaryData = j.AuxiliaryData?.Select(a => new Farm.Web.Shared.AuxiliaryData
-                {
-                    Provider = a.Provider,
-                    Name = a.Name,
-                    Value = a.Value,
-                    Description = a.Description,
-                    Units = a.Units
-                }).ToArray(),
-                ThumbnailUrl = ExtractThumbnailUrl(j.Metadata, printer.ServerUrl)
-            }).ToArray();
-
-            return new Farm.Web.Shared.HistoryListResponse
-            {
-                Count = moonrakerResponse.Count,
-                Jobs = jobs
-            };
+            HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
+            return Ok(resp);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Failed to get history for printer {id}: {ex.Message}");
-            return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
         }
     }
 
     [HttpGet("{id}/history/{jobId}")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.HistoryJob), 200)]
+    [ProducesResponseType(typeof(HistoryJob), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(408)]
     [ProducesResponseType(502)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
-        // Input validation
-        if (string.IsNullOrWhiteSpace(jobId))
+        try
+        {
+            HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
+            return Ok(job);
+        }
+        catch (ArgumentException)
         {
             _logger.LogWarning($"GetHistoryJob called with null or empty jobId for printer {id}");
             return BadRequest("Job ID is required");
         }
-
-        Printer? printer = await db.Printers.FindAsync(new object?[] { id, ct }, cancellationToken: ct);
-        if (printer == null)
+        catch (KeyNotFoundException)
         {
-            _logger.LogWarning($"Printer {id} not found for history job request");
-            throw new PrinterNotFoundException($"Printer {id} not found");
+            _logger.LogInformation($"History job {jobId} not found for printer {id}");
+            return NotFound($"History job {jobId} not found");
         }
-
-        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"History requested for non-Moonraker printer {id} (Backend={printer.Backend})");
+            _logger.LogWarning(ex, $"History requested for non-Moonraker printer {id}");
             return BadRequest("History is only available for Moonraker printers");
-        }
-
-        _logger.LogDebug($"Fetching history job {jobId} for printer {id} ({printer.Name})");
-
-        try
-        {
-            Services.HistoryJob? moonrakerJob = await moon.GetHistoryJobAsync(printer.ServerUrl, jobId, ct);
-            if (moonrakerJob == null)
-            {
-                _logger.LogInformation($"History job {jobId} not found for printer {id}");
-                return NotFound($"History job {jobId} not found");
-            }
-
-            // Convert from Moonraker model to shared model
-            Shared.HistoryJob job = new()
-            {
-                JobId = moonrakerJob.JobId,
-                Exists = moonrakerJob.Exists,
-                EndTime = moonrakerJob.EndTime,
-                FilamentUsed = moonrakerJob.FilamentUsed,
-                Filename = moonrakerJob.Filename,
-                Metadata = moonrakerJob.Metadata,
-                PrintDuration = moonrakerJob.PrintDuration,
-                Status = moonrakerJob.Status,
-                StartTime = moonrakerJob.StartTime,
-                TotalDuration = moonrakerJob.TotalDuration,
-                User = moonrakerJob.User,
-                AuxiliaryData = moonrakerJob.AuxiliaryData?.Select(a => new Farm.Web.Shared.AuxiliaryData
-                {
-                    Provider = a.Provider,
-                    Name = a.Name,
-                    Value = a.Value,
-                    Description = a.Description,
-                    Units = a.Units
-                }).ToArray()
-            };
-
-            _logger.LogDebug($"Successfully retrieved history job {jobId} for printer {id}");
-            return job;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError($"Network error retrieving history job {jobId} for printer {id} from {printer.ServerUrl}: {ex.Message}");
+            _logger.LogError($"Network error retrieving history job {jobId} for printer {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
@@ -2375,73 +1658,27 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
             _logger.LogWarning($"Timeout retrieving history job {jobId} for printer {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
-        // Let global exception handler catch other exceptions for consistent error responses
     }
 
     [HttpGet("{id}/history/totals")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.HistoryTotals), 200)]
+    [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Shared.HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
-        if (printer == null)
-        {
-            return NotFound();
-        }
-
-        _logger.LogDebug($"GetHistoryTotals called for printer {id} ({printer.Name}), backend: {printer.Backend}");
-
-        if (printer.Backend != (int)PrinterBackend.Moonraker)
-        {
-            _logger.LogInformation($"Printer {id} is not Moonraker backend, returning empty totals");
-            // Return empty totals for non-Moonraker printers
-            return new Farm.Web.Shared.HistoryTotals
-            {
-                JobTotals = new Farm.Web.Shared.JobTotals()
-            };
-        }
-
         try
         {
-            _logger.LogDebug($"Calling Moonraker API for totals at: {printer.ServerUrl}");
-            Services.HistoryTotals? moonrakerTotals = await moon.GetHistoryTotalsAsync(printer.ServerUrl, ct);
-            if (moonrakerTotals == null)
-            {
-                _logger.LogWarning($"Moonraker API returned null totals");
-                return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
-            }
-
-            _logger.LogDebug($"Moonraker totals received - Jobs: {moonrakerTotals.JobTotals.TotalJobs}, PrintTime: {moonrakerTotals.JobTotals.TotalPrintTime}, FilamentUsed: {moonrakerTotals.JobTotals.TotalFilamentUsed}");
-
-            // Convert from Moonraker model to shared model
-            Shared.HistoryTotals totals = new()
-            {
-                JobTotals = new Farm.Web.Shared.JobTotals
-                {
-                    TotalJobs = (int)moonrakerTotals.JobTotals.TotalJobs,
-                    TotalTime = moonrakerTotals.JobTotals.TotalTime,
-                    TotalPrintTime = moonrakerTotals.JobTotals.TotalPrintTime,
-                    TotalFilamentUsed = moonrakerTotals.JobTotals.TotalFilamentUsed,
-                    LongestJob = moonrakerTotals.JobTotals.LongestJob,
-                    LongestPrint = moonrakerTotals.JobTotals.LongestPrint
-                },
-                AuxiliaryTotals = moonrakerTotals.AuxiliaryTotals?.Select(a => new Farm.Web.Shared.AuxiliaryTotals
-                {
-                    Provider = a.Provider,
-                    Field = a.Field,
-                    Maximum = a.Maximum,
-                    Total = a.Total
-                }).ToArray()
-            };
-
-            _logger.LogDebug($"Returning converted totals - Jobs: {totals.JobTotals.TotalJobs}, PrintTime: {totals.JobTotals.TotalPrintTime}, FilamentUsed: {totals.JobTotals.TotalFilamentUsed}");
-            return totals;
+            HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
+            return Ok(totals);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
         }
         catch (Exception ex)
         {
             _logger.LogError($"Failed to get history totals for printer {id}: {ex.Message}");
-            return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
+            return new HistoryTotals { JobTotals = new JobTotals() };
         }
     }
 
@@ -2452,21 +1689,19 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [ProducesResponseType(500)]
     public async Task<ActionResult> DeleteHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
-        Printer? printer = await db.Printers.FindAsync(new object?[] { id }, cancellationToken: ct);
-        if (printer == null)
+        try
+        {
+            bool success = await _printersService.DeleteHistoryJobAsync(id, jobId, ct);
+            return success ? Ok() : StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
+        }
+        catch (KeyNotFoundException)
         {
             return NotFound();
         }
-
-        if (printer.Backend != (int)PrinterBackend.Moonraker)
+        catch (InvalidOperationException ex)
         {
+            _logger.LogWarning(ex, $"History deletion requested for non-Moonraker printer {id}");
             return BadRequest("History deletion is only available for Moonraker printers");
-        }
-
-        try
-        {
-            bool success = await moon.DeleteHistoryJobAsync(printer.ServerUrl, jobId, ct);
-            return success ? Ok() : StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
         catch (Exception ex)
         {
@@ -2481,40 +1716,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
     public async Task<IActionResult> ExportPrintersAsync(CancellationToken ct)
     {
-        var printers = await db.Printers
-            .Include(p => p.Manufacturer)
-            .Include(p => p.Model)
-            .Select(p => new
-            {
-                p.Name,
-                p.ServerUrl,
-                p.OriginalServerUrl,
-                p.Notes,
-                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : "",
-                ModelName = p.Model != null ? p.Model.Name : "",
-                Backend = p.Backend.ToString(),
-                p.ApiKey,
-                p.DateAcquired
-            })
-            .ToListAsync(ct);
-
-        StringBuilder csv = new();
-        _ = csv.AppendLine("Name,ServerUrl,OriginalServerUrl,Notes,ManufacturerName,ModelName,Backend,ApiKey,DateAcquired");
-
-        foreach (var printer in printers)
-        {
-            _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)}," +
-                          $"{EscapeCsvValue(printer.ServerUrl)}," +
-                          $"{EscapeCsvValue(printer.OriginalServerUrl)}," +
-                          $"{EscapeCsvValue(printer.Notes)}," +
-                          $"{EscapeCsvValue(printer.ManufacturerName)}," +
-                          $"{EscapeCsvValue(printer.ModelName)}," +
-                          $"{EscapeCsvValue(printer.Backend)}," +
-                          $"{EscapeCsvValue(printer.ApiKey)}," +
-                          $"{EscapeCsvValue(printer.DateAcquired?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))}");
-        }
-
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+        byte[] bytes = await _printersService.BuildExportCsvAsync(null, ct);
         return File(bytes, "text/csv", $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv");
     }
 
@@ -2531,59 +1733,7 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     {
         try
         {
-            var query = db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).AsQueryable();
-            if (ids != null && ids.Length > 0)
-            {
-                query = query.Where(p => ids.Contains(p.Id));
-            }
-
-            List<Printer> printers = await query.ToListAsync(ct);
-
-            // Load capabilities for the selected printers in one query
-            IQueryable<PrinterCapabilities> capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
-            if (ids != null && ids.Length > 0)
-            {
-                capQuery = capQuery.Where(c => ids.Contains(c.PrinterId));
-            }
-            List<PrinterCapabilities> capabilities = await capQuery.ToListAsync(ct);
-
-            var results = printers.Select(p =>
-            {
-                PrinterCapabilities? cap = capabilities.Find(c => c.PrinterId == p.Id);
-                return new PrinterWithCapabilitiesDto
-                {
-                    PrinterId = p.Id,
-                    PrinterName = p.Name,
-                    PrinterModel = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
-                    ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
-                    Backend = (PrinterBackend?)p.Backend,
-                    IpAddress = p.IpAddress,
-                    Capabilities = cap == null ? null : new PrinterCapabilitiesDto(
-                        cap.Id,
-                        cap.PrinterId,
-                        p.Name,
-                        cap.NozzleDiameter,
-                        cap.SupportedMaterials,
-                        cap.MaxBuildVolumeX,
-                        cap.MaxBuildVolumeY,
-                        cap.MaxBuildVolumeZ,
-                        cap.HasHeatedBed,
-                        cap.HasEnclosure,
-                        cap.MultiMaterial,
-                        cap.SupportsAutoLeveling,
-                        cap.NumberOfExtruders,
-                        cap.MinHotendTemp,
-                        cap.MaxHotendTemp,
-                        cap.MinBedTemp,
-                        cap.MaxBedTemp,
-                        cap.CurrentMaterial,
-                        cap.CurrentSpoolId,
-                        cap.IsAvailable,
-                        cap.LastUpdated
-                    )
-                };
-            }).ToArray();
-
+            PrinterWithCapabilitiesDto[] results = await _printersService.GetPrintersWithCapabilitiesDtosAsync(ids, ct);
             return Ok(results);
         }
         catch (Exception ex)
@@ -2603,526 +1753,40 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
     [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
     public async Task<IActionResult> StreamExportAsync([FromBody] Guid[]? ids, [FromQuery] string format = "csv", CancellationToken ct = default)
     {
-        format = (format ?? "csv").ToLowerInvariant();
-        IQueryable<Printer> query = db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).AsQueryable();
-        if (ids != null && ids.Length > 0)
-        {
-            query = query.Where(p => ids.Contains(p.Id));
-        }
-
-        // Prepare capability lookup
-        IQueryable<PrinterCapabilities> capQuery = db.PrinterCapabilities.AsNoTracking().AsQueryable();
-        if (ids != null && ids.Length > 0)
-        {
-            capQuery = capQuery.Where(c => ids.Contains(c.PrinterId));
-        }
-
-        Dictionary<Guid, PrinterCapabilities> capabilities = await capQuery.ToDictionaryAsync(c => c.PrinterId, ct);
-
-        // local helper removed; using class-level PropertySuppressedForExport method instead
-
-        if (format == "json")
-        {
-            await StreamJsonExportAsync(query, capabilities, ct);
-            return new EmptyResult();
-        }
-
-        // CSV streaming using pipe
-        string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
-        Response.ContentType = "text/csv";
-        Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
-
-        // Write header (include capability fields for parity with JSON export). Exclude properties marked to be suppressed for export.
-        List<string> headerParts = new List<string>() { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "ManufacturerName", "ModelName", "Backend", "ApiKey", "DateAcquired" };
-        // Build capability property lists and append to headerParts
-        BuildCsvHeaderAndCapProps(ref headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos);
-        // Map a few friendly names for CSV (NozzleDiameter -> NozzleDiameter, SupportedMaterials -> SupportedMaterials)
-        headerParts.AddRange(capPropsForCsv);
-        headerParts.Add("CapabilitiesLastUpdated");
-
-        // Write header using PipeWriter to reduce temporary allocations
-        System.IO.Pipelines.PipeWriter pipeWriter = Response.BodyWriter;
-        await WriteCsvHeaderAsync(pipeWriter, headerParts, ct);
-
-    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
-        {
-            capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
-
-            // Build row values in the same order as headerParts
-            // Pre-calc small buffer for a typical line; we still use GetBytes into the PipeWriter span per field
-            // to avoid building large intermediate strings.
-            // Write fixed prefix fields
-            string[] prefixFields = new[]
-            {
-            EscapeCsvValue(p.Name),
-            EscapeCsvValue(p.ServerUrl),
-            EscapeCsvValue(p.OriginalServerUrl),
-            EscapeCsvValue(p.Notes),
-            EscapeCsvValue(p.Manufacturer?.Name),
-            EscapeCsvValue(p.Model?.Name),
-            EscapeCsvValue(p.Backend.ToString()),
-            EscapeCsvValue(p.ApiKey),
-            EscapeCsvValue(p.DateAcquired?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
-        };
-
-            // Delegate CSV row writing to helper to reduce nesting and satisfy analyzers
-            await WriteCsvRowAsync(pipeWriter, prefixFields, capPropInfos, cap, ct);
-        }
-
-        return new EmptyResult();
-    }
-
-    // Extracted JSON streaming export to reduce nesting and satisfy analyzers (S1199).
-    private async Task StreamJsonExportAsync(IQueryable<Printer> query, Dictionary<Guid, PrinterCapabilities> capabilities, CancellationToken ct)
-    {
-        Response.ContentType = "application/json";
-        Response.Headers["Content-Disposition"] = $"attachment; filename=printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
-        await using Utf8JsonWriter writer = new Utf8JsonWriter(Response.BodyWriter);
-        writer.WriteStartArray();
-    await foreach (Printer p in query.AsAsyncEnumerable().WithCancellation(ct))
-        {
-            capabilities.TryGetValue(p.Id, out PrinterCapabilities? cap);
-            Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p, cap);
-            JsonSerializer.Serialize(writer, dtoDict, _exportJsonOptions);
-            await writer.FlushAsync(ct);
-        }
-        writer.WriteEndArray();
-        await writer.FlushAsync(ct);
-    }
-
-    public enum DuplicateHandling { Skip, Error, Update }
-
-    [HttpPost("import")]
-    [ProducesResponseType(200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
-    public async Task<IActionResult> ImportPrintersAsync(IFormFile file, [FromQuery] string duplicateHandling = "skip", CancellationToken ct = default)
-    {
-        if (file == null || file.Length == 0)
-        {
-            return BadRequest("No file provided");
-        }
-        // parse requested duplicate handling (we keep the query-string value for processor; local enum not needed)
-        Enum.TryParse<DuplicateHandling>(duplicateHandling, true, out _);
-
-        if (file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-        {
-                (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseCsvAsync(file.OpenReadStream(), ct);
-            if (parseErrors.Count > 0)
-            {
-                return BadRequest(string.Join(';', parseErrors));
-            }
-
-            List<(string Name, string Status, System.Guid? Id, string? Reason)> processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
-            return Ok(new
-            {
-                ImportedCount = processed.Count(r => r.Status == "Imported"),
-                SkippedCount = processed.Count(r => r.Status == "Skipped"),
-                Results = processed,
-                Errors = Array.Empty<string>()
-            });
-        }
-        else if (file.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-        {
-            // Parse JSON into CreatePrinterDto[] and forward to BulkCreateAsync logic
-            try
-            {
-                (CreatePrinterDto[] dtos, List<string> parseErrors) = await _importParser.ParseJsonAsync(file.OpenReadStream(), ct);
-                if (parseErrors.Count > 0)
-                {
-                    return BadRequest(string.Join(';', parseErrors));
-                }
-
-                List<(string Name, string Status, System.Guid? Id, string? Reason)> processed = await _importProcessor.ProcessAsync(dtos, duplicateHandling, ct);
-                return Ok(new
-                {
-                    ImportedCount = processed.Count(r => r.Status == "Imported"),
-                    SkippedCount = processed.Count(r => r.Status == "Skipped"),
-                    Results = processed
-                });
-            }
-            catch (System.Text.Json.JsonException ex)
-            {
-                return BadRequest($"Invalid JSON file: {ex.Message}");
-            }
-        }
-        else
-        {
-            return BadRequest("File must be a CSV or JSON file");
-        }
-
-        // CSV handling moved into ImportCsvAsync
-    }
-
-    /// <summary>
-    /// Bulk create printers from a JSON array of CreatePrinterDto objects.
-    /// Returns per-item import results including success/failure and reasons.
-    /// </summary>
-    [HttpPost("bulk")]
-    [ProducesResponseType(200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
-    public async Task<IActionResult> BulkCreateAsync([FromBody] CreatePrinterDto[] dtos, CancellationToken ct)
-    {
-        if (dtos == null || dtos.Length == 0)
-        {
-            return BadRequest("No printers provided");
-        }
-
-        List<BulkImportResultItem> results = new();
-
-    foreach ((CreatePrinterDto dto, int idx) in dtos.Select((d, i) => (d, i)))
-        {
-            try
-            {
-                // Validate using the existing validator
-                ValidationResult validationResult = await validator.ValidateAsync(dto, ct);
-                if (!validationResult.IsValid)
-                {
-                    string reason = string.Join("; ", validationResult.Errors.Select(e => e.ErrorMessage));
-                    results.Add(new BulkImportResultItem(idx, dto.Name, "Failed", null, reason));
-                    continue;
-                }
-
-                // Simple existence check by name or server URL to avoid duplicates
-                bool exists = await db.Printers.AnyAsync(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl, ct);
-                if (exists)
-                {
-                    results.Add(new BulkImportResultItem(idx, dto.Name, "Skipped", null, "Printer already exists"));
-                    continue;
-                }
-
-                PrinterDto created = await CreatePrinterFromDtoAsync(dto, ct);
-                results.Add(new BulkImportResultItem(idx, dto.Name, "Imported", created.Id, null));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug($"Bulk import item failed at index {idx}: {ex.Message}");
-                results.Add(new BulkImportResultItem(idx, dto?.Name ?? string.Empty, "Failed", null, ex.Message));
-            }
-        }
-
-        return Ok(new
-        {
-            ImportedCount = results.Count(r => r.Status == "Imported"),
-            SkippedCount = results.Count(r => r.Status == "Skipped"),
-            Results = results
-        });
-    }
-
-    private async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
-    {
-        // resolve or create manufacturer/model
-        Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
-        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
-        {
-            string name = dto.NewManufacturerName!.Trim();
-            Manufacturer? existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
-            if (existing is null)
-            {
-                existing = new Manufacturer { Id = Guid.NewGuid(), Name = name };
-                _ = db.Manufacturers.Add(existing);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            manufacturerId = existing.Id;
-        }
-
-        Guid modelId = dto.ModelId ?? Guid.Empty;
-        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
-        {
-            string mname = dto.NewModelName!.Trim();
-            PrinterModel? existingModel = await db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
-            if (existingModel is null)
-            {
-                existingModel = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
-                _ = db.Models.Add(existingModel);
-                _ = await db.SaveChangesAsync(ct);
-            }
-            modelId = existingModel.Id;
-        }
-
-        // Use default catalog entries if manufacturer or model are still empty
-        if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
-        {
-            (Guid defaultManufacturerId, Guid defaultModelId) = await defaultCatalog.GetDefaultCatalogIdsAsync();
-            if (manufacturerId == Guid.Empty)
-            {
-                manufacturerId = defaultManufacturerId;
-            }
-            if (modelId == Guid.Empty)
-            {
-                modelId = defaultModelId;
-            }
-        }
-
-        // Resolve host to IP and persist the IP-based base URL; store original URL for future re-resolve
-        int defaultPort = dto.Backend == PrinterBackend.PrusaLink ? 80 : dto.Backend == PrinterBackend.SDCP ? 80 : 7125;
-        string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
-        string resolvedBase = normalizedInput;
-        string? resolvedIp = null;
         try
         {
-            Uri uri = new(normalizedInput);
-            if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+            byte[] data;
+            string contentType;
+            string filename;
+
+            if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
             {
-                string hostToResolve = EnsureLocalSuffix(uri.Host);
-                IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct);
-                IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
-                if (firstIp is not null)
-                {
-                    UriBuilder ub = new(uri)
-                    {
-                        Host = firstIp.ToString()
-                    };
-                    resolvedBase = ub.Uri.ToString().TrimEnd('/');
-                    resolvedIp = firstIp.ToString();
-                }
+                data = await _printersService.BuildExportJsonAsync(ids, ct);
+                contentType = "application/json";
+                filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
             }
             else
             {
-                resolvedIp = uri.Host;
+                data = await _printersService.BuildExportCsvAsync(ids, ct);
+                contentType = "text/csv";
+                filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
             }
-        }
-        catch { }
 
-        Printer p = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = dto.Name,
-            ServerUrl = resolvedBase,
-            OriginalServerUrl = normalizedInput,
-            IpAddress = resolvedIp,
-            Notes = dto.Notes,
-            ManufacturerId = manufacturerId,
-            ModelId = modelId,
-            DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc)
-                : dto.DateAcquired,
-            Backend = (int)dto.Backend,
-            ApiKey = dto.ApiKey
-        };
-        _ = db.Printers.Add(p);
-        _ = await db.SaveChangesAsync(ct);
-
-        // Auto-discover capabilities for the newly created printer (import scenario)
-        try
-        {
-            Printer? printerForDiscovery = await db.Printers
-                .Include(pr => pr.Manufacturer)
-                .Include(pr => pr.Model)
-                .FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-
-            if (printerForDiscovery != null)
-            {
-                PrinterCapabilities? discoveredCapabilities = await capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct);
-                if (discoveredCapabilities == null)
-                {
-                    _logger.LogDebug($"Could not discover capabilities for imported printer: {p.Name} ({p.Id})");
-                }
-            }
+            Response.ContentType = contentType;
+            Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
+            await Response.Body.WriteAsync(data.AsMemory(0, data.Length), ct);
+            return new EmptyResult();
         }
         catch (Exception ex)
         {
-            _logger.LogDebug($"Error during capability discovery for imported printer: {p.Name} ({p.Id}) - {ex.Message}");
+            _logger.LogError(ex, "Failed to export printers");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to export printers");
         }
-
-        return new PrinterDto(
-            Id: p.Id,
-            Name: p.Name,
-            ServerUrl: p.ServerUrl,
-            Notes: p.Notes,
-            IsOnline: false,
-            State: null,
-            ManufacturerName: null,
-            ModelName: null,
-            Backend: dto.Backend,
-            ApiKey: p.ApiKey,
-            OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
-        );
     }
 
-    // Simple result shape for bulk import responses
-    private sealed record BulkImportResultItem(int Index, string Name, string Status, Guid? Id = null, string? Reason = null);
+    // Export helpers moved to PrintersService
 
-    private static string EscapeCsvValue(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        // Escape quotes and wrap in quotes if contains comma, quote, or newline
-        if (value.Contains('"'))
-        {
-            value = value.Replace("\"", "\"\"");
-        }
-
-        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
-        {
-            value = $"\"{value}\"";
-        }
-
-        return value;
-    }
-
-    // Helper to build CSV header parts and capability property infos for export
-    private static void BuildCsvHeaderAndCapProps(ref List<string> headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos)
-    {
-        capPropsForCsv = new List<string>();
-        capPropInfos = new List<System.Reflection.PropertyInfo>();
-
-        try
-        {
-            Type capType = typeof(Farm.Infrastructure.Domain.PrinterCapabilities);
-            var resolver = _exportJsonOptions?.TypeInfoResolver;
-            if (resolver != null)
-            {
-                var ti = resolver.GetTypeInfo(capType, _exportJsonOptions!);
-                if (ti != null)
-                {
-                    foreach (var jp in ti.Properties)
-                    {
-                        System.Reflection.PropertyInfo? pi = capType.GetProperty(jp.Name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                        if (pi == null)
-                            continue;
-
-                        ImportExportAttribute? attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
-                        if (attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0)
-                            continue;
-
-                        capPropsForCsv.Add(jp.Name);
-                        capPropInfos.Add(pi);
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // ignore and fall back to reflection
-        }
-
-        if (capPropsForCsv.Count == 0)
-        {
-            var infos = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-                .Where(pi => !(pi.GetCustomAttribute<ImportExportAttribute>(inherit: true) is ImportExportAttribute a && (a.IgnoreFor & ImportExportTargets.Export) != 0))
-                .ToArray();
-            capPropsForCsv = infos.Select(pi => pi.Name).ToList();
-            capPropInfos = infos.ToList();
-        }
-
-        headerParts.AddRange(capPropsForCsv);
-        headerParts.Add("CapabilitiesLastUpdated");
-    }
-
-    private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p, PrinterCapabilities? cap)
-    {
-            Dictionary<string, object?> dtoDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        dtoDict["printerId"] = p.Id;
-        dtoDict["printerName"] = p.Name;
-        dtoDict["printerModel"] = p.Model?.Name ?? string.Empty;
-        dtoDict["manufacturerName"] = p.Manufacturer?.Name;
-        dtoDict["backend"] = (PrinterBackend?)p.Backend;
-        dtoDict["ipAddress"] = p.IpAddress;
-
-        if (cap != null)
-        {
-            Dictionary<string, object?> capDict = new Dictionary<string, object?>();
-            System.Reflection.PropertyInfo[] capProps = typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            foreach (System.Reflection.PropertyInfo prop in capProps)
-            {
-                if (PropertySuppressedForExport(prop))
-                {
-                    continue;
-                }
-
-                object? val = prop.GetValue(cap);
-                ReadOnlySpan<char> nameSpan = prop.Name.AsSpan();
-                string camel = char.ToLowerInvariant(nameSpan[0]).ToString() + nameSpan.Slice(1).ToString();
-                capDict[camel] = val;
-            }
-            dtoDict["capabilities"] = capDict;
-        }
-
-        return dtoDict;
-    }
-
-    // Helper method to extract thumbnail URL from metadata
-    private static string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
-    {
-        if (metadata == null)
-        {
-            return null;
-        }
-
-        // Look for thumbnail in common metadata keys
-        string[] thumbnailKeys = new[] { "thumbnail", "thumbnails", "gcode_thumbnail" };
-
-        foreach (string? key in thumbnailKeys)
-        {
-            if (metadata.TryGetValue(key, out object? thumbnailValue))
-            {
-                // Handle different thumbnail formats
-                if (thumbnailValue is string thumbnailStr && !string.IsNullOrEmpty(thumbnailStr))
-                {
-                    // If it's already a full URL, return it
-                    if (thumbnailStr.StartsWith("http://") || thumbnailStr.StartsWith("https://"))
-                    {
-                        return thumbnailStr;
-                    }
-
-                    // Otherwise, construct the full URL
-                    return $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailStr}";
-                }
-
-                // Handle array of thumbnails - take the first one
-                if (thumbnailValue is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    List<JsonElement> array = jsonElement.EnumerateArray().ToList();
-                    if (array.Count > 0)
-                    {
-                        // Handle array of strings (legacy format)
-                        if (array[0].ValueKind == System.Text.Json.JsonValueKind.String)
-                        {
-                            string? thumbnailPath = array[0].GetString();
-                            if (!string.IsNullOrEmpty(thumbnailPath))
-                            {
-                                return thumbnailPath.StartsWith("http") ? thumbnailPath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailPath}";
-                            }
-                        }
-                        // Handle array of thumbnail objects with relative_path property
-                        else if (array[0].ValueKind == System.Text.Json.JsonValueKind.Object)
-                        {
-                            // Look for the largest thumbnail (prefer 400x300, then 300x300, then others)
-                            JsonElement thumbnailObj = array
-                                .Where(t => t.TryGetProperty("relative_path", out _))
-                                .OrderByDescending(t =>
-                                {
-                                    int width = t.TryGetProperty("width", out JsonElement w) ? w.GetInt32() : 0;
-                                    int height = t.TryGetProperty("height", out JsonElement h) ? h.GetInt32() : 0;
-                                    return width * height; // Prefer larger thumbnails
-                                })
-                                .FirstOrDefault();
-
-                            if (thumbnailObj.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                                thumbnailObj.TryGetProperty("relative_path", out JsonElement relativePathProp))
-                            {
-                                string? relativePath = relativePathProp.GetString();
-                                if (!string.IsNullOrEmpty(relativePath))
-                                {
-                                    return relativePath.StartsWith("http") ? relativePath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{relativePath}";
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
+    // Thumbnail extraction delegated to PrintersService
 
     [HttpGet("test")]
     [ProducesResponseType(typeof(object), 200)]
@@ -3132,131 +1796,368 @@ public class PrintersController(AppDbContext db, IMoonrakerClient moon, IPrusaLi
         return Ok(new { message = "Simple test works!", timestamp = DateTime.UtcNow });
     }
 
-    [HttpGet("discover")]
-    [ProducesResponseType(typeof(IEnumerable<DiscoveredPrinterDto>), 200)]
-    [ProducesResponseType(408)]
+    // ===== PHASE 4: PRINTER CONFIGURATION ENDPOINTS =====
+
+    /// <summary>
+    /// Gets the current configuration for a specific printer.
+    /// Returns all editable printer properties including API key, camera URLs, maintenance mode, etc.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Printer configuration details</returns>
+    /// <response code="200">Returns the printer configuration</response>
+    /// <response code="404">If the printer does not exist</response>
+    /// <response code="500">If there was an error retrieving the configuration</response>
+    [HttpGet("{id:guid}/config")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrintersAsync([FromQuery] string? backends, CancellationToken ct)
+    public async Task<IActionResult> GetPrinterConfigAsync(Guid id, CancellationToken ct)
     {
         try
         {
-            _logger.LogInformation($"Starting network printer discovery... Backends={backends}");
+            _logger.LogInformation($"[Config] Getting printer configuration for {id}");
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
 
-            // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
-            using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout for full network scan
-
-            // Parse optional backends query parameter (comma-separated names)
-            List<PrinterBackend>? backendList = null;
-            if (!string.IsNullOrWhiteSpace(backends))
+            if (printer == null)
             {
-                string[] parts = backends.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                List<PrinterBackend> parsed = new();
-                foreach (string p in parts)
-                {
-                    if (Enum.TryParse<PrinterBackend>(p, true, out PrinterBackend b))
-                    {
-                        parsed.Add(b);
-                    }
-                }
-                if (parsed.Count > 0)
-                {
-                    backendList = parsed;
-                }
+                _logger.LogWarning($"[Config] Printer {id} not found");
+                return NotFound(new { message = $"Printer {id} not found" });
             }
 
-            List<DiscoveredPrinterDto> discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
-
-            // If backend filter provided, apply it at controller layer
-            if (backendList != null && backendList.Count > 0)
+            // Return printer configuration as JSON object
+            var config = new
             {
-                discovered = discovered.Where(d => backendList.Contains(d.Backend)).ToList();
-            }
+                id = printer.Id,
+                name = printer.Name,
+                serverUrl = printer.ServerUrl,
+                originalServerUrl = printer.OriginalServerUrl,
+                ipAddress = printer.IpAddress,
+                backend = printer.Backend,
+                apiKey = printer.ApiKey,
+                cameraStreamUrl = printer.CameraStreamUrl,
+                cameraSnapshotUrl = printer.CameraSnapshotUrl,
+                backendPort = printer.BackendPort,
+                frontendPort = printer.FrontendPort,
+                notes = printer.Notes,
+                manufacturerId = printer.ManufacturerId,
+                modelId = printer.ModelId,
+                dateAcquired = printer.DateAcquired,
+                inMaintenance = printer.InMaintenance
+            };
 
-            // Get existing printer ServerUrls to filter out duplicates
-            List<string> existingUrls = await db.Printers
-                .AsNoTracking()
-                .Select(p => p.ServerUrl)
-                .ToListAsync(ct);
-
-            // Normalize both existing and discovered URLs for proper comparison
-            HashSet<string> normalizedExistingUrls = existingUrls
-                .Select(url => NormalizeServerUrl(url, 80))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            // Filter out printers that already exist in the database
-            List<DiscoveredPrinterDto> newPrinters = discovered
-                .Where(d => !normalizedExistingUrls.Contains(NormalizeServerUrl(d.ServerUrl, 80)))
-                .ToList();
-
-            _logger.LogInformation($"Discovery completed. Found {discovered.Count} printers, {newPrinters.Count} are new");
-
-            return Ok(newPrinters);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogWarning($"Printer discovery was cancelled");
-            return StatusCode(StatusCodes.Status408RequestTimeout, "Discovery operation timed out");
+            return Ok(config);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to discover printers on network: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to discover printers. Please try again.");
+            _logger.LogError(ex, $"[Config] Failed to get printer configuration for {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to retrieve printer configuration",
+                error = ex.Message
+            });
         }
     }
 
+    /// <summary>
+    /// Updates the configuration for a specific printer.
+    /// Allows updating API key, camera URLs, maintenance mode, and other editable properties.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="config">The updated configuration properties</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Updated printer configuration</returns>
+    /// <response code="200">Returns the updated configuration</response>
+    /// <response code="400">If the configuration data is invalid</response>
+    /// <response code="404">If the printer does not exist</response>
+    /// <response code="500">If there was an error updating the configuration</response>
+    [HttpPut("{id:guid}/config")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    public async Task<IActionResult> UpdatePrinterConfigAsync(
+        Guid id,
+        [FromBody] object? config,
+        CancellationToken ct)
+    {
+        if (config == null)
+        {
+            return BadRequest(new { message = "Configuration data is required" });
+        }
+
+        try
+        {
+            _logger.LogInformation($"[Config] Updating printer configuration for {id}");
+
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            if (printer == null)
+            {
+                _logger.LogWarning($"[Config] Printer {id} not found for update");
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
+            // Parse configuration updates from JSON
+            if (config is JsonElement jsonElement)
+            {
+                Dictionary<string, object>? configDict = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
+                if (configDict == null)
+                {
+                    return BadRequest(new { message = "Invalid configuration format" });
+                }
+
+                // Update fields if present in the request
+                if (configDict.TryGetValue("name", out object? nameVal) && nameVal != null)
+                {
+                    printer.Name = nameVal.ToString() ?? printer.Name;
+                }
+
+                if (configDict.TryGetValue("apiKey", out object? apiKeyVal))
+                {
+                    printer.ApiKey = apiKeyVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("cameraStreamUrl", out object? streamVal))
+                {
+                    printer.CameraStreamUrl = streamVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("cameraSnapshotUrl", out object? snapshotVal))
+                {
+                    printer.CameraSnapshotUrl = snapshotVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("notes", out object? notesVal))
+                {
+                    printer.Notes = notesVal?.ToString();
+                }
+
+                if (configDict.TryGetValue("inMaintenance", out object? maintenanceVal) && bool.TryParse(maintenanceVal?.ToString(), out bool maintValue))
+                {
+                    printer.InMaintenance = maintValue;
+                }
+
+                if (configDict.TryGetValue("backendPort", out object? bpVal) && int.TryParse(bpVal?.ToString(), out int bp))
+                {
+                    printer.BackendPort = bp;
+                }
+
+                if (configDict.TryGetValue("frontendPort", out object? fpVal) && int.TryParse(fpVal?.ToString(), out int fp))
+                {
+                    printer.FrontendPort = fp;
+                }
+
+                _logger.LogInformation($"[Config] Updating printer: {printer.Name} with new configuration");
+                await _printersService.SaveChangesAsync(ct);
+                _logger.LogInformation($"[Config] Successfully updated printer configuration for {id}");
+
+                // Return updated configuration
+                var updatedConfig = new
+                {
+                    id = printer.Id,
+                    name = printer.Name,
+                    serverUrl = printer.ServerUrl,
+                    originalServerUrl = printer.OriginalServerUrl,
+                    ipAddress = printer.IpAddress,
+                    backend = printer.Backend,
+                    apiKey = printer.ApiKey,
+                    cameraStreamUrl = printer.CameraStreamUrl,
+                    cameraSnapshotUrl = printer.CameraSnapshotUrl,
+                    backendPort = printer.BackendPort,
+                    frontendPort = printer.FrontendPort,
+                    notes = printer.Notes,
+                    manufacturerId = printer.ManufacturerId,
+                    modelId = printer.ModelId,
+                    dateAcquired = printer.DateAcquired,
+                    inMaintenance = printer.InMaintenance,
+                    message = "Configuration updated successfully"
+                };
+
+                return Ok(updatedConfig);
+            }
+
+            return BadRequest(new { message = "Configuration must be a JSON object" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Config] Failed to update printer configuration for {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to update printer configuration",
+                error = ex.Message
+            });
+        }
+    }
+
+    #region Discovery Stream Endpoints
+
+    /// <summary>
+    /// Start a network discovery stream to find printers on the local network.
+    /// Returns a session ID that can be used to receive discovery progress via SignalR.
+    /// </summary>
+    /// <param name="request">Optional request with backend filters</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Session ID for tracking discovery progress</returns>
+    /// <response code="200">Discovery started successfully</response>
+    /// <response code="500">Failed to start discovery</response>
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(408)]
     [ProducesResponseType(500)]
-    public ActionResult StartDiscoveryStream([FromBody] StartDiscoveryRequest? request, CancellationToken ct)
+    public async Task<ActionResult> StartDiscoveryStreamAsync(
+        [FromBody] DiscoveryStreamRequest? request,
+        CancellationToken ct)
     {
         try
         {
-            // Generate a unique session ID for this discovery session
-            string sessionId = Guid.NewGuid().ToString();
+            bool autoRegister = request?.AutoRegister ?? false;
+            _logger.LogInformation($"[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={autoRegister})");
 
-            _logger.LogInformation($"Starting streaming network printer discovery with session ID: {sessionId}");
+            IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
+            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
+                backends: backends,
+                autoRegister: autoRegister,
+                cancellationToken: ct);
 
-            // Start the discovery process in the background
-            // The progress and results will be sent via SignalR
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout to allow for multiple networks and slow responses
-
-                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, request?.Backends, timeoutCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogWarning($"Streaming printer discovery was cancelled for session {sessionId}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError($"Failed to discover printers in streaming mode for session {sessionId}: {ex.Message}");
-                }
-            }, ct);
-
-            // Return the session ID immediately so client can join the SignalR group
-            return Ok(new { sessionId, message = "Discovery started. Connect to SignalR hub to receive updates." });
+            return Ok(new { sessionId = result.SessionId, message = result.Message });
         }
-
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to start streaming printer discovery: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start discovery stream. Please try again.");
+            _logger.LogError(ex, "[DISCOVERY] Failed to start discovery stream");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to start discovery",
+                error = ex.Message
+            });
         }
     }
 
-    [HttpGet("test-simple")]
+    /// <summary>
+    /// Cancel an active discovery stream.
+    /// </summary>
+    /// <param name="sessionId">The session ID to cancel</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Cancellation confirmation</returns>
+    /// <response code="200">Discovery cancelled successfully</response>
+    /// <response code="500">Failed to cancel discovery</response>
+    [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
-    public ActionResult TestSimple()
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> CancelDiscoveryStreamAsync(
+        [FromRoute] string sessionId,
+        CancellationToken ct)
     {
-        _logger.LogError($"=== SIMPLE TEST CALLED ===");
-        return Ok(new { message = "API is working!", timestamp = DateTime.UtcNow });
+        try
+        {
+            _logger.LogInformation($"[DISCOVERY] Cancelling discovery stream {sessionId}");
+
+            Services.Interfaces.DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
+
+            return Ok(new { message = result.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[DISCOVERY] Failed to cancel discovery stream {sessionId}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to cancel discovery",
+                error = ex.Message
+            });
+        }
     }
 
-    // Request models moved to top-level files
+    #endregion
+
+    #region Printer Location Management
+
+    /// <summary>
+    /// Assign a printer to a location.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="request">The location assignment request</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The updated printer</returns>
+    /// <response code="200">Printer assigned to location successfully</response>
+    /// <response code="404">Printer or location not found</response>
+    /// <response code="500">Failed to assign printer to location</response>
+    [HttpPost("{id}/location")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> AssignPrinterToLocationAsync(
+        [FromRoute] Guid id,
+        [FromBody] AssignPrinterToLocationRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request?.LocationId == null)
+            {
+                return BadRequest(new { message = "LocationId is required" });
+            }
+
+            var printer = await _printersService.FindByIdAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound(new { message = "Printer not found" });
+            }
+
+            // Update printer with location
+            printer.LocationId = request.LocationId;
+            await _printersService.SaveChangesAsync(ct);
+
+            // Return authoritative updated DTO
+            PrinterDto updated = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrintersController] Failed to assign printer {id} to location");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Remove a printer from its location (unassign).
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content</returns>
+    /// <response code="204">Printer unassigned from location successfully</response>
+    /// <response code="404">Printer not found</response>
+    /// <response code="500">Failed to unassign printer from location</response>
+    [HttpDelete("{id}/location")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> UnassignPrinterFromLocationAsync(
+        [FromRoute] Guid id,
+        CancellationToken ct)
+    {
+        try
+        {
+            var printer = await _printersService.FindByIdAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound(new { message = "Printer not found" });
+            }
+
+            // Remove location from printer
+            printer.LocationId = null;
+            await _printersService.SaveChangesAsync(ct);
+
+            // Return authoritative updated DTO
+            PrinterDto updated = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrintersController] Failed to unassign printer {id} from location");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    #endregion
+
 }

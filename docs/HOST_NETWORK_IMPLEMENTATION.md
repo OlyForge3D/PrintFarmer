@@ -25,9 +25,8 @@ Implemented full host network mode support in the deployment script with:
 
 1. ✅ **OS Detection** - Automatically detects Linux (required for host networking)
 2. ✅ **User Prompts** - Interactive selection between bridge and host modes
-3. ✅ **Override Generation** - Creates `docker-compose.host-network.yml` automatically
-4. ✅ **Dynamic CORS** - Automatically configures CORS based on selected ports
-5. ✅ **Non-Interactive Support** - Environment variable configuration for CI/CD
+3. ✅ **Dynamic CORS** - Automatically configures CORS based on selected ports
+4. ✅ **Non-Interactive Support** - Environment variable configuration for CI/CD
 
 ---
 
@@ -43,7 +42,6 @@ Implemented full host network mode support in the deployment script with:
 echo
 echo -e "${BLUE}Network Mode for API Container:${NC}"
 echo "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
-echo "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
 echo
 
 if [ "$OS" != "linux" ]; then

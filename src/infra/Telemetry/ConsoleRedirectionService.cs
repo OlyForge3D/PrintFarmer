@@ -80,7 +80,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
         }
         else if (value != '\r')
         {
-            _buffer.Append(value);
+            _ = _buffer.Append(value);
         }
     }
 
@@ -88,7 +88,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
     {
         if (!string.IsNullOrEmpty(value))
         {
-            _buffer.Append(value);
+            _ = _buffer.Append(value);
         }
         FlushBuffer();
     }
@@ -98,7 +98,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
         if (_buffer.Length > 0)
         {
             string message = _buffer.ToString();
-            _buffer.Clear();
+            _ = _buffer.Clear();
 
             _unifiedLogger.LogWithContext(_logLevel, _category, message);
         }

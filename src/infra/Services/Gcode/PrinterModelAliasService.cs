@@ -1,0 +1,72 @@
+﻿using System;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace Farm.Infrastructure.Services.Gcode;
+
+/// <summary>
+/// Service for resolving printer model aliases.
+/// Maps slicer-specific model names (e.g., "COREONEL", "Phrozen Arco")
+/// to canonical PrinterModel IDs for consistent gcode file association.
+/// </summary>
+public interface IPrinterModelAliasService
+{
+    /// <summary>
+    /// Resolves a slicer model name to its canonical PrinterModel ID.
+    /// </summary>
+    /// <param name="slicerModelName">The model name as it appears in gcode (e.g., "COREONEL")</param>
+    /// <param name="slicerType">Optional slicer type (e.g., "PrusaSlicer", "OrcaSlicer").
+    ///   If null, looks for alias that applies to all slicers.</param>
+    /// <returns>PrinterModel ID if found, null if no matching alias exists.</returns>
+    Task<Guid?> ResolveModelAliasAsync(string slicerModelName, string? slicerType = null);
+}
+
+/// <summary>
+/// Default implementation of printer model alias resolution.
+/// </summary>
+public class PrinterModelAliasService : IPrinterModelAliasService
+{
+    private readonly AppDbContext _dbContext;
+
+    public PrinterModelAliasService(AppDbContext dbContext)
+    {
+        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    }
+
+    /// <summary>
+    /// Resolves a slicer model name to its canonical PrinterModel ID.
+    /// Priority: Exact slicer-type match > Null slicer-type (applies to all)
+    /// </summary>
+    public async Task<Guid?> ResolveModelAliasAsync(string slicerModelName, string? slicerType = null)
+    {
+        if (string.IsNullOrWhiteSpace(slicerModelName))
+        {
+            return null;
+        }
+
+        // Try exact match with slicer type first
+        if (!string.IsNullOrEmpty(slicerType))
+        {
+            var exactMatch = await _dbContext.PrinterModelAliases
+                .AsNoTracking()
+                .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == slicerType)
+                .Select(a => a.PrinterModelId)
+                .FirstOrDefaultAsync();
+
+            if (exactMatch != Guid.Empty)
+            {
+                return exactMatch;
+            }
+        }
+
+        // Fall back to slicer-agnostic alias (SlicerType is null)
+        var genericMatch = await _dbContext.PrinterModelAliases
+            .AsNoTracking()
+            .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == null)
+            .Select(a => a.PrinterModelId)
+            .FirstOrDefaultAsync();
+
+        return genericMatch != Guid.Empty ? genericMatch : null;
+    }
+}

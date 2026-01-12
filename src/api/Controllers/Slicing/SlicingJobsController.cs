@@ -1,5 +1,6 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -7,20 +8,27 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Jobs")]
-public class SlicingJobsController : ControllerBase
+public class SlicingJobsController(
+    IUnifiedLoggingService logger,
+    Infrastructure.Temp.ITempPathProvider tempPathProvider,
+    ISlicerOrchestrator orchestrator,
+    IFileManagementService fileManagementService) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
-    private readonly ISlicerOrchestrator _orchestrator;
-    private readonly string _tempRoot;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider = tempPathProvider;
+    private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
 
-    public SlicingJobsController(IUnifiedLoggingService logger, Infrastructure.Temp.ITempPathProvider tempPathProvider, ISlicerOrchestrator orchestrator)
+    // Ensure temp directory exists during construction - field exists only for side effect
+#pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
+    private readonly object _tempDirInitializer = EnsureTempDirectoryExists(tempPathProvider);
+#pragma warning restore CA1823, S1144
+    
+    private static object EnsureTempDirectoryExists(Infrastructure.Temp.ITempPathProvider provider)
     {
-        _logger = logger;
-        _tempPathProvider = tempPathProvider;
-        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
-        _ = Directory.CreateDirectory(_tempRoot);
+        var tempRoot = Path.GetFullPath(provider.GetTempRoot());
+        _ = Directory.CreateDirectory(tempRoot);
+        return new object(); // Return dummy value since we only care about side effect
     }
 
     [HttpGet("jobs/{jobId}/status")]
@@ -48,6 +56,10 @@ public class SlicingJobsController : ControllerBase
             return NotFound();
         }
         SlicingJobDto j = job;
+        // Extract profile information from composite SlicerProfileDto
+        string profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
+        string profileMaterial = j.Profile?.FilamentProfile?.Material ?? "Unknown";
+
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,
@@ -61,7 +73,7 @@ public class SlicingJobsController : ControllerBase
             Metadata = new SliceMetadataDto
             {
                 SlicerVersion = j.SlicerEngine == "prusaslicer" ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                ProfileUsed = $"{j.Profile?.Quality} - {j.Profile?.Material}",
+                ProfileUsed = $"{profileQuality} - {profileMaterial}",
                 EstimatedCost = 0
             }
         });
@@ -146,7 +158,7 @@ public class SlicingJobsController : ControllerBase
         }
         string rebuiltPath = Path.Combine(tempRoot, fileName);
         string path = rebuiltPath;
-        if (!IsSafePath(path, tempRoot))
+        if (!_fileManagementService.IsSafePath(path, tempRoot))
         {
             return NotFound();
         }
@@ -158,25 +170,5 @@ public class SlicingJobsController : ControllerBase
         }
 
         return PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");
-    }
-
-    private static bool IsSafePath(string candidatePath, string root)
-    {
-        try
-        {
-            string fullRoot = Path.GetFullPath(root);
-            string fullCandidate = Path.GetFullPath(candidatePath);
-            if (!fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-            string relative = Path.GetRelativePath(fullRoot, fullCandidate);
-            if (relative.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || relative.Contains(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return false;
-            }
-            return true;
-        }
-        catch { return false; }
     }
 }

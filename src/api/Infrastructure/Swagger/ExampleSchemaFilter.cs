@@ -1,20 +1,26 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
-using Swashbuckle.AspNetCore.SwaggerGen;
+
+// Explicit using to disambiguate from Moonraker's LoginRequest
+using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 
 namespace Farm.Web.Api.Infrastructure.Swagger;
 
 /// <summary>
-/// Adds example objects to OpenAPI schemas for improved Swagger UI clarity.
+/// OpenAPI schema enrichment utilities for improved Swagger UI clarity.
+/// Note: With native ASP.NET Core OpenAPI (no Swashbuckle), custom filters
+/// are applied via AddOperationTransformer and AddDocumentTransformer in Program.cs
 /// </summary>
-public sealed class ExampleSchemaFilter : ISchemaFilter
+public static class ExampleSchemaFilter
 {
-    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    /// <summary>
+    /// Creates an example schema for a given DTO type for use in OpenAPI transformers.
+    /// </summary>
+    public static OpenApiSchema? GetExampleForType(Type t)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(context);
-        Type t = context.Type;
+        OpenApiSchema schema = new OpenApiSchema();
 
         if (t == typeof(CreatePrinterDto))
         {
@@ -94,7 +100,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
                 ["quality"] = new OpenApiString("standard")
             };
         }
-        else if (t == typeof(LoginRequest))
+        else if (t == typeof(AuthLoginRequest))
         {
             schema.Example = new OpenApiObject
             {
@@ -143,7 +149,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                ["originalFileName"] = new OpenApiString("benchy.gcode"),
+                ["name"] = new OpenApiString("benchy.gcode"),
                 ["displayName"] = new OpenApiString("Benchy"),
                 ["fileSizeBytes"] = new OpenApiLong(3_456_789),
                 ["uploadedAt"] = new OpenApiString(DateTime.UtcNow.AddDays(-1).ToString("o")),
@@ -201,10 +207,6 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
                 ["maxBuildVolumeZ"] = new OpenApiDouble(250),
                 ["hasHeatedBed"] = new OpenApiBoolean(true),
                 ["hasEnclosure"] = new OpenApiBoolean(true),
-                ["multiMaterial"] = new OpenApiBoolean(false),
-                ["numberOfExtruders"] = new OpenApiInteger(1),
-                ["isAvailable"] = new OpenApiBoolean(true),
-                ["lastUpdated"] = new OpenApiString(DateTime.UtcNow.ToString("o"))
             };
         }
         else if (t == typeof(PrintJobDto))
@@ -267,5 +269,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
                 prop.Example = new OpenApiString("00:02:30");
             }
         }
+
+        return schema;
     }
 }

@@ -1,0 +1,2779 @@
+﻿#pragma warning disable CS1066, S1006 // Default parameters in explicit interface implementations are architecturally intentional
+
+using System.IO;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
+
+namespace Farm.Backend.Plugin.Moonraker;
+
+public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : PrinterClientBase, IMoonrakerClient,
+    ISupportsFileDownload,
+    ISupportsFileList,
+    ISupportsFileUpload,
+    ISupportsStartPrint,
+    ISupportsControlOperations,
+    ISupportsCamera,
+    ISupportsConfiguredCameraDetection,
+    ISupportsFileMetadata,
+    ISupportsMovement,
+    ISupportsTemperatureControl,
+    ISupportsPrinterInformation,
+    ISupportsHistory
+{
+    private readonly HttpClient _http = http;
+    private readonly IUnifiedLoggingService _logger = logger;
+
+    public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/info");
+            _logger.LogDebug($"[Moonraker] Querying status at: {uri}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug($"[Moonraker] Status query failed with status {resp.StatusCode} at {uri}");
+                return new PrinterStatus(false, null);
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            string? state = null;
+            JsonElement root = doc.RootElement;
+            if (root.TryGetProperty("state", out JsonElement s1) && s1.ValueKind == JsonValueKind.String)
+            {
+                state = s1.GetString();
+            }
+            else if (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object &&
+                     result.TryGetProperty("state", out JsonElement s2) && s2.ValueKind == JsonValueKind.String)
+            {
+                state = s2.GetString();
+            }
+
+            _logger.LogDebug($"[Moonraker] Status retrieved: state={state}");
+            return new PrinterStatus(true, state);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, $"[Moonraker] HTTP request failed for {baseUrl}: {ex.Message}");
+            return new PrinterStatus(false, null);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogDebug(ex, $"[Moonraker] Timeout getting status from {baseUrl}");
+            return new PrinterStatus(false, null);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, $"[Moonraker] JSON parse error from {baseUrl}: {ex.Message}");
+            return new PrinterStatus(false, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, $"[Moonraker] Unexpected error getting status from {baseUrl}: {ex.GetType().Name}: {ex.Message}");
+            return new PrinterStatus(false, null);
+        }
+    }
+
+    public async Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/info");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
+
+            // Handle both direct response and wrapped response
+            JsonElement infoElement = root;
+            if (root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object)
+            {
+                infoElement = result;
+            }
+
+            return JsonSerializer.Deserialize<MoonrakerPrinterInfo>(infoElement.GetRawText());
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            return null;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, $"Failed to get printer info from {baseUrl}");
+            return null;
+        }
+    }
+
+    public async Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
+            if (!root.TryGetProperty("result", out JsonElement result))
+            {
+                return null;
+            }
+
+            string? state = null;
+            if (result.TryGetProperty("status", out JsonElement statusNode) &&
+                statusNode.ValueKind == JsonValueKind.Object &&
+                statusNode.TryGetProperty("print_stats", out JsonElement psNode) &&
+                psNode.ValueKind == JsonValueKind.Object &&
+                psNode.TryGetProperty("state", out JsonElement stNode) &&
+                stNode.ValueKind == JsonValueKind.String)
+            {
+                state = stNode.GetString();
+            }
+            // Only report job details when printing
+            if (!string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase))
+            {
+                return new PrinterJob(state, null, null, null);
+            }
+
+            double? progress = null;
+            string? jobName = null;
+            string? thumb = null;
+
+            if (result.TryGetProperty("status", out JsonElement statusEl))
+            {
+                if (statusEl.TryGetProperty("display_status", out JsonElement display) &&
+                    display.TryGetProperty("progress", out JsonElement prog))
+                {
+                    double pv = 0;
+                    try
+                    {
+                        pv = prog.GetDouble();
+                    }
+                    catch
+                    {
+                    }
+                    progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
+                }
+                if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
+                    ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                {
+                    jobName = fn.GetString();
+                }
+            }
+
+            // Try Klipper job queue for thumbnail path
+            if (result.TryGetProperty("job_queue", out JsonElement jq) && jq.ValueKind == JsonValueKind.Object &&
+                jq.TryGetProperty("thumbnails", out JsonElement thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
+            {
+                JsonElement first = thumbs[0];
+                if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
+                {
+                    Uri baseUri2 = new(baseUrl);
+                    string relPath = Uri.EscapeDataString(rp.GetString()!);
+                    Uri thumbUri = new(baseUri2, $"server/files/gcodes/{relPath}");
+                    thumb = thumbUri.ToString();
+                }
+            }
+
+            // Fallback: query file metadata for thumbnails if not found yet
+            if (thumb is null && !string.IsNullOrWhiteSpace(jobName))
+            {
+                try
+                {
+                    Uri baseUri3 = new(baseUrl);
+                    Uri metaUri = new(baseUri3, $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
+                    using HttpResponseMessage mresp = await _http.GetAsync(metaUri, cts.Token);
+                    if (mresp.IsSuccessStatusCode)
+                    {
+                        await using Stream mstream = await mresp.Content.ReadAsStreamAsync(cts.Token);
+                        using JsonDocument mdoc = await JsonDocument.ParseAsync(mstream, cancellationToken: cts.Token);
+                        JsonElement mroot = mdoc.RootElement;
+                        if (mroot.TryGetProperty("result", out JsonElement mres) &&
+                            mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
+                            mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
+                        {
+                            JsonElement first = mthumbs[0];
+                            if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
+                            {
+                                Uri baseUriX = new(baseUrl);
+                                Uri thumbUri2 = new(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
+                                thumb = thumbUri2.ToString();
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return new PrinterJob(state, progress, jobName, thumb);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
+            Uri baseUri = new(baseUrl);
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "/webcam/",
+                Query = "action=stream"
+            };
+
+            return Task.FromResult<string?>(builder.Uri.ToString());
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        return GetCameraStreamUrlAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return Task.FromResult<string?>(null);
+            }
+
+            Uri baseUri = new(baseUrl);
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "/webcam/",
+                Query = "action=snapshot"
+            };
+
+            return Task.FromResult<string?>(builder.Uri.ToString());
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        return GetCameraSnapshotUrlAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
+    public async Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            string? url = await GetCameraSnapshotUrlAsync(baseUrl, null, ct);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return null;
+            }
+
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Queries the Moonraker API for actual configured camera URLs.
+    /// Returns the first enabled camera's stream and snapshot URLs from the /server/webcams/list API.
+    /// </summary>
+    public async Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // Get the raw camera URLs from the API (which handles relative URL resolution)
+            (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
+
+            // If we got URLs from the API, they should already be normalized
+            // But we can optionally apply frontendPort if it differs from what the API returned
+            // For now, just return what the API provided
+            return (stream, snapshot);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
+    {
+        _logger.LogDebug($"[Moonraker] GetCompositeStatusAsync: baseUrl={baseUrl}");
+        PrinterStatus status = await GetStatusAsync(baseUrl, ct);
+        _logger.LogDebug($"[Moonraker] GetCompositeStatusAsync: status.IsOnline={status.IsOnline}, status.State={status.State}");
+        PrinterJob? job = await GetJobAsync(baseUrl, ct);
+        // Try to read current position
+        double? x = null, y = null, z = null;
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri = new(baseUrl);
+            Uri posUri = new(baseUri, "printer/objects/query?toolhead=position");
+            using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+                using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+                JsonElement root = doc.RootElement;
+                if (root.TryGetProperty("result", out JsonElement result) &&
+                    result.TryGetProperty("status", out JsonElement statusNode) &&
+                    statusNode.TryGetProperty("toolhead", out JsonElement th) &&
+                    th.TryGetProperty("position", out JsonElement pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+                {
+                    try
+                    { x = pos[0].GetDouble(); }
+                    catch { }
+                    try
+                    { y = pos[1].GetDouble(); }
+                    catch { }
+                    try
+                    { z = pos[2].GetDouble(); }
+                    catch { }
+                }
+            }
+        }
+        catch
+        {
+        }
+        // Prefer print job state (printing, paused, complete) over system state, but not for error states
+        // If system is shutdown/error, that takes precedence over print_stats state
+        string? state = null;
+        if (!string.IsNullOrEmpty(status.State) &&
+            (status.State.Equals("shutdown", StringComparison.OrdinalIgnoreCase) ||
+             status.State.Equals("error", StringComparison.OrdinalIgnoreCase)))
+        {
+            // System is in error state, use system state
+            state = status.State;
+        }
+        else
+        {
+            // Otherwise prefer job state if available
+            state = job?.PrintState ?? status.State;
+        }
+        // Query temps
+        double? hotend = null, bed = null, hotendT = null, bedT = null;
+        try
+        {
+            using CancellationTokenSource cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts2.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri2 = new(baseUrl);
+            Uri tempsUri = new(baseUri2, "printer/objects/query?extruder&heater_bed");
+            using HttpResponseMessage resp2 = await _http.GetAsync(tempsUri, cts2.Token);
+            if (resp2.IsSuccessStatusCode)
+            {
+                await using Stream stream2 = await resp2.Content.ReadAsStreamAsync(cts2.Token);
+                using JsonDocument doc2 = await JsonDocument.ParseAsync(stream2, cancellationToken: cts2.Token);
+                JsonElement root2 = doc2.RootElement;
+                if (root2.TryGetProperty("result", out JsonElement result2) && result2.TryGetProperty("status", out JsonElement status2))
+                {
+                    if (status2.TryGetProperty("extruder", out JsonElement ex))
+                    {
+                        if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
+                        { try { hotend = t.GetDouble(); } catch { } }
+                        if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
+                        { try { hotendT = tt.GetDouble(); } catch { } }
+                    }
+                    if (status2.TryGetProperty("heater_bed", out JsonElement hb))
+                    {
+                        if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
+                        { try { bed = t.GetDouble(); } catch { } }
+                        if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
+                        { try { bedT = tt.GetDouble(); } catch { } }
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // Query camera info when online; webcam listing may still be available via Moonraker
+        string? cam = null;
+        string? snap = null;
+        if (status.IsOnline)
+        {
+            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct);
+            cam = streamUrl;
+            snap = snapshotUrl;
+        }
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
+    }
+
+    public Task<PrinterDto> CreatePrinterDtoAsync(
+        Printer printer,
+        PrinterCompositeStatus status,
+        PrinterSpoolInfoDto? spoolInfo,
+        CancellationToken ct = default)
+    {
+        // Use camera URLs from database (discovered and validated during printer setup/refresh)
+        // These are validated URLs - null if no cameras are configured
+        string? cameraStreamUrl = printer.CameraStreamUrl;
+        string? cameraSnapshotUrl = printer.CameraSnapshotUrl;
+
+        // Construct backend-specific PrinterDto
+        return Task.FromResult(new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            Notes: printer.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: printer.Manufacturer?.Name,
+            ModelName: printer.Model?.Name,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: cameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            Backend: PrinterBackend.Moonraker,
+            ApiKey: printer.ApiKey,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort,
+            SpoolInfo: spoolInfo,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl,
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
+        ));
+    }
+
+    public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "G28", ct);
+
+    public async Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+
+    public async Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+
+    public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
+    {
+        List<string> cmds = new();
+        if (hotend is not null)
+        {
+            cmds.Add($"M104 S{hotend:0}");
+        }
+
+        if (bed is not null)
+        {
+            cmds.Add($"M140 S{bed:0}");
+        }
+
+        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
+    }
+
+    public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    {
+        List<string> parts = new() { "G91", "G0" };
+        if (x is not null)
+        {
+            parts.Add($"X{x:0.###}");
+        }
+
+        if (y is not null)
+        {
+            parts.Add($"Y{y:0.###}");
+        }
+
+        if (z is not null)
+        {
+            parts.Add($"Z{z:0.###}");
+        }
+
+        if (f is not null)
+        {
+            parts.Add($"F{f:0.###}");
+        }
+
+        string[] cmds = new[] { string.Join(' ', parts), "G90" };
+        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
+    }
+
+    public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    {
+        List<string> parts = new() { "G90", "G0" };
+        if (x is not null)
+        {
+            parts.Add($"X{x:0.###}");
+        }
+
+        if (y is not null)
+        {
+            parts.Add($"Y{y:0.###}");
+        }
+
+        if (z is not null)
+        {
+            parts.Add($"Z{z:0.###}");
+        }
+
+        if (f is not null)
+        {
+            parts.Add($"F{f:0.###}");
+        }
+
+        return await SendGcodePrivateAsync(baseUrl, string.Join(' ', parts), ct);
+    }
+
+    public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "PAUSE", ct);
+
+    public async Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "RESUME", ct);
+
+    public async Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "M112", ct);
+
+    public async Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "FIRMWARE_RESTART", ct);
+
+    public Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return FirmwareRestartAsync(baseUrl.ToString(), ct);
+    }
+
+    public async Task<bool> DisableMotorsAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "M84", ct);
+
+    public Task<bool> DisableMotorsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DisableMotorsAsync(baseUrl.ToString(), ct);
+    }
+
+    public async Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, gcode, ct);
+
+    public Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SendGcodeAsync(baseUrl.ToString(), gcode, ct);
+    }
+
+    private async Task<bool> SendGcodePrivateAsync(string baseUrl, string gcode, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, new[] { gcode }, ct);
+
+    private async Task<bool> SendGcodePrivateAsync(string baseUrl, IEnumerable<string> gcodes, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri4 = new(baseUrl);
+            Uri scriptUri = new(baseUri4, "printer/gcode/script");
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
+    private async Task<(string? stream, string? snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        string? stream = null;
+        string? snapshot = null;
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            Uri baseUri = new(baseUrl);
+            Uri listUri = new(baseUri, "server/webcams/list");
+            using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return (null, null);
+            }
+
+            await using Stream streamContent = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(streamContent, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
+            if (!((root.TryGetProperty("webcams", out JsonElement cams) && cams.ValueKind == JsonValueKind.Array) ||
+                  (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object && res.TryGetProperty("webcams", out cams) && cams.ValueKind == JsonValueKind.Array)))
+            {
+                return (null, null);
+            }
+
+            foreach (JsonElement cam in cams.EnumerateArray())
+            {
+                bool enabled = true;
+                if (cam.TryGetProperty("enabled", out JsonElement en))
+                {
+                    if (en.ValueKind == JsonValueKind.False)
+                    {
+                        enabled = false;
+                    }
+                    else if (en.ValueKind == JsonValueKind.True)
+                    {
+                        enabled = true;
+                    }
+                }
+                if (!enabled)
+                {
+                    continue;
+                }
+
+                // Try to resolve via /server/webcams/test using uid or name
+                string? uid = null;
+                if (cam.TryGetProperty("uid", out JsonElement uidEl) && uidEl.ValueKind == JsonValueKind.String)
+                {
+                    uid = uidEl.GetString();
+                }
+
+                string? name = null;
+                if (cam.TryGetProperty("name", out JsonElement nmEl) && nmEl.ValueKind == JsonValueKind.String)
+                {
+                    name = nmEl.GetString();
+                }
+
+                Uri? testUri = uid is not null
+                    ? new Uri(new Uri(baseUrl), $"server/webcams/test?uid={Uri.EscapeDataString(uid)}")
+                    : (name is not null ? new Uri(new Uri(baseUrl), $"server/webcams/test?name={Uri.EscapeDataString(name)}") : null);
+                if (testUri is not null)
+                {
+                    try
+                    {
+                        using HttpResponseMessage tresp = await _http.PostAsync(testUri, content: null, cts.Token);
+                        if (tresp.IsSuccessStatusCode)
+                        {
+                            await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
+                            using JsonDocument tdoc = await JsonDocument.ParseAsync(tstream, cancellationToken: cts.Token);
+                            JsonElement troot = tdoc.RootElement;
+                            if (troot.TryGetProperty("result", out JsonElement tresult))
+                            {
+                                troot = tresult;
+                            }
+
+                            if (stream is null && troot.TryGetProperty("stream_url", out JsonElement tsu) && tsu.ValueKind == JsonValueKind.String)
+                            {
+                                stream = NormalizeCameraUrl(tsu.GetString(), baseUrl);
+                            }
+
+                            if (snapshot is null && troot.TryGetProperty("snapshot_url", out JsonElement ssu) && ssu.ValueKind == JsonValueKind.String)
+                            {
+                                snapshot = NormalizeCameraUrl(ssu.GetString(), baseUrl);
+                            }
+
+                            if (stream is not null && snapshot is not null)
+                            {
+                                return (stream, snapshot);
+                            }
+                        }
+                    }
+                    catch (HttpRequestException)
+                    {
+                        // Test endpoint not available, continue with fallback
+                    }
+                    catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+                    {
+                        // Timeout during test, continue with fallback
+                    }
+                    catch (JsonException)
+                    {
+                        // Invalid JSON response, continue with fallback
+                    }
+                }
+
+                // Fallback to raw listing values, normalizing relative paths
+                if (stream is null && cam.TryGetProperty("stream_url", out JsonElement su) && su.ValueKind == JsonValueKind.String)
+                {
+                    string? s = su.GetString();
+                    if (!string.IsNullOrWhiteSpace(s))
+                    {
+                        stream = NormalizeCameraUrl(s, baseUrl);
+                    }
+                }
+                if (snapshot is null && cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
+                {
+                    string? s = sn.GetString();
+                    if (!string.IsNullOrWhiteSpace(s))
+                    {
+                        snapshot = NormalizeCameraUrl(s, baseUrl);
+                    }
+                }
+
+                if (stream is not null && snapshot is not null)
+                {
+                    return (stream, snapshot);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
+        }
+        return (stream, snapshot);
+    }
+
+    // File upload and management methods
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for file uploads
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/upload");
+
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(fileContent);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", fileName);
+            formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
+
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/print/start");
+            var payload = new { filename = fileName };
+
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, payload, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
+    {
+        // Call the new method that returns full file info, then extract just the paths for backward compatibility
+        var fileInfoList = await GetFileListWithMetadataAsync(baseUrl, ct);
+        return fileInfoList.Select(f => f.Path).ToArray();
+    }
+
+    /// <summary>
+    /// Get list of G-code files with metadata (size, modified date) from Moonraker.
+    /// </summary>
+    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/list?root=gcodes");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return new List<PrinterFileInfo>();
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            JsonElement root = doc.RootElement;
+
+            if (!root.TryGetProperty("result", out JsonElement result) ||
+                result.ValueKind != JsonValueKind.Array)
+            {
+                return new List<PrinterFileInfo>();
+            }
+
+            List<PrinterFileInfo> files = new();
+            foreach (JsonElement file in result.EnumerateArray())
+            {
+                if (file.TryGetProperty("path", out JsonElement path) &&
+                    path.ValueKind == JsonValueKind.String)
+                {
+                    string? fileName = path.GetString();
+                    if (!string.IsNullOrEmpty(fileName) && fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Extract size if available
+                        long? size = null;
+                        if (file.TryGetProperty("size", out JsonElement sizeElement) &&
+                            sizeElement.ValueKind == JsonValueKind.Number)
+                        {
+                            size = sizeElement.GetInt64();
+                        }
+
+                        // Extract modified timestamp if available (convert to Unix timestamp in seconds)
+                        long? modified = null;
+                        if (file.TryGetProperty("modified", out JsonElement modifiedElement) &&
+                            modifiedElement.ValueKind == JsonValueKind.Number)
+                        {
+                            double timestamp = modifiedElement.GetDouble();
+                            modified = (long)timestamp;
+                        }
+
+                        // Get thumbnail URL for this file
+                        string? thumbnailUrl = await GetThumbnailUrlAsync(baseUrl, fileName, cts.Token);
+
+                        files.Add(new PrinterFileInfo
+                        {
+                            Name = fileName,
+                            Path = fileName,
+                            Size = size,
+                            Modified = modified,
+                            ThumbnailUrl = thumbnailUrl
+                        });
+                    }
+                }
+            }
+            return files;
+        }
+        catch
+        {
+            return new List<PrinterFileInfo>();
+        }
+    }
+
+    /// <summary>
+    /// Gets the thumbnail URL for a gcode file if available.
+    /// Returns null if no thumbnail is found.
+    /// </summary>
+    private async Task<string?> GetThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            var thumbnails = await GetFileThumbnailsAsync(baseUrl, filename, ct);
+            if (thumbnails != null && thumbnails.Count > 0)
+            {
+                // Use the largest thumbnail available
+                var largestThumbnail = thumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault();
+                if (!string.IsNullOrEmpty(largestThumbnail.RelativePath))
+                {
+                    // Build absolute thumbnail URL
+                    return $"{baseUrl}/server/files/gcodes/{Uri.EscapeDataString(largestThumbnail.RelativePath)}";
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail if thumbnail retrieval fails
+        }
+        return null;
+    }
+
+    // ===== FILE OPERATIONS API =====
+
+    /// <summary>
+    /// Get list of available file roots
+    /// </summary>
+    public async Task<FileRoot[]> GetFileRootsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/roots");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return Array.Empty<FileRoot>();
+            }
+
+            MoonrakerResponse<FileRoot[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileRoot[]>>(cancellationToken: cts.Token);
+            return response?.Result ?? Array.Empty<FileRoot>();
+        }
+        catch
+        {
+            return Array.Empty<FileRoot>();
+        }
+    }
+
+    /// <summary>
+    /// Get directory information with optional filtering
+    /// </summary>
+    public async Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            // First try using REST API
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&extended={(extended ? "true" : "false")}");
+
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                try
+                {
+                    MoonrakerResponse<MoonrakerDirectoryInfo>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerDirectoryInfo>>(cancellationToken: cts.Token);
+                    if (response?.Result != null)
+                    {
+                        return response.Result;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogDebug($"Error parsing directory info from REST API: {ex.Message}");
+                    // Continue to fallback method
+                }
+            }
+
+            // If REST API fails, try using JSON-RPC
+            JsonRpcRequest jsonRpcRequest = new()
+            {
+                Method = "server.files.get_directory",
+                Params = new Dictionary<string, object>
+                {
+                    ["path"] = path,
+                    ["extended"] = extended
+                },
+                Id = 1
+            };
+
+            Uri jsonRpcUri = new(baseUri, "websocket");
+            string jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
+            using StringContent content = new(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage jsonRpcResp = await _http.PostAsync(jsonRpcUri, content, cts.Token);
+            if (!jsonRpcResp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            string responseJson = await jsonRpcResp.Content.ReadAsStringAsync(cts.Token);
+
+            try
+            {
+                JsonRpcResponse? jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
+
+                if (jsonRpcResponse?.Error != null)
+                {
+                    _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+
+                    // Special handling for URL parameter error
+                    if (jsonRpcResponse.Error.Message.Contains("No data for argument: url", StringComparison.OrdinalIgnoreCase) ||
+                        jsonRpcResponse.Error.Code == 400)
+                    {
+                        // Try again with URL parameter included
+                        jsonRpcRequest.Params = new Dictionary<string, object>
+                        {
+                            ["path"] = path,
+                            ["extended"] = extended,
+                            ["url"] = "http://printfarmer-api:5088" // Add URL parameter
+                        };
+
+                        jsonContent = JsonSerializer.Serialize(jsonRpcRequest);
+                        using StringContent retryContent = new(jsonContent, Encoding.UTF8, "application/json");
+
+                        using HttpResponseMessage retryResp = await _http.PostAsync(jsonRpcUri, retryContent, cts.Token);
+                        if (!retryResp.IsSuccessStatusCode)
+                        {
+                            return null;
+                        }
+
+                        responseJson = await retryResp.Content.ReadAsStringAsync(cts.Token);
+                        jsonRpcResponse = JsonSerializer.Deserialize<JsonRpcResponse>(responseJson);
+
+                        if (jsonRpcResponse?.Error != null)
+                        {
+                            _logger.LogDebug($"JSON-RPC error for {jsonRpcRequest.Method}: {jsonRpcResponse.Error.Message} (Code: {jsonRpcResponse.Error.Code})");
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
+
+                if (jsonRpcResponse?.Result == null)
+                {
+                    return null;
+                }
+
+                // Deserialize the result to MoonrakerDirectoryInfo
+                string? resultJson = jsonRpcResponse.Result.ToString();
+                MoonrakerDirectoryInfo? directoryInfo = JsonSerializer.Deserialize<MoonrakerDirectoryInfo>(resultJson ?? "{}");
+                return directoryInfo;
+            }
+            catch (JsonException jex)
+            {
+                _logger.LogDebug(jex, $"Failed to parse JSON response: {jex.Message}");
+                return null;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            return null;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Catch any remaining exceptions (JSON serialization errors, etc.) to ensure method resilience
+            _logger.LogDebug(ex, $"Failed to get directory from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Create a new directory
+    /// </summary>
+    public async Task<DirectoryCreateResponse?> CreateDirectoryAsync(string baseUrl, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/directory");
+            DirectoryCreateRequest request = new()
+            { Path = path };
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<DirectoryCreateResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryCreateResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Delete a file or directory
+    /// </summary>
+    public async Task<bool> DeleteFileOrDirectoryAsync(string baseUrl, string path, bool force = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/directory?path={encodedPath}&force={(force ? "true" : "false")}");
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Move or rename a file/directory
+    /// </summary>
+    public async Task<bool> MoveFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/move");
+            FileMoveRequest request = new()
+            { Source = source, Dest = dest };
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Copy a file
+    /// </summary>
+    public async Task<bool> CopyFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/copy");
+            FileCopyRequest request = new()
+            { Source = source, Dest = dest };
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get file metadata for G-Code files
+    /// </summary>
+    public async Task<GCodeMetadata?> GetFileMetadataAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/metadata?filename={encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<GCodeMetadata>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<GCodeMetadata>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets thumbnail information for a G-code file using Moonraker's dedicated thumbnails API endpoint.
+    /// This is more efficient than GetFileMetadataAsync when only thumbnails are needed.
+    /// </summary>
+    public async Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/thumbnails?filename={encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return new List<(int, int, string)>();
+            }
+
+            MoonrakerResponse<List<ThumbnailInfo>>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<List<ThumbnailInfo>>>(cancellationToken: cts.Token);
+            if (response?.Result == null || response.Result.Count == 0)
+            {
+                return new List<(int, int, string)>();
+            }
+
+            return response.Result
+                .Select(t => (t.Width, t.Height, t.RelativePath))
+                .ToList();
+        }
+        catch
+        {
+            return new List<(int, int, string)>();
+        }
+    }
+
+    /// <summary>
+    /// Start a metadata scan for a file
+    /// </summary>
+    public async Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/metascan");
+            MetadataScanRequest request = new()
+            { Filename = filename };
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            return false;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, $"Failed to start metadata scan for {filename} at {baseUrl}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get a file thumbnail
+    /// </summary>
+    public async Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/thumbs/{encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the URL of the largest available thumbnail for a G-code file using the Moonraker thumbnails API.
+    /// This endpoint is more efficient than GetFileMetadataAsync when only thumbnail information is needed.
+    /// The response returns thumbnail metadata including relative paths, allowing efficient direct construction of URLs.
+    /// </summary>
+    public async Task<string?> GetFileThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/thumbnails?filename={encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            // Parse the response which contains thumbnail metadata array
+            MoonrakerResponse<ThumbnailInfo[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<ThumbnailInfo[]>>(cancellationToken: cts.Token);
+            if (response?.Result == null || response.Result.Length == 0)
+            {
+                return null;
+            }
+
+            // Find the largest thumbnail by pixel count
+            var largestThumbnail = response.Result
+                .OrderByDescending(t => t.Width * t.Height)
+                .FirstOrDefault();
+
+            return largestThumbnail?.RelativePath;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Download a file from Moonraker
+    /// </summary>
+    /// <remarks>
+    /// Moonraker filenames come with "gcodes/" prefix (e.g., "gcodes/file.gcode").
+    /// The URL constructed is: /server/files/gcodes/...
+    /// </remarks>
+    public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        _logger.LogInformation($"[Moonraker] DownloadFileAsync starting: filename='{filename}', baseUrl='{baseUrl}'");
+
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(900)); // 15 minutes for large file downloads
+
+            // Encode each path segment separately to preserve forward slashes
+            // e.g., "folder/subfolder/file.gcode" -> "folder/subfolder/file.gcode" (only special chars encoded)
+            string[] pathSegments = filename.Split('/');
+            string encodedFilename = string.Join("/", pathSegments.Select(Uri.EscapeDataString));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
+
+            _logger.LogDebug($"[Moonraker] Downloading file from URL: {uri}");
+
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"[Moonraker] Download failed: StatusCode={resp.StatusCode}, ReasonPhrase='{resp.ReasonPhrase}', URL='{uri}'");
+                return null;
+            }
+
+            byte[] content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+
+            if (content == null || content.Length == 0)
+            {
+                _logger.LogWarning($"[Moonraker] Download returned empty content for file '{filename}'. StatusCode={resp.StatusCode}, ContentLength={resp.Content.Headers.ContentLength}, ContentType={resp.Content.Headers.ContentType}");
+                return null;
+            }
+
+            _logger.LogInformation($"[Moonraker] Successfully downloaded file '{filename}': {content.Length} bytes");
+            return content;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, $"[Moonraker] Download timeout for file '{filename}' after 30 seconds");
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, $"[Moonraker] HTTP error downloading file '{filename}': {ex.Message}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Moonraker] Unexpected error downloading file '{filename}': {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Upload a file to a specific root directory
+    /// </summary>
+    public async Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content,
+        bool print = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for uploads
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/upload");
+
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(content);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", filename);
+            formContent.Add(new StringContent(root), "root");
+
+            if (print)
+            {
+                formContent.Add(new StringContent("true"), "print");
+            }
+
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<FileUploadResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Upload a file with path (can create subdirectories)
+    /// </summary>
+    public async Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content,
+        bool print = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/files/upload");
+
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(content);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            string filename = Path.GetFileName(path);
+            formContent.Add(streamContent, "file", filename);
+            formContent.Add(new StringContent(path), "path");
+
+            if (print)
+            {
+                formContent.Add(new StringContent("true"), "print");
+            }
+
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<FileUploadResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<FileUploadResponse>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get detailed file list with extended information
+    /// </summary>
+    public async Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(string baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            Uri baseUri = new(baseUrl);
+            string relative = $"server/files/list?root={Uri.EscapeDataString(root)}&extended=true";
+            if (!string.IsNullOrEmpty(path))
+            {
+                relative += $"&path={Uri.EscapeDataString(path)}";
+            }
+
+            Uri uri = new(baseUri, relative);
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return [];
+            }
+
+            MoonrakerResponse<MoonrakerFileInfo[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerFileInfo[]>>(cancellationToken: cts.Token);
+            return response?.Result ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Delete a specific file
+    /// </summary>
+    public async Task<bool> DeleteFileAsync(string baseUrl, string path, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedPath = Uri.EscapeDataString(path);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedPath}");
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get file contents as stream
+    /// </summary>
+    public async Task<Stream?> GetFileStreamAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            // Read the content into a MemoryStream to ensure proper disposal
+            byte[] content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            return new MemoryStream(content);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // ===== HISTORY API OPERATIONS =====
+
+    /// <summary>
+    /// List print history jobs with optional filtering parameters
+    /// </summary>
+    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            string relative = "server/history/list";
+            List<string> queryParams = new();
+
+            if (limit.HasValue)
+            {
+                queryParams.Add($"limit={limit.Value}");
+            }
+
+            if (start.HasValue)
+            {
+                queryParams.Add($"start={start.Value}");
+            }
+
+            if (since.HasValue)
+            {
+                queryParams.Add($"since={((DateTimeOffset)since.Value).ToUnixTimeSeconds()}");
+            }
+
+            if (before.HasValue)
+            {
+                queryParams.Add($"before={((DateTimeOffset)before.Value).ToUnixTimeSeconds()}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(order))
+            {
+                queryParams.Add($"order={Uri.EscapeDataString(order)}");
+            }
+
+            if (queryParams.Count > 0)
+            {
+                relative += "?" + string.Join("&", queryParams);
+            }
+
+            Uri uri = new(baseUri, relative);
+            _logger.LogInformation($"[Moonraker] Fetching history from {uri}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"[Moonraker] History API returned {resp.StatusCode} from {uri}");
+                return null;
+            }
+
+            string content = await resp.Content.ReadAsStringAsync(cts.Token);
+            _logger.LogDebug($"[Moonraker] History response: {content.Substring(0, Math.Min(200, content.Length))}...");
+            MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
+            if (response?.Result == null)
+            {
+                _logger.LogWarning($"[Moonraker] History response deserialization returned null");
+                return null;
+            }
+            _logger.LogInformation($"[Moonraker] Successfully fetched {response.Result.Count} history items");
+            return response.Result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("History request cancelled by user");
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning(ex, $"[Moonraker] History request timed out for {baseUrl}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Moonraker] Failed to get history list from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get a specific history job by job ID
+    /// </summary>
+    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get history job {jobId} from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Delete a specific history job by job ID
+    /// </summary>
+    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
+            using HttpResponseMessage resp = await _http.DeleteAsync(uri, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, $"Failed to delete history job {jobId} from {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get history totals and statistics
+    /// </summary>
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/history/totals");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<HistoryTotals>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryTotals>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, $"Failed to get history totals from {baseUrl}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reset history totals (clears all statistics)
+    /// </summary>
+    public async Task<bool> ResetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/history/reset_totals");
+            using HttpResponseMessage resp = await _http.PostAsync(uri, null, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, $"Failed to reset history totals from {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    // ===== SPOOLMAN API OPERATIONS =====
+
+    /// <summary>
+    /// Get Spoolman status and connection information
+    /// </summary>
+    public async Task<SpoolmanStatus?> GetSpoolmanStatusAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/spoolman/status");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<SpoolmanStatus>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanStatus>>(cancellationToken: cts.Token);
+            return response?.Result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get the currently active spool ID
+    /// </summary>
+    public async Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/spoolman/spool_id");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<SpoolmanSpoolIdResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<SpoolmanSpoolIdResponse>>(cancellationToken: cts.Token);
+            return response?.Result?.SpoolId;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Set the active spool ID in Spoolman
+    /// </summary>
+    public async Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/spoolman/spool_id");
+            SpoolmanSpoolIdRequest request = new()
+            { SpoolId = spoolId };
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Proxy a request to the Spoolman server
+    /// </summary>
+    public async Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path,
+        string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for proxy requests
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/spoolman/proxy");
+            SpoolmanProxyRequest request = new()
+            {
+                RequestMethod = method,
+                Path = path,
+                Query = query,
+                Body = body,
+                UseV2Response = useV2Response
+            };
+
+            using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await resp.Content.ReadAsStringAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get all spools from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific spool by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/spool/{spoolId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new spool in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanSpoolAsync(string baseUrl, object spoolData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/spool", body: spoolData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a spool in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanSpoolAsync(string baseUrl, int spoolId, object spoolData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: spoolData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a spool from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/spool/{spoolId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get all filaments from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanFilamentsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific filament by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanFilamentByIdAsync(string baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/filament/{filamentId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new filament in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanFilamentAsync(string baseUrl, object filamentData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/filament", body: filamentData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a filament in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanFilamentAsync(string baseUrl, int filamentId, object filamentData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/filament/{filamentId}", body: filamentData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a filament from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/filament/{filamentId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get all vendors from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanVendorsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/vendor", ct: ct);
+    }
+
+    /// <summary>
+    /// Get a specific vendor by ID from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanVendorByIdAsync(string baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/vendor/{vendorId}", ct: ct);
+    }
+
+    /// <summary>
+    /// Create a new vendor in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> CreateSpoolmanVendorAsync(string baseUrl, object vendorData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/vendor", body: vendorData, ct: ct);
+    }
+
+    /// <summary>
+    /// Update a vendor in Spoolman via proxy
+    /// </summary>
+    public async Task<string?> UpdateSpoolmanVendorAsync(string baseUrl, int vendorId, object vendorData, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/vendor/{vendorId}", body: vendorData, ct: ct);
+    }
+
+    /// <summary>
+    /// Delete a vendor from Spoolman via proxy
+    /// </summary>
+    public async Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/vendor/{vendorId}", ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Use a specific amount of filament from the active spool
+    /// </summary>
+    public async Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default)
+    {
+        var body = new { used_length = length };
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "PUT", "/api/v1/spool/use", body: body, ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get Spoolman server information via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanInfoAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/info", ct: ct);
+    }
+
+    /// <summary>
+    /// Get Spoolman health status via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanHealthAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/health", ct: ct);
+    }
+
+    /// <summary>
+    /// Search spools in Spoolman with optional filters via proxy
+    /// </summary>
+    public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
+        bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        List<string> queryParams = new();
+        if (!string.IsNullOrEmpty(query))
+        {
+            queryParams.Add($"search={Uri.EscapeDataString(query)}");
+        }
+
+        if (allowArchived.HasValue)
+        {
+            queryParams.Add($"allow_archived={(allowArchived.Value ? "true" : "false")}");
+        }
+
+        if (limit.HasValue)
+        {
+            queryParams.Add($"limit={limit.Value}");
+        }
+
+        if (offset.HasValue)
+        {
+            queryParams.Add($"offset={offset.Value}");
+        }
+
+        string? queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", query: queryString, ct: ct);
+    }
+
+    /// <summary>
+    /// Search filaments in Spoolman with optional filters via proxy
+    /// </summary>
+    public async Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
+        int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        List<string> queryParams = new();
+        if (!string.IsNullOrEmpty(query))
+        {
+            queryParams.Add($"search={Uri.EscapeDataString(query)}");
+        }
+
+        if (limit.HasValue)
+        {
+            queryParams.Add($"limit={limit.Value}");
+        }
+
+        if (offset.HasValue)
+        {
+            queryParams.Add($"offset={offset.Value}");
+        }
+
+        string? queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : null;
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", query: queryString, ct: ct);
+    }
+
+    /// <summary>
+    /// Archive/unarchive a spool in Spoolman via proxy
+    /// </summary>
+    public async Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default)
+    {
+        var body = new { archived };
+        string? result = await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: body, ct: ct);
+        return result != null;
+    }
+
+    /// <summary>
+    /// Get statistics from Spoolman via proxy
+    /// </summary>
+    public async Task<string?> GetSpoolmanStatsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/statistics", ct: ct);
+    }
+
+    /// <summary>
+    /// Backup Spoolman database via proxy
+    /// </summary>
+    public async Task<string?> BackupSpoolmanAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/backup", ct: ct);
+    }
+
+    /// <summary>
+    /// Get external database integrations status from Spoolman via proxy  
+    /// </summary>
+    public async Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default)
+    {
+        return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/external", ct: ct);
+    }
+
+    // Explicit interface implementations for capability markers
+
+    /// <summary>
+    /// ISupportsFileDownload implementation - downloads a file from the printer.
+    /// </summary>
+    async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct)
+        => await DownloadFileAsync(baseUrl, filePath, ct);
+
+    /// <summary>
+    /// ISupportsFileList implementation - gets the list of files on the printer.
+    /// </summary>
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        // Use the new method that extracts file metadata including size
+        return await GetFileListWithMetadataAsync(baseUrl, ct);
+    }
+
+#pragma warning disable S1006 // Default parameters in explicit interface implementation
+#pragma warning disable CA1033 // Type implements interfaces that specify default parameter values
+
+    /// <summary>
+    /// ISupportsFileUpload implementation - uploads a G-code file to the printer.
+    /// </summary>
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+        => await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
+
+    /// <summary>
+    /// ISupportsStartPrint implementation - starts a print job for the specified file.
+    /// </summary>
+    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+        => await StartPrintAsync(baseUrl, fileName, ct);
+
+    /// <summary>
+    /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
+    /// </summary>
+    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await PauseAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await ResumeAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await EmergencyStopAsync(baseUrl, ct);
+
+    /// <summary>
+    /// ISupportsCamera implementations - get camera stream and snapshot URLs.
+    /// </summary>
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetCameraStreamUrlAsync(baseUrl, frontendPort, ct: ct);
+
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetCameraSnapshotUrlAsync(baseUrl, ct: ct);
+
+    /// <summary>
+    /// ISupportsConfiguredCameraDetection implementation - detects actually configured cameras.
+    /// This queries the Moonraker API to find cameras that are actually present on the printer.
+    /// Returns (null, null) if no cameras are found, preventing false positives.
+    /// </summary>
+    async Task<(string? streamUrl, string? snapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        // Query the actual API to get configured camera URLs
+        (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
+        return (stream, snapshot);
+    }
+
+    /// <summary>
+    /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.
+    /// </summary>
+    async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default)
+    {
+        var metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        var result = new PrinterFileMetadata
+        {
+            FilePath = filePath,
+            PrintTime = metadata.EstimatedTime != null ? metadata.EstimatedTime.Value / 60.0 : null,
+            LayerHeight = metadata.LayerHeight,
+            FirstLayerExtrTemp = metadata.FirstLayerExtrTemp,
+            FirstLayerBedTemp = metadata.FirstLayerBedTemp,
+            ObjectHeight = metadata.ObjectHeight,
+            ExtrUsedFilament = metadata.FilamentTotal
+        };
+
+        // Extract thumbnail information
+        if (metadata.Thumbnails != null && metadata.Thumbnails.Length > 0)
+        {
+            result.Thumbnails = metadata.Thumbnails
+                .Where(t => !string.IsNullOrEmpty(t.RelativePath))
+                .Select(t => (t.Width, t.Height, t.RelativePath))
+                .ToList();
+        }
+
+        return result;
+    }
+
+
+    /// <summary>
+    /// ISupportsMovement implementations - home and move operations.
+    /// </summary>
+    async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await SendHomeAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsMovement.SendHomeAsync(string baseUrl, CancellationToken ct = default)
+        => await SendHomeAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsMovement.HomeXYAsync(string baseUrl, CancellationToken ct = default)
+        => await HomeXYAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsMovement.HomeZAsync(string baseUrl, CancellationToken ct = default)
+        => await HomeZAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsMovement.MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, string? apiKey = null, CancellationToken ct = default)
+        => await MoveAsync(baseUrl, x, y, z, f, ct: ct);
+
+    async Task<bool> ISupportsMovement.MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+        => await MoveToAsync(baseUrl, x, y, z, f, ct);
+
+    /// <summary>
+    /// ISupportsTemperatureControl implementation - set temperatures.
+    /// </summary>
+    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
+        => await SetTempsAsync(baseUrl, hotendTemp, bedTemp, ct);
+
+    /// <summary>
+    /// ISupportsHistory implementations - get and manage print history.
+    /// </summary>
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryListAsync(baseUrl, limit, start, ct: ct);
+
+    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryJobAsync(baseUrl, jobId, ct);
+
+    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryTotalsAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await DeleteHistoryJobAsync(baseUrl, jobId, ct);
+
+    /// <summary>
+    /// ISupportsPrinterInformation implementation - get detailed printer information.
+    /// </summary>
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        var info = await GetPrinterInfoAsync(baseUrl, ct);
+        return new StandardPrinterInfo
+        {
+            Name = info?.Hostname ?? "Unknown",
+            Firmware = info?.SoftwareVersion ?? "Unknown",
+            Model = info?.ConfigFile ?? "Unknown"
+        };
+    }
+#pragma warning restore CA1033
+#pragma warning restore S1006
+
+    // ========== URI OVERLOADS ==========
+    // These methods accept Uri objects instead of string baseUrl for analyzer CA1054 compliance
+
+    // Status and Job Information
+    public Task<PrinterStatus> GetStatusAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetStatusAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetPrinterInfoAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<PrinterJob?> GetJobAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetJobAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCompositeStatusAsync(baseUrl.ToString(), ct);
+    }
+
+    // Camera Operations
+    public Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetCameraSnapshotAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetConfiguredCameraUrlsAsync(baseUrl.ToString(), frontendPort, ct);
+    }
+
+    // Printer Control Operations
+    public Task<bool> SendHomeAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SendHomeAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> HomeXYAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return HomeXYAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> HomeZAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return HomeZAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> SetTempsAsync(Uri baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SetTempsAsync(baseUrl.ToString(), hotend, bed, ct);
+    }
+
+    public Task<bool> MoveAsync(Uri baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return MoveAsync(baseUrl.ToString(), x, y, z, f, ct);
+    }
+
+    public Task<bool> MoveToAsync(Uri baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return MoveToAsync(baseUrl.ToString(), x, y, z, f, ct);
+    }
+
+    // Print Job Control
+    public Task<bool> PauseAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return PauseAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> ResumeAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return ResumeAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> EmergencyStopAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return EmergencyStopAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(fileName);
+        return StartPrintAsync(baseUrl.ToString(), fileName, ct);
+    }
+
+    // File Operations
+    public Task<string[]> GetFileListAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetFileListAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<FileRoot[]> GetFileRootsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetFileRootsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(path);
+        return GetDirectoryAsync(baseUrl.ToString(), path, extended, ct);
+    }
+
+    public Task<DirectoryCreateResponse?> CreateDirectoryAsync(Uri baseUrl, string path, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(path);
+        return CreateDirectoryAsync(baseUrl.ToString(), path, ct);
+    }
+
+    public Task<bool> DeleteFileOrDirectoryAsync(Uri baseUrl, string path, bool force = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(path);
+        return DeleteFileOrDirectoryAsync(baseUrl.ToString(), path, force, ct);
+    }
+
+    public Task<bool> MoveFileAsync(Uri baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(dest);
+        return MoveFileAsync(baseUrl.ToString(), source, dest, ct);
+    }
+
+    public Task<bool> CopyFileAsync(Uri baseUrl, string source, string dest, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(dest);
+        return CopyFileAsync(baseUrl.ToString(), source, dest, ct);
+    }
+
+    public Task<bool> DeleteFileAsync(Uri baseUrl, string path, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(path);
+        return DeleteFileAsync(baseUrl.ToString(), path, ct);
+    }
+
+    public Task<Stream?> GetFileStreamAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileStreamAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    // File Metadata and Content
+    public Task<GCodeMetadata?> GetFileMetadataAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileMetadataAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<bool> StartMetadataScanAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return StartMetadataScanAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileThumbnailsAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<byte[]?> GetFileThumbnailAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileThumbnailAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<string?> GetFileThumbnailUrlAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileThumbnailUrlAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<byte[]?> DownloadFileAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return DownloadFileAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(Uri baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetDetailedFileListAsync(baseUrl.ToString(), root, path, ct);
+    }
+
+    // File Uploads
+    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(fileName);
+        ArgumentNullException.ThrowIfNull(fileContent);
+        return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, ct);
+    }
+
+    public Task<FileUploadResponse?> UploadFileAsync(Uri baseUrl, string root, string filename, Stream content, bool print = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(filename);
+        ArgumentNullException.ThrowIfNull(content);
+        return UploadFileAsync(baseUrl.ToString(), root, filename, content, print, ct);
+    }
+
+    public Task<FileUploadResponse?> UploadFileWithPathAsync(Uri baseUrl, string path, Stream content, bool print = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(content);
+        return UploadFileWithPathAsync(baseUrl.ToString(), path, content, print, ct);
+    }
+
+    // History Operations
+    public Task<HistoryListResponse?> GetHistoryListAsync(Uri baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetHistoryListAsync(baseUrl.ToString(), limit, start, since, before, order, ct);
+    }
+
+    public Task<HistoryJob?> GetHistoryJobAsync(Uri baseUrl, string jobId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(jobId);
+        return GetHistoryJobAsync(baseUrl.ToString(), jobId, ct);
+    }
+
+    public Task<bool> DeleteHistoryJobAsync(Uri baseUrl, string jobId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(jobId);
+        return DeleteHistoryJobAsync(baseUrl.ToString(), jobId, ct);
+    }
+
+    public Task<HistoryTotals?> GetHistoryTotalsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetHistoryTotalsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> ResetHistoryTotalsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return ResetHistoryTotalsAsync(baseUrl.ToString(), ct);
+    }
+
+    // Spoolman Integration
+    public Task<SpoolmanStatus?> GetSpoolmanStatusAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanStatusAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<int?> GetSpoolmanActiveSpoolAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanActiveSpoolAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<bool> SetSpoolmanActiveSpoolAsync(Uri baseUrl, int? spoolId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SetSpoolmanActiveSpoolAsync(baseUrl.ToString(), spoolId, ct);
+    }
+
+    public Task<string?> SpoolmanProxyRequestAsync(Uri baseUrl, string method, string path, string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(method);
+        ArgumentNullException.ThrowIfNull(path);
+        return SpoolmanProxyRequestAsync(baseUrl.ToString(), method, path, query, body, useV2Response, ct);
+    }
+
+    // Spoolman Spool Operations
+    public Task<string?> GetSpoolmanSpoolsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanSpoolsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> GetSpoolmanSpoolByIdAsync(Uri baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanSpoolByIdAsync(baseUrl.ToString(), spoolId, ct);
+    }
+
+    public Task<string?> CreateSpoolmanSpoolAsync(Uri baseUrl, object spoolData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(spoolData);
+        return CreateSpoolmanSpoolAsync(baseUrl.ToString(), spoolData, ct);
+    }
+
+    public Task<string?> UpdateSpoolmanSpoolAsync(Uri baseUrl, int spoolId, object spoolData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(spoolData);
+        return UpdateSpoolmanSpoolAsync(baseUrl.ToString(), spoolId, spoolData, ct);
+    }
+
+    public Task<bool> DeleteSpoolmanSpoolAsync(Uri baseUrl, int spoolId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DeleteSpoolmanSpoolAsync(baseUrl.ToString(), spoolId, ct);
+    }
+
+    // Spoolman Filament Operations
+    public Task<string?> GetSpoolmanFilamentsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanFilamentsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> GetSpoolmanFilamentByIdAsync(Uri baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanFilamentByIdAsync(baseUrl.ToString(), filamentId, ct);
+    }
+
+    public Task<string?> CreateSpoolmanFilamentAsync(Uri baseUrl, object filamentData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filamentData);
+        return CreateSpoolmanFilamentAsync(baseUrl.ToString(), filamentData, ct);
+    }
+
+    public Task<string?> UpdateSpoolmanFilamentAsync(Uri baseUrl, int filamentId, object filamentData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filamentData);
+        return UpdateSpoolmanFilamentAsync(baseUrl.ToString(), filamentId, filamentData, ct);
+    }
+
+    public Task<bool> DeleteSpoolmanFilamentAsync(Uri baseUrl, int filamentId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DeleteSpoolmanFilamentAsync(baseUrl.ToString(), filamentId, ct);
+    }
+
+    // Spoolman Vendor Operations
+    public Task<string?> GetSpoolmanVendorsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanVendorsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> GetSpoolmanVendorByIdAsync(Uri baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanVendorByIdAsync(baseUrl.ToString(), vendorId, ct);
+    }
+
+    public Task<string?> CreateSpoolmanVendorAsync(Uri baseUrl, object vendorData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(vendorData);
+        return CreateSpoolmanVendorAsync(baseUrl.ToString(), vendorData, ct);
+    }
+
+    public Task<string?> UpdateSpoolmanVendorAsync(Uri baseUrl, int vendorId, object vendorData, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(vendorData);
+        return UpdateSpoolmanVendorAsync(baseUrl.ToString(), vendorId, vendorData, ct);
+    }
+
+    public Task<bool> DeleteSpoolmanVendorAsync(Uri baseUrl, int vendorId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DeleteSpoolmanVendorAsync(baseUrl.ToString(), vendorId, ct);
+    }
+
+    // Spoolman Utility and Advanced Operations
+    public Task<bool> UseSpoolmanFilamentAsync(Uri baseUrl, double length, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return UseSpoolmanFilamentAsync(baseUrl.ToString(), length, ct);
+    }
+
+    public Task<string?> GetSpoolmanInfoAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanInfoAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> GetSpoolmanHealthAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanHealthAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> SearchSpoolmanSpoolsAsync(Uri baseUrl, string? query = null, bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SearchSpoolmanSpoolsAsync(baseUrl.ToString(), query, allowArchived, limit, offset, ct);
+    }
+
+    public Task<string?> SearchSpoolmanFilamentsAsync(Uri baseUrl, string? query = null, int? limit = null, int? offset = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SearchSpoolmanFilamentsAsync(baseUrl.ToString(), query, limit, offset, ct);
+    }
+
+    public Task<bool> ArchiveSpoolmanSpoolAsync(Uri baseUrl, int spoolId, bool archived = true, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return ArchiveSpoolmanSpoolAsync(baseUrl.ToString(), spoolId, archived, ct);
+    }
+
+    public Task<string?> GetSpoolmanStatsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanStatsAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> BackupSpoolmanAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return BackupSpoolmanAsync(baseUrl.ToString(), ct);
+    }
+
+    public Task<string?> GetSpoolmanIntegrationsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetSpoolmanIntegrationsAsync(baseUrl.ToString(), ct);
+    }
+
+    /// <summary>
+    /// Response model for thumbnail information from Moonraker API
+    /// </summary>
+    private record ThumbnailInfo(
+        int Width,
+        int Height,
+        long Size,
+        [property: System.Text.Json.Serialization.JsonPropertyName("thumbnail_path")]
+        string RelativePath);
+}

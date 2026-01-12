@@ -1,12 +1,15 @@
-﻿using System.Globalization;
+﻿using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services;
 
@@ -26,10 +29,135 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return new SpoolmanConfigDto(settings.BaseUrl);
     }
 
+    public async Task<SpoolmanProbeResult> ProbeAsync(string candidateBaseUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(candidateBaseUrl))
+        {
+            return new SpoolmanProbeResult(false, Message: "BaseUrl is required");
+        }
+
+        string raw = candidateBaseUrl.Trim();
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = "http://" + raw;
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out Uri? baseUri))
+        {
+            return new SpoolmanProbeResult(false, Message: "Invalid URL");
+        }
+
+        // Use provided URL (normalization is lightweight here)
+        string normalized = UrlNormalizer.NormalizeBaseUrl(raw);
+        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" };
+
+        foreach (string path in probePaths)
+        {
+            try
+            {
+                using HttpRequestMessage req = new(HttpMethod.Get, normalized + path);
+                using HttpResponseMessage resp = await http.SendAsync(req, ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    string? version = null;
+                    try
+                    {
+                        using Stream stream = await resp.Content.ReadAsStreamAsync(ct);
+                        using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                        JsonElement root = doc.RootElement;
+                        if (root.TryGetProperty("version", out JsonElement vProp) && vProp.ValueKind == JsonValueKind.String)
+                        {
+                            version = vProp.GetString();
+                        }
+                        else if (root.TryGetProperty("spoolman_version", out JsonElement svProp) && svProp.ValueKind == JsonValueKind.String)
+                        {
+                            version = svProp.GetString();
+                        }
+                    }
+                    catch { }
+
+                    return new SpoolmanProbeResult(true, NormalizedUrl: normalized, EndpointTried: path, StatusCode: (int)resp.StatusCode, Version: version);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (path == probePaths[^1])
+                {
+                    (string? category, string? message) = CategorizeException(ex);
+                    logger.LogError(ex, "Probe failed for {Url}", candidateBaseUrl);
+                    return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: message, ErrorCategory: category);
+                }
+            }
+        }
+
+        return new SpoolmanProbeResult(false, NormalizedUrl: normalized, Message: "Probe endpoints failed");
+    }
+
+    public async Task<SpoolmanProbeResult> HealthProbeAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return new SpoolmanProbeResult(false, Message: "Spoolman not configured");
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" };
+        foreach (string p in probePaths)
+        {
+            try
+            {
+                using HttpRequestMessage req = new(HttpMethod.Get, baseUrl + p);
+                using HttpResponseMessage resp = await http.SendAsync(req, ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    return new SpoolmanProbeResult(true, NormalizedUrl: baseUrl, EndpointTried: p, StatusCode: (int)resp.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (p == probePaths[^1])
+                {
+                    logger.LogError(ex, "Health probe failed for configured Spoolman");
+                    return new SpoolmanProbeResult(false, NormalizedUrl: baseUrl, EndpointTried: p, StatusCode: null, Version: null, Message: ex.Message);
+                }
+            }
+        }
+
+        return new SpoolmanProbeResult(false, NormalizedUrl: baseUrl, Message: "Probe endpoints failed");
+    }
+
+    private static (string? category, string? message) CategorizeException(Exception ex)
+    {
+        if (ex is TaskCanceledException or OperationCanceledException)
+        {
+            return ("timeout", "Connection timed out");
+        }
+        if (ex is HttpRequestException hre)
+        {
+            if (hre.InnerException is System.Net.Sockets.SocketException se)
+            {
+                return se.SocketErrorCode switch
+                {
+                    System.Net.Sockets.SocketError.HostNotFound => ("dns_failure", "Host could not be resolved"),
+                    System.Net.Sockets.SocketError.ConnectionRefused => ("connection_refused", "Connection refused"),
+                    System.Net.Sockets.SocketError.TimedOut => ("timeout", "Connection timed out"),
+                    _ => ("network_error", hre.Message)
+                };
+            }
+            return ("http_error", hre.Message);
+        }
+        if (ex is System.Security.Authentication.AuthenticationException)
+        {
+            return ("tls_error", "TLS/SSL negotiation failed");
+        }
+        return ("unknown", ex.Message);
+    }
+
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        string? baseUrl = NormalizeBaseUrl(config.BaseUrl);
+        string? baseUrl = UrlNormalizer.NormalizeBaseUrlNullable(config.BaseUrl);
 
         SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
         settings.BaseUrl = baseUrl ?? string.Empty;
@@ -41,22 +169,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
         settings.BaseUrl = string.Empty;
         settingsService.Save(settings);
-    }
-
-    private static string? NormalizeBaseUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return url; // allow null/empty to propagate (controller returns 200 with success=false)
-        }
-
-        string t = url.Trim();
-        if (!t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            t = "http://" + t;
-        }
-        return t.TrimEnd('/');
     }
 
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
@@ -943,7 +1055,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
         string url = $"http://{ip}:7912";
-        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        System.Diagnostics.Stopwatch stopwatch = Stopwatch.StartNew();
 
         try
         {

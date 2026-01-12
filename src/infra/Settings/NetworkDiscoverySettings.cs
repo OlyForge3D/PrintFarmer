@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Settings;
@@ -25,11 +26,6 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
 
-    [SettingDisplay(Name = "Ports", Description = "List of ports to scan.", InputType = SettingInputType.Array, IsMulti = true)]
-    [JsonPropertyName("ports")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
-    public IList<int> Ports { get; set; } = new List<int> { 80 };
-
     [SettingDisplay(Name = "Client Timeout (ms)", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
     [JsonPropertyName("clientTimeoutMs")]
     public int ClientTimeoutMs { get; set; } = 200; // Valid range: 50-60000
@@ -46,15 +42,37 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [JsonPropertyName("maxRetries")]
     public int MaxRetries { get; set; } = 2; // Valid range: 0-10
 
+    /// <summary>
+    /// Enable or disable the background periodic discovery service.
+    /// When enabled, the system will automatically scan for new printers at the configured interval.
+    /// </summary>
+    [SettingDisplay(Name = "Enable Background Scanning", Description = "Automatically scan for new printers in the background.", InputType = SettingInputType.Boolean)]
+    [JsonPropertyName("backgroundScanEnabled")]
+    public bool BackgroundScanEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Interval between background discovery scans in minutes.
+    /// </summary>
+    [SettingDisplay(Name = "Scan Interval (minutes)", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
+    [JsonPropertyName("backgroundScanIntervalMinutes")]
+    public int BackgroundScanIntervalMinutes { get; set; } = 30;
+
+    /// <summary>
+    /// UTC timestamp of the last heartbeat from the discovery service.
+    /// Used to determine if the discovery service is actively running.
+    /// </summary>
+    [JsonPropertyName("lastHeartbeat")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? LastHeartbeat { get; set; }
+
     public void Validate()
     {
         EnsureUniqueSubnets();
-        EnsureUniquePorts();
         if (DiscoverySubnets == null || DiscoverySubnets.Count == 0 || DiscoverySubnets.Any(string.IsNullOrWhiteSpace))
         {
             throw new ValidationException("At least one valid subnet is required.");
         }
-        foreach (var subnet in DiscoverySubnets)
+        foreach (string subnet in DiscoverySubnets)
         {
             if (!IsValidCidr(subnet))
             {
@@ -69,30 +87,13 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return;
         }
-        var unique = DiscoverySubnets.Distinct().ToList();
+        List<string> unique = DiscoverySubnets.Distinct().ToList();
         if (unique.Count != DiscoverySubnets.Count)
         {
             DiscoverySubnets.Clear();
-            foreach (var subnet in unique)
+            foreach (string? subnet in unique)
             {
                 DiscoverySubnets.Add(subnet);
-            }
-        }
-    }
-
-    private void EnsureUniquePorts()
-    {
-        if (Ports == null)
-        {
-            return;
-        }
-        var unique = Ports.Distinct().ToList();
-        if (unique.Count != Ports.Count)
-        {
-            Ports.Clear();
-            foreach (var port in unique)
-            {
-                Ports.Add(port);
             }
         }
     }
@@ -104,12 +105,12 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return false;
         }
-        var parts = cidr.Split('/');
+        string[] parts = cidr.Split('/');
         if (parts.Length != 2)
         {
             return false;
         }
-        if (!System.Net.IPAddress.TryParse(parts[0], out _))
+        if (!IPAddress.TryParse(parts[0], out _))
         {
             return false;
         }

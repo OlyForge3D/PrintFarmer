@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- Unified build configuration for all projects in /src -->
+  <!-- This is the single source of truth for all .NET project settings -->
+
+  <PropertyGroup>
+    <!-- Common framework and compiler settings for all /src projects -->
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    
+    <!-- Analysis settings -->
+    <AnalysisMode>All</AnalysisMode>
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
+    <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
+    <WarningsAsErrors>Nullable</WarningsAsErrors>
+
+    <!-- Unified warning suppressions - organized by category -->
+    <!-- Code Architecture -->
+    <!-- CA1812: Avoid uninstantiated internal classes (DI instantiated) -->
+    <!-- CA1515: Make types internal (API types need public visibility) -->
+    <!-- CA1822: Member can be static (low priority, readability preference) -->
+    <!-- CA1852: Seal types (minor optimization, maintenance burden) -->
+    <!-- CA1814: Prefer jagged arrays (2D arrays intentional for algorithms) -->
+    <!-- Exception Handling -->
+    <!-- CA1031: Catch specific exceptions (intentional catch-all handlers) -->
+    <!-- S108: Empty code block (intentional silent catch for optional ops) -->
+    <!-- S2486: Handle exception or comment (intentional silent catch) -->
+    <!-- Logging -->
+    <!-- CA1848: Use LoggerMessage delegates (standard logging consistently used) -->
+    <!-- S6667: Pass exception to logging (intentional in some cases) -->
+    <!-- Async Patterns -->
+    <!-- CA2007: ConfigureAwait (ASP.NET Core doesn't need this) -->
+    <!-- CA2016: Forward CancellationToken (not always appropriate) -->
+    <!-- S6966: Await RunAsync (startup pattern) -->
+    <!-- String/Culture (machine-readable data uses invariant) -->
+    <!-- CA1305/CA1307/CA1310/CA1311/CA1304/CA1308: Culture settings for machine data -->
+    <!-- URI/URL Handling -->
+    <!-- CA1054/CA1055/CA1056/CA2234: String URLs more convenient than Uri objects -->
+    <!-- S1075: Hardcoded URIs (configuration values) -->
+    <!-- IDisposable (false positives or framework-managed) -->
+    <!-- CA2000/CA1816/IDISP*: Framework-managed resources -->
+    <!-- Collections & LINQ -->
+    <!-- CA1860/CA1869/CA1850/CA1872/S6602/S6605: Minor optimizations -->
+    <!-- Code Style -->
+    <!-- CA1861/S1066/S3358/S1125/S1481/S2139/S2325/S1135: Readability preferences -->
+    <!-- DTO/Model Properties -->
+    <!-- CA1819/CA2227/CA1002/CA1805: DTOs need arrays and setters for JSON -->
+    <!-- Naming Conventions -->
+    <!-- CA1716/CA1707/CA1711/CA1847: Intentional deviations for clarity -->
+    <!-- Sonar Specific -->
+    <!-- S125/S3260/S3267/S4136/S4487/S1450/S1854/S3881/S6603: Design choices -->
+    <NoWarn>$(NoWarn);CA1812;CA1515;CA1822;CA1852;CA1814;CA1031;S108;S2486;CA1848;S6667;CA2007;CA2016;S6966;CA1305;CA1307;CA1310;CA1311;CA1304;CA1308;CA1054;CA1055;CA1056;CA2234;S1075;CA2000;CA1816;IDISP004;IDISP001;CA1062;CA1508;CA2100;CA1860;CA1869;CA1850;CA1872;S6602;S6605;CA1861;S1066;S3358;S1125;S1481;S2139;S2325;S1135;CS1591;CA1819;CA2227;CA1002;CA1805;CA1716;CA1707;CA1711;CA1847;CA1063;IDISP003;IDISP025;S125;S3260;S3267;S4136;S4487;S1450;S1854;S3881;S6603</NoWarn>
+  </PropertyGroup>
+
+  <!-- Common Analyzer packages -->
+  <ItemGroup>
+    <PackageReference Include="IDisposableAnalyzers" Version="4.0.8" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Threading" Version="17.13.61" PrivateAssets="all" />
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="9.32.0.97167" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

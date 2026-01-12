@@ -1,0 +1,21 @@
+# Dockerfile for pre-caching upgraded Node.js Alpine base image
+# Usage: docker build -f Dockerfile.base-node -t node:22-alpine-upgraded .
+# Then: docker save -o node-22-alpine-upgraded.tar node:22-alpine-upgraded
+# This image is used as base for frontend-build stage
+
+FROM node:22-alpine
+
+# Cache-busting argument: change this to force fresh apk updates
+# Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
+ARG CACHE_BUST=latest
+
+# Update and upgrade all packages, then clean cache
+# This creates a fully-patched base image that can be cached offline
+RUN echo "Cache bust: ${CACHE_BUST}" && \
+    apk update && \
+    apk upgrade && \
+    apk cache clean && \
+    rm -rf /tmp/* /var/tmp/*
+
+# Set a label to identify this as a pre-cached image
+LABEL prebuild="true" purpose="base-image" updated="true"

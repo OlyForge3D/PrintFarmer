@@ -41,7 +41,13 @@ module.exports = {
     'no-restricted-imports': ['error', { paths: restrictedImports }],
     // Custom local rule to detect unguarded console / raw JSX dumps
     'local/pf-no-unguarded-console': 'warn',
-  '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: false }],
+    // Enforce theme variables instead of hardcoded colors
+    'local/no-hardcoded-colors': ['warn', { 
+      allowedColors: [
+        // Allow colors in colorFamilies.ts utility file
+      ] 
+    }],
+    '@typescript-eslint/no-explicit-any': ['error', { ignoreRestArgs: false }],
   },
   overrides: [
     {

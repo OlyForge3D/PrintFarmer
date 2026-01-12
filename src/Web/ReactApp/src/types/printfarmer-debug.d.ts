@@ -5,12 +5,31 @@ export {};
 
 declare global {
   interface PrintFarmerDebugFlags {
-    // Add per-area flags (optional). Examples:
+    // Printer UI components
+    printerCard?: boolean;
+    printerHistory?: boolean;
+    printerRealtime?: boolean;
+    printerBulkActions?: boolean;
+    printerSelection?: boolean;
+    printerDashboard?: boolean;
+    expandablePrinterCard?: boolean;
+    printerDiscoveryModal?: boolean;
+    printerDetailsSidebar?: boolean;
+    
+    // Signal/Communication
     printerSignalR?: boolean;
     harvestSignalR?: boolean;
+    
+    // Pages and features
     setupWizard?: boolean;
     userManagementPage?: boolean;
     fileBrowser?: boolean;
+    telemetrySettingsPage?: boolean;
+    
+    // Tools and utilities
+    toolsCodemodTest?: boolean;
+    main?: boolean;
+    
     // Add others as you adopt them
     [key: string]: boolean | undefined;
   }

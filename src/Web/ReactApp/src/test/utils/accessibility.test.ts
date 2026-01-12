@@ -4,7 +4,7 @@ import {
   getContrastRatio, 
   checkWCAGCompliance,
   ColorBlindnessSimulation 
-} from '@/utils/accessibility';
+} from '@/common/utils/accessibility';
 
 describe('Accessibility Utils', () => {
   describe('getLuminance', () => {

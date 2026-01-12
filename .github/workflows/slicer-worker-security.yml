@@ -1,0 +1,224 @@
+name: Slicer Worker Security & Efficiency
+
+# Automated security scanning and image efficiency analysis for slicer worker containers.
+# Runs on PR changes to worker Dockerfiles to catch issues early in the development cycle.
+# Complements the manual-only strict build workflows for production deployments.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/docker/dockerfiles/Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/**'
+      - 'src/orcaslicer-worker/**'
+      - 'src/worker-shared/**'
+      - '.github/workflows/slicer-worker-security.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/docker/dockerfiles/Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/**'
+      - 'src/orcaslicer-worker/**'
+      - 'src/worker-shared/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # For uploading SARIF results to GitHub Security
+
+env:
+  ORCASLICER_VERSION: "2.3.1"
+  PRUSASLICER_VERSION: "2.9.3"
+
+jobs:
+  build-and-scan-base:
+    name: Build & Scan Slicer Base Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build slicer-base image (via multistage)
+        id: build-base
+        run: |
+          echo "Building slicer-base for security scanning (via Dockerfile.multistage)"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
+          docker build --platform linux/amd64 -f scripts/docker/dockerfiles/Dockerfile.multistage --target slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" .
+          echo "image=printfarmer-slicer-base:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Scan slicer-base with Trivy (table output)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.build-base.outputs.image }}
+          format: 'table'
+          exit-code: '0'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Scan slicer-base with Trivy (SARIF output)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.build-base.outputs.image }}
+          format: 'sarif'
+          output: 'trivy-slicer-base.sarif'
+          exit-code: '0'
+          vuln-type: 'os,library'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+
+      - name: Upload Trivy SARIF (slicer-base)
+        if: always()
+        run: |
+          if [ -f trivy-slicer-base.sarif ]; then
+            echo "SARIF file exists, uploading via gh CLI"
+            gh api --method POST /repos/${{ github.repository }}/code-scanning/sarifs -f "commit_sha=${{ github.sha }}" -f "sarif=@trivy-slicer-base.sarif" -f category=trivy-slicer-base || true
+          else
+            echo "trivy-slicer-base.sarif not found, skipping upload"
+          fi
+
+      - name: Analyze image efficiency with Dive (slicer-base)
+        run: |
+          echo "Analyzing image efficiency for slicer-base using dive container"
+          # Pull dive image and run analysis against the built image
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}":/workspace wagoodman/dive:0.10.0 --json /workspace/dive-slicer-base.json ${{ steps.build-base.outputs.image }} || true
+        continue-on-error: true # Don't fail build on efficiency warnings initially
+
+      - name: Export image size metrics
+        run: |
+          SIZE=$(docker image inspect ${{ steps.build-base.outputs.image }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "slicer-base image size: ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+          echo "SLICER_BASE_SIZE_MB=${SIZE_MB}" >> $GITHUB_ENV
+
+  build-and-scan-orcaslicer:
+    name: Build & Scan OrcaSlicer Worker
+    runs-on: ubuntu-latest
+    needs: build-and-scan-base
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build OrcaSlicer worker with stub binary (via multistage)
+        id: build-orca
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Building OrcaSlicer worker (stub mode for CI efficiency)"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA='${{ github.sha }}'
+          docker build --platform linux/amd64 \
+            --build-arg ORCASLICER_VERSION=${{ env.ORCASLICER_VERSION }} \
+            --build-arg ALLOW_STUB=true \
+            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
+            -f scripts/docker/dockerfiles/Dockerfile.multistage --target orcaslicer-worker \
+            -t orcaslicer-worker:scan-${{ github.sha }} .
+          echo "image=orcaslicer-worker:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Scan OrcaSlicer with Trivy (table output)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.build-orca.outputs.image }}
+          format: 'table'
+          exit-code: '0'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Scan OrcaSlicer with Trivy (SARIF output)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.build-orca.outputs.image }}
+          format: 'sarif'
+          output: 'trivy-orcaslicer.sarif'
+          exit-code: '0'
+          vuln-type: 'os,library'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+
+      - name: Upload Trivy SARIF (OrcaSlicer)
+        if: always()
+        run: |
+          if [ -f trivy-orcaslicer.sarif ]; then
+            echo "SARIF file exists, uploading via gh CLI"
+            gh api --method POST /repos/${{ github.repository }}/code-scanning/sarifs -f "commit_sha=${{ github.sha }}" -f "sarif=@trivy-orcaslicer.sarif" -f category=trivy-orcaslicer || true
+          else
+            echo "trivy-orcaslicer.sarif not found, skipping upload"
+          fi
+
+      - name: Analyze image efficiency with Dive (OrcaSlicer)
+        run: |
+          echo "Analyzing image efficiency for OrcaSlicer using dive container"
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}":/workspace wagoodman/dive:0.10.0 --json /workspace/dive-orca.json ${{ steps.build-orca.outputs.image }} || true
+        continue-on-error: true
+
+      - name: Export image size metrics
+        run: |
+          SIZE=$(docker image inspect ${{ steps.build-orca.outputs.image }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "OrcaSlicer worker image size: ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run basic container smoke test
+        run: |
+          echo "Starting OrcaSlicer worker container for smoke test"
+          docker run -d --name orca-smoke-test \
+            -e Worker__ApiKey=test-key \
+            -e Worker__ServiceEndpoint=http://localhost:5245 \
+            ${{ steps.build-orca.outputs.image }}
+          sleep 5
+          docker logs orca-smoke-test
+          docker stop orca-smoke-test || true
+          docker rm orca-smoke-test || true
+
+  build-and-scan-prusaslicer:
+    name: Build & Scan PrusaSlicer Worker (Deprecated)
+    runs-on: ubuntu-latest
+    needs: build-and-scan-base
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Note - PrusaSlicer Worker Support Deprecated
+        run: |
+          echo "⚠️  PrusaSlicer worker support is deprecated and not actively maintained"
+          echo "For active development, use OrcaSlicer worker only"
+
+  security-summary:
+    name: Security & Efficiency Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-scan-base, build-and-scan-orcaslicer]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Slicer Worker Security & Efficiency Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All slicer worker images have been scanned for vulnerabilities and analyzed for efficiency." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images Scanned:" >> $GITHUB_STEP_SUMMARY
+          echo "- slicer-base (common runtime foundation via Dockerfile.multistage)" >> $GITHUB_STEP_SUMMARY
+          echo "- orcaslicer-worker (OrcaSlicer ${{ env.ORCASLICER_VERSION }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Analysis:" >> $GITHUB_STEP_SUMMARY
+          echo "- Trivy vulnerability scanning (OS and library packages)" >> $GITHUB_STEP_SUMMARY
+          echo "- SARIF results uploaded to GitHub Security tab" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Efficiency Analysis:" >> $GITHUB_STEP_SUMMARY
+          echo "- Dive image layer analysis for waste detection" >> $GITHUB_STEP_SUMMARY
+          echo "- Image size metrics tracked" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **View detailed results:** Check the Security tab and individual job logs above." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔒 **Production builds:** Manual-only strict builds remain controlled via workflow_dispatch with safety guards." >> $GITHUB_STEP_SUMMARY

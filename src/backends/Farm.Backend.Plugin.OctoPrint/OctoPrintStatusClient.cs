@@ -1,0 +1,209 @@
+﻿#pragma warning disable CS1587 // XML comment is not placed on a valid language element
+
+using System;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
+
+namespace Farm.Backend.Plugin.OctoPrint
+{
+    /// <summary>
+    /// Printer status client for OctoPrint backend (Klipper/GCODE printer control).
+    /// Implements IPrinterStatusClient for OctoPrint-specific status retrieval.
+    /// </summary>
+    public class OctoPrintStatusClient : IPrinterStatusClient
+    {
+        private readonly IOctoPrintClient _client;
+        private readonly ICircuitBreakerService _circuitBreaker;
+        private readonly IUnifiedLoggingService _logger;
+
+        public PrinterBackend SupportedBackend => PrinterBackend.OctoPrint;
+
+        public OctoPrintStatusClient(
+            IOctoPrintClient client,
+            ICircuitBreakerService circuitBreaker,
+            IUnifiedLoggingService logger)
+        {
+            ArgumentNullException.ThrowIfNull(client);
+            ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(logger);
+
+            _client = client;
+            _circuitBreaker = circuitBreaker;
+            _logger = logger;
+        }
+
+        public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(printer);
+
+            try
+            {
+                CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
+
+                // Retrieve both printer state and job status - now returns typed objects
+                OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
+                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    ct);
+
+                OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
+                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    ct);
+
+                // Create status DTO from typed objects
+                if (printerState != null && jobStatus != null)
+                {
+                    return new PrinterStatusDto(
+                        Id: printer.Id,
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        Progress: jobStatus.Progress ?? 0,
+                        JobName: jobStatus.Filename,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null);
+                }
+                else if (printerState != null)
+                {
+                    return new PrinterStatusDto(
+                        Id: printer.Id,
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        Progress: 0,
+                        JobName: null,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null);
+                }
+                else
+                {
+                    _logger.LogWarning($"[OctoPrint] Failed to retrieve status for printer {printer.Id}");
+                    return CreateOfflineStatus(printer.Id);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning($"[OctoPrint] Status timeout for printer {printer.Id}");
+                return CreateOfflineStatus(printer.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[OctoPrint] Error getting status for printer {printer.Id}: {ex.Message}");
+                return CreateOfflineStatus(printer.Id);
+            }
+        }
+
+        public async Task<PrinterDto> GetPrinterDtoAsync(Printer printer, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(printer);
+
+            try
+            {
+                CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
+
+                OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
+                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    ct);
+
+                OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
+                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    ct);
+
+                // Build PrinterDto from typed objects
+                if (printerState != null)
+                {
+                    return new PrinterDto(
+                        Id: printer.Id,
+                        Name: printer.Name,
+                        Notes: printer.Notes,
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        ManufacturerName: printer.Manufacturer?.Name,
+                        ModelName: printer.Model?.Name,
+                        Progress: jobStatus?.Progress ?? 0,
+                        JobName: jobStatus?.Filename,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null,
+                        X: null,
+                        Y: null,
+                        Z: null,
+                        HotendTemp: null,
+                        BedTemp: null,
+                        HotendTarget: null,
+                        BedTarget: null,
+                        Backend: (PrinterBackend)printer.Backend,
+                        ApiKey: printer.ApiKey,
+                        OriginalServerUrl: printer.OriginalServerUrl,
+                        IpAddress: printer.IpAddress,
+                        BackendPort: printer.BackendPort,
+                        FrontendPort: printer.FrontendPort,
+                        SpoolInfo: null,
+                        BackendUrl: printer.BackendUrl,
+                        FrontendUrl: printer.FrontendUrl);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[OctoPrint] Error getting printer DTO for {printer.Id}: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(printer);
+
+            // OctoPrint camera support would be implemented here
+            _logger.LogWarning($"[OctoPrint] Camera stream URLs not yet implemented for printer {printer.Id}");
+            await Task.CompletedTask;
+            return null;
+        }
+
+        public async Task<string?> GetCameraSnapshotUrlAsync(Printer printer, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(printer);
+
+            // OctoPrint camera support would be implemented here
+            _logger.LogWarning($"[OctoPrint] Camera snapshot URLs not yet implemented for printer {printer.Id}");
+            await Task.CompletedTask;
+            return null;
+        }
+
+        public async Task<bool> IsCameraAvailableAsync(Printer printer, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(printer);
+
+            // OctoPrint camera support not yet implemented
+            await Task.CompletedTask;
+            return false;
+        }
+
+        private static PrinterStatusDto CreateOfflineStatus(Guid printerId)
+        {
+            return new PrinterStatusDto(
+                Id: printerId,
+                IsOnline: false,
+                State: null,
+                Progress: null,
+                JobName: null,
+                ThumbnailUrl: null,
+                CameraStreamUrl: null,
+                CameraSnapshotUrl: null);
+        }
+
+        /// <summary>
+        /// Parses OctoPrint API responses to extract printer status.
+        /// Expects JSON from /api/printer and /api/job endpoints.
+        /// </summary>
+
+    }
+}

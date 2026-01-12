@@ -1,16 +1,22 @@
 {
   "compilerOptions": {
     "baseUrl": "./",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "paths": {
       "@/*": ["./src/*"],
       "@/components/*": ["./src/components/*"],
+      "@/common/*": ["./src/common/*"],
+      "@/features/*": ["./src/features/*"],
       "@/contexts": ["./src/contexts/index.ts"],
       "@/contexts/*": ["./src/contexts/*"],
       "@/hooks/*": ["./src/hooks/*"],
       "@/services/*": ["./src/services/*"],
       "@/types/*": ["./src/types/*"],
       "@/utils/*": ["./src/utils/*"],
-      "@/pages/*": ["./src/pages/*"]
+      "@/pages/*": ["./src/pages/*"],
+      "@/test/*": ["./src/test/*"],
+      "@farm/slicers-orcaslicer-v2_3_1": ["../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui"]
     }
   }
 }

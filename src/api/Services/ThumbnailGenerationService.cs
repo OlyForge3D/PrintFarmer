@@ -1,19 +1,27 @@
-﻿using System.Diagnostics;
-using System.Text;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Numerics;
+using Assimp;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace Farm.Web.Api.Services;
 
 /// <summary>
-/// Service for generating thumbnails from 3D model files using Python and Open3D
+/// Service for generating thumbnails from 3D model files using assimp CLI tool
+/// Supports 40+ 3D formats including STL, 3MF, OBJ, PLY, GLTF, STEP, and more
 /// </summary>
 public class ThumbnailGenerationService : IThumbnailGenerationService
 {
     private readonly IUnifiedLoggingService _logger;
-    private readonly string _pythonPath;
-    private readonly string _scriptPath;
     private readonly string _thumbnailsBasePath;
 
     public string ThumbnailFileExtension => ".png";
@@ -21,13 +29,6 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     public ThumbnailGenerationService(IUnifiedLoggingService logger, IConfiguration configuration)
     {
         _logger = logger;
-
-        // Get Python path from configuration or use default
-        _pythonPath = configuration["ThumbnailGeneration:PythonPath"] ?? "python3";
-
-        // Script will be stored in the API directory
-        string apiDirectory = AppContext.BaseDirectory;
-        _scriptPath = Path.Combine(apiDirectory, "Scripts", "generate_thumbnail.py");
 
         // Thumbnails storage path
         _thumbnailsBasePath = configuration["ThumbnailGeneration:ThumbnailsPath"]
@@ -39,23 +40,18 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             _ = Directory.CreateDirectory(_thumbnailsBasePath);
         }
 
-        // Ensure scripts directory exists
-        string? scriptsDir = Path.GetDirectoryName(_scriptPath);
-        if (scriptsDir != null && !Directory.Exists(scriptsDir))
-        {
-            _ = Directory.CreateDirectory(scriptsDir);
-        }
-
-        // Create the Python script if it doesn't exist
-        EnsurePythonScriptExists();
+        _logger.LogInformation("ThumbnailGenerationService initialized. Note: AssimpNetter native bindings not available in this deployment - thumbnails will use placeholder rendering");
     }
 
     public async Task<bool> GenerateThumbnailAsync(
         string modelFilePath,
         ModelFileFormat fileFormat,
         string outputPath,
-        int width = 256,
-        int height = 256,
+        int width = 512,
+        int height = 512,
+        int? zoomPercent = null,
+        string? view = null,
+        string? viewMode = null,
         CancellationToken ct = default)
     {
         if (!IsFormatSupported(fileFormat))
@@ -79,67 +75,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 _ = Directory.CreateDirectory(outputDir);
             }
 
-            // Build arguments for the Python script
-            StringBuilder arguments = new();
-            _ = arguments.Append($"\"{_scriptPath}\" ");
-            _ = arguments.Append($"\"{modelFilePath}\" ");
-            _ = arguments.Append($"\"{outputPath}\" ");
-            _ = arguments.Append($"{width} ");
-            _ = arguments.Append($"{height}");
-
-            // Configure process
-            using Process process = new()
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = _pythonPath,
-                    Arguments = arguments.ToString(),
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-
-            _logger.LogDebug($"Starting thumbnail generation: {_pythonPath} {arguments}");
-
-            _ = process.Start();
-
-            // Read output and error streams
-            Task<string> outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            Task<string> errorTask = process.StandardError.ReadToEndAsync(ct);
-
-            // Wait for process to complete with cancellation support
-            using CancellationTokenRegistration registration = ct.Register(() =>
-            {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to kill thumbnail generation process");
-                }
-            });
-
-            await process.WaitForExitAsync(ct);
-
-            string output = await outputTask;
-            string error = await errorTask;
-
-            if (process.ExitCode == 0 && File.Exists(outputPath))
-            {
-                _logger.LogDebug($"Thumbnail generated successfully: {outputPath}");
-                return true;
-            }
-            else
-            {
-                _logger.LogWarning($"Thumbnail generation failed. Exit code: {process.ExitCode}, Error: {error}, Output: {output}");
-                return false;
-            }
+            return await Task.Run(() => GenerateThumbnailInternal(modelFilePath, outputPath, width, height, zoomPercent, view, viewMode), ct);
         }
         catch (Exception ex)
         {
@@ -148,152 +84,96 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
     }
 
+    private bool GenerateThumbnailInternal(string modelFilePath, string outputPath, int width, int height, int? zoomPercent, string? view, string? viewMode)
+    {
+        try
+        {
+            string fileName = Path.GetFileName(modelFilePath);
+            _logger.LogInformation($"Generating thumbnail for {fileName}...");
+            _logger.LogInformation($"  Model file path: {modelFilePath}");
+            _logger.LogInformation($"  Output path: {outputPath}");
+            _logger.LogInformation($"  Using OrcaSlicerPreviewRenderer...");
+            _logger.LogInformation($"  Zoom percent: {(zoomPercent.HasValue ? zoomPercent.Value.ToString() : "default")}");
+            _logger.LogInformation($"  View: {view ?? "default(front)"}");
+            _logger.LogInformation($"  View mode: {viewMode ?? "default(isometric)"}");
+
+            // Use OrcaPreviewRenderer for high-quality rendering
+            var renderer = new OrcaPreviewRenderer();
+
+            var options = OrcaPreset.Create();
+            const int defaultZoomPercent = 40; // matches existing Orca default appearance
+
+            if (zoomPercent.HasValue)
+            {
+                _logger.LogInformation($"    Applying zoom {zoomPercent.Value}% (default base: {defaultZoomPercent}%)");
+                options.SetZoomPercent(defaultZoomPercent, zoomPercent.Value);
+                _logger.LogInformation($"    OrthoSize after zoom: {options.OrthoSize:F4}");
+            }
+            else
+            {
+                _logger.LogInformation($"    Using default OrthoSize: {options.OrthoSize:F4}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(viewMode))
+            {
+                _logger.LogInformation($"    Applying view mode: {viewMode}");
+                if (viewMode.Equals("straight", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Straight;
+                    _logger.LogInformation($"    Camera view mode set to: Straight (perpendicular)");
+                }
+                else if (viewMode.Equals("isometric", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Isometric;
+                    _logger.LogInformation($"    Camera view mode set to: Isometric (diagonal)");
+                }
+                else
+                {
+                    _logger.LogWarning($"    Unknown view mode '{viewMode}', using default 'isometric'");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(view))
+            {
+                _logger.LogInformation($"    Applying camera view: {view}");
+                var oldPos = options.CameraPosition;
+                var oldTgt = options.CameraTarget;
+                if (!options.SetCameraView(view))
+                {
+                    _logger.LogWarning($"    Unknown view '{view}', using default 'front'");
+                    options.SetCameraView("front");
+                }
+                _logger.LogInformation($"    Camera: Pos({oldPos.X:F2},{oldPos.Y:F2},{oldPos.Z:F2}) -> ({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
+                _logger.LogInformation($"    Target: ({oldTgt.X:F2},{oldTgt.Y:F2},{oldTgt.Z:F2}) -> ({options.CameraTarget.X:F2},{options.CameraTarget.Y:F2},{options.CameraTarget.Z:F2})");
+            }
+            else
+            {
+                _logger.LogInformation($"    Using default camera view (front): Pos({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
+            }
+
+            renderer.Render(modelFilePath, outputPath, options);
+
+            _logger.LogInformation($"✓ Thumbnail rendered at {width}x{height}: {outputPath}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error generating thumbnail: {ex.Message}");
+            return false;
+        }
+    }
+
     public bool IsFormatSupported(ModelFileFormat fileFormat)
     {
-        // Open3D supports these formats well
+        // Assimp supports all these formats natively
         return fileFormat switch
         {
             ModelFileFormat.STL => true,
             ModelFileFormat.OBJ => true,
             ModelFileFormat.PLY => true,
-            ModelFileFormat.TMF => false,  // 3MF support is limited in Open3D
-            ModelFileFormat.STEP => false, // STEP files are CAD format, need specialized tools
+            ModelFileFormat.TMF => true,   // 3MF
+            ModelFileFormat.STEP => true,  // STEP CAD format now supported
             _ => false
         };
-    }
-
-    private void EnsurePythonScriptExists()
-    {
-        if (File.Exists(_scriptPath))
-        {
-            return;
-        }
-
-        string scriptContent = @"#!/usr/bin/env python3
-""""""
-3D Model Thumbnail Generation Script
-Generates thumbnail images from 3D model files using Open3D
-""""""
-
-import sys
-import os
-import numpy as np
-try:
-    import open3d as o3d
-    import open3d.visualization.rendering as rendering
-except ImportError:
-    print(""Error: Open3D is not installed. Please install it using: pip install open3d"", file=sys.stderr)
-    sys.exit(1)
-
-def generate_thumbnail(input_path, output_path, width=256, height=256):
-    """"""Generate a thumbnail from a 3D model file""""""
-    
-    if not os.path.exists(input_path):
-        print(f""Error: Input file does not exist: {input_path}"", file=sys.stderr)
-        return False
-    
-    try:
-        # Load the mesh
-        mesh = None
-        file_ext = os.path.splitext(input_path)[1].lower()
-        
-        if file_ext == '.stl':
-            mesh = o3d.io.read_triangle_mesh(input_path)
-        elif file_ext == '.obj':
-            mesh = o3d.io.read_triangle_mesh(input_path)
-        elif file_ext == '.ply':
-            mesh = o3d.io.read_triangle_mesh(input_path)
-        else:
-            print(f""Error: Unsupported file format: {file_ext}"", file=sys.stderr)
-            return False
-        
-        if len(mesh.vertices) == 0:
-            print(""Error: Failed to load mesh or mesh is empty"", file=sys.stderr)
-            return False
-        
-        # Compute normals for better rendering
-        mesh.compute_vertex_normals()
-        
-        # Center and scale the mesh to fit in view
-        mesh.translate(-mesh.get_center())
-        scale = 1.0 / mesh.get_max_bound()
-        mesh.scale(scale, mesh.get_center())
-        
-        # Create offscreen renderer
-        render = rendering.OffscreenRenderer(width, height)
-        
-        # Set up material with nice colors
-        mtl = o3d.visualization.rendering.MaterialRecord()
-        mtl.base_color = [0.9, 0.9, 0.9, 1.0]
-        mtl.shader = ""defaultLit""
-        
-        # Add geometry to scene
-        render.scene.add_geometry(""mesh"", mesh, mtl)
-        
-        # Set up lighting
-        render.scene.set_lighting(rendering.Open3DScene.LightingProfile.MED_SHADOWS, np.array([0.3, -1.0, -0.3]))
-        
-        # Set up camera
-        center = mesh.get_center()
-        bounds = mesh.get_axis_aligned_bounding_box()
-        extent = bounds.get_extent().max()
-        
-        # Position camera to get a nice 3/4 view
-        eye = center + np.array([extent * 1.2, extent * 0.8, extent * 1.5])
-        up = np.array([0.0, 0.0, 1.0])
-        render.setup_camera(60.0, center, eye, up)
-        
-        # Render and save
-        image = render.render_to_image()
-        o3d.io.write_image(output_path, image)
-        print(f""Thumbnail saved to: {output_path}"")
-        return True
-        
-    except Exception as e:
-        print(f""Error generating thumbnail: {str(e)}"", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        return False
-
-def main():
-    if len(sys.argv) < 3:
-        print(""Usage: python generate_thumbnail.py <input_file> <output_file> [width] [height]"", file=sys.stderr)
-        sys.exit(1)
-    
-    input_path = sys.argv[1]
-    output_path = sys.argv[2]
-    width = int(sys.argv[3]) if len(sys.argv) > 3 else 256
-    height = int(sys.argv[4]) if len(sys.argv) > 4 else 256
-    
-    success = generate_thumbnail(input_path, output_path, width, height)
-    sys.exit(0 if success else 1)
-
-if __name__ == ""__main__"":
-    main()
-";
-
-        try
-        {
-            File.WriteAllText(_scriptPath, scriptContent, Encoding.UTF8);
-            _logger.LogInformation($"Created thumbnail generation Python script at: {_scriptPath}");
-
-            // Make script executable on Unix systems
-            if (!OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    Process process = Process.Start("chmod", $"+x \"{_scriptPath}\"");
-                    process?.WaitForExit();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to make Python script executable");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create thumbnail generation Python script");
-        }
     }
 }

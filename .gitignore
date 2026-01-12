@@ -35,8 +35,14 @@ node_modules/
 .deploy-config
 
 # Docker generated files (created by deployment script)
-docker-compose.host-network.yml
+/docker-compose*.yml
+/otel-collector-config.yaml
+/monitoring
+
 .env.microservices
+# Keep template sources tracked
+!scripts/docker/compose-templates/
+!scripts/docker/compose-templates/**
 
 # SqlLite Database Files
 *.db
@@ -67,8 +73,8 @@ coverage-final.json
 dotnet-install.sh.*
 
 # Deploy script generated compose files
-docker-compose.override.yml
-docker-compose.host-network.yml
+/docker-compose.override.yml
+
 
 # Local Orca extraction artifacts (should not be committed)
 orca7z/
@@ -81,3 +87,18 @@ build_context/
 orca_assets/
 prusa_preseed/
 
+# Test-generated artifacts directory (cleaned by tests). Safe to ignore.
+src/test-artifacts/
+
+# Ignore API artifact storage folders created during tests or local runs
+# Test runs now redirect artifact storage to src/test-artifacts/ by default,
+# but ignore src/api/artifacts/ as a safety-net for leftover files.
+src/api/artifacts/
+
+# Ignore API uploads directory (test-generated files and temporary uploads)
+src/api/uploads/
+
+# Auto-generated docker files 
+/dockerfiles/
+/docker-entrypoint-config.sh
+/Dockerfile.multistage

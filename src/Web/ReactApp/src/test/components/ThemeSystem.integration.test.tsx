@@ -2,9 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider } from '@/contexts/ThemeContext';
-import { useTheme } from '@/contexts/ThemeHooks';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { ThemeToggle } from '@/common/components/ThemeToggle';
 
 // Mock localStorage
 const localStorageMock = {
@@ -176,19 +175,25 @@ describe('Theme System Integration', () => {
     // Start: light
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: light');
     
-    // Click 1: light -> dark
+    // Click 1: light -> github-dark
     await act(async () => {
       fireEvent.click(toggle);
     });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: dark');
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: github-dark');
     
-    // Click 2: dark -> system
+    // Click 2: github-dark -> printfarmer-dark
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: printfarmer-dark');
+    
+    // Click 3: printfarmer-dark -> system
     await act(async () => {
       fireEvent.click(toggle);
     });
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: system');
     
-    // Click 3: system -> light
+    // Click 4: system -> light
     await act(async () => {
       fireEvent.click(toggle);
     });

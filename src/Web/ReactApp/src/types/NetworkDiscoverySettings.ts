@@ -7,5 +7,5 @@ export interface NetworkDiscoverySettings {
   requestDelayMs?: number;
   maxConcurrentRequests?: number;
   maxRetries?: number;
-  // Add any additional fields from backend as needed
+  lastHeartbeat?: string; // ISO 8601 timestamp of last heartbeat from discovery service
 }

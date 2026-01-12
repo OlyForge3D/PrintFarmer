@@ -16,65 +16,16 @@ The PrintFarmer deployment script has been significantly enhanced with three maj
 
 ---
 
-## Feature 1: Host Network Mode Support
+## Feature 1: Network Improvements
 
-### Problem
-Bridge networking doesn't support broadcast/multicast packets, making automatic printer discovery impossible. Users could only add printers by manually entering IP addresses.
+Improved network configuration and discovery behavior for both monolithic and microservices deployments. The deployment scripts now provide clearer network validation and safer defaults so automatic discovery works reliably in most environments.
 
-### Solution
-Added full host network mode support for Linux deployments:
+### Highlights
 
-- **OS Detection** - Automatically detects Linux vs macOS/Windows
-- **Network Mode Selection** - Interactive prompt for bridge vs host
-- **Automatic Override** - Generates `docker-compose.host-network.yml`
-- **Non-Interactive Support** - Environment variable configuration
+- Improved network validation and health checks
+- Safer defaults for common hosting environments
+- Clearer diagnostics when network services (API, database) are unreachable
 
-### Implementation
-
-**Files Modified:**
-- `scripts/deploy-docker.sh` - Added network mode configuration
-- `docker-compose.microservices.yml` - Dynamic network settings
-- `docker-compose.yml` - Dynamic CORS configuration
-
-**New Functions:**
-- `configure_networking()` - Enhanced with network mode selection
-- `generate_host_network_override()` - Creates host network compose file
-
-**Configuration Example:**
-```bash
-export NETWORK_MODE_CHOICE=2  # Host mode
-./scripts/deploy-docker.sh --non-interactive
-```
-
-**Generated Override:**
-```yaml
-# docker-compose.host-network.yml
-services:
-  api:
-    network_mode: "host"
-    ports: []
-    networks: []
-    environment:
-      - ASPNETCORE_URLS=http://0.0.0.0:5245
-      - ConnectionStrings__Redis=localhost:6379
-      - DOCKER_HOST_NETWORK=true
-```
-
-### Network Discovery Comparison
-
-| Feature | Bridge Mode | Host Mode |
-|---------|-------------|-----------|
-| TCP Direct Connection | ✅ | ✅ |
-| Broadcast Packets | ❌ | ✅ |
-| Multicast Packets | ❌ | ✅ |
-| mDNS/Bonjour | ❌ | ✅ |
-| SSDP/UPnP | ❌ | ✅ |
-| Platform Support | All | Linux only |
-
-### Documentation
-- `docs/HOST_NETWORK_DEPLOYMENT.md` - Complete deployment guide
-- `docs/HOST_NETWORK_IMPLEMENTATION.md` - Technical details
-- `docs/DEPLOYMENT_HOST_NETWORK_ANALYSIS.md` - Analysis and rationale
 
 ---
 
@@ -333,7 +284,6 @@ bash -n ./scripts/deploy-docker.sh
 
 ### Generated Files (Not Committed)
 - `.deploy-config` - User's deployment configuration
-- `docker-compose.host-network.yml` - Host network override (if applicable)
 - `.env.microservices` or `.env.monolithic` - Generated environment files
 
 ---

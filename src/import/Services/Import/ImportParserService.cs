@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Importing.Services.Import;
 
@@ -26,7 +26,10 @@ public class ImportParserService : IImportParserService
 
         string[] header = lines[0].Split(',').Select(h => h.Trim()).ToArray();
         var headerMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < header.Length; i++) headerMap[header[i]] = i;
+        for (int i = 0; i < header.Length; i++)
+        {
+            headerMap[header[i]] = i;
+        }
 
         var dtos = new List<CreatePrinterDto>();
         for (int i = 1; i < lines.Length; i++)
@@ -37,8 +40,16 @@ public class ImportParserService : IImportParserService
                 CreatePrinterDto dto = new();
                 string GetCol(string name)
                 {
-                    if (!headerMap.TryGetValue(name, out var idx)) return string.Empty;
-                    if (idx < 0 || idx >= values.Length) return string.Empty;
+                    if (!headerMap.TryGetValue(name, out var idx))
+                    {
+                        return string.Empty;
+                    }
+
+                    if (idx < 0 || idx >= values.Length)
+                    {
+                        return string.Empty;
+                    }
+
                     return values[idx].Trim();
                 }
 
@@ -49,7 +60,7 @@ public class ImportParserService : IImportParserService
                 dto.NewManufacturerName = string.IsNullOrWhiteSpace(GetCol("ManufacturerName")) ? null : GetCol("ManufacturerName");
                 dto.NewModelName = string.IsNullOrWhiteSpace(GetCol("ModelName")) ? null : GetCol("ModelName");
                 var backendVal = GetCol("Backend");
-                dto.Backend = Enum.TryParse<Farm.Web.Shared.PrinterBackend>(backendVal, true, out var b) ? b : Farm.Web.Shared.PrinterBackend.Moonraker;
+                dto.Backend = Enum.TryParse<Farm.Infrastructure.PrinterBackend>(backendVal, true, out var b) ? b : Farm.Infrastructure.PrinterBackend.Moonraker;
                 var dateStr = GetCol("DateAcquired");
                 dto.DateAcquired = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ? dt : null;
 

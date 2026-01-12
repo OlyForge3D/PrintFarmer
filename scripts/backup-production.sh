@@ -56,7 +56,7 @@ esac
 # 2. Application Data Backup
 print_status "Backing up application data..."
 docker run --rm \
-    -v printfarmer_app_data:/source:ro \
+    -v printfarmer-app-data:/source:ro \
     -v "$BACKUP_DIR":/backup \
     alpine:latest \
     tar czf "/backup/${BACKUP_PREFIX}_app_data.tar.gz" -C /source .
@@ -64,7 +64,7 @@ docker run --rm \
 # 3. Model Files Backup
 print_status "Backing up uploaded models..."
 docker run --rm \
-    -v printfarmer_model_uploads:/source:ro \
+    -v printfarmer-model-uploads:/source:ro \
     -v "$BACKUP_DIR":/backup \
     alpine:latest \
     tar czf "/backup/${BACKUP_PREFIX}_models.tar.gz" -C /source .
@@ -72,7 +72,7 @@ docker run --rm \
 # 4. G-code Files Backup
 print_status "Backing up G-code files..."
 docker run --rm \
-    -v printfarmer_gcode_storage:/source:ro \
+    -v printfarmer-gcode-storage:/source:ro \
     -v "$BACKUP_DIR":/backup \
     alpine:latest \
     tar czf "/backup/${BACKUP_PREFIX}_gcode.tar.gz" -C /source .
@@ -80,7 +80,7 @@ docker run --rm \
 # 5. Slicer Profiles Backup
 print_status "Backing up slicer profiles..."
 docker run --rm \
-    -v printfarmer_slicer_profiles:/source:ro \
+    -v printfarmer-slicer-profiles:/source:ro \
     -v "$BACKUP_DIR":/backup \
     alpine:latest \
     tar czf "/backup/${BACKUP_PREFIX}_profiles.tar.gz" -C /source .

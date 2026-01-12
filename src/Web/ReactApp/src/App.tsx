@@ -1,35 +1,56 @@
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { Layout } from '@/components/Layout';
-import { ObservabilityDashboard } from '@/components/ObservabilityDashboard';
-import { PrinterDashboard } from '@/components/PrinterDashboard';
-import { SetupWizard } from '@/components/SetupWizard';
-import { AuthProvider } from '@/contexts/AuthContext';
+// Common components
+import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
+import { ErrorBoundary } from '@/common/components/ErrorBoundary';
+import { Layout } from '@/common/components/Layout';
+import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
+import { SetupWizard } from '@/features/auth/components/SetupWizard';
+
+// Contexts & Providers
+import { AuthProvider } from '@/common/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
-import { useUnifiedLogging } from '@/hooks/useUnifiedLogging';
-import { CatalogPage } from '@/pages/CatalogPage';
-import { FilesPage } from '@/pages/FilesPage';
-import { HarvestPage } from '@/pages/HarvestPage';
-import { HarvestHistoryPage } from '@/pages/HarvestHistoryPage';
-import { ModelsPage } from '@/pages/ModelsPage';
-import { PrintersPage } from '@/pages/PrintersPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
-import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
-import PrintersAdminPage from '@/pages/admin/PrintersAdminPage';
-import LogsPage from './pages/logs/LogsPage';
-import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
-import { SpoolsPage } from '@/pages/SpoolsPage';
-import { UserManagementPage } from '@/pages/UserManagementPage';
+import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+
+// Hooks & Utils
+import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
+import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+
+// Services
+import { assetService } from '@/services/assetService';
+import { printerSignalRService } from '@/services/printer-signalr';
+
+// Feature Pages
+import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
+import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
+import { PrintersPage } from '@/features/printers/pages/PrintersPage';
+import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
+import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
+import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { LogsPage } from '@/features/admin/pages/LogsPage';
+import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
+import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
+import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
+import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
+import { LoginPage } from '@/features/auth/pages/LoginPage';
+import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
+import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
+import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
+// Admin pages may be missing in some branches; use inline placeholders in routes below.
+// Observability/FileHealth/Tags admin pages may be missing in this branch.
+import { FilesPage } from '@/features/files/pages/FilesPage';
+import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
+import { FileHealthDashboard } from '@/features/gcode/components/file-health';
+
+// External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes, Navigate, useLocation } from 'react-router-dom';
-import RegistrationPendingPage from '@/pages/RegistrationPendingPage';
-import { HarvestedFilesLibrary } from './pages/HarvestedFilesLibrary';
+import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import LoginPage from './pages/LoginPage';
-import { useAuth } from '@/contexts/AuthHooks';
+import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
 // Create a query client for React Query
@@ -83,77 +104,32 @@ function AuthenticatedAppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/confirm-email" element={<ConfirmEmailPage />} />
       <Route path="/registration-pending" element={<RegistrationPendingPage />} />
       <Route path="/*" element={<Layout />}>
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
-        <Route path="models" element={<ModelsPage />} />
-        <Route path="harvest/*">
-          <Route index element={<HarvestPage />} />
-          <Route path="history" element={<HarvestHistoryPage />} />
-          <Route path="library" element={<HarvestedFilesLibrary />} />
-        </Route>
-        <Route path="files" element={<FilesPage />} />
-        <Route path="catalog" element={<CatalogPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="printQueue" element={<PrintQueueDashboardPage />} />
+        <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
-        <Route
-          path="admin/users"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <UserManagementPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/observability"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <ObservabilityDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/printers"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <PrintersAdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/logs"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <LogsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerSettingsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer/dry-run"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerDryRunPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer/job-status"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerJobStatusPage />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
+        <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
+        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
+        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
+          <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
+          <Route path="printers" element={<PrintersPage />} />
+          <Route path="workers" element={<WorkerManagementPage />} />
+          <Route path="observability" element={<ObservabilityDashboard />} />
+          <Route path="file-health" element={<FileHealthDashboard />} />
+          <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
+          <Route path="tags" element={<TagAdminPage />} />
+        </Route>
+        <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
     </Routes>
   );
@@ -163,32 +139,57 @@ function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
   // Initialize unified logging for the main App component
-  const { logger } = useUnifiedLogging({ 
-    component: 'App', 
-    logLifecycle: true 
+  const { logger } = useUnifiedLogging({
+    component: 'App',
+    logLifecycle: true
   });
+
+  // Initialize asset service on app startup
+  useEffect(() => {
+    assetService.initialize().catch(err => {
+      logger.warn('Failed to initialize asset service', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+  }, [logger]);
+
+  // Eagerly establish SignalR connections on app startup for faster realtime updates
+  useEffect(() => {
+    // Connect both SignalR services in the background
+    // These will establish connections and start receiving updates immediately
+    Promise.all([
+      printerSignalRService.connect(),
+      harvestSignalRService.connect()
+    ]).catch(err => {
+      logger.warn('Failed to establish SignalR connections', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+  }, [logger]);
 
   useEffect(() => {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
       try {
-        const response = await fetch('/api/setup/status');
+        const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
+          headers: getAuthHeaders()
+        });
         if (response.ok) {
           const data = await response.json();
           setSetupComplete(!data.needsSetup);
-          logger.info('Setup status retrieved', { 
-            needsSetup: data.needsSetup, 
-            setupComplete: !data.needsSetup 
+          logger.info('Setup status retrieved', {
+            needsSetup: data.needsSetup,
+            setupComplete: !data.needsSetup
           });
         } else {
           setSetupComplete(false);
-          logger.warn('Setup status check failed - assuming setup needed', { 
-            status: response.status 
+          logger.warn('Setup status check failed - assuming setup needed', {
+            status: response.status
           });
         }
       } catch (error) {
-        logger.error('Error checking setup status', { 
-          error: error instanceof Error ? error.message : String(error) 
+        logger.error('Error checking setup status', {
+          error: error instanceof Error ? error.message : String(error)
         });
         setSetupComplete(false);
       } finally {
@@ -217,8 +218,10 @@ function App() {
         <ThemeProvider>
           <AuthProvider>
             <QueryClientProvider client={queryClient}>
-              <SetupWizard onComplete={handleSetupComplete} />
-              <Toaster position="top-right" richColors />
+              <SlicerUIProvider>
+                <SetupWizard onComplete={handleSetupComplete} />
+                <Toaster position="top-right" richColors />
+              </SlicerUIProvider>
             </QueryClientProvider>
           </AuthProvider>
         </ThemeProvider>
@@ -231,29 +234,31 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
-            {/*
-              Enable react-router future flags to opt into upcoming behavior and silence
-              development warnings about future flags. These are safe opt-ins for our
-              current router version and recommended by react-router maintainers.
-            */}
-            <Router
-              // Future flags documented by react-router to opt into v7 behaviors. See
-              // https://reactrouter.com/en/main/upgrading/v6
-              future={{
-                // prevents double-slash when basename and paths are combined
-                v7_preventBasepathDoubleSlash: true,
-                // use route ids in path generation where applicable
-                v7_useIdInRoutePaths: true,
-                // wrap state updates in React.startTransition (opt-in for upcoming v7)
-                v7_startTransition: true,
-                // change relative path resolution in splat routes to v7 behavior
-                v7_relativeSplatPath: true,
-              }}
-            >
-              <AuthenticatedAppRoutes />
-            </Router>
-            <ReactQueryDevtools initialIsOpen={false} />
-            <Toaster position="top-right" richColors />
+            <SlicerUIProvider>
+              {/*
+                Enable react-router future flags to opt into upcoming behavior and silence
+                development warnings about future flags. These are safe opt-ins for our
+                current router version and recommended by react-router maintainers.
+              */}
+              <Router
+                // Future flags documented by react-router to opt into v7 behaviors. See
+                // https://reactrouter.com/en/main/upgrading/v6
+                future={{
+                  // prevents double-slash when basename and paths are combined
+                  v7_preventBasepathDoubleSlash: true,
+                  // use route ids in path generation where applicable
+                  v7_useIdInRoutePaths: true,
+                  // wrap state updates in React.startTransition (opt-in for upcoming v7)
+                  v7_startTransition: true,
+                  // change relative path resolution in splat routes to v7 behavior
+                  v7_relativeSplatPath: true,
+                }}
+              >
+                <AuthenticatedAppRoutes />
+              </Router>
+              <ReactQueryDevtools initialIsOpen={false} />
+              <Toaster position="top-right" richColors />
+            </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>

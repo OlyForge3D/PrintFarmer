@@ -1,0 +1,21 @@
+/* Progress bar for harvest import */
+.harvest-progress-bar {
+  display: flex;
+  width: 100%;
+  border-radius: 9999px;
+  height: 0.75rem;
+  overflow: hidden;
+}
+
+.harvest-progress-bar-fill {
+  background-color: var(--pf-accent);
+  height: 0.75rem;
+  flex: var(--progress-percent, 0) 0 0;
+  transition: flex 0.3s ease-in-out;
+}
+
+.harvest-progress-bar-empty {
+  background-color: var(--pf-border);
+  height: 0.75rem;
+  flex: var(--progress-remaining, 100) 0 0;
+}

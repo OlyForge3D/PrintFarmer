@@ -21,13 +21,13 @@ public class GracefulShutdownService : BackgroundService
         _state = state;
         _logger = logger;
         _lifetime = lifetime;
-        var seconds = int.TryParse(config["Worker:Shutdown:GraceSeconds"], out var s) ? s : 30;
+        int seconds = int.TryParse(config["Worker:Shutdown:GraceSeconds"], out int s) ? s : 30;
         _grace = TimeSpan.FromSeconds(seconds);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _lifetime.ApplicationStopping.Register(OnStopping);
+        _ = _lifetime.ApplicationStopping.Register(OnStopping);
         _logger.LogInformation($"Graceful shutdown service active (grace={_grace.TotalSeconds}s)");
         try
         {
@@ -45,10 +45,10 @@ public class GracefulShutdownService : BackgroundService
         _state.SetShuttingDown();
         _ = Task.Run(async () =>
         {
-            var start = DateTime.UtcNow;
+            DateTime start = DateTime.UtcNow;
             while (DateTime.UtcNow - start < _grace)
             {
-                var snapshot = _state.GetWorkerState();
+                WorkerState snapshot = _state.GetWorkerState();
                 if (snapshot.ActiveJobs == 0)
                 {
                     _logger.LogInformation($"All jobs complete after {(DateTime.UtcNow - start).TotalMilliseconds}ms");

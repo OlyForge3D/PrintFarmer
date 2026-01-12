@@ -1,9 +1,9 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,8 +17,6 @@ namespace Farm.Web.Api.Controllers;
 [Tags("Spoolman Integration")]
 public class SpoolmanController(
     ISpoolmanService spoolman,
-    IHttpClientFactory httpClientFactory,
-    Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService urlRewriter,
     ISettingsService settingsService,
     IUnifiedLoggingService logger) : ControllerBase
 {
@@ -43,108 +41,11 @@ public class SpoolmanController(
             return Ok(new { success = false, message = "BaseUrl is required" });
         }
 
-        string raw = request.BaseUrl.Trim();
-        // Prepend scheme if user omitted (assume http)
-        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            raw = "http://" + raw; // safer default inside container networks
-        }
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out Uri? baseUri))
-        {
-            return Ok(new { success = false, message = "Invalid URL" });
-        }
-
-        // Apply environment-specific URL rewriting for network access
-        string rewrittenUrl = urlRewriter.RewriteUrl(baseUri.ToString(), "Spoolman");
-        string normalized = rewrittenUrl.TrimEnd('/');
-
-        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        try
-        {
-            foreach (string path in probePaths)
-            {
-                try
-                {
-                    HttpClient client = httpClientFactory.CreateClient("SpoolmanTestProbe");
-                    client.Timeout = TimeSpan.FromSeconds(5);
-                    using HttpResponseMessage resp = await client.GetAsync(normalized + path, ct);
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        string? version = null;
-                        try
-                        {
-                            using Stream stream = await resp.Content.ReadAsStreamAsync(ct);
-                            using JsonDocument doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
-                            JsonElement root = doc.RootElement;
-                            // Try common version property names
-                            if (root.TryGetProperty("version", out JsonElement vProp) && vProp.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                version = vProp.GetString();
-                            }
-                            else if (root.TryGetProperty("spoolman_version", out JsonElement svProp) && svProp.ValueKind == System.Text.Json.JsonValueKind.String)
-                            {
-                                version = svProp.GetString();
-                            }
-                        }
-                        catch { /* ignore JSON parse failures */ }
-
-                        return Ok(new
-                        {
-                            success = true,
-                            normalizedUrl = normalized,
-                            endpointTried = path,
-                            statusCode = (int)resp.StatusCode,
-                            version
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    if (path == probePaths[^1])
-                    {
-                        // Log only the last failure but return a 200 payload so the UI can
-                        // display the probe result without treating it as an internal server error.
-                        _logger.LogError(ex, "Unhandled exception in /api/spoolman/test: {Message}", ex.Message);
-                        (string? category, string? message) = CategorizeException(ex);
-                        return Ok(new { success = false, normalizedUrl = normalized, endpointTried = path, message, errorCategory = category });
-                    }
-                }
-            }
-            return Ok(new { success = false, normalizedUrl = normalized, message = "Probe endpoints failed" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unhandled exception in /api/spoolman/test: {Message}", ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, normalizedUrl = normalized, message = $"Internal Server Error: {ex.Message}" });
-        }
+        SpoolmanProbeResult probe = await spoolman.ProbeAsync(request.BaseUrl, ct);
+        return Ok(new { success = probe.Success, normalizedUrl = probe.NormalizedUrl, endpointTried = probe.EndpointTried, statusCode = probe.StatusCode, version = probe.Version, message = probe.Message, errorCategory = probe.ErrorCategory });
     }
 
-    private static (string category, string message) CategorizeException(Exception ex)
-    {
-        if (ex is TaskCanceledException or OperationCanceledException)
-        {
-            return ("timeout", "Connection timed out");
-        }
-        if (ex is HttpRequestException hre)
-        {
-            if (hre.InnerException is System.Net.Sockets.SocketException se)
-            {
-                return se.SocketErrorCode switch
-                {
-                    System.Net.Sockets.SocketError.HostNotFound => ("dns_failure", "Host could not be resolved"),
-                    System.Net.Sockets.SocketError.ConnectionRefused => ("connection_refused", "Connection refused"),
-                    System.Net.Sockets.SocketError.TimedOut => ("timeout", "Connection timed out"),
-                    _ => ("network_error", hre.Message)
-                };
-            }
-            return ("http_error", hre.Message);
-        }
-        if (ex is System.Security.Authentication.AuthenticationException)
-        {
-            return ("tls_error", "TLS/SSL negotiation failed");
-        }
-        return ("unknown", ex.Message);
-    }
+    // Note: Exception categorization was moved into the SpoolmanService Probe implementation.
     /// <summary>
     /// Gets the current Spoolman integration configuration.
     /// </summary>
@@ -163,7 +64,7 @@ public class SpoolmanController(
     /// <response code="204">If the configuration was successfully updated</response>
     /// <response code="400">If the configuration data is invalid</response>
     [HttpPost("config")]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")]
+    [Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)
@@ -210,45 +111,12 @@ public class SpoolmanController(
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> HealthAsync(CancellationToken ct)
     {
-        SpoolmanConfigDto? cfg = spoolman.GetConfig();
-        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        SpoolmanProbeResult probe = await spoolman.HealthProbeAsync(ct);
+        if (!probe.Success)
         {
-            return Ok(new { configured = false, success = false, message = "Spoolman not configured" });
+            return Ok(new { configured = true, success = false, message = probe.Message });
         }
-
-        // Use a minimal endpoint (info or health). Try /api/v1/health first, fallback to /api/v1/info
-        string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" }; // order matters
-        try
-        {
-            foreach (string p in probePaths)
-            {
-                try
-                {
-                    HttpClient client = httpClientFactory.CreateClient("SpoolmanHealthProbe");
-                    client.Timeout = TimeSpan.FromSeconds(5);
-                    HttpResponseMessage resp = await client.GetAsync(baseUrl + p, ct);
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        return Ok(new { configured = true, success = true, endpoint = p, statusCode = (int)resp.StatusCode });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    if (p == probePaths[^1])
-                    {
-                        _logger.LogError(ex, "Unhandled exception in /api/spoolman/health: {Message}", ex.Message);
-                        return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = $"Internal Server Error: {ex.Message}" });
-                    }
-                }
-            }
-            return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = "Probe endpoints failed" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unhandled exception in /api/spoolman/health: {Message}", ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { configured = true, success = false, message = $"Internal Server Error: {ex.Message}" });
-        }
+        return Ok(new { configured = true, success = true, endpoint = probe.EndpointTried, statusCode = probe.StatusCode });
     }
 
     /// <summary>

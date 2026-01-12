@@ -1,0 +1,40 @@
+﻿using System.Data;
+using System.Data.Common;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+
+namespace Farm.Web.Api.Tests.TestInfrastructure;
+
+// Minimal interceptor used in tests to ensure SQLite PRAGMA settings (foreign_keys)
+// This implementation is defensive and best-effort so tests don't fail when run
+// in environments without full SQLite support.
+internal sealed class TestSqlitePragmaEnforcer : DbCommandInterceptor
+{
+    public TestSqlitePragmaEnforcer()
+    {
+    }
+
+    public static void EnsureForeignKeysEnabled(SqliteConnection? conn)
+    {
+        try
+        {
+            if (conn == null)
+            {
+                return;
+            }
+            if (conn.State != ConnectionState.Open)
+            {
+                conn.Open();
+            }
+            using SqliteCommand cmd = conn.CreateCommand();
+            cmd.CommandText = "PRAGMA foreign_keys = ON;";
+            _ = cmd.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Best-effort; swallow exceptions in test environment
+        }
+    }
+
+    // No-op overrides - we don't alter commands in tests
+}

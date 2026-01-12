@@ -1,0 +1,26 @@
+# MySQL database service for PrintFarmer
+# Single-provider template for use in multi-database deployments
+# NOTE: This file contains just the service configuration to be inserted under services.database:
+
+image: mysql:${MYSQL_VERSION:-8.0}
+container_name: printfarmer-database-mysql
+environment:
+  MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+  MYSQL_DATABASE: ${MYSQL_DATABASE:-printfarmer}
+  MYSQL_USER: ${MYSQL_USER:-printfarmer}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+ports:
+  - "3306:3306"
+networks:
+  printfarmer-network:
+    aliases:
+      - mysql
+      - database
+volumes:
+  - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/mysql
+restart: unless-stopped
+healthcheck:
+  test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+  interval: 10s
+  timeout: 5s
+  retries: 5

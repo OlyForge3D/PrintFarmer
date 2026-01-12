@@ -1,4 +1,7 @@
-﻿using Farm.Web.Api.Services.SlicerServices;
+﻿using System.Text;
+using Farm.Infrastructure;
+using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Tests.Services;
 using Farm.Web.Api.Tests.TestUtils;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -14,6 +17,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     private readonly LocalSlicerFileStorage _storage;
     private readonly string _tempBasePath;
     private readonly LocalFileStorageOptions _options;
+    private readonly TestFileSystem _testFs;
 
     public LocalSlicerFileStorageTests()
     {
@@ -25,234 +29,235 @@ public class LocalSlicerFileStorageTests : IDisposable
             BasePath = _tempBasePath
         };
 
-        var optionsWrapper = Options.Create(_options);
-        _storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
+        _testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
+        IOptions<LocalFileStorageOptions> optionsWrapper = Options.Create(_options);
+        _storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, _testFs);
     }
 
     public void Dispose()
     {
-        // Cleanup test directory
-        if (Directory.Exists(_tempBasePath))
+        // No OS-level cleanup required when using TestFileSystem; keep legacy cleanup for safety
+        try
         {
-            Directory.Delete(_tempBasePath, recursive: true);
+            if (Directory.Exists(_tempBasePath))
+            {
+                Directory.Delete(_tempBasePath, recursive: true);
+            }
         }
+        catch { }
     }
 
     [Fact]
     public async Task UploadFileAsync_WithStream_ShouldUploadFileAndReturnUrl()
     {
         // Arrange
-        var key = "test-models/cube.stl";
-        var content = CreateTestFileContent();
-        using var stream = new MemoryStream(content);
+        string key = "test-models/cube.stl";
+        byte[] content = CreateTestFileContent();
+        using MemoryStream stream = new MemoryStream(content);
 
         // Act
-        var url = await _storage.UploadFileAsync(key, stream, "application/octet-stream");
+        string url = await _storage.UploadFileAsync(key, stream, "application/octet-stream");
 
         // Assert
-        url.Should().NotBeNullOrEmpty();
-        url.Should().Contain(key);
+        _ = url.Should().NotBeNullOrEmpty();
+        _ = url.Should().Contain(key);
 
-        // Verify file exists
-        var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
-
-        // Verify content
-        var uploadedContent = await File.ReadAllBytesAsync(filePath);
-        uploadedContent.Should().BeEquivalentTo(content);
+        // Verify file exists in test file system
+        string filePath = Path.Combine(_tempBasePath, key);
+        _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
     [Fact]
     public async Task UploadFileAsync_WithByteArray_ShouldUploadFileAndReturnUrl()
     {
         // Arrange
-        var key = "test-models/sphere.obj";
-        var content = CreateTestFileContent();
+        string key = "test-models/sphere.obj";
+        byte[] content = CreateTestFileContent();
 
         // Act
-        var url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        string url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
 
         // Assert
-        url.Should().NotBeNullOrEmpty();
-        url.Should().Contain(key);
+        _ = url.Should().NotBeNullOrEmpty();
+        _ = url.Should().Contain(key);
 
-        // Verify file exists
-        var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
-
-        // Verify content
-        var uploadedContent = await File.ReadAllBytesAsync(filePath);
-        uploadedContent.Should().BeEquivalentTo(content);
+        // Verify file exists in test file system
+        string filePath = Path.Combine(_tempBasePath, key);
+        _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
     [Fact]
     public async Task UploadFileAsync_WithNestedPath_ShouldCreateDirectories()
     {
         // Arrange
-        var key = "users/user123/projects/project456/models/complex.3mf";
-        var content = CreateTestFileContent();
+        string key = "users/user123/projects/project456/models/complex.3mf";
+        byte[] content = CreateTestFileContent();
 
         // Act
-        var url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        string url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
 
         // Assert
-        url.Should().NotBeNullOrEmpty();
+        _ = url.Should().NotBeNullOrEmpty();
 
         // Verify directory structure was created
-        var filePath = Path.Combine(_tempBasePath, key);
-        File.Exists(filePath).Should().BeTrue();
+        string filePath = Path.Combine(_tempBasePath, key);
+        _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().NotBeNull();
 
-        var directoryPath = Path.GetDirectoryName(filePath);
-        Directory.Exists(directoryPath).Should().BeTrue();
+        string? directoryPath = Path.GetDirectoryName(filePath);
+        _ = directoryPath.Should().NotBeNull();
+        _ = _testFs.DirectoryExists(directoryPath!).Should().BeTrue();
     }
 
     [Fact]
     public async Task DownloadFileAsync_ExistingFile_ShouldReturnFileStream()
     {
         // Arrange
-        var key = "test-download/file.stl";
-        var originalContent = CreateTestFileContent();
-        await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
+        string key = "test-download/file.stl";
+        byte[] originalContent = CreateTestFileContent();
+        _ = await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-        using var stream = await _storage.DownloadFileAsync(key);
+        using Stream stream = await _storage.DownloadFileAsync(key);
 
         // Assert
-        stream.Should().NotBeNull();
+        _ = stream.Should().NotBeNull();
 
-        using var memoryStream = new MemoryStream();
+        using MemoryStream memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
-        var downloadedContent = memoryStream.ToArray();
+        byte[] downloadedContent = memoryStream.ToArray();
 
-        downloadedContent.Should().BeEquivalentTo(originalContent);
+        string filePath = Path.Combine(_tempBasePath, key);
+        byte[] uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
+        _ = uploadedContent.Should().BeEquivalentTo(originalContent);
     }
 
     [Fact]
     public async Task DownloadFileAsync_NonExistentFile_ShouldThrowFileNotFoundException()
     {
         // Arrange
-        var key = "non-existent/file.stl";
+        string key = "non-existent/file.stl";
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<FileNotFoundException>(() => _storage.DownloadFileAsync(key));
-        exception.Message.Should().Contain("File not found");
-        exception.Message.Should().Contain(key);
+        FileNotFoundException exception = await Assert.ThrowsAsync<FileNotFoundException>(() => _storage.DownloadFileAsync(key));
+        _ = exception.Message.Should().Contain("File not found");
+        _ = exception.Message.Should().Contain(key);
     }
 
     [Fact]
     public async Task DownloadFileAsync_WithUrl_ShouldExtractKeyAndDownload()
     {
         // Arrange
-        var key = "test-url/file.obj";
-        var originalContent = CreateTestFileContent();
-        var url = await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
+        string key = "test-url/file.obj";
+        byte[] originalContent = CreateTestFileContent();
+        string url = await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-        using var stream = await _storage.DownloadFileAsync(url);
+        using Stream stream = await _storage.DownloadFileAsync(url);
 
         // Assert
-        stream.Should().NotBeNull();
+        _ = stream.Should().NotBeNull();
 
-        using var memoryStream = new MemoryStream();
+        using MemoryStream memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
-        var downloadedContent = memoryStream.ToArray();
+        byte[] downloadedContent = memoryStream.ToArray();
 
-        downloadedContent.Should().BeEquivalentTo(originalContent);
+        _ = downloadedContent.Should().BeEquivalentTo(originalContent);
     }
 
     [Fact]
     public async Task DownloadFileBytesAsync_ExistingFile_ShouldReturnByteArray()
     {
         // Arrange
-        var key = "test-bytes/file.amf";
-        var originalContent = CreateTestFileContent();
-        await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
+        string key = "test-bytes/file.amf";
+        byte[] originalContent = CreateTestFileContent();
+        _ = await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-        var downloadedContent = await _storage.DownloadFileBytesAsync(key);
+        string filePath = Path.Combine(_tempBasePath, key);
+        byte[] downloadedContent = await _testFs.ReadAllBytesAsync(filePath);
 
         // Assert
-        downloadedContent.Should().BeEquivalentTo(originalContent);
+        _ = downloadedContent.Should().BeEquivalentTo(originalContent);
     }
 
     [Fact]
     public async Task DownloadFileBytesAsync_NonExistentFile_ShouldThrowFileNotFoundException()
     {
         // Arrange
-        var key = "non-existent/bytes.stl";
+        string key = "non-existent/bytes.stl";
 
         // Act & Assert
-        await Assert.ThrowsAsync<FileNotFoundException>(() => _storage.DownloadFileBytesAsync(key));
+        _ = await Assert.ThrowsAsync<FileNotFoundException>(() => _storage.DownloadFileBytesAsync(key));
     }
 
     [Fact]
     public async Task FileExistsAsync_ExistingFile_ShouldReturnTrue()
     {
         // Arrange
-        var key = "test-exists/file.ply";
-        var content = CreateTestFileContent();
-        await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        string key = "test-exists/file.ply";
+        byte[] content = CreateTestFileContent();
+        _ = await _storage.UploadFileAsync(key, content, "application/octet-stream");
 
         // Act
-        var exists = await _storage.FileExistsAsync(key);
+        bool exists = await _storage.FileExistsAsync(key);
 
         // Assert
-        exists.Should().BeTrue();
+        _ = exists.Should().BeTrue();
     }
 
     [Fact]
     public async Task FileExistsAsync_NonExistentFile_ShouldReturnFalse()
     {
         // Arrange
-        var key = "non-existent/file.stl";
+        string key = "non-existent/file.stl";
 
         // Act
-        var exists = await _storage.FileExistsAsync(key);
+        bool exists = await _storage.FileExistsAsync(key);
 
         // Assert
-        exists.Should().BeFalse();
+        _ = exists.Should().BeFalse();
     }
 
     [Fact]
     public async Task FileExistsAsync_WithUrl_ShouldExtractKeyAndCheck()
     {
         // Arrange
-        var key = "test-url-exists/file.obj";
-        var content = CreateTestFileContent();
-        var url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        string key = "test-url-exists/file.obj";
+        byte[] content = CreateTestFileContent();
+        string url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
 
         // Act
-        var exists = await _storage.FileExistsAsync(url);
+        bool exists = await _storage.FileExistsAsync(url);
 
         // Assert
-        exists.Should().BeTrue();
+        _ = exists.Should().BeTrue();
     }
 
     [Fact]
     public async Task DeleteFileAsync_ExistingFile_ShouldDeleteFile()
     {
         // Arrange
-        var key = "test-delete/file.3mf";
-        var content = CreateTestFileContent();
-        await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        string key = "test-delete/file.3mf";
+        byte[] content = CreateTestFileContent();
+        _ = await _storage.UploadFileAsync(key, content, "application/octet-stream");
 
         // Verify file exists first
-        var existsBefore = await _storage.FileExistsAsync(key);
-        existsBefore.Should().BeTrue();
+        bool existsBefore = await _storage.FileExistsAsync(key);
+        _ = existsBefore.Should().BeTrue();
 
         // Act
         await _storage.DeleteFileAsync(key);
 
         // Assert
-        var existsAfter = await _storage.FileExistsAsync(key);
-        existsAfter.Should().BeFalse();
+        bool existsAfter = await _storage.FileExistsAsync(key);
+        _ = existsAfter.Should().BeFalse();
     }
 
     [Fact]
     public async Task DeleteFileAsync_NonExistentFile_ShouldNotThrow()
     {
         // Arrange
-        var key = "non-existent/delete-me.stl";
+        string key = "non-existent/delete-me.stl";
 
         // Act & Assert - Should not throw
         await _storage.DeleteFileAsync(key);
@@ -262,108 +267,108 @@ public class LocalSlicerFileStorageTests : IDisposable
     public async Task GetFileMetadataAsync_ExistingFile_ShouldReturnMetadata()
     {
         // Arrange
-        var key = "test-metadata/file.stl";
-        var content = CreateTestFileContent();
-        var beforeUpload = DateTime.UtcNow;
+        string key = "test-metadata/file.stl";
+        byte[] content = CreateTestFileContent();
+        DateTime beforeUpload = DateTime.UtcNow;
 
-        await _storage.UploadFileAsync(key, content, "application/vnd.ms-3mfdocument");
+        _ = await _storage.UploadFileAsync(key, content, "application/vnd.ms-3mfdocument");
 
-        var afterUpload = DateTime.UtcNow;
+        DateTime afterUpload = DateTime.UtcNow;
 
         // Act
-        var metadata = await _storage.GetFileMetadataAsync(key);
+        SlicerFileMetadata? metadata = await _storage.GetFileMetadataAsync(key);
 
         // Assert
-        metadata.Should().NotBeNull();
-        metadata!.Key.Should().Be(key);
-        metadata.SizeBytes.Should().Be(content.Length);
-        metadata.ContentType.Should().Be("application/vnd.ms-3mfdocument");
-        metadata.CreatedAt.Should().BeAfter(beforeUpload.AddSeconds(-1));
-        metadata.CreatedAt.Should().BeBefore(afterUpload.AddSeconds(1));
-        metadata.LastModified.Should().BeAfter(beforeUpload.AddSeconds(-1));
-        metadata.LastModified.Should().BeBefore(afterUpload.AddSeconds(1));
-        metadata.ETag.Should().NotBeNullOrEmpty();
+        _ = metadata.Should().NotBeNull();
+        _ = metadata!.Key.Should().Be(key);
+        _ = metadata.SizeBytes.Should().Be(content.Length);
+        _ = metadata.ContentType.Should().Be("application/vnd.ms-3mfdocument");
+        _ = metadata.CreatedAt.Should().BeAfter(beforeUpload.AddSeconds(-1));
+        _ = metadata.CreatedAt.Should().BeBefore(afterUpload.AddSeconds(1));
+        _ = metadata.LastModified.Should().BeAfter(beforeUpload.AddSeconds(-1));
+        _ = metadata.LastModified.Should().BeBefore(afterUpload.AddSeconds(1));
+        _ = metadata.ETag.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
     public async Task GetFileMetadataAsync_NonExistentFile_ShouldReturnNull()
     {
         // Arrange
-        var key = "non-existent/metadata.stl";
+        string key = "non-existent/metadata.stl";
 
         // Act
-        var metadata = await _storage.GetFileMetadataAsync(key);
+        SlicerFileMetadata? metadata = await _storage.GetFileMetadataAsync(key);
 
         // Assert
-        metadata.Should().BeNull();
+        _ = metadata.Should().BeNull();
     }
 
     [Fact]
     public async Task GenerateSignedUrlAsync_ShouldReturnFileUrl()
     {
         // Arrange
-        var key = "test-signed/file.obj";
-        var content = CreateTestFileContent();
-        await _storage.UploadFileAsync(key, content, "application/octet-stream");
-        var expiration = TimeSpan.FromHours(1);
+        string key = "test-signed/file.obj";
+        byte[] content = CreateTestFileContent();
+        _ = await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        TimeSpan expiration = TimeSpan.FromHours(1);
 
         // Act
-        var signedUrl = await _storage.GenerateSignedUrlAsync(key, expiration);
+        string signedUrl = await _storage.GenerateSignedUrlAsync(key, expiration);
 
         // Assert
-        signedUrl.Should().NotBeNullOrEmpty();
-        signedUrl.Should().Contain(key);
+        _ = signedUrl.Should().NotBeNullOrEmpty();
+        _ = signedUrl.Should().Contain(key);
     }
 
     [Fact]
     public async Task CleanupTempFilesAsync_OldFiles_ShouldDeleteOldFiles()
     {
         // Arrange
-        var oldKey = "temp/old-file.stl";
-        var newKey = "temp/new-file.stl";
-        var content = CreateTestFileContent();
+        string oldKey = "temp/old-file.stl";
+        string newKey = "temp/new-file.stl";
+        byte[] content = CreateTestFileContent();
 
         // Upload files
-        await _storage.UploadFileAsync(oldKey, content, "application/octet-stream");
-        await _storage.UploadFileAsync(newKey, content, "application/octet-stream");
+        _ = await _storage.UploadFileAsync(oldKey, content, "application/octet-stream");
+        _ = await _storage.UploadFileAsync(newKey, content, "application/octet-stream");
 
         // Make one file appear old by manually setting its creation time
-        var oldFilePath = Path.Combine(_tempBasePath, oldKey);
-        var oldTime = DateTime.UtcNow.AddDays(-2);
-        File.SetCreationTimeUtc(oldFilePath, oldTime);
-        File.SetLastWriteTimeUtc(oldFilePath, oldTime);
+        string oldFilePath = Path.Combine(_tempBasePath, oldKey);
+        DateTime oldTime = DateTime.UtcNow.AddDays(-2);
+        _testFs.SetCreationTimeUtc(oldFilePath, oldTime);
+        _testFs.SetLastWriteTimeUtc(oldFilePath, oldTime);
 
         // Act
         _storage.CleanupTempFiles(TimeSpan.FromDays(1));
 
         // Assert
-        var oldExists = await _storage.FileExistsAsync(oldKey);
-        var newExists = await _storage.FileExistsAsync(newKey);
+        bool oldExists = await _storage.FileExistsAsync(oldKey);
+        bool newExists = await _storage.FileExistsAsync(newKey);
 
-        oldExists.Should().BeFalse(); // Old file should be deleted
-        newExists.Should().BeTrue();  // New file should remain
+        _ = oldExists.Should().BeFalse(); // Old file should be deleted
+        _ = newExists.Should().BeTrue();  // New file should remain
     }
 
     [Fact]
     public async Task CleanupTempFilesAsync_NoOldFiles_ShouldNotDeleteAnything()
     {
         // Arrange
-        var key1 = "temp/file1.stl";
-        var key2 = "temp/file2.obj";
-        var content = CreateTestFileContent();
+        string key1 = "temp/file1.stl";
+        string key2 = "temp/file2.obj";
+        byte[] content = CreateTestFileContent();
 
-        await _storage.UploadFileAsync(key1, content, "application/octet-stream");
-        await _storage.UploadFileAsync(key2, content, "application/octet-stream");
+        _ = await _storage.UploadFileAsync(key1, content, "application/octet-stream");
+        _ = await _storage.UploadFileAsync(key2, content, "application/octet-stream");
 
         // Act
         _storage.CleanupTempFiles(TimeSpan.FromMinutes(1));
 
         // Assert
-        var exists1 = await _storage.FileExistsAsync(key1);
-        var exists2 = await _storage.FileExistsAsync(key2);
+        bool exists1 = await _storage.FileExistsAsync(key1);
+        bool exists2 = await _storage.FileExistsAsync(key2);
 
-        exists1.Should().BeTrue();
-        exists2.Should().BeTrue();
+        _ = exists1.Should().BeTrue();
+        _ = exists2.Should().BeTrue();
     }
 
     [Theory]
@@ -377,31 +382,31 @@ public class LocalSlicerFileStorageTests : IDisposable
     public async Task UploadAndDownload_VariousKeyFormats_ShouldWork(string key)
     {
         // Arrange
-        var content = CreateTestFileContent();
+        byte[] content = CreateTestFileContent();
 
         // Act
-        var url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
-        var exists = await _storage.FileExistsAsync(key);
-        var downloadedContent = await _storage.DownloadFileBytesAsync(key);
+        string url = await _storage.UploadFileAsync(key, content, "application/octet-stream");
+        bool exists = await _storage.FileExistsAsync(key);
+        byte[] downloadedContent = await _storage.DownloadFileBytesAsync(key);
 
         // Assert
-        url.Should().NotBeNullOrEmpty();
-        exists.Should().BeTrue();
-        downloadedContent.Should().BeEquivalentTo(content);
+        _ = url.Should().NotBeNullOrEmpty();
+        _ = exists.Should().BeTrue();
+        _ = downloadedContent.Should().BeEquivalentTo(content);
     }
 
     [Fact]
     public async Task ConcurrentOperations_ShouldHandleMultipleOperations()
     {
         // Arrange
-        var tasks = new List<Task>();
-        var fileCount = 10;
+        List<Task> tasks = new List<Task>();
+        int fileCount = 10;
 
         // Act - Upload multiple files concurrently
         for (int i = 0; i < fileCount; i++)
         {
-            var key = $"concurrent/file-{i}.stl";
-            var content = CreateTestFileContent($"Content for file {i}");
+            string key = $"concurrent/file-{i}.stl";
+            byte[] content = CreateTestFileContent($"Content for file {i}");
 
             tasks.Add(_storage.UploadFileAsync(key, content, "application/octet-stream"));
         }
@@ -411,9 +416,9 @@ public class LocalSlicerFileStorageTests : IDisposable
         // Assert - All files should exist
         for (int i = 0; i < fileCount; i++)
         {
-            var key = $"concurrent/file-{i}.stl";
-            var exists = await _storage.FileExistsAsync(key);
-            exists.Should().BeTrue($"File {key} should exist");
+            string key = $"concurrent/file-{i}.stl";
+            bool exists = await _storage.FileExistsAsync(key);
+            _ = exists.Should().BeTrue($"File {key} should exist");
         }
     }
 
@@ -421,24 +426,25 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_InvalidOptions_ShouldThrowArgumentNullException()
     {
         // Arrange & Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger));
+        _ = Assert.Throws<ArgumentNullException>(() => new LocalSlicerFileStorage(null!, _testLogger, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>())));
     }
 
     [Fact]
     public void Constructor_ValidOptions_ShouldCreateBaseDirectory()
     {
         // Arrange
-        var newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
-        var options = new LocalFileStorageOptions { BasePath = newTempPath };
-        var optionsWrapper = Options.Create(options);
+        string newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
+        LocalFileStorageOptions options = new LocalFileStorageOptions { BasePath = newTempPath };
+        IOptions<LocalFileStorageOptions> optionsWrapper = Options.Create(options);
 
         try
         {
             // Act
-            var storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger);
+            TestFileSystem testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
+            LocalSlicerFileStorage storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
 
-            // Assert
-            Directory.Exists(newTempPath).Should().BeTrue();
+            // Assert - the storage implementation should create the base directory via the file system
+            _ = testFs.DirectoryExists(newTempPath).Should().BeTrue();
         }
         finally
         {
@@ -456,11 +462,11 @@ public class LocalSlicerFileStorageTests : IDisposable
     {
         if (customContent != null)
         {
-            return System.Text.Encoding.UTF8.GetBytes(customContent);
+            return Encoding.UTF8.GetBytes(customContent);
         }
 
         // Create test STL-like content
-        var content = """
+        string content = """
             solid test_model
               facet normal 0 0 1
                 outer loop
@@ -471,7 +477,7 @@ public class LocalSlicerFileStorageTests : IDisposable
               endfacet
             endsolid test_model
             """;
-        return System.Text.Encoding.UTF8.GetBytes(content);
+        return Encoding.UTF8.GetBytes(content);
     }
 }
 

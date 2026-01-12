@@ -81,7 +81,7 @@ Slicing operations are computationally intensive and can benefit significantly f
 #### OrcaSlicer Microservice
 ```dockerfile
 # docker/orcaslicer.dockerfile
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Install OrcaSlicer and dependencies
 RUN apt-get update && apt-get install -y \
@@ -388,149 +388,12 @@ public class OrcaSlicingService : ISlicingService
 
 ### 2. Job Queue Implementation
 
-#### Redis-based Job Queue
-```csharp
-// SlicerService.Core/Services/RedisJobQueue.cs
-public class RedisJobQueue : IJobQueue
-{
-    private readonly IConnectionMultiplexer _redis;
-    private readonly IDatabase _database;
-    private readonly ILogger<RedisJobQueue> _logger;
-    private readonly string _queueKey = "slicer:jobs:queue";
-    private readonly string _processingKey = "slicer:jobs:processing";
-    private readonly string _completedKey = "slicer:jobs:completed";
+#### Queue options and DB-backed approach
+This document previously contained an example Redis-based queue implementation. The current project no longer requires Redis for worker queueing; workers use an HTTP claim/renew/complete flow against the API and the API defaults to a DB-backed queue implementation. For high-throughput scenarios you can use an external message broker (RabbitMQ, Kafka, etc.) and integrate via a QueueProvider implementation.
 
-    public RedisJobQueue(IConnectionMultiplexer redis, ILogger<RedisJobQueue> logger)
-    {
-        _redis = redis;
-        _database = redis.GetDatabase();
-        _logger = logger;
-    }
-
-    public async Task EnqueueAsync(SlicingJob job)
-    {
-        var jobJson = JsonSerializer.Serialize(job);
-        
-        // Add to priority queue (higher priority = lower score)
-        var score = GetPriorityScore(job.Priority);
-        await _database.SortedSetAddAsync(_queueKey, jobJson, score);
-        
-        // Store job details
-        await _database.HashSetAsync($"job:{job.Id}", new HashEntry[]
-        {
-            new("id", job.Id.ToString()),
-            new("status", job.Status.ToString()),
-            new("created_at", job.CreatedAt.ToString("O")),
-            new("data", jobJson)
-        });
-
-        _logger.LogInformation("Enqueued job {JobId} with priority {Priority}", job.Id, job.Priority);
-    }
-
-    public async Task<SlicingJob?> DequeueAsync(string workerId, TimeSpan timeout)
-    {
-        var result = await _database.ScriptEvaluateAsync(@"
-            local job = redis.call('ZPOPMIN', KEYS[1])
-            if job[1] then
-                redis.call('ZADD', KEYS[2], job[2], job[1])
-                redis.call('HSET', 'worker:' .. ARGV[1], 'current_job', job[1], 'started_at', ARGV[2])
-                return job[1]
-            else
-                return nil
-            end
-        ", new RedisKey[] { _queueKey, _processingKey }, new RedisValue[] { workerId, DateTime.UtcNow.ToString("O") });
-
-        if (result.IsNull)
-        {
-            return null;
-        }
-
-        var jobJson = result.ToString();
-        var job = JsonSerializer.Deserialize<SlicingJob>(jobJson);
-        
-        if (job != null)
-        {
-            job.Status = SlicingJobStatus.Processing;
-            job.StartedAt = DateTime.UtcNow;
-            job.WorkerId = workerId;
-            
-            await UpdateJobStatusAsync(job);
-        }
-
-        return job;
-    }
-
-    public async Task CompleteJobAsync(SlicingJob job, SlicingResult result)
-    {
-        job.Status = result.Success ? SlicingJobStatus.Completed : SlicingJobStatus.Failed;
-        job.CompletedAt = DateTime.UtcNow;
-        job.ErrorMessage = result.Error;
-        job.ResultFileUrl = result.ResultFileUrl;
-
-        // Move from processing to completed
-        var jobJson = JsonSerializer.Serialize(job);
-        
-        await _database.ScriptEvaluateAsync(@"
-            redis.call('ZREM', KEYS[1], ARGV[1])
-            redis.call('ZADD', KEYS[2], ARGV[2], ARGV[1])
-        ", new RedisKey[] { _processingKey, _completedKey }, 
-           new RedisValue[] { jobJson, DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
-
-        await UpdateJobStatusAsync(job);
-
-        _logger.LogInformation("Completed job {JobId} with status {Status}", job.Id, job.Status);
-    }
-
-    public async Task<SlicingJob?> GetJobAsync(Guid jobId)
-    {
-        var jobData = await _database.HashGetAsync($"job:{jobId}", "data");
-        if (!jobData.HasValue)
-        {
-            return null;
-        }
-
-        return JsonSerializer.Deserialize<SlicingJob>(jobData);
-    }
-
-    public async Task<long> GetQueueDepthAsync()
-    {
-        return await _database.SortedSetLengthAsync(_queueKey);
-    }
-
-    public async Task<long> GetProcessingCountAsync()
-    {
-        return await _database.SortedSetLengthAsync(_processingKey);
-    }
-
-    private double GetPriorityScore(SlicingJobPriority priority)
-    {
-        return priority switch
-        {
-            SlicingJobPriority.Low => 3.0,
-            SlicingJobPriority.Normal => 2.0,
-            SlicingJobPriority.High => 1.0,
-            SlicingJobPriority.Critical => 0.0,
-            _ => 2.0
-        };
-    }
-
-    private async Task UpdateJobStatusAsync(SlicingJob job)
-    {
-        var jobJson = JsonSerializer.Serialize(job);
-        await _database.HashSetAsync($"job:{job.Id}", new HashEntry[]
-        {
-            new("status", job.Status.ToString()),
-            new("progress", job.Progress),
-            new("started_at", job.StartedAt?.ToString("O") ?? ""),
-            new("completed_at", job.CompletedAt?.ToString("O") ?? ""),
-            new("worker_id", job.WorkerId ?? ""),
-            new("error_message", job.ErrorMessage ?? ""),
-            new("result_file_url", job.ResultFileUrl ?? ""),
-            new("data", jobJson)
-        });
-    }
-}
-```
+Guidance:
+- Workers should claim work via the API endpoints and complete via the API (claim/renew/complete). This keeps worker logic independent of the queue store.
+- The server offers a DB-backed queue by default. If you need a broker, add a provider implementation and register it in the service collection.
 
 ### 3. Kubernetes Deployment Configuration
 

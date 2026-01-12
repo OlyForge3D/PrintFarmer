@@ -1,0 +1,33 @@
+FROM nginx:alpine
+
+# Copy nginx configuration
+COPY deploy/nginx/nginx-microservices.conf /etc/nginx/nginx.conf
+
+# Install curl for health checks and pre-create nginx directories with proper permissions
+RUN apk add --no-cache curl && \
+    # Create nginx cache and temp directories
+    mkdir -p /var/cache/nginx/client_temp \
+             /var/cache/nginx/proxy_temp \
+             /var/cache/nginx/fastcgi_temp \
+             /var/cache/nginx/uwsgi_temp \
+             /var/cache/nginx/scgi_temp && \
+    # Set proper ownership and permissions for cache directories
+    chown -R nginx:nginx /var/cache/nginx && \
+    chmod -R 755 /var/cache/nginx && \
+    # Also ensure /run directory exists and has proper permissions for pid file
+    mkdir -p /run/nginx && \
+    chown nginx:nginx /run/nginx && \
+    chmod 755 /run/nginx && \
+    # Ensure /var/log/nginx has proper permissions
+    mkdir -p /var/log/nginx && \
+    chown nginx:nginx /var/log/nginx && \
+    chmod 755 /var/log/nginx
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:80/health || exit 1
+
+EXPOSE 80
+
+# Override the default nginx entrypoint to just run nginx directly
+ENTRYPOINT []
+CMD ["nginx", "-g", "daemon off;"]

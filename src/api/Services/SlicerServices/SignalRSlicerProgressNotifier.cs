@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SlicerServices;
@@ -27,12 +27,12 @@ public class SignalRSlicerProgressNotifier(
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
-                await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingProgress", update, cancellationToken);
+                await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingprogress", update, cancellationToken);
                 _logger.LogDebug($"Sent progress update for job {update.JobId} to {connectionIds.Count} subscribers: {update.Progress}%");
             }
 
             // Also send to a general group for monitoring dashboards
-            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingProgress", update, cancellationToken);
+            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicingprogress", update, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -73,15 +73,15 @@ public class SignalRSlicerProgressNotifier(
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
-                await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingCompleted", completionNotification, cancellationToken);
+                await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingcompleted", completionNotification, cancellationToken);
                 _logger.LogInformation($"Sent completion notification for job {job.Id} to {connectionIds.Count} subscribers");
             }
 
             // Send to user's personal group
-            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("SlicingCompleted", completionNotification, cancellationToken);
+            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("slicingcompleted", completionNotification, cancellationToken);
 
             // Send to monitoring group
-            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingCompleted", completionNotification, cancellationToken);
+            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicingcompleted", completionNotification, cancellationToken);
 
             // Clean up subscriptions for completed job
             RemoveJobSubscriptions(job.Id);
@@ -120,15 +120,15 @@ public class SignalRSlicerProgressNotifier(
             if (connectionIds.Count > 0)
             {
                 // Send to specific subscribers
-                await _hubContext.Clients.Clients(connectionIds).SendAsync("SlicingFailed", failureNotification, cancellationToken);
+                await _hubContext.Clients.Clients(connectionIds).SendAsync("slicingfailed", failureNotification, cancellationToken);
                 _logger.LogInformation($"Sent failure notification for job {job.Id} to {connectionIds.Count} subscribers");
             }
 
             // Send to user's personal group
-            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("SlicingFailed", failureNotification, cancellationToken);
+            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("slicingfailed", failureNotification, cancellationToken);
 
             // Send to monitoring group
-            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("SlicingFailed", failureNotification, cancellationToken);
+            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicingfailed", failureNotification, cancellationToken);
 
             // Clean up subscriptions for failed job (unless it can be retried)
             if (!failureNotification.CanRetry)

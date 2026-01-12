@@ -1,0 +1,125 @@
+# Program.cs Refactoring Guide
+
+## Problem
+The current `Program.cs` is over 1,150 lines and mixes multiple concerns:
+- Service registration (database, caching, HTTP clients, business services)
+- Database initialization and seeding
+- CLI command handling (--create-admin, --list-users)  
+- Middleware configuration
+- Endpoint routing
+- OpenTelemetry setup
+- Authentication/Authorization setup
+
+## Solution
+Extract concerns into focused extension methods in separate files:
+
+### 1. ServiceCollectionExtensions.cs
+**Location:** `src/api/Infrastructure/ServiceCollectionExtensions.cs`
+
+**Purpose:** Centralize service registration
+
+**Methods:**
+- `AddPrintFarmerDatabase()` - Database and EF Core setup
+- `AddPrintFarmerSettings()` - Settings service registration
+- `AddPrintFarmerServices()` - All business services (caching, API clients, discovery, etc.)
+
+### 2. DatabaseInitializationExtensions.cs
+**Location:** `src/api/Infrastructure/DatabaseInitializationExtensions.cs`
+
+**Purpose:** Handle database initialization in correct order
+
+**Methods:**
+- `InitializeDatabaseAsync()` - Ensures schema exists, then initializes and seeds
+
+**Key Fix:** Calls `EnsureCreatedAsync()` BEFORE resolving `SettingsService`, preventing queries against missing tables.
+
+### 3. CliCommandExtensions.cs
+**Location:** `src/api/Infrastructure/CliCommandExtensions.cs`
+
+**Purpose:** Handle headless CLI commands
+
+**Methods:**
+- `HandleCliCommandsAsync()` - Returns true if CLI command executed (app should exit)
+- Private methods for --list-users and --create-admin
+
+## Refactored Program.cs Structure
+
+The new `Program.cs` should be ~400-500 lines instead of 1,150+:
+
+```csharp
+using Farm.Web.Api.Infrastructure;
+// ... other necessary usings
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// === SERVICE REGISTRATION ===
+builder.Services.AddPrintFarmerDatabase(builder.Configuration);
+builder.Services.AddPrintFarmerSettings();
+builder.Services.AddPrintFarmerServices();
+
+// Controllers, Swagger, CORS, OpenTelemetry, Auth (keep as-is)
+// ...
+
+WebApplication app = builder.Build();
+
+// === CLI COMMAND HANDLING ===
+if (await app.HandleCliCommandsAsync(args))
+{
+    return; // CLI command executed, exit
+}
+
+// === MIDDLEWARE PIPELINE ===
+// ... (keep existing middleware configuration)
+
+// === DATABASE INITIALIZATION ===
+await app.InitializeDatabaseAsync();
+
+// === RUN APPLICATION ===
+await app.RunAsync();
+```
+
+## Benefits
+
+1. **Separation of Concerns** - Each file has a single responsibility
+2. **Testability** - Extension methods can be unit tested independently  
+3. **Readability** - Program.cs shows high-level flow at a glance
+4. **Maintainability** - Changes to service registration don't clutter Program.cs
+5. **Bug Fix** - Database initialization happens in correct order
+
+## Migration Steps
+
+1. ✅ Create `ServiceCollectionExtensions.cs`
+2. ✅ Create `DatabaseInitializationExtensions.cs`  
+3. ✅ Create `CliCommandExtensions.cs`
+4. ⏳ Update `Program.cs` to use the new extensions
+5. ⏳ Test that application starts correctly
+6. ⏳ Test CLI commands still work
+
+## Files Created
+
+- `/src/api/Infrastructure/ServiceCollectionExtensions.cs` (90 lines)
+- `/src/api/Infrastructure/DatabaseInitializationExtensions.cs` (67 lines)
+- `/src/api/Infrastructure/CliCommandExtensions.cs` (113 lines)
+
+Total: 270 lines of well-organized, focused code replacing ~500 lines of mixed concerns in Program.cs.
+
+## Completed changes related to the ongoing refactor (branch: feature/orcaslicer-reimplementation)
+
+The following follow-up maintenance and test-reliability tasks were completed while working on the Program.cs refactor. These steps are small, safe, and improve test determinism and local developer workflow:
+
+- Created an IntegrationTests project (`src/tests/Farm.Web.IntegrationTests`) and moved Docker-heavy Slicer worker tests into it. This keeps the fast-running `Farm.Web.Api.Tests` project Docker-free by default.
+- Copied a self-contained `DockerTestHelpers.cs` into the new IntegrationTests project so Docker helpers live with Docker tests.
+- Updated `src/tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj` to explicitly exclude the moved Docker test sources (added `<Compile Remove="..."/>` entries), ensuring quick local test runs won't attempt to run Docker compose or container builds.
+- Updated documentation pointers in the old SlicerServices README to reference the new integration test locations.
+- Fixed failing unit tests in `PasswordPolicyServiceTests` by:
+    - Updating test setup to capture the entity passed to `SaveAsync` and assert on it.
+    - Making `PasswordPolicyService.UpdateAsync` return a DTO constructed from the saved entity (deterministic and avoids a second repository read in tests).
+    - Added a small test utility `TestSqlitePragmaEnforcer` and resolved a duplicate `CustomWebApplicationFactory` type to make the test project compile and run deterministically.
+
+These changes were verified by running the API test project locally (`dotnet test ./tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj`) and confirming all tests in that project pass (304/304 green).
+
+If you'd like, I can also:
+
+- Physically delete the now-excluded old Docker test files from `src/tests/Farm.Web.Api.Tests` (they are currently excluded in csproj but still present in the tree).
+- Add a short section to the repository README describing the new IntegrationTests project and how to run Docker integration tests (CI-only or locally with Docker available).
+

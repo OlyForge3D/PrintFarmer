@@ -8,9 +8,9 @@ namespace Farm.Web.Api.Services.TestHelpers
     {
         public static object Create(string name, string? manufacturer = null, string? model = null, string? firmware = null, string? version = null)
         {
-            // Try to instantiate the API's PrinterInfo type if present.
-            System.Reflection.Assembly apiAssembly = typeof(PrinterInfoFactory).Assembly;
-            Type t = apiAssembly.GetType("Farm.Web.Api.Services.PrinterInfo") ?? throw new InvalidOperationException("API PrinterInfo type not found");
+            // Try to instantiate the shared PrinterInfo type (moved from API to shared project).
+            System.Reflection.Assembly sharedAssembly = typeof(Farm.Infrastructure.Contracts.Printers.PrusaLink.PrinterInfo).Assembly;
+            Type t = sharedAssembly.GetType("Farm.Infrastructure.Contracts.Printers.PrusaLink.PrinterInfo") ?? throw new InvalidOperationException("Shared PrinterInfo type not found");
 
             // Instantiate and set properties permissively
             object inst = Activator.CreateInstance(t)!;

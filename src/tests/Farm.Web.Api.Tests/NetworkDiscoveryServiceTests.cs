@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
+using Farm.Infrastructure;
 using Farm.Web.Api.Services;
-using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests;
 
@@ -10,54 +10,54 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_MoonrakerPort80_OmitsPortFromUrl()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 80;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfo("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 80;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfo("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100");
-        result.Port.Should().Be(80);
-        result.Backend.Should().Be(PrinterBackend.Moonraker);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100");
+        _ = result.BackendPort.Should().Be(80);
+        _ = result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
     [Fact]
     public void CreateDiscoveredPrinter_MoonrakerPort7125_IncludesPortInUrl()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 7125;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfo("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 7125;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfo("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100:7125");
-        result.Port.Should().Be(7125);
-        result.Backend.Should().Be(PrinterBackend.Moonraker);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100:7125");
+        _ = result.BackendPort.Should().Be(7125);
+        _ = result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
     [Fact]
     public void CreateDiscoveredPrinter_PrusaLinkPort80_IncludesPortInUrl()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 80;
-        var backend = PrinterBackend.PrusaLink;
-        var printerInfo = CreatePrinterInfo("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 80;
+        PrinterBackend backend = PrinterBackend.PrusaLink;
+        object printerInfo = CreatePrinterInfo("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100:80");
-        result.Port.Should().Be(80);
-        result.Backend.Should().Be(PrinterBackend.PrusaLink);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100:80");
+        _ = result.BackendPort.Should().Be(80);
+        _ = result.Backend.Should().Be(PrinterBackend.PrusaLink);
     }
 
     private static object CreatePrinterInfo(string name)
@@ -70,53 +70,53 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_UnknownManufacturer_SetsManufacturerToNull()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 7125;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfoWithUnknownManufacturer("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 7125;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfoWithUnknownManufacturer("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     [Fact]
     public void CreateDiscoveredPrinter_UnknownModel_SetsModelToNull()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 80;
-        var backend = PrinterBackend.PrusaLink;
-        var printerInfo = CreatePrinterInfoWithUnknownModel("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 80;
+        PrinterBackend backend = PrinterBackend.PrusaLink;
+        object printerInfo = CreatePrinterInfoWithUnknownModel("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
         // If the runtime PrinterInfo includes Manufacturer/Model properties then assert them,
         // otherwise the API probe DTO doesn't include those fields and the result will be null.
-        var pit = printerInfo.GetType();
-        var mfgProp = pit.GetProperty("Manufacturer");
+        Type pit = printerInfo.GetType();
+        PropertyInfo? mfgProp = pit.GetProperty("Manufacturer");
         if (mfgProp != null)
         {
-            result.Manufacturer.Should().Be("Test Manufacturer", "because manufacturer is not Unknown");
+            _ = result.Manufacturer.Should().Be("Test Manufacturer", "because manufacturer is not Unknown");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
-        var modelProp = pit.GetProperty("Model");
+        PropertyInfo? modelProp = pit.GetProperty("Model");
         if (modelProp != null)
         {
-            result.Model.Should().BeNull("because Unknown model should not be set");
+            _ = result.Model.Should().BeNull("because Unknown model should not be set");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -124,17 +124,17 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_BothUnknown_SetsBothToNull()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 7125;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfoWithUnknownValues("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 7125;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfoWithUnknownValues("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because Unknown model should not be set");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because Unknown model should not be set");
     }
 
     private static object CreatePrinterInfoWithUnknownManufacturer(string name)
@@ -156,34 +156,34 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_PartialUnknown_KeepsValues()
     {
         // Arrange
-        var ipAddress = "192.168.1.100";
-        var port = 80;
-        var backend = PrinterBackend.PrusaLink;
-        var printerInfo = CreatePrinterInfoWithPartialUnknown("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 80;
+        PrinterBackend backend = PrinterBackend.PrusaLink;
+        object printerInfo = CreatePrinterInfoWithPartialUnknown("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert - conditional based on runtime DTO shape
-        var pit2 = printerInfo.GetType();
-        var mfgProp2 = pit2.GetProperty("Manufacturer");
+        Type pit2 = printerInfo.GetType();
+        PropertyInfo? mfgProp2 = pit2.GetProperty("Manufacturer");
         if (mfgProp2 != null)
         {
-            result.Manufacturer.Should().Be("MyUnknown Manufacturer", "because it doesn't start with Unknown");
+            _ = result.Manufacturer.Should().Be("MyUnknown Manufacturer", "because it doesn't start with Unknown");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
-        var modelProp2 = pit2.GetProperty("Model");
+        PropertyInfo? modelProp2 = pit2.GetProperty("Model");
         if (modelProp2 != null)
         {
-            result.Model.Should().Be("Model Unknown Type", "because it doesn't start with Unknown");
+            _ = result.Model.Should().Be("Model Unknown Type", "because it doesn't start with Unknown");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -196,34 +196,34 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_UnknownPrusa_SetsModelToNull()
     {
         // Arrange - This tests the specific "Unknown Prusa" pattern from PrusaLink discovery
-        var ipAddress = "192.168.1.100";
-        var port = 80;
-        var backend = PrinterBackend.PrusaLink;
-        var printerInfo = CreatePrinterInfoWithUnknownPrusa("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 80;
+        PrinterBackend backend = PrinterBackend.PrusaLink;
+        object printerInfo = CreatePrinterInfoWithUnknownPrusa("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert - conditional based on runtime DTO shape
-        var pit3 = printerInfo.GetType();
-        var mfgProp3 = pit3.GetProperty("Manufacturer");
+        Type pit3 = printerInfo.GetType();
+        PropertyInfo? mfgProp3 = pit3.GetProperty("Manufacturer");
         if (mfgProp3 != null)
         {
-            result.Manufacturer.Should().Be("Prusa Research", "because manufacturer is known");
+            _ = result.Manufacturer.Should().Be("Prusa Research", "because manufacturer is known");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
-        var modelProp3 = pit3.GetProperty("Model");
+        PropertyInfo? modelProp3 = pit3.GetProperty("Model");
         if (modelProp3 != null)
         {
-            result.Model.Should().BeNull("because Unknown Prusa should not be set");
+            _ = result.Model.Should().BeNull("because Unknown Prusa should not be set");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -231,34 +231,34 @@ public class NetworkDiscoveryServiceTests
     public void CreateDiscoveredPrinter_NullManufacturerValidModel_SetsBothToNull()
     {
         // Arrange - When manufacturer is null, model should also be set to null
-        var ipAddress = "192.168.1.100";
-        var port = 7125;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfoWithNullManufacturer("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 7125;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfoWithNullManufacturer("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because manufacturer is null");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because manufacturer is null");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     [Fact]
     public void CreateDiscoveredPrinter_UnknownManufacturerValidModel_SetsBothToNull()
     {
         // Arrange - When manufacturer is "Unknown" (filtered to null) and model is valid, both should be null
-        var ipAddress = "192.168.1.100";
-        var port = 7125;
-        var backend = PrinterBackend.Moonraker;
-        var printerInfo = CreatePrinterInfoWithUnknownManufacturerValidModel("Test Printer");
+        string ipAddress = "192.168.1.100";
+        int port = 7125;
+        PrinterBackend backend = PrinterBackend.Moonraker;
+        object printerInfo = CreatePrinterInfoWithUnknownManufacturerValidModel("Test Printer");
 
         // Act
-        var result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
+        DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     private static object CreatePrinterInfoWithUnknownPrusa(string name)
@@ -293,18 +293,18 @@ public class NetworkDiscoveryServiceTests
         {
             if (printerInfo != null)
             {
-                var pit = printerInfo.GetType();
-                var pn = pit.GetProperty("Name");
+                Type pit = printerInfo.GetType();
+                PropertyInfo? pn = pit.GetProperty("Name");
                 if (pn != null)
                 {
                     name = pn.GetValue(printerInfo) as string;
                 }
-                var pm = pit.GetProperty("Manufacturer");
+                PropertyInfo? pm = pit.GetProperty("Manufacturer");
                 if (pm != null)
                 {
                     manufacturer = pm.GetValue(printerInfo) as string;
                 }
-                var pmod = pit.GetProperty("Model");
+                PropertyInfo? pmod = pit.GetProperty("Model");
                 if (pmod != null)
                 {
                     model = pmod.GetValue(printerInfo) as string;
@@ -338,10 +338,10 @@ public class NetworkDiscoveryServiceTests
             serverUrl = $"http://{ipAddress}:{port}";
         }
 
-        var fallback = new DiscoveredPrinterDto
+        DiscoveredPrinterDto fallback = new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,
-            Port = port,
+            BackendPort = port,
             Backend = backend,
             ServerUrl = serverUrl,
             Name = name ?? string.Empty,
@@ -360,7 +360,7 @@ public class NetworkDiscoveryServiceTests
         try
         {
             Console.WriteLine("[TEST DIAGNOSTIC] Enumerating loaded assemblies for types named 'PrinterInfo':");
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 string asmName = asm.FullName ?? asm.GetName().Name ?? "<unknown assembly>";
                 Type[] types;
@@ -374,7 +374,7 @@ public class NetworkDiscoveryServiceTests
                     continue;
                 }
 
-                foreach (var t in types)
+                foreach (Type t in types)
                 {
                     if (!t.Name.Equals("PrinterInfo", StringComparison.Ordinal) && !(t.FullName?.EndsWith("+PrinterInfo") ?? false))
                     {
@@ -382,8 +382,8 @@ public class NetworkDiscoveryServiceTests
                     }
 
                     Console.WriteLine($"  - Found type: {t.FullName} (Assembly: {asmName})");
-                    var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
-                    foreach (var p in props)
+                    PropertyInfo[] props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+                    foreach (PropertyInfo p in props)
                     {
                         Console.WriteLine($"      Property: {p.Name} (Type: {p.PropertyType.FullName})");
                     }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
-import { ColorFamilySelect } from '@/components/ColorFamilySelect';
+import { ColorFamilySelect } from '@/features/catalog/components/ColorFamilySelect';
 
 // Basic options sample
 const options = ['Red','Green','Blue'];

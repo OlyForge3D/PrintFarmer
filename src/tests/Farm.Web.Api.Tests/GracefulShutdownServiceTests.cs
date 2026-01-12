@@ -22,12 +22,12 @@ public class GracefulShutdownServiceTests
     public async Task StartAsync_RegistersApplicationStoppingCallbackAsync()
     {
         // Arrange
-        var service = new GracefulShutdownService(
+        GracefulShutdownService service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
             _testLogger);
-        var cancellationToken = CancellationToken.None;
-        _mockAppLifetime.Setup(x => x.ApplicationStopping)
+        CancellationToken cancellationToken = CancellationToken.None;
+        _ = _mockAppLifetime.Setup(x => x.ApplicationStopping)
             .Returns(new CancellationToken());
 
         // Act
@@ -41,11 +41,11 @@ public class GracefulShutdownServiceTests
     public async Task StopAsync_CompletesSuccessfullyAsync()
     {
         // Arrange
-        var service = new GracefulShutdownService(
+        GracefulShutdownService service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
             _testLogger);
-        var cancellationToken = CancellationToken.None;
+        CancellationToken cancellationToken = CancellationToken.None;
 
         // Act & Assert
         await service.StopAsync(cancellationToken); // Should complete without throwing
@@ -55,7 +55,7 @@ public class GracefulShutdownServiceTests
     public void Constructor_WithValidParameters_CreatesInstance()
     {
         // Arrange & Act
-        var service = new GracefulShutdownService(
+        GracefulShutdownService service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
             _testLogger);
@@ -68,7 +68,7 @@ public class GracefulShutdownServiceTests
     public void Service_ImplementsIHostedService()
     {
         // Arrange
-        var service = new GracefulShutdownService(
+        GracefulShutdownService service = new GracefulShutdownService(
             _mockServiceProvider.Object,
             _mockAppLifetime.Object,
             _testLogger);

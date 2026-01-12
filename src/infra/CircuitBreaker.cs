@@ -68,7 +68,7 @@ public class CircuitBreaker
     public async Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        await ExecuteAsync<object?>(async token =>
+        _ = await ExecuteAsync<object?>(async token =>
         {
             await operation(token);
             return null;

@@ -160,3 +160,23 @@ jobs:
           files: |
             artifacts/**/*.spdx.json
             artifacts/digest-*/*.txt
+
+      - name: Upload RELEASE_NOTES.md as release asset
+        if: always()
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -e
+          # Use GitHub CLI if available; fall back to curl upload via API
+          if command -v gh >/dev/null 2>&1; then
+            gh release upload "$VERSION" RELEASE_NOTES.md --clobber || true
+          else
+            echo "gh not found; attempting direct API upload"
+            TOKEN="${{ secrets.GITHUB_TOKEN }}"
+            UPLOAD_URL=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$VERSION" | jq -r .upload_url)
+            if [ -n "$UPLOAD_URL" ] && [ "$UPLOAD_URL" != "null" ]; then
+              # strip the {?name,label} template
+              UPLOAD_URL_CLEAN=${UPLOAD_URL%\{*}
+              curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" --data-binary @RELEASE_NOTES.md "$UPLOAD_URL_CLEAN?name=RELEASE_NOTES.md" || true
+            fi
+          fi

@@ -1,4 +1,4 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -53,4 +53,15 @@ public interface ISpoolmanService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Enumerable of discovery results</returns>
     Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default);
+
+    /// <summary>
+    /// Probes a candidate Spoolman base URL for basic health/version endpoints without persisting configuration.
+    /// Returns a SpoolmanProbeResult with normalized URL and success details.
+    /// </summary>
+    Task<SpoolmanProbeResult> ProbeAsync(string candidateBaseUrl, CancellationToken ct);
+
+    /// <summary>
+    /// Performs a minimal health probe against the currently configured Spoolman instance.
+    /// </summary>
+    Task<SpoolmanProbeResult> HealthProbeAsync(CancellationToken ct);
 }

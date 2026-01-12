@@ -8,10 +8,11 @@ The backend selection dropdowns are now dynamically populated from the `PrinterB
 ### 1. Enum Definition (`src/Web/ReactApp/src/types/api.ts`)
 ```typescript
 export enum PrinterBackend {
-  Moonraker = 0,
-  PrusaLink = 1,
-  SDCP = 2,
-  OctoPrint = 3
+  Unknown = 0,
+  Moonraker = 1,
+  PrusaLink = 2,
+  SDCP = 3,
+  OctoPrint = 4
 }
 ```
 
@@ -85,22 +86,24 @@ To add a new backend (e.g., "Repetier"):
 ```csharp
 public enum PrinterBackend
 {
-    Moonraker = 0,
-    PrusaLink = 1,
-    SDCP = 2,
-    OctoPrint = 3,
-    Repetier = 4  // NEW
+    Unknown = 0,
+    Moonraker = 1,
+    PrusaLink = 2,
+    SDCP = 3,
+    OctoPrint = 4,
+    Repetier = 5  // NEW
 }
 ```
 
 2. **Update TypeScript enum** (`src/Web/ReactApp/src/types/api.ts`):
 ```typescript
 export enum PrinterBackend {
-  Moonraker = 0,
-  PrusaLink = 1,
-  SDCP = 2,
-  OctoPrint = 3,
-  Repetier = 4  // NEW - automatically appears in all dropdowns!
+  Unknown = 0,
+  Moonraker = 1,
+  PrusaLink = 2,
+  SDCP = 3,
+  OctoPrint = 4,
+  Repetier = 5  // NEW - automatically appears in all dropdowns!
 }
 ```
 

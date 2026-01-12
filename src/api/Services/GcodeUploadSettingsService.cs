@@ -10,13 +10,13 @@ public interface IGcodeUploadSettings
 
 public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
 {
-    private readonly ConcurrentDictionary<string, byte> _extensions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _extensions = new(StringComparer.Ordinal);
 
     public InMemoryGcodeUploadSettings()
     {
         // Seed from environment variable or defaults
         string? env = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
-        string[] list = string.IsNullOrWhiteSpace(env) ? [".gcode", ".bgcode"] : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] list = string.IsNullOrWhiteSpace(env) ? new[] { ".gcode", ".bgcode" } : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (string e in list)
         {
             string norm = e.StartsWith('.') ? e : "." + e;
@@ -32,7 +32,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
             .Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e.Trim())
             .Select(e => e.StartsWith('.') ? e : "." + e)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
         _extensions.Clear();
         foreach (string? e in cleaned)

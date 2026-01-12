@@ -1,6 +1,6 @@
 ﻿namespace Farm.Web.Api.Controllers.Requests;
 
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 public record UpdateModelRequest(
     string Name,
@@ -20,9 +20,7 @@ public record UpdateModelRequest(
     bool? SupportsAutoLeveling = null,
 
     // Temperature ranges
-    int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
     int? MaxBedTemp = null,
 
     // Speed capabilities

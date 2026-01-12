@@ -5,7 +5,7 @@ echo "🛠️  Starting PrintFarmer Development Environment..."
 
 # Check if Node.js and npm are available
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js 18+ first."
+    echo "❌ Node.js is not installed. Please install Node.js (v20.19.0 or later) first."
     exit 1
 fi
 

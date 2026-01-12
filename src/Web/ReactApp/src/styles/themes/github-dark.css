@@ -1,0 +1,134 @@
+/* =============================================================================
+   GitHub Dark Theme
+   ============================================================================= */
+
+[data-theme="github-dark"] {
+  /* Color system metadata */
+  --pf-theme-name: 'github-dark';
+  
+  /* Primary background colors - GitHub Dark */
+  --pf-bg-0: #0d1117;           /* Main page background (GitHub canvas default) */
+  --pf-bg-1: #161b22;           /* Secondary background (cards/forms - GitHub canvas subtle) */
+  --pf-bg-2: #21262d;           /* Tertiary background (GitHub canvas inset) */
+  --pf-panel: #161b22;          /* Panel background */
+  
+  /* Border and divider colors - GitHub Dark */
+  --pf-border: #30363d;         /* Main border color (GitHub border default) */
+  --pf-border-light: #484f58;   /* Light border (GitHub border muted) */
+  --pf-border-medium: #30363d;  /* Medium border */
+  --pf-border-dark: #21262d;    /* Dark border */
+  --pf-border-gray: #6e7681;    /* Gray border */
+  
+  /* Text colors - GitHub Dark */
+  --pf-text-primary: #c9d1d9;   /* Primary text (GitHub fg default) */
+  --pf-text-secondary: #8b949e; /* Secondary text (GitHub fg muted) */
+  --pf-text-tertiary: #6e7681;  /* Tertiary text/muted (GitHub fg subtle) */
+  --pf-text-light: #c9d1d9;     /* Light text */
+  --pf-text-muted: #8b949e;     /* Muted text */
+  
+  /* Accent and brand colors - GitHub Dark */
+  --pf-accent: #58a6ff;         /* Bright accent for text (GitHub accent fg) */
+  --pf-accent-bg: #0969da;      /* Dark accent for button backgrounds (GitHub accent emphasis) */
+  --pf-accent-hover: #0860ca;   /* Darker blue for button hover */
+  --pf-accent-2: #58a6ff;       /* Blue accent */
+  --pf-success: #3fb950;        /* Success green (GitHub success fg) */
+  --pf-success-bg: #1a6b2f;     /* Darker green button background */
+  --pf-success-hover: #238636;  /* Success hover state */
+  --pf-error-hover: #da3633;    /* Darker red for error button hover */
+  --pf-link: #58a6ff;           /* Links (GitHub accent fg) */
+  
+  /* Semantic status colors - GitHub Dark */
+  --pf-status-online-bg: #0d1117;
+  --pf-status-online-text: #3fb950;
+  --pf-status-online-border: #238636;
+  --pf-status-offline-bg: #0d1117;
+  --pf-status-offline-text: #f85149;
+  --pf-status-offline-border: #da3633;
+  
+  /* Error and warning colors - GitHub Dark */
+  --pf-error: #f85149;          /* Danger red (GitHub danger fg) */
+  --pf-error-bg: #0d1117;
+  --pf-error-text: #f85149;
+  --pf-error-border: #da3633;
+  --pf-warning: #d29922;        /* Warning yellow (GitHub attention fg) */
+  --pf-warning-text: #d29922;
+  
+  /* Loading and disabled states */
+  --pf-loading: #58a6ff;
+  --pf-loading-border: #0969da;
+  --pf-disabled: #6e7681;
+  
+  /* Gradient colors - GitHub Dark inspired */
+  --pf-gradient-primary-start: #161b22;
+  --pf-gradient-primary-end: #0d1117;
+  --pf-gradient-secondary-start: #21262d;
+  --pf-gradient-secondary-end: #161b22;
+  --pf-gradient-success-start: #1a6b2f;
+  --pf-gradient-success-end: #238636;
+  --pf-gradient-green-start: #238636;
+  --pf-gradient-green-end: #1a6b2f;
+  --pf-gradient-green-active-start: #2ea043;
+  --pf-gradient-green-active-end: #1a7f37;
+  --pf-gradient-gray-start: #6e7681;
+  --pf-gradient-gray-end: #484f58;
+  --pf-gradient-gray-dark-start: #484f58;
+  --pf-gradient-gray-dark-end: #30363d;
+  
+  /* Focus and interaction states - GitHub Dark */
+  --pf-focus-ring: rgba(88, 166, 255, 0.5);
+  --pf-focus-ring-offset: #0d1117;
+  --pf-hover-overlay: rgba(177, 186, 196, 0.12);
+  --pf-active-overlay: rgba(177, 186, 196, 0.2);
+
+  /* Skeleton / shimmer surfaces - GitHub Dark */
+  --pf-skeleton-bg: #21262d;
+  --pf-skeleton-bg-alt: #30363d;
+  --pf-skeleton-accent: #484f58;
+  --pf-focus-outline: var(--pf-accent);
+  
+  /* ========== CONTROL STYLING VARIABLES ========== */
+  /* Input/Select/Textarea Controls */
+  --pf-control-bg: #0d1117;            /* Input background */
+  --pf-control-border: #30363d;        /* Input border default */
+  --pf-control-border-hover: #484f58;  /* Input border on hover */
+  --pf-control-border-focus: #58a6ff;  /* Input border on focus */
+  --pf-control-text: #c9d1d9;          /* Input text color */
+  --pf-control-placeholder: #6e7681;   /* Placeholder text */
+  --pf-control-disabled-bg: #0d1117;   /* Disabled control background */
+  --pf-control-disabled-text: #6e7681; /* Disabled control text */
+  
+  /* Focus Ring */
+  --pf-control-focus-ring: rgba(88, 166, 255, 0.5);  /* Blue focus ring */
+  --pf-control-focus-ring-offset: #0d1117;  /* Offset background */
+  --pf-control-focus-ring-width: 2px;
+  
+  /* Button States (Primary variant) */
+  --pf-button-primary-bg: #0969da;
+  --pf-button-primary-hover: #0860ca;
+  --pf-button-primary-active: #033d8b;
+  --pf-button-primary-text: #ffffff;
+  --pf-button-primary-border: #0969da;
+  
+  /* Button States (Secondary variant) */
+  --pf-button-secondary-bg: #21262d;
+  --pf-button-secondary-hover: #161b22;
+  --pf-button-secondary-active: #0d1117;
+  --pf-button-secondary-text: #c9d1d9;
+  --pf-button-secondary-border: #30363d;
+  
+  /* Button States (Danger variant) */
+  --pf-button-danger-bg: #f85149;
+  --pf-button-danger-hover: #da3633;
+  --pf-button-danger-active: #ae2622;
+  --pf-button-danger-text: #ffffff;
+  --pf-button-danger-border: #f85149;
+  
+  /* Validation States */
+  --pf-validation-error-bg: rgba(248, 81, 73, 0.1);  /* Light red background */
+  --pf-validation-error-border: #f85149;
+  --pf-validation-error-text: #f85149;
+  --pf-validation-success-border: #3fb950;
+  --pf-validation-success-text: #3fb950;
+  
+  color-scheme: dark;
+}

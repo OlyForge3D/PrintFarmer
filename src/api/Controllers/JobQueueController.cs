@@ -1,9 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
-public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) : ControllerBase
+public class JobQueueController(Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all jobs in the queue
@@ -25,35 +26,8 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            List<PrintJob> jobs = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .OrderBy(j => j.QueuePosition)
-                .ThenBy(j => j.CreatedAt)
-                .ToListAsync();
-
-            return Ok(jobs.Select(job => new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            }));
+            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(CancellationToken.None);
+            return Ok(dtos);
         }
         catch (Exception ex)
         {
@@ -78,75 +52,13 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
         }
         try
         {
-            // Validate the gcode file exists
-            GcodeFile? gcodeFile = await db.GcodeFiles.FindAsync(request.GcodeFileId);
-            if (gcodeFile == null)
+            JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
+            if (added == null)
             {
-                return NotFound($"G-code file with ID {request.GcodeFileId} not found");
+                return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
             }
 
-            // Create the job
-            PrintJob job = new()
-            {
-                Id = Guid.NewGuid(),
-                Name = gcodeFile.OriginalFileName,
-                GcodeFileId = request.GcodeFileId,
-                AssignedPrinterId = request.AssignedPrinterId,
-                Status = PrintJobStatus.Queued,
-                Priority = (int)request.Priority,
-                RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-                RequiredMaterialType = request.RequiredMaterialType,
-                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue ?
-                    TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value) : null,
-                EstimatedFilamentUsage = gcodeFile.EstimatedFilamentLengthMm,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                QueuedAt = DateTime.UtcNow
-            };
-
-            // Set queue position
-            int maxPosition = await db.PrintJobs
-                .Where(j => j.Status == PrintJobStatus.Queued)
-                .MaxAsync(j => (int?)j.QueuePosition) ?? 0;
-            job.QueuePosition = maxPosition + 1;
-
-            _ = db.PrintJobs.Add(job);
-            _ = await db.SaveChangesAsync();
-
-            // Load related entities for response
-            await db.Entry(job)
-                .Reference(j => j.GcodeFile)
-                .LoadAsync();
-
-            if (job.AssignedPrinterId.HasValue)
-            {
-                await db.Entry(job)
-                    .Reference(j => j.AssignedPrinter)
-                    .LoadAsync();
-            }
-
-            return CreatedAtAction(nameof(GetJobAsync), new { id = job.Id }, new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            });
+            return CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -166,38 +78,13 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            PrintJob? job = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(j => j.Id == id);
-
-            if (job == null)
+            JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
+            if (dto == null)
             {
                 return NotFound($"Print job with ID {id} not found");
             }
 
-            return Ok(new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)(int)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            });
+            return Ok(dto);
         }
         catch (Exception ex)
         {
@@ -222,82 +109,14 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
         }
         try
         {
-            PrintJob? job = await db.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(j => j.Id == id);
-
-            if (job == null)
+            JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
+            if (updated == null)
             {
-                return NotFound($"Print job with ID {id} not found");
+                // Service returns null for not found or invalid assignment; translate to proper HTTP
+                return NotFound($"Print job with ID {id} not found or invalid printer assignment");
             }
 
-            // Update fields if provided
-            if (request.Status.HasValue)
-            {
-                job.Status = (PrintJobStatus)(int)request.Status.Value;
-            }
-
-            if (request.Priority.HasValue)
-            {
-                job.Priority = (int)request.Priority.Value;
-            }
-
-            if (request.AssignedPrinterId.HasValue)
-            {
-                // Validate printer exists
-                Printer? printer = await db.Printers.FindAsync(request.AssignedPrinterId.Value);
-                if (printer == null)
-                {
-                    return BadRequest($"Printer with ID {request.AssignedPrinterId} not found");
-                }
-                job.AssignedPrinterId = request.AssignedPrinterId.Value;
-            }
-
-            if (request.ActualFilamentUsage.HasValue)
-            {
-                job.ActualFilamentUsage = request.ActualFilamentUsage.Value;
-            }
-
-            if (!string.IsNullOrEmpty(request.FailureReason))
-            {
-                job.FailureReason = request.FailureReason;
-            }
-
-            job.UpdatedAt = DateTime.UtcNow;
-
-            _ = await db.SaveChangesAsync();
-
-            // Reload printer if assignment changed
-            if (request.AssignedPrinterId.HasValue)
-            {
-                await db.Entry(job)
-                    .Reference(j => j.AssignedPrinter)
-                    .LoadAsync();
-            }
-
-            return Ok(new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile.OriginalFileName,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (PrintJobStatus?)(int)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            });
+            return Ok(updated);
         }
         catch (Exception ex)
         {
@@ -318,20 +137,11 @@ public class JobQueueController(AppDbContext db, IUnifiedLoggingService logger) 
     {
         try
         {
-            PrintJob? job = await db.PrintJobs.FindAsync(id);
-            if (job == null)
+            bool ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
+            if (!ok)
             {
-                return NotFound($"Print job with ID {id} not found");
+                return BadRequest("Cannot delete the job (not found or currently printing)");
             }
-
-            // Can only delete queued or failed jobs
-            if (job.Status == PrintJobStatus.Printing || job.Status == PrintJobStatus.Starting)
-            {
-                return BadRequest("Cannot delete a job that is currently printing");
-            }
-
-            _ = db.PrintJobs.Remove(job);
-            _ = await db.SaveChangesAsync();
 
             return NoContent();
         }

@@ -58,6 +58,14 @@ public static class DockerTestHelpers
             CreateNoWindow = true,
             WorkingDirectory = workingDir
         };
+        // Allow short-circuit for quick test runs that should not execute Docker.
+        string? skip = Environment.GetEnvironmentVariable("SKIP_DOCKER_TESTS");
+        if (!string.IsNullOrEmpty(skip) && (skip == "1" || skip.Equals("true", StringComparison.OrdinalIgnoreCase)))
+        {
+            output.WriteLine($"SKIP_DOCKER_TESTS set - skipping execution of: {command} {string.Join(' ', args)}");
+            return (true, "(skipped)", string.Empty);
+        }
+
         output.WriteLine($"Running: {command} {string.Join(" ", args)}");
         process.Start();
         var stdOutTask = process.StandardOutput.ReadToEndAsync();

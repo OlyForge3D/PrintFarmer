@@ -4,9 +4,9 @@ import React from 'react';
 import { renderHook } from '@testing-library/react';
 import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { useCreatePrinter, useQueuePrintJob, queryKeys } from '../../hooks/useApi';
-import { apiClient } from '../../services/api';
-import { PrinterBackend, JobQueueStatus, Printer, JobQueuePrintJob } from '../../types/api';
+import { useCreatePrinter, useQueuePrintJob, queryKeys } from '@/common/hooks/useApi';
+import { apiClient } from '@/services/api';
+import { PrinterBackend, JobQueueStatus, Printer, JobQueuePrintJob } from '@/types/api';
 
 // Utility to create a fresh QueryClient per test
 function createTestClient() {

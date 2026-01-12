@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.SystemLogs;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -23,14 +22,12 @@ public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnified
             try
             {
                 await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
-                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                ISystemLogRepository logRepository = scope.ServiceProvider.GetRequiredService<ISystemLogRepository>();
                 DateTime cutoff = DateTime.UtcNow.AddDays(-_retentionDays);
-                List<Farm.Infrastructure.Domain.SystemLog> oldLogs = await db.SystemLogs.Where(l => l.Timestamp < cutoff).ToListAsync(stoppingToken);
-                if (oldLogs.Count > 0)
+                int deletedCount = await logRepository.DeleteLogsOlderThanAsync(cutoff, stoppingToken);
+                if (deletedCount > 0)
                 {
-                    db.SystemLogs.RemoveRange(oldLogs);
-                    _ = await db.SaveChangesAsync(stoppingToken);
-                    _logger.LogInformation($"SystemLogCleanupService: Deleted {oldLogs.Count} logs older than {cutoff}");
+                    _logger.LogInformation($"SystemLogCleanupService: Deleted {deletedCount} logs older than {cutoff}");
                 }
             }
             catch (Exception ex)

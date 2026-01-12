@@ -1,0 +1,26 @@
+name: Bootstrap Ubuntu Agent
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/bootstrap-ubuntu.sh'
+      - '.github/workflows/bootstrap-ubuntu-ci.yml'
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Ensure sudo available
+        run: sudo true
+
+      - name: Run bootstrap script (verify)
+        run: |
+          chmod +x scripts/bootstrap-ubuntu.sh
+          sudo bash ./scripts/bootstrap-ubuntu.sh --verify
+        env:
+          DOTNET_VERSION: '9.0.302'
+          NODE_VERSION: '18'

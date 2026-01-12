@@ -10,10 +10,10 @@ public class WorkerReadinessHealthCheck(IWorkerStateService workerStateService, 
     {
         try
         {
-            var state = workerStateService.GetWorkerState();
-            var isReady = state.IsInitialized && !state.IsShuttingDown && state.ActiveJobs < state.MaxConcurrentJobs;
+            WorkerState state = workerStateService.GetWorkerState();
+            bool isReady = state.IsInitialized && !state.IsShuttingDown && state.ActiveJobs < state.MaxConcurrentJobs;
             logger.LogDebug($"Readiness - Ready {isReady} Active {state.ActiveJobs}/{state.MaxConcurrentJobs}");
-            var data = new Dictionary<string, object>
+            Dictionary<string, object> data = new Dictionary<string, object>
             {
                 ["initialized"] = state.IsInitialized,
                 ["shuttingDown"] = state.IsShuttingDown,

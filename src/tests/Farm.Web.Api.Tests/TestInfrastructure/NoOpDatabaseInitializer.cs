@@ -5,7 +5,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
 {
     // Lightweight no-op implementation used in tests that use the EF InMemory provider
     // to avoid executing heavy seeding logic which may depend on SQL-specific behaviors.
-    public sealed class NoOpDatabaseInitializer : Farm.Web.Api.Services.DatabaseInitializer
+    public sealed class NoOpDatabaseInitializer : Api.Services.DatabaseInitializer
     {
         public NoOpDatabaseInitializer(Farm.Infrastructure.Data.AppDbContext context, IUnifiedLoggingService logger)
             : base(context, logger)

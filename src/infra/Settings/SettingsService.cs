@@ -4,7 +4,10 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Infrastructure.Settings
@@ -12,9 +15,6 @@ namespace Farm.Infrastructure.Settings
     /// <summary>
     /// Discovers, loads, and validates all settings classes marked with [AppSetting].
     /// </summary>
-    using Farm.Infrastructure.Data;
-    using Microsoft.EntityFrameworkCore;
-
     public class SettingsService : ISettingsService
     {
         /// <summary>
@@ -22,21 +22,21 @@ namespace Farm.Infrastructure.Settings
         /// </summary>
         public object? GetSettingsClassValues(string className)
         {
-            var type = _settingTypes.Find(t => t.Name.Equals(className, StringComparison.OrdinalIgnoreCase));
+            Type? type = _settingTypes.Find(t => t.Name.Equals(className, StringComparison.OrdinalIgnoreCase));
             if (type == null)
             {
                 return null;
             }
 
-            var appAttr = type.GetCustomAttribute<AppSettingAttribute>();
-            var sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
+            AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
+            SystemSettingAttribute? sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
             string? key = appAttr?.Key ?? sysAttr?.Key;
             if (key == null)
             {
                 return null;
             }
 
-            if (_settings.TryGetValue(key, out var value))
+            if (_settings.TryGetValue(key, out object? value))
             {
                 return value;
             }
@@ -44,12 +44,13 @@ namespace Farm.Infrastructure.Settings
             return null;
         }
         private readonly IUnifiedLoggingService _logger;
+        private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
         public void Save<T>(T settings) where T : class, IAppSetting
         {
             ArgumentNullException.ThrowIfNull(settings);
-            var type = typeof(T);
-            var appAttr = type.GetCustomAttribute<AppSettingAttribute>();
+            Type type = typeof(T);
+            AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
             if (appAttr == null)
             {
                 throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
@@ -57,71 +58,52 @@ namespace Farm.Infrastructure.Settings
             _settings[appAttr.Key] = settings;
 
             // Persist to DB (AppSettings only)
-            var json = System.Text.Json.JsonSerializer.Serialize(settings);
-            var entity = _dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
-            if (entity == null)
-            {
-                _logger.LogInformation("[SettingsService] Adding new entity", null, new { Key = appAttr.Key });
-                entity = new AppSettingsEntity
-                {
-                    Key = appAttr.Key,
-                    SettingsJson = json,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                _dbContext.AppSettingsEntities.Add(entity);
-            }
-            else
-            {
-                _logger.LogInformation("[SettingsService] Updating existing entity", null, new { Key = entity.Key, Id = entity.Id });
-                _logger.LogDebug("[SettingsService] JSON length change", null, new { OldLen = entity.SettingsJson?.Length ?? 0, NewLen = json.Length });
+            string json = JsonSerializer.Serialize(settings);
 
-                var entry = _dbContext.Entry(entity);
-                _logger.LogDebug("[SettingsService] Entity state before changes", null, new { State = entry.State.ToString() });
-
-                entity.SettingsJson = json;
-                entity.UpdatedAt = DateTime.UtcNow;
-
-                // Explicitly mark as modified to ensure EF tracks the changes
-                entry.State = Microsoft.EntityFrameworkCore.EntityState.Modified;
-
-                _logger.LogDebug("[SettingsService] Entity state after marking Modified", null, new { State = entry.State.ToString() });
-            }
-
-            var rowsAffected = _dbContext.SaveChanges();
-            _logger.LogInformation("[SettingsService] SaveChanges returned", null, new { RowsAffected = rowsAffected });
-
-            // Clear change tracker to ensure fresh data is loaded on next query
-            _dbContext.ChangeTracker.Clear();
+            // Use repository to persist settings
+            // Note: This is called from non-async context, so we use sync over async as a workaround
+            // Ideally this method should be async
+#pragma warning disable VSTHRD002
+            Task setTask = _settingsRepo.SetAsync(appAttr.Key, json);
+            setTask.Wait();
+            Task saveTask = _settingsRepo.SaveChangesAsync();
+            saveTask.Wait();
+#pragma warning restore VSTHRD002
         }
+
         private Dictionary<string, object> _settings = new();
         private readonly List<Type> _settingTypes;
-        private readonly AppDbContext _dbContext;
 
         public SettingsService(IConfiguration config)
         {
-            // For DI: IConfiguration and AppDbContext
-            throw new InvalidOperationException("Use the constructor with IConfiguration and AppDbContext");
+            // For DI: IConfiguration and IDbContextFactory
+            throw new InvalidOperationException("Use the constructor with IConfiguration and IDbContextFactory<AppDbContext>");
 
         }
 
-        public SettingsService(IConfiguration config, AppDbContext dbContext, IUnifiedLoggingService logger)
+        private readonly Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository _settingsRepo;
+
+        public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, IUnifiedLoggingService logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
         {
             _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
                 .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null || t.GetCustomAttribute<SystemSettingAttribute>() != null)
                 .ToList();
-            _dbContext = dbContext;
+            _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settingsRepo = settingsRepo ?? throw new ArgumentNullException(nameof(settingsRepo));
             LoadSettings(config);
         }
 
         private void LoadSettings(IConfiguration config)
         {
-            var newSettings = new Dictionary<string, object>();
+            Dictionary<string, object> newSettings = new Dictionary<string, object>();
+            using var dbContext = _dbContextFactory.CreateDbContext();
+
             foreach (Type type in _settingTypes)
             {
-                var appAttr = type.GetCustomAttribute<AppSettingAttribute>();
-                var sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
+                AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
+                SystemSettingAttribute? sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
                 string? key = appAttr?.Key ?? sysAttr?.Key;
                 if (key == null)
                 {
@@ -132,12 +114,12 @@ namespace Farm.Infrastructure.Settings
                 if (appAttr != null)
                 {
                     // AppSettings: try DB first, fallback to config
-                    var dbEntity = _dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
+                    AppSettingsEntity? dbEntity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
                     if (dbEntity != null && !string.IsNullOrWhiteSpace(dbEntity.SettingsJson))
                     {
                         try
                         {
-                            instance = System.Text.Json.JsonSerializer.Deserialize(dbEntity.SettingsJson, type);
+                            instance = JsonSerializer.Deserialize(dbEntity.SettingsJson, type);
                         }
                         catch
                         {
@@ -177,7 +159,7 @@ namespace Farm.Infrastructure.Settings
 
         public T Get<T>() where T : class
         {
-            var result = _settings.Values.OfType<T>().FirstOrDefault();
+            T? result = _settings.Values.OfType<T>().FirstOrDefault();
             if (result == null)
             {
                 throw new InvalidOperationException($"No settings instance found for type {typeof(T).Name}");
@@ -194,6 +176,42 @@ namespace Farm.Infrastructure.Settings
         {
             get { return _settings.Values; }
         }
+
+        /// <summary>
+        /// Attempts to acquire a distributed lock for a given key.
+        /// Returns true if the lock was acquired (key did not exist or was in a completion state).
+        /// </summary>
+        public async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            var existingLock = await _settingsRepo.GetAsync(lockKey, ct);
+            if (existingLock?.SettingsJson == "completed" || existingLock?.SettingsJson == "in-progress")
+            {
+                return false; // Lock already held
+            }
+
+            // Acquire lock
+            await _settingsRepo.SetAsync(lockKey, "in-progress", ct);
+            await _settingsRepo.SaveChangesAsync(ct);
+            return true;
+        }
+
+        /// <summary>
+        /// Marks a distributed lock as completed.
+        /// </summary>
+        public async Task CompleteLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            await _settingsRepo.SetAsync(lockKey, "completed", ct);
+            await _settingsRepo.SaveChangesAsync(ct);
+        }
+
+        /// <summary>
+        /// Clears a distributed lock to allow retry.
+        /// </summary>
+        public async Task ClearLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            await _settingsRepo.DeleteAsync(lockKey, ct);
+            await _settingsRepo.SaveChangesAsync(ct);
+        }
         /// <summary>
         /// Returns metadata for all discovered settings classes for dynamic UI generation.
         /// Only returns AppSettings (IAppSetting), not SystemSettings (ISystemSetting).
@@ -203,8 +221,8 @@ namespace Farm.Infrastructure.Settings
         {
             foreach (Type type in _settingTypes)
             {
-                var appAttr = type.GetCustomAttribute<AppSettingAttribute>();
-                var sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
+                AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
+                SystemSettingAttribute? sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
 
                 // Skip SystemSettings - they should not appear in the UI
                 if (sysAttr != null && appAttr == null)
@@ -218,7 +236,7 @@ namespace Farm.Infrastructure.Settings
                     continue;
                 }
 
-                var classDisplayAttr = type.GetCustomAttribute<SettingDisplayAttribute>();
+                SettingDisplayAttribute? classDisplayAttr = type.GetCustomAttribute<SettingDisplayAttribute>();
                 string? displayName = classDisplayAttr?.Name;
                 string? description = classDisplayAttr?.Description;
                 string? icon = classDisplayAttr?.Icon;
@@ -228,18 +246,18 @@ namespace Farm.Infrastructure.Settings
                 List<SettingPropertyMetadata> props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Select(p =>
                     {
-                        var jsonAttr = p.GetCustomAttribute<JsonPropertyNameAttribute>();
+                        JsonPropertyNameAttribute? jsonAttr = p.GetCustomAttribute<JsonPropertyNameAttribute>();
                         if (jsonAttr == null)
                         {
                             throw new InvalidOperationException($"Property '{p.Name}' in settings class '{type.Name}' is missing [JsonPropertyName] attribute.");
                         }
-                        var meta = new SettingPropertyMetadata
+                        SettingPropertyMetadata meta = new SettingPropertyMetadata
                         {
                             Name = jsonAttr.Name,
                             Type = p.PropertyType.Name,
                             Attributes = new System.Collections.ObjectModel.ReadOnlyCollection<string>(p.GetCustomAttributes().Select(a => a.GetType().Name).ToList())
                         };
-                        var displayAttr = p.GetCustomAttribute<SettingDisplayAttribute>();
+                        SettingDisplayAttribute? displayAttr = p.GetCustomAttribute<SettingDisplayAttribute>();
                         if (displayAttr != null)
                         {
 #pragma warning disable S1244 // Floating point numbers should not be tested for equality

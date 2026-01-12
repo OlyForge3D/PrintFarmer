@@ -15,54 +15,54 @@ public static class ModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         // Printer table optimizations
-        modelBuilder.Entity<Printer>(entity =>
+        _ = modelBuilder.Entity<Printer>(entity =>
         {
             // Index for frequently queried fields
-            entity.HasIndex(p => p.Backend)
+            _ = entity.HasIndex(p => p.Backend)
                   .HasDatabaseName("IX_Printers_Backend");
 
             // String length constraints for better performance
-            entity.Property(p => p.Name)
+            _ = entity.Property(p => p.Name)
                   .HasMaxLength(100);
 
-            entity.Property(p => p.ServerUrl)
+            _ = entity.Property(p => p.ServerUrl)
                   .HasMaxLength(500);
 
-            entity.Property(p => p.ApiKey)
+            _ = entity.Property(p => p.ApiKey)
                   .HasMaxLength(500);
 
-            entity.Property(p => p.Notes)
+            _ = entity.Property(p => p.Notes)
                   .HasMaxLength(1000);
 
-            entity.Property(p => p.OriginalServerUrl)
+            _ = entity.Property(p => p.OriginalServerUrl)
                   .HasMaxLength(500);
 
-            entity.Property(p => p.IpAddress)
+            _ = entity.Property(p => p.IpAddress)
                   .HasMaxLength(50);
         });
 
         // Manufacturer table optimizations
-        modelBuilder.Entity<Manufacturer>(entity =>
+        _ = modelBuilder.Entity<Manufacturer>(entity =>
         {
-            entity.HasIndex(m => m.Name)
+            _ = entity.HasIndex(m => m.Name)
                   .IsUnique()
                   .HasDatabaseName("IX_Manufacturers_Name_Unique");
 
-            entity.Property(m => m.Name)
+            _ = entity.Property(m => m.Name)
                   .HasMaxLength(100);
         });
 
         // Model table optimizations
-        modelBuilder.Entity<PrinterModel>(entity =>
+        _ = modelBuilder.Entity<PrinterModel>(entity =>
         {
-            entity.HasIndex(m => m.ManufacturerId)
+            _ = entity.HasIndex(m => m.ManufacturerId)
                   .HasDatabaseName("IX_Models_ManufacturerId");
 
-            entity.HasIndex(m => new { m.ManufacturerId, m.Name })
+            _ = entity.HasIndex(m => new { m.ManufacturerId, m.Name })
                   .IsUnique()
                   .HasDatabaseName("IX_Models_ManufacturerId_Name_Unique");
 
-            entity.Property(m => m.Name)
+            _ = entity.Property(m => m.Name)
                   .HasMaxLength(100);
         });
 
@@ -112,10 +112,10 @@ public static class ModelBuilderExtensions
     private static void ConfigureSqlServerOptimizations(ModelBuilder modelBuilder)
     {
         // SQL Server-specific optimizations
-        modelBuilder.Entity<Printer>(entity =>
+        _ = modelBuilder.Entity<Printer>(entity =>
         {
             // Use included columns for covering indexes (SQL Server specific)
-            entity.HasIndex(p => p.Backend)
+            _ = entity.HasIndex(p => p.Backend)
                 .HasDatabaseName("IX_Printers_Backend_Covering");
         });
     }

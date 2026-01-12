@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+
+  <!-- Backend Plugin Configuration -->
+  <!-- Inherits common build settings from /src/Directory.Build.props -->
+  <!-- Only defines backend-specific NuGet package references -->
+
+  <!-- Import parent Directory.Build.props from /src -->
+  <Import Project="../Directory.Build.props" />
+
+  <!-- Common NuGet Package References for Backend Infrastructure -->
+  <!-- These versions are synchronized across all backend projects -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
+    <PackageReference Include="Refit.HttpClientFactory" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>
+

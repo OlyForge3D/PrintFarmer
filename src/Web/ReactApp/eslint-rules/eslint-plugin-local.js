@@ -1,6 +1,12 @@
 /* Local ESLint plugin wrapper to expose local rules as 'local/*' */
-module.exports = {
+import pfNoUngaurdedConsole from './pf-no-unguarded-console.js'
+import pfNoRawHtmlControls from './pf-no-raw-html-controls.js'
+import noHardcodedColors from './no-hardcoded-colors.js'
+
+export default {
   rules: {
-    'pf-no-unguarded-console': require('./pf-no-unguarded-console')
+    'pf-no-unguarded-console': pfNoUngaurdedConsole,
+    'pf-no-raw-html-controls': pfNoRawHtmlControls,
+    'no-hardcoded-colors': noHardcodedColors
   }
 };

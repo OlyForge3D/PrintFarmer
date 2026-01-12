@@ -1,10 +1,10 @@
 ﻿using System.Data.Common;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services;
@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Services;
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
 
-public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : Farm.Web.Api.Services.Interfaces.IDatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : IDatabaseInitializer
 {
     private readonly AppDbContext _context = context;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -112,8 +112,15 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     catch (Microsoft.Data.Sqlite.SqliteException sqlEx) when (sqlEx.Message?.Contains("no such table", StringComparison.OrdinalIgnoreCase) == true && seedAttempt < seedMaxAttempts)
                     {
                         seedAttempt++;
-                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table; retrying in 1s...");
-                        await Task.Delay(TimeSpan.FromSeconds(1));
+                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table (SQLite); retrying in 2s...");
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                    }
+                    catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P01" && seedAttempt < seedMaxAttempts)
+                    {
+                        // PostgreSQL error 42P01 = relation does not exist (table/view not found)
+                        seedAttempt++;
+                        _logger.LogWarning(pgEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing relation (PostgreSQL); retrying in 2s...");
+                        await Task.Delay(TimeSpan.FromSeconds(2));
                     }
                 }
                 _logger.LogInformation("[DB] Database initialization completed successfully");
@@ -147,6 +154,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
         await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
         await SeedAuthenticationDataAsync();
+        await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
 
     private async Task SeedCatalogDataAsync()
@@ -158,12 +166,12 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 "Unknown",  // Default for unidentified manufacturers - must be first to ensure it gets a consistent ID
                 "Elegoo",
                 "Eryone",
-                "FlashForge",
+                "Flashforge",  // Note: OrcaSlicer manifest uses "Flashforge" not "FlashForge"
                 "Phrozen",
-                "PrintersForAnts",
+                "PrintersForAnts",  // Community derivative of Voron
                 "Prusa",
                 "Sovol",
-                "RatRig",
+                "Ratrig",  // Note: OrcaSlicer manifest uses "Ratrig" not "RatRig", but model names use "RatRig V-Core"
                 "Voron",
             };
 
@@ -187,50 +195,57 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
              int? MinHotend, int? MaxHotend, int? MinBed, int? MaxBed, string Materials, int? MaxSpeed)[] modelSeeds = new[]
             {
                 ("Unknown Model", "Unknown", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.Unknown, (double?)0.4, true, false, false, 1, false, (int?)0, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS", (int?)100),
-                ("AD5X", "FlashForge", 220.0, 220.0, 220.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
-                ("SV08", "Sovol", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("SV08 Max", "Sovol", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("Zero", "Sovol", 150.0, 150.0, 150.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS", (int?)150),
+                // Flashforge (note: manifest uses "Flashforge" not "FlashForge")
+                ("Flashforge AD5X", "Flashforge", 220.0, 220.0, 220.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                // Sovol (manifest names: "Sovol SV08", "Sovol SV08 MAX", "Sovol Zero")
+                ("Sovol SV08", "Sovol", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Sovol SV08 MAX", "Sovol", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Sovol Zero", "Sovol", 150.0, 150.0, 150.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS", (int?)150),
+                // Eryone (manifest: "Eryone" -> "Thinker X400")
                 ("Thinker X400", "Eryone", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
-                ("Centauri", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
-                ("Centauri Carbon", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                // Elegoo (manifest: Neptune 4 models and Centauri models)
+                ("Elegoo Neptune 4", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Elegoo Neptune 4 Max", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Elegoo Centauri", "Elegoo", 256.0, 256.0, 256.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("Elegoo Centauri Carbon", "Elegoo", 256.0, 256.0, 256.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                // PrintersForAnts (community derivative of Voron - smaller build volumes)
                 ("SaladFork 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
-                ("SaladFork 180", "PrintersForAnts", 180.0, 180.0, 180.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+                ("SaladFork 180", "PrintersForAnts", 180.0, 180.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Micron 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
-                ("Micron 160", "PrintersForAnts", 160.0, 160.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Micron 180", "PrintersForAnts", 180.0, 180.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
-                ("Voron v0", "Voron", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("v2.4 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("v2.4 300", "Voron", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("v2.4 350", "Voron", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("Switchwire", "Voron", 250.0, 210.0, 240.0, (int?)0, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("Trident 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("Trident 300", "Voron", 300.0, 300.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("Trident 300 Cube", "Voron", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("Trident 350", "Voron", 350.0, 350.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore3.1 200", "RatRig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.1 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.1 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.1 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.2 200", "RatRig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.2 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.2 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore3.2 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
-                ("vCore4 300", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 400", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 500", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 300 Hybrid", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 400 Hybrid", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 500 Hybrid", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 300 IDEX", "RatRig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 400 IDEX", "RatRig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("vCore4 500 IDEX", "RatRig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
-                ("Arco", "Phrozen", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
-                ("Original Prusa Mini+", "Prusa", 180.0, 180.0, 180.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS,ASA,PC", (int?)180),
-                ("Original Prusa i3 MK3S+", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
-                ("Original Prusa MK4S", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
-                ("Original Prusa Core One", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)250),
-                ("Original Prusa XL", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, true, 5, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
+                // Voron (manifest: "Voron 0.1", "Voron 2.4 250", etc. - NOT "v2.4" or "Voron v0")
+                ("Voron 0.1", "Voron", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron 2.4 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron 2.4 300", "Voron", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron 2.4 350", "Voron", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron Switchwire 250", "Voron", 250.0, 210.0, 240.0, (int?)0, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("Voron Trident 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron Trident 300", "Voron", 300.0, 300.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("Voron Trident 350", "Voron", 350.0, 350.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                // Ratrig (note: manifest uses "Ratrig" not "RatRig", models use "RatRig V-Core 3 200" etc.)
+                ("RatRig V-Core 3 200", "Ratrig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("RatRig V-Core 3 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("RatRig V-Core 3 400", "Ratrig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("RatRig V-Core 3 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
+                ("RatRig V-Core 4 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 400", "Ratrig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 HYBRID 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 HYBRID 400", "Ratrig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 HYBRID 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 IDEX 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 IDEX 400", "Ratrig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                ("RatRig V-Core 4 IDEX 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+                // Phrozen (manifest: "Phrozen" -> "Phrozen Arco")
+                ("Phrozen Arco", "Phrozen", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                // Prusa (manifest: "Prusa MINI", "Prusa MK3S", "Prusa MK4S", "Prusa CORE One", "Prusa XL" - NO "Original Prusa")
+                ("Prusa MINI", "Prusa", 180.0, 180.0, 180.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS,ASA,PC", (int?)180),
+                ("Prusa MK3S", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                ("Prusa MK3.5", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
+                ("Prusa MK4", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
+                ("Prusa MK4S", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
+                ("Prusa CORE One", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)250),
+                ("Prusa XL", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, true, 5, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
             };
 
             foreach ((string modelName, string mfg, double x, double y, double z, int? defaultBackend, MotionType? motionType,
@@ -241,10 +256,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 {
                     continue;
                 }
-                bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
+                bool exists = await _context.PrinterModels.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
-                    _ = _context.Models.Add(new PrinterModel
+                    _ = _context.PrinterModels.Add(new PrinterModel
                     {
                         Id = Guid.NewGuid(),
                         Name = modelName,
@@ -260,9 +275,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         MultiMaterial = multiMaterial,
                         NumberOfExtruders = extruders,
                         SupportsAutoLeveling = autoLevel,
-                        MinHotendTemp = minHotend,
                         MaxHotendTemp = maxHotend,
-                        MinBedTemp = minBed,
                         MaxBedTemp = maxBed,
                         MaxPrintSpeed = maxSpeed
                     });
@@ -293,7 +306,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 string manufacturerName,
                 _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, string supportedMaterials, _) in modelSeeds)
             {
-                PrinterModel? model = await _context.Models
+                PrinterModel? model = await _context.PrinterModels
                     .FirstOrDefaultAsync(m => m.Name == modelName &&
                                            m.Manufacturer != null &&
                                            m.Manufacturer.Name == manufacturerName);
@@ -324,7 +337,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             {
                 _ = await _context.SaveChangesAsync();
             }
-            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
             {
                 _logger.LogWarning(ex, "Ignored unique constraint violation while seeding model-filament relationships; another process probably inserted the same records.");
             }
@@ -367,7 +380,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         {
             _ = await _context.SaveChangesAsync();
         }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             _logger.LogWarning(ex, "Ignored unique constraint violation while seeding filament types; another process probably inserted the same records.");
         }
@@ -382,7 +395,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     public async Task<PrinterModel> GetUnknownModelAsync()
     {
         Manufacturer unknownMfg = await GetUnknownManufacturerAsync();
-        PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
+        PrinterModel? unknownModel = await _context.PrinterModels.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
         return unknownModel ?? throw new InvalidOperationException("Unknown model not found. Ensure SeedCatalogDataAsync() has been called.");
     }
@@ -590,6 +603,51 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
     }
     // === END: Seeding logic merged from DatabaseSeeder ===
+
+    /// <summary>
+    /// Seeds root folders ("/") for gcode and models folder types.
+    /// This prevents race conditions when multiple concurrent uploads try to create the root folder simultaneously.
+    /// </summary>
+    private async Task SeedRootFoldersAsync()
+    {
+        try
+        {
+            // Ensure root "/" folder exists for "gcode" folder type
+            string folderPath = "/";
+            string[] folderTypes = new[] { "gcode", "models" };
+
+            foreach (string folderType in folderTypes)
+            {
+                bool rootExists = await _context.Folders.AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
+                if (!rootExists)
+                {
+                    _context.Folders.Add(new FolderNode
+                    {
+                        Id = Guid.NewGuid(),
+                        Path = folderPath,
+                        FolderType = folderType,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            try
+            {
+                _ = await _context.SaveChangesAsync();
+                _logger.LogInformation("[DB] Root folders ('/') seeded successfully for gcode and models types");
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Ignore duplicate key errors - root folder already exists (possibly created by another instance)
+                _logger.LogDebug("[DB] Root folders already exist (duplicate key handled gracefully)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DB] Failed to seed root folders");
+            throw;
+        }
+    }
 
     /// <summary>
     /// Validate database connection without initializing

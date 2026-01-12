@@ -27,10 +27,10 @@ public static class CliCommandExtensions
         // Create an async scope to resolve scoped services without using the service locator pattern
         await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
         // Resolve logger explicitly; if not registered, keep null to preserve Console fallback
-        Farm.Infrastructure.Telemetry.IUnifiedLoggingService? logger = null;
+        IUnifiedLoggingService? logger = null;
         try
         {
-            logger = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            logger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
         }
         catch (InvalidOperationException)
         {
@@ -43,7 +43,7 @@ public static class CliCommandExtensions
             AppDbContext cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             _ = await cliDb.Database.EnsureCreatedAsync();
 
-            Farm.Web.Api.Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer>();
+            Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Services.Interfaces.IDatabaseInitializer>();
             if (dbInitializer != null)
             {
                 await dbInitializer.SeedAllAsync();
@@ -94,7 +94,7 @@ public static class CliCommandExtensions
         // Method intentionally falls through when a CLI command was handled.
     }
 
-    private static async Task ListUsersAsync(AppDbContext db, Farm.Infrastructure.Telemetry.IUnifiedLoggingService? logger)
+    private static async Task ListUsersAsync(AppDbContext db, IUnifiedLoggingService? logger)
     {
         List<User> users = await db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role).ToListAsync();
         if (logger != null)
@@ -117,7 +117,7 @@ public static class CliCommandExtensions
         }
     }
 
-    private static async Task CreateAdminAsync(AppDbContext db, List<string> rawArgs, Farm.Infrastructure.Telemetry.IUnifiedLoggingService? logger)
+    private static async Task CreateAdminAsync(AppDbContext db, List<string> rawArgs, IUnifiedLoggingService? logger)
     {
         string GetArg(string name)
         {

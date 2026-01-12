@@ -1,0 +1,511 @@
+# syntax=docker/dockerfile:1
+############################################################
+# Multi-Stage PrintFarmer Build
+# Builds all .NET projects once and creates efficient runtime containers
+# This approach avoids rebuilding shared libraries in each worker container
+############################################################
+
+# Global build arguments
+ARG ORCASLICER_VERSION=2.3.1
+ARG BUILD_VERBOSITY=quiet
+
+# Base image tags - use Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter compatibility
+# Ubuntu Noble has glibc 2.39 which is compatible with bundled Assimp libraries (built for 2.38)
+ARG SDK_TAG=9.0
+ARG ASPNET_TAG=9.0-noble
+ARG NODE_TAG=22-alpine
+ARG NGINX_TAG=alpine
+ARG UBUNTU_TAG=24.04
+
+############################################################
+# Shared Build Stage - Build all .NET projects once
+############################################################
+FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
+WORKDIR /src
+
+# Copy all project files for dependency resolution
+COPY Directory.Build.props ./
+COPY global.json ./
+COPY proto /proto
+COPY src/ ./
+
+# Restore all dependencies in one go
+RUN dotnet restore ./api/Farm.Web.Api.csproj && \
+    dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
+    dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj
+
+# Build and publish all services: sequential restore, then sequential publish
+# Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore ./api/Farm.Web.Api.csproj && \
+    dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
+    dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
+    echo "Publishing API..." && \
+    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Publishing OrcaSlicer Worker..." && \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Publishing Printer Discovery..." && \
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Building backend plugins..." && \
+    dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+
+# Verify critical runtime files exist and fail immediately if any are missing
+RUN echo "Checking published artifacts..." && \
+    echo "API publish directory:" && ls -lah /app/publish/api/ 2>&1 | head -20 && \
+    echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 && \
+    echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 && \
+    echo "Checking for plugin DLLs in API directory:" && ls -lah /app/publish/api/Farm.Backend.Plugin.*.dll 2>&1 && \
+    ([ -f /app/publish/api/Farm.Web.Api.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Web.Api.dll"; exit 1)) && \
+    ([ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || (echo "✗ MISSING: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; exit 1)) && \
+    ([ -f /app/publish/printer-discovery/PrinterDiscoveryService.dll ] || (echo "✗ MISSING: /app/publish/printer-discovery/PrinterDiscoveryService.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Core.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Core.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Moonraker.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Moonraker.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Sdcp.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Sdcp.dll"; exit 1)) && \
+    echo "✓ All .NET builds completed successfully"
+
+############################################################
+# API Runtime Container
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
+WORKDIR /app
+EXPOSE 5000
+
+# Install runtime tools that are present in the upgraded image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+# Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
+
+# Create necessary directories with proper ownership
+RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models && \
+    chown -R appuser:appuser /app
+
+# Copy API binaries from shared build stage (as appuser)
+COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
+
+# Download and extract Lib3MF library for 3MF file support
+# Lib3MF native library is already copied to output by csproj during build
+# No additional steps needed - it's included in the published output
+
+# Create startup script to fix mounted volume permissions for appuser (UID 1001)
+# This handles the case where mounted volumes from host preserve host UID/GID
+# Run as root initially to fix permissions, then drop to appuser to run the app
+RUN cat > /app/entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
+# The appuser may not own these directories if they're bind mounts from the host
+chmod -R g+rwx /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+# Drop to appuser and run application
+exec gosu appuser dotnet Farm.Web.Api.dll
+EOF
+RUN chmod +x /app/entrypoint.sh
+
+# Install gosu for privilege dropping (used by many Docker images)
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
+
+# Set environment
+ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV GCODE_STORAGE_PATH=/app/gcode
+ENV MODEL_UPLOAD_PATH=/app/models
+ENV SLICER_PROFILES_PATH=/app/profiles
+
+# Keep as root so entrypoint can fix permissions
+# USER appuser
+
+# Health check (note: changed to run as appuser context would fail, run as is)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
+    CMD curl -f http://localhost:5000/healthz || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+############################################################
+# OrcaSlicer Binary Layer (cached layer for binary assets)
+############################################################
+FROM ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
+ARG ORCASLICER_VERSION
+ARG ORCA_ASSET_PATH=""
+ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
+ARG ALLOW_STUB=true
+ARG GITHUB_TOKEN
+ARG _SKIP_ORCA_BINARY_BUILD=0
+WORKDIR /tmp
+
+# Install AppImage/tooling stack (matches upgraded base image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Download and extract OrcaSlicer binaries with robust error handling
+RUN set -e; \
+    echo "[orcaslicer-binaries] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
+    mkdir -p /orcaslicer-dist/opt; \
+    \
+    # If _SKIP_ORCA_BINARY_BUILD=1, skip all download/extraction (using prebuilt image) \
+    if [ "${_SKIP_ORCA_BINARY_BUILD}" = "1" ]; then \
+        echo "[orcaslicer-binaries] Skipping binary build (using prebuilt image via additional_contexts)"; \
+        mkdir -p /orcaslicer-dist/opt/orcaslicer && \
+        echo "[orcaslicer-binaries] Setup complete (waiting for additional_contexts to populate /opt/orcaslicer)"; \
+        exit 0; \
+    fi; \
+    \
+    if [ "$ALLOW_STUB" = "true" ]; then \
+        echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
+    else \
+        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download real binary"; \
+    fi; \
+    \
+    # Check if AppImage is available from ORCA_ASSET_PATH (for offline builds) \
+    cached_appimage=""; \
+    if [ -n "${ORCA_ASSET_PATH}" ] && [ -d "${ORCA_ASSET_PATH}" ]; then \
+        echo "[orcaslicer-binaries] Searching for cached AppImage in ${ORCA_ASSET_PATH}"; \
+        cached_appimage=$(find "${ORCA_ASSET_PATH}" -maxdepth 1 -name "*.AppImage" -type f | head -n1 || true); \
+        if [ -n "$cached_appimage" ]; then \
+            echo "[orcaslicer-binaries] Found cached AppImage: $cached_appimage"; \
+            cp "$cached_appimage" orcaslicer.AppImage; \
+            chmod +x orcaslicer.AppImage; \
+        fi; \
+    fi; \
+    \
+    # Try to find the correct download URL dynamically (only if not using cached AppImage) \
+    if [ ! -f orcaslicer.AppImage ]; then \
+        dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+                          -H "User-Agent: OrcaSlicerWorker/1.0" \
+                          -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                      jq -r --arg ver "v${ORCASLICER_VERSION}" \
+                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
+                      head -n1 || true); \
+        \
+        if [ -n "$dynamic_url" ]; then \
+            echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
+            ORCASLICER_URL="$dynamic_url"; \
+        fi; \
+    fi; \
+    \
+    # Download function with validation \
+    try_download() { \
+        url="$1"; \
+        echo "[orcaslicer-binaries] Attempting download: $url"; \
+        if curl -H "User-Agent: OrcaSlicerWorker/1.0" -fSL -o orcaslicer.AppImage.tmp "$url"; then \
+            size=$(stat -c%s orcaslicer.AppImage.tmp 2>/dev/null || echo 0); \
+            if [ "$size" -gt 5000000 ]; then \
+                mv orcaslicer.AppImage.tmp orcaslicer.AppImage; \
+                echo "[orcaslicer-binaries] Download successful (size: $size bytes)"; \
+                return 0; \
+            else \
+                echo "[orcaslicer-binaries] Download too small (size $size < 5MB), invalid"; \
+            fi; \
+        fi; \
+        rm -f orcaslicer.AppImage.tmp || true; \
+        return 1; \
+    }; \
+    \
+    # Try multiple URL patterns (only if not using cached AppImage) \
+    if [ ! -f orcaslicer.AppImage ]; then \
+        try_download "${ORCASLICER_URL}" \
+        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+        || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    fi; \
+    \
+    # Extract AppImage if available \
+    if [ -f orcaslicer.AppImage ]; then \
+        chmod +x orcaslicer.AppImage; \
+        arch=$(uname -m); \
+        echo "[orcaslicer-binaries] File magic: $( (command -v file >/dev/null 2>&1 && file orcaslicer.AppImage) || echo 'file N/A')"; \
+        echo "[orcaslicer-binaries] Host build arch: $arch"; \
+        \
+        if [ "$arch" = "x86_64" ] || [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then \
+            echo "[orcaslicer-binaries] Attempting unsquashfs extraction"; \
+            if unsquashfs -d squashfs-root orcaslicer.AppImage >/dev/null 2>&1; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] unsquashfs extraction successful"; \
+            elif ./orcaslicer.AppImage --appimage-extract 2>extract.err; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] --appimage-extract successful"; \
+            elif command -v 7z >/dev/null 2>&1 && 7z x -y -oorca7z orcaslicer.AppImage >/dev/null 2>&1; then \
+                [ -d orca7z/squashfs-root ] && mv orca7z/squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                [ ! -d /orcaslicer-dist/opt/orcaslicer ] && mkdir -p /orcaslicer-dist/opt/orcaslicer && cp -R orca7z/* /orcaslicer-dist/opt/orcaslicer/ 2>/dev/null || true; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] 7z extraction successful"; \
+            elif command -v bsdtar >/dev/null 2>&1 && bsdtar -xf orcaslicer.AppImage 2>/dev/null && [ -d squashfs-root ]; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] bsdtar extraction successful"; \
+            fi; \
+        else \
+            echo "[orcaslicer-binaries] Skipping extraction due to unsupported arch: $arch"; \
+        fi; \
+        rm -f orcaslicer.AppImage; \
+    fi; \
+    \
+    # Create stub if binary extraction failed but ALLOW_STUB is true \
+    if [ ! -f /orcaslicer-dist/orcaslicer ]; then \
+        if [ "${ALLOW_STUB}" = "true" ]; then \
+            echo "[orcaslicer-binaries] Creating stub binary"; \
+            printf '#!/bin/sh\n>&2 echo "[WARN] OrcaSlicer binary not present (version %s)"\nexit 2\n' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer; \
+            chmod +x /orcaslicer-dist/orcaslicer; \
+        else \
+            echo "[orcaslicer-binaries] ERROR: Binary missing and ALLOW_STUB=false"; \
+            exit 1; \
+        fi; \
+    fi; \
+    \
+    # OrcaSlicer profiles are already in /opt/orcaslicer/resources/profiles \
+    echo "[orcaslicer-binaries] OrcaSlicer profiles available at /opt/orcaslicer/resources/profiles"; \
+    if [ -d /orcaslicer-dist/opt/orcaslicer/resources/profiles ]; then \
+        echo "[orcaslicer-binaries] Verified: profiles directory present"; \
+        ls /orcaslicer-dist/opt/orcaslicer/resources/profiles/*.json 2>/dev/null | head -5 || true; \
+    else \
+        echo "[orcaslicer-binaries] Warning: OrcaSlicer profiles not found in extracted AppImage"; \
+    fi
+
+############################################################
+# Slicer Base Runtime (shared runtime for all workers)
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
+WORKDIR /app
+
+# Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates \
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
+        xvfb fuse squashfs-tools file p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+# Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
+
+# Create necessary directories and set ownership for appuser
+RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
+
+############################################################
+# OrcaSlicer Worker Runtime Container  
+############################################################
+FROM slicer-base AS orcaslicer-worker
+ARG ORCASLICER_VERSION
+ARG ALLOW_STUB
+
+LABEL component="orcaslicer-worker" \
+      orcaslicer.version="${ORCASLICER_VERSION}" \
+      description="Dedicated OrcaSlicer worker container" \
+      security.sandbox="true"
+
+# Copy OrcaSlicer binaries from the binary layer (as appuser)
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
+
+# Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
+COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
+
+# Verify binary installation and set up permissions
+RUN set -e; \
+    chmod +x /usr/local/bin/orcaslicer && \
+    test -f /usr/local/bin/orcaslicer && \
+    test -s ./Farm.OrcaSlicer.Worker.dll && \
+    echo "✓ OrcaSlicer worker binaries verified" && \
+    # Verify profile directories exist \
+    PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
+    if [ -d "$PROFILES_DIR" ]; then \
+        profile_count=$(find "$PROFILES_DIR" -name "*.json" 2>/dev/null | wc -l); \
+        echo "✓ Profile directory verified with $profile_count JSON profiles"; \
+    else \
+        echo "ERROR: Profile directory not found at $PROFILES_DIR"; \
+        exit 1; \
+    fi && \
+    echo "✓ OrcaSlicer worker setup completed"
+
+# Run as non-root user
+USER appuser
+
+# Set environment
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+ENV Worker__WorkingDirectory=/app/temp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
+
+############################################################
+# React Frontend Build Stage
+############################################################
+# Accept build arguments for frontend configuration
+ARG VITE_API_BASE_URL=/api
+ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+
+FROM node:${NODE_TAG} AS frontend-build
+WORKDIR /app
+
+# Copy workspace package.json files FIRST (root + workspaces) for reproducible installs
+# This is a monorepo using npm workspaces - MUST install from root to resolve all workspace deps together
+COPY package.json package-lock.json ./
+COPY src/Web/ReactApp/package.json ./src/Web/ReactApp/
+COPY src/Slicers/ ./src/Slicers/
+
+# Create symlink for Vite path alias resolution (vite.config.ts checks /Slicers/... path in Docker)
+# Maps /Slicers -> /app/src/Slicers for absolute path resolution in Vite builds
+RUN ln -s /app/src/Slicers /Slicers
+
+# Install npm dependencies with proper error handling and validation
+# Critical: devDependencies (including vite) MUST be installed for the build to succeed
+RUN set -eux; \
+    echo "[frontend-build] Node.js version:"; node --version; \
+    echo "[frontend-build] npm version:"; npm --version; \
+    \
+    # Check if package-lock.json exists
+    if [ -f package-lock.json ]; then \
+        echo "[frontend-build] package-lock.json found - using npm ci"; \
+        npm ci --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+    else \
+        echo "[frontend-build] package-lock.json NOT found - using npm install"; \
+        npm install --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+    fi; \
+    npm_status=$?; \
+    \
+    # Check installation success
+    if [ "$npm_status" -ne 0 ]; then \
+        echo "[frontend-build] ERROR: npm install/ci failed with status $npm_status"; \
+        echo "[frontend-build] Last 50 lines of npm log:"; \
+        tail -n 50 /tmp/npm-install.log; \
+        exit 1; \
+    fi; \
+    \
+    # Verify critical build tools are installed
+    if [ ! -f node_modules/.bin/vite ]; then \
+        echo "[frontend-build] ERROR: vite not found in node_modules/.bin"; \
+        echo "[frontend-build] Contents of node_modules/.bin:"; \
+        ls -la node_modules/.bin 2>&1 | head -20; \
+        exit 1; \
+    fi; \
+    \
+    echo "[frontend-build] ✓ Dependencies installed successfully"; \
+    echo "[frontend-build] ✓ vite available at: $(which vite)"; \
+    npm ls --depth=0 2>&1 | head -25
+
+# Copy source code and build with environment variables
+COPY src/Web/ReactApp/ ./
+ARG VITE_API_BASE_URL=/api
+ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+RUN set -eux; \
+    echo "[frontend-build] Starting React build with Vite..."; \
+    echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
+    echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
+    echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
+    echo "[frontend-build] Current directory: $(pwd)"; \
+    echo "[frontend-build] Files in current directory:"; ls -la | head -20; \
+    \
+    # Pre-build validation
+    if [ ! -f node_modules/.bin/vite ]; then \
+        echo "[frontend-build] CRITICAL ERROR: vite executable not found!"; \
+        echo "[frontend-build] node_modules/.bin contents:"; \
+        ls -la node_modules/.bin 2>&1 | head -20; \
+        exit 127; \
+    fi; \
+    \
+    # Export build environment variables
+    export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
+    export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
+    export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
+    \
+    # Run the build with verbose error output
+    echo "[frontend-build] Executing: npm run build"; \
+    npm run build 2>&1; \
+    build_status=$?; \
+    \
+    if [ "$build_status" -ne 0 ]; then \
+        echo "[frontend-build] ERROR: Build failed with status $build_status"; \
+        exit $build_status; \
+    fi; \
+    \
+    # Verify build output
+    if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
+        echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
+        echo "[frontend-build] Current directory contents:"; \
+        ls -la; \
+        exit 1; \
+    fi; \
+    \
+    echo "[frontend-build] ✓ Build completed successfully"; \
+    echo "[frontend-build] dist/ contents:"; \
+    ls -lah dist/
+
+############################################################
+# React Frontend Runtime Container
+############################################################
+FROM nginx:${NGINX_TAG} AS frontend-runtime
+WORKDIR /usr/share/nginx/html
+
+# Ensure curl present for health checks when using standard nginx tag
+RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
+
+# Copy built React app
+COPY --from=frontend-build /app/dist .
+
+# Copy nginx configuration
+COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
+
+# Note: curl and nginx directories are pre-configured in base image
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:80/health || exit 1
+
+EXPOSE 80
+
+# Override the default nginx entrypoint to just run nginx directly
+ENTRYPOINT []
+CMD ["nginx", "-g", "daemon off;"]
+
+############################################################
+# Printer Discovery Service Runtime Container
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
+WORKDIR /app
+
+# Install curl for health checks (standard base images don't have it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+# Create discovery user (different from appuser for service isolation)
+RUN groupadd -r discovery && useradd -r -g discovery discovery && \
+    chown -R discovery:discovery /app
+
+# Copy published printer discovery service (as discovery user)
+COPY --chown=discovery:discovery --from=shared-build /app/publish/printer-discovery .
+
+# Run as non-root user
+USER discovery
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5246/health || exit 1
+
+EXPOSE 5246
+
+ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]

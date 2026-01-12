@@ -1,0 +1,69 @@
+# OrcaSlicer Worker Addon Service
+# This service is conditionally included via compose-generator.sh when ENABLE_ORCA_WORKER is set
+# Provides distributed slicing capability for the PrintFarmer API
+
+# Anchor definitions (these are typically injected from docker-compose.common.yml by compose-generator.sh)
+x-orcaslicer-build: &orcaslicer-build
+  context: .
+  dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
+  target: orcaslicer-worker
+  args:
+    SDK_TAG: ${SDK_TAG:-9.0}
+    ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
+    NODE_TAG: ${NODE_TAG:-22-alpine}
+    NGINX_TAG: ${NGINX_TAG:-alpine}
+    UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    ALLOW_STUB: ${ALLOW_STUB:-0}
+    ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
+    _SKIP_ORCA_BINARY_BUILD: ${_SKIP_ORCA_BINARY_BUILD:-0}
+
+x-worker-healthcheck: &worker-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 90s
+
+x-worker-volumes: &worker-volumes
+  - ${EXTERNAL_ORCA_WORKER_TEMP:-.volumes/printfarmer-orcaslicer-temp}:/app/temp
+  - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models:ro
+  - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode:ro
+
+x-worker-security: &worker-security {}
+
+x-worker-deployment: &worker-deployment
+  resources:
+    limits:
+      cpus: '${ORCA_WORKER_CPU_LIMIT:-1}'
+      memory: ${ORCA_WORKER_MEMORY_LIMIT:-1gb}
+    reservations:
+      cpus: '${ORCA_WORKER_CPU_REQUEST:-0.5}'
+      memory: ${ORCA_WORKER_MEMORY_REQUEST:-512m}
+
+services:
+  orcaslicer-worker:
+    build:
+      <<: *orcaslicer-build
+    image: printfarmer-orcaslicer-worker
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://api:5245}
+      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5245}
+      - Worker__WorkingDirectory=/app/temp
+      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__MaxConcurrentJobs=1
+      - Worker__MaxMemoryMb=1024
+    volumes: *worker-volumes
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - printfarmer-network
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+    <<: *worker-security
+    deploy: *worker-deployment
+

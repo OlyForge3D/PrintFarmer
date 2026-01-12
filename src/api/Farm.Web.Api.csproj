@@ -6,14 +6,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RestoreSources>https://api.nuget.org/v3/index.json;https://nuget.pkg.github.com/assimp/index.json</RestoreSources>
   </PropertyGroup>
 
   <ItemGroup>
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <!-- Plugin implementations - needed for dynamic plugin discovery -->
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.8" />
     <!-- Explicitly reference newer Microsoft.Data.SqlClient to fix reflection bug with .NET 9 -->
@@ -41,23 +52,34 @@
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.10.0" />
+      <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.10.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.10.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.10.0" />
-    <PackageReference Include="AutoMapper" Version="12.0.1" />
-    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+    <PackageReference Include="AutoMapper" Version="14.0.0" />
+    <PackageReference Include="AssimpNetter" Version="6.0.2.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
-  <!-- Removed old Farm.Infrastructure reference after folder rename -->
+    <!-- Slicer libraries -->
+    <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
   </ItemGroup>
+
 
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />
     <None Include="Tests\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include native Lib3MF libraries for runtime loading -->
+    <None Include="runtimes/linux-x64/native/lib3mf.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

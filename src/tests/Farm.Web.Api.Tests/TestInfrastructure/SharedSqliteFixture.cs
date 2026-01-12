@@ -1,10 +1,10 @@
-﻿using Xunit;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Farm.Infrastructure.Telemetry;
+using Xunit;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 
@@ -31,8 +31,8 @@ public class SharedSqliteFixture : IDisposable
 
     public SharedSqliteFixture()
     {
-        var name = $"shared_fixture_{Guid.NewGuid():N}";
-        var connStr = $"Data Source=file:{name}?mode=memory&cache=shared";
+        string name = $"shared_fixture_{Guid.NewGuid():N}";
+        string connStr = $"Data Source=file:{name}?mode=memory&cache=shared";
         Connection = new SqliteConnection(connStr);
         Connection.Open();
 
@@ -49,21 +49,21 @@ public class SharedSqliteFixture : IDisposable
         // Instead register EF using the connection string so EF will open separate
         // physical connections while the keeper connection simply keeps the
         // in-memory DB alive.
-        var services = new ServiceCollection();
+        ServiceCollection services = new ServiceCollection();
         // Minimal configuration: register DbContext using the connection string
-        services.AddDbContext<AppDbContext>(opts => opts.UseSqlite(connStr));
+        _ = services.AddDbContext<AppDbContext>(opts => opts.UseSqlite(connStr));
 
         // Register DatabaseInitializer and its dependencies similarly to startup
         // We will attempt to reuse the project's service registrations minimally.
-        services.AddLogging();
+        _ = services.AddLogging();
         // Tests run without the full service graph; DatabaseInitializer depends on IUnifiedLoggingService.
         // Provide a simple NoOp implementation so the initializer can be constructed for seeding.
-        services.AddSingleton<IUnifiedLoggingService, NoOpUnifiedLoggingService>();
-        services.AddScoped<DatabaseInitializer>();
+        _ = services.AddSingleton<IUnifiedLoggingService, NoOpUnifiedLoggingService>();
+        _ = services.AddScoped<DatabaseInitializer>();
 
-        var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        ServiceProvider provider = services.BuildServiceProvider();
+        using IServiceScope scope = provider.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Do NOT call EnsureCreated here. The DatabaseInitializer.InitializeAsync
         // will perform schema provisioning; calling EnsureCreated twice (here and
@@ -71,7 +71,7 @@ public class SharedSqliteFixture : IDisposable
         // in-memory SQLite in concurrent scenarios. Let the initializer be the
         // single source of truth for schema creation.
 
-        var initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
+        DatabaseInitializer? initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
         if (initializer != null)
         {
             try

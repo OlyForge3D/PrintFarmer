@@ -1,0 +1,76 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:3000"
+            - "http://localhost:3001"
+            - "https://localhost:3000"
+            - "https://localhost:3001"
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  resourcedetection:
+    detectors: [env, system]
+  
+  attributes:
+    actions:
+      - key: environment
+        value: development
+        action: insert
+      - key: service.namespace
+        value: printfarmer
+        action: insert
+
+exporters:
+  # Jaeger for distributed tracing (using OTLP gRPC for better compatibility)
+  otlp:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Prometheus for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: printfarmer
+    const_labels:
+      environment: development
+
+  # Console output for debugging
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [otlp, debug]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [prometheus, debug]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes, batch]
+      exporters: [debug]
+
+  extensions: [health_check]
+  
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

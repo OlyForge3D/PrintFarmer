@@ -130,7 +130,6 @@ Removes these images (forces rebuild on next deployment):
 ### Step 6: Remove Configuration Files
 ```
 ℹ️  Step 6/6: Removing generated configuration files...
-  • Removed docker-compose.host-network.yml
   • Removed docker-compose.override.yml
   • Removed .env
 ✅ Configuration files cleaned
@@ -175,7 +174,7 @@ docker images | grep printfarmer | awk '{print $3}' | xargs docker rmi -f 2>/dev
 docker network prune -f
 
 # Remove generated files
-rm -f docker-compose.host-network.yml docker-compose.override.yml .env
+rm -f docker-compose.override.yml .env
 ```
 
 ## Troubleshooting

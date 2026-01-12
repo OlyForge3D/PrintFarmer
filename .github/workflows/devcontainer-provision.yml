@@ -1,0 +1,37 @@
+name: Devcontainer Provision
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET (for post-create scripts that invoke dotnet)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.302'
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Make post-create executable
+        run: chmod +x .devcontainer/post-create.sh
+
+      - name: Run devcontainer post-create verification
+        run: |
+          # Run provisioning script with verification to catch provisioning regressions
+          ./.devcontainer/post-create.sh --verify
+        env:
+          # prevent heavy global npm installs inside CI if they are unnecessary
+          SKIP_GLOBAL_NPM: '1'
+          # Avoid apt operations if the runner doesn't need them
+          SKIP_APT: '0'
+          DEVCONTAINER_VERIFY: '1'

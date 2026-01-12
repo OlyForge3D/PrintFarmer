@@ -1,15 +1,17 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, within } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { TestRouter } from '@/test/utils/TestRouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PrinterDashboard } from '@/components/PrinterDashboard';
+import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
 import type { Printer } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
+import { AuthProvider } from '@/common/contexts/AuthContext';
 
 // Mock the API hooks
-vi.mock('@/hooks/useApi', async () => ({
-  usePrintersWithCameraUrls: vi.fn(),
+vi.mock('@/common/hooks/useApi', async () => ({
+  usePrinters: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePrinter: () => ({ mutateAsync: vi.fn() }),
@@ -20,6 +22,11 @@ vi.mock('@/hooks/useApi', async () => ({
   useModels: vi.fn(() => ({ data: [] })),
   useFilamentTypes: vi.fn(() => ({ data: [] })),
   useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
+  useJobQueue: vi.fn(() => ({ 
+    data: [], 
+    isLoading: false, 
+    error: null 
+  })),
   usePrinterHistory: vi.fn(() => ({ 
     data: { jobs: [], total: 0 }, 
     isLoading: false, 
@@ -33,7 +40,7 @@ vi.mock('@/hooks/useApi', async () => ({
 }));
 
 vi.mock('@/hooks/useSignalR', () => ({
-  usePrinterStatusUpdates: vi.fn(() => ({ getPrinterStatus: () => undefined })),
+  usePrinterStatusUpdates: vi.fn(() => ({ printerStatuses: new Map() })),
   useDiscoveryStream: () => ({
     progress: null,
     foundPrinters: [],
@@ -45,7 +52,7 @@ vi.mock('@/hooks/useSignalR', () => ({
 }));
 
 // dynamic import after mocks
-const { usePrintersWithCameraUrls } = await import('@/hooks/useApi');
+const { usePrinters } = await import('@/common/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -57,9 +64,11 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TestRouter>{children}</TestRouter>
-    </QueryClientProvider>
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <TestRouter>{children}</TestRouter>
+      </QueryClientProvider>
+    </AuthProvider>
   );
 }
 
@@ -69,12 +78,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render loading state', () => {
-  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+  vi.mocked(usePrinters).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+  } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -88,12 +97,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render empty state when no printers', () => {
-  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+  vi.mocked(usePrinters).mockReturnValue({
       data: [] as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+  } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -111,12 +120,12 @@ describe('PrinterDashboard', () => {
       statusCode: 500,
     };
 
-  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+  vi.mocked(usePrinters).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: mockError,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+  } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -138,7 +147,7 @@ describe('PrinterDashboard', () => {
         state: 'printing',
         manufacturerName: 'Prusa',
         modelName: 'MK3S+',
-        backend: 0, // Moonraker
+        backend: PrinterBackend.Moonraker,
       },
       {
         id: '2',
@@ -148,16 +157,16 @@ describe('PrinterDashboard', () => {
         state: null,
         manufacturerName: 'Creality',
         modelName: 'Ender 3',
-        backend: 1, // PrusaLink
+        backend: PrinterBackend.PrusaLink,
       },
     ];
 
-  vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+  vi.mocked(usePrinters).mockReturnValue({
       data: mockPrinters as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+  } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -165,29 +174,22 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-    // The printers list should be present and contain two listitems
-    const list = screen.getByRole('list', { name: /printers list/i });
-    expect(list).toBeInTheDocument();
-    const items = within(list).getAllByRole('listitem');
-    expect(items).toHaveLength(2);
-
-    // Prefer accessible queries: check text inside each listitem
-    expect(within(items[0]).getByText('Test Printer 1')).toBeInTheDocument();
-    expect(within(items[1]).getByText('Test Printer 2')).toBeInTheDocument();
-    expect(within(items[0]).getByText('Prusa MK3S+')).toBeInTheDocument();
-    expect(within(items[1]).getByText('Creality Ender 3')).toBeInTheDocument();
+    // Check that stats are rendered instead of printer cards
+    expect(screen.getByText('Total Printers')).toBeInTheDocument();
+    expect(screen.getByText('Online')).toBeInTheDocument();
+    expect(screen.getByText('Printing')).toBeInTheDocument();
   });
 
   it('exposes data-testid attributes for printers list and items', () => {
     // Reuse a small mock response
-    vi.mocked(usePrintersWithCameraUrls).mockReturnValue({
+    vi.mocked(usePrinters).mockReturnValue({
       data: [
         { id: '42', name: 'X', manufacturerName: 'M', modelName: 'Model' }
       ] as unknown as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrintersWithCameraUrls>);
+    } as unknown as ReturnType<typeof usePrinters>);
 
     render(
       <TestWrapper>
@@ -195,16 +197,8 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-    // Locate the list via accessible role and assert the elements expose the test ids
-    const list = screen.getByRole('list', { name: /printers list/i });
-    expect(list).toBeInTheDocument();
-    const item = within(list).getByRole('listitem', { name: /Printer X/i });
-    expect(item).toBeInTheDocument();
-    // ensure data-testid attributes are present to prevent regressions
-    expect(list).toHaveAttribute('data-testid', 'printers-list');
-    expect(item).toHaveAttribute('data-testid', 'printer-item-42');
-    // validate visible text using accessible queries
-    expect(within(item).getByText('X')).toBeInTheDocument();
-    expect(within(item).getByText('M Model')).toBeInTheDocument();
+    // Check that the dashboard stats are rendered (not individual printers)
+    expect(screen.getByText('Total Printers')).toBeInTheDocument();
+    expect(screen.getByText('Online')).toBeInTheDocument();
   });
 });

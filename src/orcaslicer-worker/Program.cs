@@ -1,10 +1,12 @@
-﻿using Farm.OrcaSlicer.Worker.Health;
-using Farm.OrcaSlicer.Worker.Services;
+﻿using System.Net.Http.Headers;
+using System.Text.Json;
+using Farm.Infrastructure; // For AllProfilesResponseDto
 using Farm.Infrastructure.Telemetry;
+using Farm.OrcaSlicer.Worker.Health;
+using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using StackExchange.Redis;
 
 namespace Farm.OrcaSlicer.Worker;
 
@@ -15,72 +17,46 @@ internal static class WorkerConstants
 
 public static class Program
 {
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
         _ = builder.Logging.ClearProviders();
         _ = builder.Logging.AddConsole();
 
-        // Redis
-        _ = builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-        {
-            ConfigurationManager configuration = builder.Configuration;
-            string raw = configuration.GetConnectionString("Redis") ?? "localhost:6379";
-            if (!raw.Contains("abortConnect", StringComparison.OrdinalIgnoreCase))
-            {
-                raw = raw.TrimEnd(',') + ",abortConnect=false";
-            }
-            try
-            {
-                return ConnectionMultiplexer.Connect(raw);
-            }
-            catch (Exception ex)
-            {
-                // Resolve ILoggerFactory from the factory-provided service provider to avoid
-                // creating a second service provider via BuildServiceProvider(). This
-                // eliminates the ASP0000 diagnostic and ensures singletons are not duplicated.
-                ILoggerFactory loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
-                ILogger? logger = loggerFactory.CreateLogger("OrcaSlicer.Startup");
-                if (logger != null)
-                {
-                    logger.LogWarning(ex, "[startup][redis] Initial Redis connection failed: {Message}", ex.Message);
-                }
-                else
-                {
-                    Console.WriteLine($"[startup][redis] WARNING: Initial Redis connection failed: {ex.Message}");
-                }
+        // Add controllers support
+        _ = builder.Services.AddControllers();
 
-                // Fall back to a local connect attempt with a safe default
-                return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
-            }
-        });
-
-        // HTTP clients
+        // HTTP clients (for API communication, artifact upload, and slicing pipeline)
+        _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
         _ = builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
+        _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
 
         // Worker services (shared core + engine specific)
         _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
         _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
+        _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
+        _ = builder.Services.AddSingleton<ISlicerProfilesService, OrcaProfilesService>(); // generic profiles interface, implemented by OrcaSlicer
+        _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
         _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
-        _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
+        _ = builder.Services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer derived)
         _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
         _ = builder.Services.AddHostedService<QueueConsumerService>(); // derived
+        _ = builder.Services.AddHostedService<RegistrationBackgroundService>(); // registration & heartbeat
 
         // Health checks
         _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
-            .AddCheck<OrcaBinaryHealthCheck>("orca_binary")
-            .AddCheck<RedisHealthCheck>("redis");
+            .AddCheck<OrcaBinaryHealthCheck>("orca_binary");
 
         WebApplication app = builder.Build();
 
@@ -89,13 +65,17 @@ public static class Program
             _ = app.UseDeveloperExceptionPage();
         }
 
+        // Enable routing and controller mapping
+        _ = app.UseRouting();
+        _ = app.MapControllers();
+
         _ = app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
             Predicate = c => c.Name == "liveness",
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
                     timestamp = DateTime.UtcNow
@@ -112,11 +92,11 @@ public static class Program
 
         _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
+            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
                     relaxed = relaxedReadiness,
@@ -131,7 +111,7 @@ public static class Program
 
         _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "redis" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
+            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
         });
 
         _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
@@ -143,12 +123,36 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
+        _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
+        {
+            string? orcaVersion = await detector.GetVersionAsync();
+            return Results.Ok(new
+            {
+                orcaslicerVersion = orcaVersion,
+                workerVersion = "1.0.0",
+                timestamp = DateTime.UtcNow
+            });
+        });
+
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())
         {
             app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - readiness will be unhealthy for orca_binary.");
         }
 
-        app.Run();
+        // Preload profiles before starting the app
+        // This ensures profiles are cached in memory before the worker registers as ready
+        try
+        {
+            IProfilePreloadService preloadService = app.Services.GetRequiredService<IProfilePreloadService>();
+            await preloadService.PreloadProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError("Failed to preload profiles at startup: {Exception}", ex.Message);
+            throw; // Fail startup if profiles cannot be preloaded
+        }
+
+        await app.RunAsync();
     }
 }

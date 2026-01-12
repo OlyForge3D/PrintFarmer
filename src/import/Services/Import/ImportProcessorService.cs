@@ -1,30 +1,27 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
+using Farm.Infrastructure.Repositories.Catalog;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using FluentValidation.Results;
-using Microsoft.EntityFrameworkCore;
-using Farm.Importing.Services.Adapters;
 
 namespace Farm.Importing.Services.Import;
 
 public class ImportProcessorService : IImportProcessorService
 {
-    private readonly AppDbContext _db;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICatalogRepository _catalogRepo;
     private readonly FluentValidation.IValidator<CreatePrinterDto> _validator;
-    private readonly IPrinterCapabilityDiscoveryAdapter _capabilityDiscovery;
-    private readonly IDefaultCatalogAdapter _defaultCatalog;
 
-    public ImportProcessorService(AppDbContext db, FluentValidation.IValidator<CreatePrinterDto> validator, IPrinterCapabilityDiscoveryAdapter capabilityDiscovery, IDefaultCatalogAdapter defaultCatalog)
+    public ImportProcessorService(IUnitOfWork unitOfWork, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator)
     {
-        _db = db;
+        _unitOfWork = unitOfWork;
+        _catalogRepo = catalogRepo;
         _validator = validator;
-        _capabilityDiscovery = capabilityDiscovery;
-        _defaultCatalog = defaultCatalog;
     }
 
     public async Task<List<(string Name, string Status, Guid? Id, string? Reason)>> ProcessAsync(CreatePrinterDto[] dtos, string duplicateHandling, CancellationToken ct)
@@ -42,13 +39,13 @@ public class ImportProcessorService : IImportProcessorService
                     continue;
                 }
 
-                // Existence
-                Printer? existing = await _db.Printers.FirstOrDefaultAsync(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl, ct);
-                if (existing != null)
+                // Check for duplicates using repository
+                bool exists = await _unitOfWork.Printers.ExistsByNameOrServerUrlAsync(dto.Name ?? string.Empty, dto.ServerUrl ?? string.Empty, ct);
+                if (exists)
                 {
                     if (duplicateHandling.Equals("skip", StringComparison.OrdinalIgnoreCase))
                     {
-                        results.Add((dto.Name ?? string.Empty, "Skipped", existing.Id, "Exists"));
+                        results.Add((dto.Name ?? string.Empty, "Skipped", null, "Exists"));
                         continue;
                     }
                     else if (duplicateHandling.Equals("error", StringComparison.OrdinalIgnoreCase))
@@ -58,20 +55,25 @@ public class ImportProcessorService : IImportProcessorService
                     }
                     else if (duplicateHandling.Equals("update", StringComparison.OrdinalIgnoreCase))
                     {
-                        existing.Name = dto.Name ?? existing.Name;
-                        existing.Notes = dto.Notes ?? existing.Notes;
-                        existing.ApiKey = dto.ApiKey ?? existing.ApiKey;
-                        existing.OriginalServerUrl = dto.OriginalServerUrl ?? existing.OriginalServerUrl;
-                        existing.DateAcquired = dto.DateAcquired ?? existing.DateAcquired;
-                        existing.Backend = (int)dto.Backend;
-                        _ = _db.Printers.Update(existing);
-                        await _db.SaveChangesAsync(ct);
-                        results.Add((dto.Name ?? string.Empty, "Imported", existing.Id, "Updated"));
-                        continue;
+                        // Find existing printer to update
+                        var allPrinters = await _unitOfWork.Printers.GetAllAsync(ct);
+                        var existing = allPrinters.FirstOrDefault(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl);
+                        if (existing != null)
+                        {
+                            existing.Name = dto.Name ?? existing.Name;
+                            existing.Notes = dto.Notes ?? existing.Notes;
+                            existing.ApiKey = dto.ApiKey ?? existing.ApiKey;
+                            existing.OriginalServerUrl = dto.OriginalServerUrl ?? existing.OriginalServerUrl;
+                            existing.DateAcquired = dto.DateAcquired ?? existing.DateAcquired;
+                            existing.Backend = (int)dto.Backend;
+                            await _unitOfWork.SaveChangesAsync(ct);
+                            results.Add((dto.Name ?? string.Empty, "Imported", existing.Id, "Updated"));
+                            continue;
+                        }
                     }
                 }
 
-                // Create
+                // Create new printer
                 var created = await CreatePrinterFromDtoAsync(dto, ct);
                 results.Add((created.Name, "Imported", created.Id, null));
             }
@@ -84,51 +86,133 @@ public class ImportProcessorService : IImportProcessorService
         return results;
     }
 
-    private async Task<Farm.Web.Shared.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
+    /// <summary>
+    /// Strips the port from a server URL, returning only scheme + host.
+    /// Used when persisting ServerUrl to the database (port is managed via FrontendPort field).
+    /// Example: "http://192.168.1.50:8080/api" -> "http://192.168.1.50"
+    /// </summary>
+    private static string StripPortFromServerUrl(string? serverUrl)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            Uri uri = new Uri(serverUrl.Trim());
+            UriBuilder ub = new UriBuilder(uri)
+            {
+                Port = -1,  // -1 means use default port (not explicitly shown in URI)
+                Path = string.Empty,  // Remove any paths
+                Query = string.Empty
+            };
+            return ub.Uri.ToString().TrimEnd('/');
+        }
+        catch
+        {
+            // Fallback: just remove port manually if URI parsing fails
+            string trimmed = serverUrl.Trim();
+            if (trimmed.Contains("://"))
+            {
+                string[] parts = trimmed.Split(new[] { "://" }, StringSplitOptions.None);
+                if (parts.Length == 2)
+                {
+                    string hostPart = parts[1];
+                    // Remove port and path
+                    int colonIndex = hostPart.IndexOf(':');
+                    int slashIndex = hostPart.IndexOf('/');
+
+                    if (colonIndex > 0 || slashIndex > 0)
+                    {
+                        int endIndex = hostPart.Length;
+                        if (colonIndex > 0)
+                        {
+                            endIndex = Math.Min(endIndex, colonIndex);
+                        }
+                        if (slashIndex > 0)
+                        {
+                            endIndex = Math.Min(endIndex, slashIndex);
+                        }
+                        hostPart = hostPart.Substring(0, endIndex);
+                    }
+                    return parts[0] + "://" + hostPart;
+                }
+            }
+            return trimmed;
+        }
+    }
+
+    private async Task<Farm.Infrastructure.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
     {
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
         if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             string name = dto.NewManufacturerName!.Trim();
-            var existing = await _db.Manufacturers.FirstOrDefaultAsync(m => m.Name == name, ct);
-            if (existing is null)
+            var manufacturers = await _catalogRepo.GetManufacturersAsync(ct);
+            var existing = manufacturers.FirstOrDefault(m => m.Name == name);
+            if (existing.Name == null)
             {
-                existing = new Farm.Infrastructure.Domain.Manufacturer { Id = Guid.NewGuid(), Name = name };
-                _ = _db.Manufacturers.Add(existing);
-                await _db.SaveChangesAsync(ct);
+                // Add new manufacturer
+                manufacturerId = Guid.NewGuid();
+                await _catalogRepo.AddManufacturerAsync(manufacturerId, name, ct);
             }
-            manufacturerId = existing.Id;
+            else
+            {
+                manufacturerId = existing.Id;
+            }
         }
 
         Guid modelId = dto.ModelId ?? Guid.Empty;
         if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
-            var existingModel = await _db.Models.FirstOrDefaultAsync(m => m.ManufacturerId == manufacturerId && m.Name == mname, ct);
-            if (existingModel is null)
+            var models = await _catalogRepo.GetModelsCachedAsync(manufacturerId, ct);
+            var existingModel = models.FirstOrDefault(m => m.ManufacturerId == manufacturerId && m.Name == mname);
+            if (existingModel?.Id == null || existingModel.Id == Guid.Empty)
             {
-                existingModel = new Farm.Infrastructure.Domain.PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturerId, Name = mname };
-                _ = _db.Models.Add(existingModel);
-                await _db.SaveChangesAsync(ct);
+                // Add new model
+                var newModel = new Farm.Infrastructure.Domain.PrinterModel
+                {
+                    Id = Guid.NewGuid(),
+                    ManufacturerId = manufacturerId,
+                    Name = mname
+                };
+                await _catalogRepo.AddModelAsync(newModel, ct);
+                modelId = newModel.Id;
             }
-            modelId = existingModel.Id;
+            else
+            {
+                modelId = existingModel.Id;
+            }
         }
 
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
-            (Guid defMan, Guid defModel) = await _defaultCatalog.GetDefaultCatalogIdsAsync();
-            if (manufacturerId == Guid.Empty) manufacturerId = defMan;
-            if (modelId == Guid.Empty) modelId = defModel;
+            Guid? defMan = await _catalogRepo.GetUnknownManufacturerIdAsync(ct);
+            Guid? defModel = await _catalogRepo.GetUnknownModelIdAsync(ct);
+
+            if (manufacturerId == Guid.Empty && defMan.HasValue)
+            {
+                manufacturerId = defMan.Value;
+            }
+
+            if (modelId == Guid.Empty && defModel.HasValue)
+            {
+                modelId = defModel.Value;
+            }
         }
 
-        int defaultPort = dto.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;
         string normalizedInput = dto.ServerUrl ?? string.Empty;
+
+        // Strip port from ServerUrl - port is managed via BackendPort field, not stored in ServerUrl
+        string serverUrlWithoutPort = StripPortFromServerUrl(normalizedInput);
 
         var p = new Farm.Infrastructure.Domain.Printer
         {
             Id = Guid.NewGuid(),
             Name = dto.Name,
-            ServerUrl = normalizedInput,
+            ServerUrl = serverUrlWithoutPort,
             OriginalServerUrl = dto.OriginalServerUrl,
             IpAddress = null,
             Notes = dto.Notes,
@@ -136,25 +220,43 @@ public class ImportProcessorService : IImportProcessorService
             ModelId = modelId,
             DateAcquired = dto.DateAcquired,
             Backend = (int)dto.Backend,
-            ApiKey = dto.ApiKey
+            ApiKey = dto.ApiKey,
+            // Populate hardware specs from DTO (populated from exported data or discovery)
+            MaxBuildVolumeX = dto.MaxBuildVolumeX,
+            MaxBuildVolumeY = dto.MaxBuildVolumeY,
+            MaxBuildVolumeZ = dto.MaxBuildVolumeZ,
+            HasHeatedBed = dto.HasHeatedBed,
+            HasEnclosure = dto.HasEnclosure,
+            MultiMaterial = dto.MultiMaterial,
+            SupportsAutoLeveling = dto.SupportsAutoLeveling,
+            MaxBedTemp = dto.MaxBedTemp,
+            CurrentMaterial = dto.CurrentMaterial,
+            CurrentSpoolId = dto.CurrentSpoolId,
+            IsAvailable = true
         };
-        _ = _db.Printers.Add(p);
-        await _db.SaveChangesAsync(ct);
 
-        try
+        await _unitOfWork.Printers.AddAsync(p, ct);
+
+        // Create default toolhead for the imported printer
+        var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
         {
-            var printerForDisc = await _db.Printers.Include(pr => pr.Manufacturer).Include(pr => pr.Model).FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-            if (printerForDisc != null)
-            {
-                _ = await _capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDisc, ct);
-            }
-        }
-        catch { }
+            Id = Guid.NewGuid(),
+            PrinterId = p.Id,
+            Name = "Extruder 1",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
+            SupportedMaterials = dto.SupportedMaterials,
+            MaxHotendTemp = dto.MaxHotendTemp,
+            UpdatedAt = DateTime.UtcNow
+        };
 
-        return new Farm.Web.Shared.PrinterDto(
+        // TODO: Add toolhead via repository if one exists, or directly via context
+        // For now, we'll need to add it to the database - this may need a toolhead repository
+
+        return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
             Name: p.Name,
-            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: false,
             State: null,
@@ -172,10 +274,14 @@ public class ImportProcessorService : IImportProcessorService
             BedTemp: null,
             HotendTarget: null,
             BedTarget: null,
-            Backend: (Farm.Web.Shared.PrinterBackend)p.Backend,
+            Backend: (Farm.Infrastructure.PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
+            IpAddress: p.IpAddress,
+            BackendPort: p.BackendPort,
+            FrontendPort: p.FrontendPort,
+            BackendUrl: p.BackendUrl,
+            FrontendUrl: p.FrontendUrl
         );
     }
 }

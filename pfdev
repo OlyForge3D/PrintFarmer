@@ -1,0 +1,214 @@
+#!/bin/bash
+
+set -e
+
+# PrintFarmer Development CLI
+# Usage: pfdev <command> [service]
+# Commands: redeploy, build, deploy, help, install, uninstall
+# Services: api, frontend, orcaslicer-worker, printer-discovery, nginx
+
+# Get the real path of this script (resolve symlinks)
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/pfdev"
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+fi
+REPO_ROOT="$(dirname "$SCRIPT_PATH")"
+SYMLINK_PATH="/usr/local/bin/pfdev"
+
+# Ensure symlink exists for global access
+ensure_symlink() {
+    if [[ ! -L "$SYMLINK_PATH" ]] || [[ "$(readlink "$SYMLINK_PATH")" != "$SCRIPT_PATH" ]]; then
+        echo "📍 Setting up global pfdev command..."
+        if sudo ln -sf "$SCRIPT_PATH" "$SYMLINK_PATH"; then
+            echo "✅ pfdev is now available globally as 'pfdev'"
+        else
+            echo "⚠️  Could not create symlink. You may need to run: sudo ln -sf $SCRIPT_PATH $SYMLINK_PATH"
+        fi
+    fi
+}
+
+# Remove symlink
+remove_symlink() {
+    if [[ -L "$SYMLINK_PATH" ]]; then
+        echo "🗑️  Removing global pfdev command..."
+        if sudo rm "$SYMLINK_PATH"; then
+            echo "✅ pfdev symlink removed"
+        else
+            echo "⚠️  Could not remove symlink. You may need to run: sudo rm $SYMLINK_PATH"
+        fi
+    else
+        echo "ℹ️  No pfdev symlink found at $SYMLINK_PATH"
+    fi
+}
+
+# Service configuration
+declare -A SERVICES=(
+    [api]="api"
+    [frontend]="frontend"
+    [orcaslicer-worker]="orcaslicer-worker"
+    [printer-discovery]="printer-discovery"
+    [nginx]="nginx"
+)
+
+# Dockerfile paths (kept for reference if needed)
+declare -A DOCKERFILES=(
+    [api]="Dockerfile.api"
+    [frontend]="Dockerfile.frontend"
+    [orcaslicer-worker]="Dockerfile"
+    [printer-discovery]="Dockerfile.printer-discovery"
+    [nginx]="Dockerfile.nginx-proxy"
+)
+
+print_usage() {
+    cat << EOF
+PrintFarmer Development CLI
+
+Usage: pfdev <command> [service1] [service2] ...
+
+Commands:
+  redeploy <service...>  Build and deploy service(s) (most common)
+  build <service...>     Build service(s) Docker image only
+  deploy <service...>    Deploy service(s) (image must already exist)
+  install                Create global symlink to use 'pfdev' from anywhere
+  uninstall              Remove global symlink
+  help                   Show this help message
+
+Available Services:
+  • api
+  • frontend
+  • orcaslicer-worker
+  • printer-discovery
+  • nginx
+
+Examples:
+  pfdev redeploy api
+  pfdev redeploy api frontend
+  pfdev build frontend orcaslicer-worker
+  pfdev deploy api nginx
+EOF
+}
+
+build_image() {
+    local service=$1
+    local start_time=$(date +%s)
+    
+    echo "📦 Building $service... [$(date '+%H:%M:%S')]"
+    cd "$REPO_ROOT"
+    # Force cache invalidation by removing the image first
+    docker rmi "printfarmer-$service:latest" 2>/dev/null || true
+    DOCKER_BUILDKIT=1 docker compose build --no-cache --pull "$service"
+    
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    echo "✅ Successfully built $service [$(date '+%H:%M:%S')] (${elapsed}s)"
+}
+
+deploy_service() {
+    local service=$1
+    local start_time=$(date +%s)
+    
+    echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
+    cd "$REPO_ROOT"
+    docker compose up -d "$service"
+    
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    echo "✅ Successfully deployed $service [$(date '+%H:%M:%S')] (${elapsed}s)"
+}
+
+redeploy_service() {
+    local service=$1
+    local start_time=$(date +%s)
+    
+    echo "🔄 Redeploying $service... [$(date '+%H:%M:%S')]"
+    build_image "$service" || return 1
+    deploy_service "$service" || return 1
+    
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+    echo "✅ Successfully redeployed $service [$(date '+%H:%M:%S')] (${elapsed}s)"
+}
+
+# Main
+if [[ $# -lt 1 ]]; then
+    ensure_symlink
+    print_usage
+    exit 1
+fi
+
+COMMAND=$1
+SERVICE=$2
+
+# Only ensure symlink on first run or help command
+if [[ "$COMMAND" == "help" ]] || [[ "$COMMAND" == "-h" ]] || [[ "$COMMAND" == "--help" ]]; then
+    ensure_symlink
+fi
+
+case "$COMMAND" in
+    redeploy)
+        if [[ $# -lt 2 ]]; then
+            echo "❌ At least one service name required"
+            print_usage
+            exit 1
+        fi
+        shift  # Remove command from args
+        for SERVICE in "$@"; do
+            if [[ ! -v SERVICES[$SERVICE] ]]; then
+                echo "❌ Unknown service: $SERVICE"
+                echo ""
+                print_usage
+                exit 1
+            fi
+            redeploy_service "$SERVICE" || exit 1
+        done
+        ;;
+    build)
+        if [[ $# -lt 2 ]]; then
+            echo "❌ At least one service name required"
+            print_usage
+            exit 1
+        fi
+        shift  # Remove command from args
+        for SERVICE in "$@"; do
+            if [[ ! -v SERVICES[$SERVICE] ]]; then
+                echo "❌ Unknown service: $SERVICE"
+                echo ""
+                print_usage
+                exit 1
+            fi
+            build_image "$SERVICE" || exit 1
+        done
+        ;;
+    deploy)
+        if [[ $# -lt 2 ]]; then
+            echo "❌ At least one service name required"
+            print_usage
+            exit 1
+        fi
+        shift  # Remove command from args
+        for SERVICE in "$@"; do
+            if [[ ! -v SERVICES[$SERVICE] ]]; then
+                echo "❌ Unknown service: $SERVICE"
+                echo ""
+                print_usage
+                exit 1
+            fi
+            deploy_service "$SERVICE" || exit 1
+        done
+        ;;
+    install)
+        ensure_symlink
+        ;;
+    uninstall)
+        remove_symlink
+        ;;
+    help|-h|--help)
+        print_usage
+        ;;
+    *)
+        echo "❌ Unknown command: $COMMAND"
+        echo ""
+        print_usage
+        exit 1
+        ;;
+esac
