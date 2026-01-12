@@ -18,13 +18,17 @@ public class SlicingJobsController(
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    private readonly string _tempRoot = InitializeTempRoot(tempPathProvider);
 
-    private static string InitializeTempRoot(Infrastructure.Temp.ITempPathProvider tempPathProvider)
+    // Ensure temp directory exists during construction - field exists only for side effect
+#pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
+    private readonly object _tempDirInitializer = EnsureTempDirectoryExists(tempPathProvider);
+#pragma warning restore CA1823, S1144
+    
+    private static object EnsureTempDirectoryExists(Infrastructure.Temp.ITempPathProvider provider)
     {
-        var tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());
+        var tempRoot = Path.GetFullPath(provider.GetTempRoot());
         _ = Directory.CreateDirectory(tempRoot);
-        return tempRoot;
+        return new object(); // Return dummy value since we only care about side effect
     }
 
     [HttpGet("jobs/{jobId}/status")]
