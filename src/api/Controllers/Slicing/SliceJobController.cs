@@ -22,42 +22,28 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Route("api/slice")]
 [Tags("Slice Jobs")]
 [Authorize] // All endpoints require authentication
-public class SliceJobController : ControllerBase
+public class SliceJobController(
+    ISliceJobRepository jobRepository,
+    ISliceJobEventService eventService,
+    ILogger<SliceJobController> logger,
+    IHostEnvironment env,
+    IProcessProfileRepository profileRepository,
+    IArtifactsService artifactsService,
+    IRateLimitService rateLimitService,
+    SliceJobMetrics metrics,
+    Services.Workers.IWorkerAuthService workerAuth,
+    Services.Workers.IWorkerCircuitBreakerService? circuitBreaker = null) : ControllerBase
 {
-    private readonly ISliceJobRepository _jobRepository;
-    private readonly ISliceJobEventService _eventService;
-    private readonly ILogger<SliceJobController> _logger;
-    private readonly IHostEnvironment _env;
-    private readonly IProcessProfileRepository _profileRepository;
-    private readonly IArtifactsService _artifactsService;
-    private readonly SliceJobMetrics _metrics;
-    private readonly IRateLimitService _rateLimitService;
-    private readonly Services.Workers.IWorkerAuthService _workerAuth;
-    private readonly Services.Workers.IWorkerCircuitBreakerService? _circuitBreaker;
-
-    public SliceJobController(
-        ISliceJobRepository jobRepository,
-        ISliceJobEventService eventService,
-        ILogger<SliceJobController> logger,
-        IHostEnvironment env,
-        IProcessProfileRepository profileRepository,
-        IArtifactsService artifactsService,
-        IRateLimitService rateLimitService,
-        SliceJobMetrics metrics,
-        Services.Workers.IWorkerAuthService workerAuth,
-        Services.Workers.IWorkerCircuitBreakerService? circuitBreaker = null)
-    {
-        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
-        _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
-        _artifactsService = artifactsService ?? throw new ArgumentNullException(nameof(artifactsService));
-        _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
-        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
-        _workerAuth = workerAuth ?? throw new ArgumentNullException(nameof(workerAuth));
-        _circuitBreaker = circuitBreaker;
-    }
+    private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly ISliceJobEventService _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
+    private readonly ILogger<SliceJobController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
+    private readonly IProcessProfileRepository _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
+    private readonly IArtifactsService _artifactsService = artifactsService ?? throw new ArgumentNullException(nameof(artifactsService));
+    private readonly SliceJobMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+    private readonly IRateLimitService _rateLimitService = rateLimitService ?? throw new ArgumentNullException(nameof(rateLimitService));
+    private readonly Services.Workers.IWorkerAuthService _workerAuth = workerAuth ?? throw new ArgumentNullException(nameof(workerAuth));
+    private readonly Services.Workers.IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
 
     /// <summary>
     /// Validates capability JSON string. Ensures JSON array; size &lt;= 32; distinct; simple lowercase slugs.

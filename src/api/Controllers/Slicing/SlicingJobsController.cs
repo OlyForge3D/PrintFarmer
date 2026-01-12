@@ -8,26 +8,27 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Jobs")]
-public class SlicingJobsController : ControllerBase
+public class SlicingJobsController(
+    IUnifiedLoggingService logger,
+    Infrastructure.Temp.ITempPathProvider tempPathProvider,
+    ISlicerOrchestrator orchestrator,
+    IFileManagementService fileManagementService) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider;
-    private readonly ISlicerOrchestrator _orchestrator;
-    private readonly IFileManagementService _fileManagementService;
-    private readonly string _tempRoot;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider = tempPathProvider;
+    private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
 
-    public SlicingJobsController(
-        IUnifiedLoggingService logger,
-        Infrastructure.Temp.ITempPathProvider tempPathProvider,
-        ISlicerOrchestrator orchestrator,
-        IFileManagementService fileManagementService)
+    // Ensure temp directory exists during construction - field exists only for side effect
+#pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
+    private readonly object _tempDirInitializer = EnsureTempDirectoryExists(tempPathProvider);
+#pragma warning restore CA1823, S1144
+    
+    private static object EnsureTempDirectoryExists(Infrastructure.Temp.ITempPathProvider provider)
     {
-        _logger = logger;
-        _tempPathProvider = tempPathProvider;
-        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-        _tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
-        _ = Directory.CreateDirectory(_tempRoot);
+        var tempRoot = Path.GetFullPath(provider.GetTempRoot());
+        _ = Directory.CreateDirectory(tempRoot);
+        return new object(); // Return dummy value since we only care about side effect
     }
 
     [HttpGet("jobs/{jobId}/status")]

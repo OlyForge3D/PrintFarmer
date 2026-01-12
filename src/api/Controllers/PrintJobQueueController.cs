@@ -12,16 +12,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/print-job-queue")]
 [Tags("Print Job Queue (New)")]
-public class PrintJobQueueController : ControllerBase
+public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IPrintJobQueueService _service;
-    private readonly IUnifiedLoggingService _logger;
-
-    public PrintJobQueueController(IPrintJobQueueService service, IUnifiedLoggingService logger)
-    {
-        _service = service;
-        _logger = logger;
-    }
+    private readonly IPrintJobQueueService _service = service;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<PrintJobDto>>> GetAllAsync(CancellationToken cancellationToken)
