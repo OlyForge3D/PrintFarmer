@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '@/common/components/ui/Button';
 
 export interface FloatingActionButtonProps {
   icon: React.ComponentType<{ className?: string }>;
@@ -39,24 +40,19 @@ export const FloatingActionButton = React.forwardRef<
   loading = false,
 }, ref) => {
   return (
-    <button
+    <Button
       ref={ref}
       onClick={onClick}
       disabled={disabled || loading}
       aria-label={label}
       title={label}
+      variant={variant}
       className={`
-        fixed rounded-full p-4 shadow-lg hover:shadow-xl transition-all
-        focus:outline-none focus:ring-2 focus:ring-pf-accent focus:ring-offset-2
-        ${variant === 'primary' 
-          ? 'bg-pf-accent text-white hover:bg-pf-accent-dark' 
-          : 'bg-pf-bg-2 text-pf-text-primary hover:bg-pf-bg-3'
-        }
-        ${disabled || loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-        ${position === 'bottom-right' && 'bottom-6 right-6'}
-        ${position === 'bottom-center' && 'bottom-6 left-1/2 -translate-x-1/2'}
-        ${position === 'bottom-left' && 'bottom-6 left-6'}
-        z-40
+        fixed rounded-full shadow-lg hover:shadow-xl transition-all
+        ${position === 'bottom-right' ? 'bottom-6 right-6' : ''}
+        ${position === 'bottom-center' ? 'bottom-6 left-1/2 -translate-x-1/2' : ''}
+        ${position === 'bottom-left' ? 'bottom-6 left-6' : ''}
+        z-40 w-16 h-16 p-0
         ${className}
       `}
     >
@@ -65,7 +61,7 @@ export const FloatingActionButton = React.forwardRef<
       ) : (
         <Icon className="w-6 h-6" />
       )}
-    </button>
+    </Button>
   );
 });
 

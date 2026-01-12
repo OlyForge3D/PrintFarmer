@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { Breadcrumbs } from '@/common/components/Breadcrumbs';
 import { Button } from '@/common/components/ui';
 // Sparkles icon - using ActivityIcon as close substitute
 import { ActivityIcon } from '@/common/components/icons/MdiIcons';
@@ -134,6 +135,16 @@ export const HarvestPage: React.FC = () => {
       subtitle="Start harvesting G-code files from your printers"
       icon={ActivityIcon}
     >
+      {/* Breadcrumbs */}
+      <Breadcrumbs
+        items={[
+          { label: 'Dashboard', href: '/' },
+          { label: 'Files', href: '/files' },
+          { label: 'Harvest', current: true }
+        ]}
+        className="mb-4"
+      />
+
       {/* Details panel overlay */}
       {selectedOperation && (
         <HarvestOperationDetails

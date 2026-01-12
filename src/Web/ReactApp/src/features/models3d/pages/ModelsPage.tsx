@@ -1,12 +1,15 @@
 import React, { useState, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
+import { useInfiniteList } from '@/common/hooks/useInfiniteList';
 import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
+import { InfiniteScroll } from '@/common/components/InfiniteScroll';
+import { Breadcrumbs } from '@/common/components/Breadcrumbs';
 import { TaggingModal } from '@/components/TaggingModal';
 import { Button, Input } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
@@ -65,10 +68,16 @@ export const ModelsPage: React.FC = () => {
     gcTime: 10 * 60 * 1000
   });
 
-  // Fetch models with search/filter
-  const { data: searchResult, isLoading } = useQuery({
-    queryKey: ['models-search', debouncedSearchQuery, selectedTags],
-    queryFn: async () => {
+  // Fetch models with search/filter using infinite scroll
+  const {
+    allItems: models,
+    isLoading,
+    hasMore,
+    isLoadingMore,
+    fetchNextPage,
+  } = useInfiniteList(
+    ['models-search', debouncedSearchQuery, selectedTags],
+    async (pageParam) => {
       const response = await fetch(`${getApiBaseUrl()}/3d-models/search`, {
         method: 'POST',
         headers: {
@@ -78,20 +87,24 @@ export const ModelsPage: React.FC = () => {
         body: JSON.stringify({
           query: debouncedSearchQuery || undefined,
           tagIds: selectedTags.length > 0 ? selectedTags : undefined,
-          page: 1,
-          pageSize: 100,
+          page: pageParam || 1,
+          pageSize: 20,
           sortBy: 'uploadedAt',
           descending: true
         })
       });
       if (!response.ok) throw new Error('Failed to search models');
-      return response.json();
+      const data = await response.json();
+      return {
+        items: data.models || [],
+        page: data.page || 1,
+        pageSize: data.pageSize || 20,
+        totalCount: data.totalCount || 0,
+        hasMore: data.hasMore || false
+      };
     },
-    staleTime: 2 * 60 * 1000,
-    gcTime: 5 * 60 * 1000
-  });
-
-  const models = searchResult?.models || [];
+    { staleTime: 2 * 60 * 1000 }
+  );
 
   // Fetch available printers for slicing (using fast endpoint without status checks)
   useQuery({
@@ -133,6 +146,14 @@ export const ModelsPage: React.FC = () => {
       icon={CubeIcon}
     >
       <div className="space-y-4 h-full flex flex-col">
+        {/* Breadcrumbs */}
+        <Breadcrumbs
+          items={[
+            { label: 'Dashboard', href: '/' },
+            { label: 'Files', href: '/files' },
+            { label: 'Models', current: true }
+          ]}
+        />
         {/* Toolbar */}
         <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 space-y-3">
           {/* Top Row: Search and Controls */}
@@ -211,7 +232,12 @@ export const ModelsPage: React.FC = () => {
 
         {/* Content Area - Full Width */}
         <div className="flex-1 min-h-0 flex flex-col">
-          {models.length === 0 && viewMode !== 'explorer' ? (
+          {models.length === 0 && isLoading && viewMode !== 'explorer' ? (
+            <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
+              <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent mx-auto"></div>
+              <p className="text-pf-text-secondary mt-3">Loading models...</p>
+            </div>
+          ) : models.length === 0 && viewMode !== 'explorer' ? (
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
               <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
               <p className="text-pf-text-secondary">No models found</p>
@@ -236,27 +262,41 @@ export const ModelsPage: React.FC = () => {
               }}
             />
           ) : viewMode === 'grid' ? (
-            <ModelGridView
-              models={models}
-              isLoading={isLoading}
-              onViewerModel={setViewerModel}
-              onTagModel={(model) => {
-                setSelectedModelForTagging(model);
-                setIsTaggingModalOpen(true);
-              }}
-              formatFileSize={formatFileSize}
-            />
+            <InfiniteScroll
+              onLoadMore={() => fetchNextPage()}
+              hasMore={hasMore}
+              isLoading={isLoadingMore}
+              className="flex-1"
+            >
+              <ModelGridView
+                models={models}
+                isLoading={isLoading}
+                onViewerModel={setViewerModel}
+                onTagModel={(model) => {
+                  setSelectedModelForTagging(model);
+                  setIsTaggingModalOpen(true);
+                }}
+                formatFileSize={formatFileSize}
+              />
+            </InfiniteScroll>
           ) : (
-            <ModelListView
-              models={models}
-              isLoading={isLoading}
-              onViewerModel={setViewerModel}
-              onTagModel={(model) => {
-                setSelectedModelForTagging(model);
-                setIsTaggingModalOpen(true);
-              }}
-              formatFileSize={formatFileSize}
-            />
+            <InfiniteScroll
+              onLoadMore={() => fetchNextPage()}
+              hasMore={hasMore}
+              isLoading={isLoadingMore}
+              className="flex-1"
+            >
+              <ModelListView
+                models={models}
+                isLoading={isLoading}
+                onViewerModel={setViewerModel}
+                onTagModel={(model) => {
+                  setSelectedModelForTagging(model);
+                  setIsTaggingModalOpen(true);
+                }}
+                formatFileSize={formatFileSize}
+              />
+            </InfiniteScroll>
           )}
         </div>
       </div>

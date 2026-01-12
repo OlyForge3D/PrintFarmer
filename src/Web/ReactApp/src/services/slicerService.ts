@@ -201,7 +201,7 @@ class SlicerService {
           try {
             const response = JSON.parse(xhr.responseText);
             resolve(response);
-          } catch (e) {
+          } catch {
             reject(new Error('Failed to parse upload response'));
           }
         } else {

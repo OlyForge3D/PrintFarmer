@@ -4,6 +4,7 @@ import { FileBrowser } from '@/features/gcode/components/FileBrowser';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
+import { Breadcrumbs } from '@/common/components/Breadcrumbs';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 
 export const GcodeLibraryPage: React.FC = () => {
@@ -18,10 +19,24 @@ export const GcodeLibraryPage: React.FC = () => {
       subtitle="Browse and manage your G-code files"
       icon={FileIcon}
     >
-      <FileBrowser
-        harvestId={harvestId}
-        printerId={printerId}
-      />
+      <div className="space-y-4 flex flex-col h-full">
+        {/* Breadcrumbs */}
+        <Breadcrumbs
+          items={[
+            { label: 'Dashboard', href: '/' },
+            { label: 'Files', href: '/files' },
+            { label: 'G-Code', current: true }
+          ]}
+        />
+
+        {/* Content */}
+        <div className="flex-1 min-h-0">
+          <FileBrowser
+            harvestId={harvestId}
+            printerId={printerId}
+          />
+        </div>
+      </div>
 
       {/* Floating Action Button for Upload */}
       <FloatingActionButton
