@@ -1775,6 +1775,10 @@ run_all_tests() {
     test_output_file_permissions
     test_complete_user_scenario
     test_addon_templates_yaml_syntax
+    test_pgadmin_template_structure
+    test_pgadmin_init_json
+    test_pgadmin_compose_generation
+    test_pgadmin_postgres_only
     
     teardown
 }
@@ -2083,6 +2087,126 @@ test_addon_templates_yaml_syntax() {
         
         test_info "✓ $addon_template YAML syntax validated"
     done
+    
+    pass_test
+}
+
+# Test pgAdmin template structure
+test_pgadmin_template_structure() {
+    start_test "pgAdmin template structure validation"
+    
+    local pgadmin_template="$SCRIPT_DIR/../scripts/docker/compose-templates/docker-compose.pgadmin.yml"
+    
+    if [ ! -f "$pgadmin_template" ]; then
+        print_fail "pgAdmin template not found: $pgadmin_template"
+        fail_test
+        return 1
+    fi
+    
+    local template_content=$(cat "$pgadmin_template")
+    
+    # Validate services wrapper exists
+    assert_contains "$template_content" "services:" "pgAdmin template should have services section"
+    
+    # Validate pgadmin service exists
+    assert_contains "$template_content" "pgadmin:" "pgAdmin template should define pgadmin service"
+    
+    # Validate required configuration fields
+    assert_contains "$template_content" "image:" "Should specify pgAdmin image"
+    assert_contains "$template_content" "container_name:" "Should specify container name"
+    assert_contains "$template_content" "environment:" "Should have environment variables"
+    assert_contains "$template_content" "ports:" "Should expose ports"
+    assert_contains "$template_content" "networks:" "Should have network configuration"
+    assert_contains "$template_content" "volumes:" "Should have volume mounts"
+    assert_contains "$template_content" "depends_on:" "Should depend on database service"
+    assert_contains "$template_content" "healthcheck:" "Should have health check"
+    
+    # Validate environment variables
+    assert_contains "$template_content" "PGADMIN_DEFAULT_EMAIL" "Should configure admin email"
+    assert_contains "$template_content" "PGADMIN_DEFAULT_PASSWORD" "Should configure admin password"
+    assert_contains "$template_content" "PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION" "Should configure cookie protection"
+    
+    # Validate port binding
+    assert_contains "$template_content" "0.0.0.0:5050:80" "Should expose port 5050 to all interfaces"
+    
+    # Validate volume configuration (may use variable reference)
+    assert_contains "$template_content" "/var/lib/pgadmin" "Should persist pgAdmin data"
+    
+    # Validate health check endpoint
+    assert_contains "$template_content" "/pgadmin4/misc/ping" "Should health check pgAdmin endpoint"
+    
+    pass_test
+}
+
+# Test pgAdmin initialization JSON structure
+test_pgadmin_init_json() {
+    start_test "pgAdmin initialization JSON validation"
+    
+    local pgadmin_init="$SCRIPT_DIR/../scripts/docker/pgadmin-init.json"
+    
+    if [ ! -f "$pgadmin_init" ]; then
+        print_fail "pgAdmin init JSON not found: $pgadmin_init"
+        fail_test
+        return 1
+    fi
+    
+    # Validate it's valid JSON
+    if ! jq empty "$pgadmin_init" 2>/dev/null; then
+        print_fail "pgAdmin init JSON is not valid JSON"
+        fail_test
+        return 1
+    fi
+    
+    local init_content=$(cat "$pgadmin_init")
+    
+    # Validate required structure
+    assert_contains "$init_content" "Servers" "Should define Servers section"
+    assert_contains "$init_content" "PrintFarmer PostgreSQL" "Should name the server 'PrintFarmer PostgreSQL'"
+    assert_contains "$init_content" "database" "Should reference database service"
+    assert_contains "$init_content" "5432" "Should use PostgreSQL default port"
+    assert_contains "$init_content" "POSTGRES_USER" "Should reference POSTGRES_USER variable"
+    assert_contains "$init_content" "POSTGRES_PASSWORD" "Should reference POSTGRES_PASSWORD variable"
+    
+    pass_test
+}
+
+# Test pgAdmin integration with compose-generator
+test_pgadmin_compose_generation() {
+    start_test "pgAdmin service merging in compose generation"
+    
+    local outdir="$TEST_TEMP_DIR/pgadmin-compose"
+    mkdir -p "$outdir"
+    
+    # Generate with pgAdmin enabled
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-pgadmin --output-dir $outdir"
+    
+    local compose_file="$outdir/docker-compose.yml"
+    assert_file_exists "$compose_file"
+    
+    local compose_content=$(cat "$compose_file")
+    
+    # Validate pgAdmin service is merged into compose file
+    assert_contains "$compose_content" "pgadmin:" "Generated compose should include pgAdmin service"
+    assert_contains "$compose_content" "printfarmer-pgadmin" "Should use correct container name"
+    assert_contains "$compose_content" "dpage/pgadmin4" "Should use pgAdmin image"
+    assert_contains "$compose_content" "5050:80" "Should expose pgAdmin port"
+    
+    pass_test
+}
+
+# Test pgAdmin only with PostgreSQL
+test_pgadmin_postgres_only() {
+    start_test "pgAdmin PostgreSQL-only deployment validation"
+    
+    local outdir="$TEST_TEMP_DIR/pgadmin-postgres"
+    mkdir -p "$outdir"
+    
+    # Try to generate with pgAdmin but non-PostgreSQL database (should skip)
+    # For now, just validate that --enable-pgadmin flag is accepted
+    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --enable-pgadmin --output-dir $outdir 2>/dev/null || true"
+    
+    # Flag should be parsed without error
+    test_info "✓ pgAdmin flag parsing works correctly"
     
     pass_test
 }

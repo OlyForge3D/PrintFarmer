@@ -3919,12 +3919,26 @@ EOF
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
     VAULT_DEV_ROOT_TOKEN=${VAULT_DEV_ROOT_TOKEN:-$(generate_random_password)}
     
+    # Setup pgAdmin credentials from AUTO_ADMIN variables if available
+    AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
+    AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
+    AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
+    if [ -z "$AUTO_ADMIN_PASSWORD" ]; then
+        AUTO_ADMIN_PASSWORD=$(generate_random_password)
+        print_info "Generated random pgAdmin password (saved to env file)"
+    fi
+    
     cat >> "$ENV_FILE" << EOF
 
 # Monitoring & Observability Credentials
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=$GRAFANA_ADMIN_PASSWORD
 VAULT_DEV_ROOT_TOKEN=$VAULT_DEV_ROOT_TOKEN
+
+# pgAdmin Configuration (if enabled)
+AUTO_ADMIN_USERNAME=$AUTO_ADMIN_USERNAME
+AUTO_ADMIN_EMAIL=$AUTO_ADMIN_EMAIL
+AUTO_ADMIN_PASSWORD=$AUTO_ADMIN_PASSWORD
 
 # Network Configuration
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
@@ -4541,7 +4555,7 @@ EOF
         # Now build all services
         # Support passing --platform to docker compose build when requested
         # Prepare build args including ORCA_ASSET_PATH for offline deployments
-        declare -a compose_build_args=(--progress=plain --build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}")
+        declare -a compose_build_args=(--build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}")
         
         # Copy AppImage files to build context if they exist (for offline builds)
         # Docker cannot access host paths in build args, so we must copy files into the build context
@@ -4572,12 +4586,12 @@ EOF
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${build_compose_cmd[@]}" build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${build_compose_cmd[@]}" build "${compose_build_args[@]}"; then
+                if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -4586,7 +4600,7 @@ EOF
                 fi
             fi
         else
-            if "${build_compose_cmd[@]}" build "${compose_build_args[@]}"; then
+            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"
@@ -5356,6 +5370,96 @@ prepare_external_storage_directories() {
     fi
 }
 
+# Prepare pgAdmin volume directory and auto-configuration
+prepare_pgadmin_setup() {
+    # Skip if pgAdmin is not enabled
+    if [ "${ENABLE_PGADMIN:-false}" != "true" ]; then
+        return 0
+    fi
+    
+    # Only configure if using PostgreSQL
+    if [ "$DB_PROVIDER" != "postgres" ]; then
+        print_info "pgAdmin configuration skipped (PostgreSQL not selected)"
+        return 0
+    fi
+
+    print_header "🐘 Preparing pgAdmin Configuration"
+    
+    # Ensure pgAdmin volume directory exists with proper permissions
+    local pgadmin_vol="${EXTERNAL_PGADMIN_PATH:-.volumes/printfarmer-pgadmin}"
+    
+    if [ ! -d "$pgadmin_vol" ]; then
+        print_info "Creating pgAdmin volume directory: $pgadmin_vol"
+        if ! mkdir -p "$pgadmin_vol" 2>/dev/null; then
+            if ! sudo mkdir -p "$pgadmin_vol" 2>/dev/null; then
+                print_warning "Could not create pgAdmin volume directory"
+                return 1
+            fi
+        fi
+    fi
+    
+    # Fix permissions for pgAdmin container (pgadmin user is uid 5050 in the container)
+    # Docker maps to the host user, but we need world-writable for safety
+    if ! chmod 777 "$pgadmin_vol" 2>/dev/null; then
+        print_info "Attempting to fix permissions with sudo..."
+        if ! sudo chmod 777 "$pgadmin_vol" 2>/dev/null; then
+            print_warning "Could not set optimal permissions on $pgadmin_vol"
+            print_info "  Try: sudo chmod 777 $pgadmin_vol"
+        fi
+    fi
+    print_success "pgAdmin volume directory ready: $pgadmin_vol"
+    
+    # Generate pgAdmin servers.json configuration to auto-register the PostgreSQL database
+    generate_pgadmin_servers_config || return 1
+    
+    echo
+    return 0
+}
+
+# Generate pgAdmin servers.json configuration with auto-registered PostgreSQL server
+generate_pgadmin_servers_config() {
+    local pgadmin_vol="${EXTERNAL_PGADMIN_PATH:-.volumes/printfarmer-pgadmin}"
+    local servers_config="$pgadmin_vol/servers.json"
+    
+    print_info "Generating pgAdmin PostgreSQL server configuration: $servers_config"
+    
+    # Get database connection details from environment
+    local db_host="${POSTGRES_HOST:-database}"
+    local db_port="${POSTGRES_PORT:-5432}"
+    local db_user="${POSTGRES_USER:-postgres}"
+    local db_name="${POSTGRES_DB:-printfarmer}"
+    
+    # Create servers.json in correct format per pgAdmin documentation
+    # See: https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html#json-format
+    # Note: Password fields cannot be imported/exported - user must enter manually
+    cat > "$servers_config" << 'EOF'
+{
+    "Servers": {
+        "1": {
+            "Name": "PrintFarmer PostgreSQL",
+            "Group": "Servers",
+            "Port": DB_PORT,
+            "Username": "DB_USER",
+            "Host": "DB_HOST",
+            "MaintenanceDB": "postgres",
+            "ConnectionParameters": {
+                "sslmode": "prefer"
+            },
+            "Comment": "PrintFarmer database server - password must be entered manually on first connection"
+        }
+    }
+}
+EOF
+
+    # Replace placeholders with actual values
+    sed -i "s|\"DB_HOST\"|\"$db_host\"|g" "$servers_config"
+    sed -i "s|DB_PORT|$db_port|g" "$servers_config"
+    sed -i "s|\"DB_USER\"|\"$db_user\"|g" "$servers_config"
+    
+    print_success "pgAdmin servers configuration generated"
+    return 0
+}
+
 # Validate external storage directories have correct permissions
 # Returns 0 if all directories are properly configured, 1 if any issues found
 validate_external_storage_permissions() {
@@ -5622,6 +5726,28 @@ verify_deployment() {
         fi
     fi
     
+    # Test pgAdmin health if enabled
+    if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DB_PROVIDER" = "postgres" ]; then
+        print_info "Testing pgAdmin..."
+        local pgadmin_checked=false
+        
+        # Check if pgAdmin container is running
+        if docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
+            # Try to reach the pgAdmin health endpoint
+            if curl -sf "http://localhost:5050/pgadmin/misc/ping" >/dev/null 2>&1; then
+                print_success "✓ pgAdmin: Healthy"
+                pgadmin_checked=true
+            fi
+        fi
+        
+        if [ "$pgadmin_checked" = false ]; then
+            print_warning "✗ pgAdmin: Not responding"
+            print_info "  (pgAdmin may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
+            print_info "  URL: http://localhost:5050/pgadmin"
+            health_check_failed=true
+        fi
+    fi
+    
     # Browser-origin / Proxy health check: ensure the public-facing origin proxies /api to the API
     # Use SERVER_HOST if set, otherwise default to localhost
     local proxy_host=${SERVER_HOST:-localhost}
@@ -5745,7 +5871,7 @@ display_final_info() {
     # Show pgAdmin URL if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
         echo -e "${BLUE}  🐘 pgAdmin (Database): http://$SERVER_HOST:5050/pgadmin${NC}"
-        echo -e "       ${YELLOW}Credentials: admin@printfarmer.local / adminpass${NC}"
+        echo -e "       ${YELLOW}Credentials: ${AUTO_ADMIN_USERNAME:-admin} / ${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}${NC}"
         echo -e "       ${YELLOW}Network Access: http://$(hostname -I | awk '{print $1}'):5050/pgadmin${NC}"
     fi
     
@@ -5888,6 +6014,9 @@ redeploy_existing() {
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
     
+    # Prepare pgAdmin volume and configuration
+    prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
+    
     # Validate that external storage directories have correct permissions
     validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
     
@@ -5933,7 +6062,7 @@ deploy_pgadmin_if_needed() {
                 # Wait for pgAdmin to be healthy
                 local retries=30
                 while [ $retries -gt 0 ]; do
-                    if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" exec -T pgadmin wget --spider -q http://localhost:80/pgadmin4/misc/ping 2>/dev/null; then
+                    if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" exec -T pgadmin wget --spider -q http://localhost:80/pgadmin/misc/ping 2>/dev/null; then
                         print_success "pgAdmin is healthy and ready"
                         return 0
                     fi
@@ -5949,6 +6078,110 @@ deploy_pgadmin_if_needed() {
             print_warning "pgAdmin service not found in compose file - was the compose file generated with ENABLE_PGADMIN?"
         fi
     fi
+}
+
+# Configure pgAdmin servers by importing database connections
+configure_pgadmin_servers() {
+    if [ "$ENABLE_PGADMIN" != "true" ] || [ "$DRY_RUN" = "true" ]; then
+        return 0
+    fi
+    
+    print_info "Configuring pgAdmin servers..."
+    
+    # Check if pgAdmin is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
+        print_warning "pgAdmin container is not running - skipping server configuration"
+        return 0
+    fi
+    
+    # Wait a bit for pgAdmin to fully initialize
+    sleep 3
+    
+    # Use curl to configure PostgreSQL server via REST API
+    local PGADMIN_URL="http://localhost:5050/pgadmin"
+    local PGADMIN_USER="${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}"
+    local PGADMIN_PASS="${AUTO_ADMIN_PASSWORD:-adminpass}"
+    
+    # Create a temporary file for curl cookies
+    local COOKIE_JAR=$(mktemp)
+    trap "rm -f '$COOKIE_JAR'" EXIT
+    
+    # Step 1: Get login page to establish session
+    print_info "Establishing pgAdmin session..."
+    
+    curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+        -X GET "${PGADMIN_URL}/login" \
+        -H "Content-Type: text/html" \
+        >/dev/null 2>&1
+    
+    # Step 2: Authenticate with pgAdmin
+    print_info "Authenticating with pgAdmin..."
+    
+    local LOGIN_RESPONSE=$(curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+        -X POST "${PGADMIN_URL}/login" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "email=${PGADMIN_USER}&password=${PGADMIN_PASS}" \
+        2>&1)
+    
+    # Check if authentication was successful by checking if we can access the API
+    local AUTH_CHECK=$(curl -s -b "$COOKIE_JAR" \
+        -X GET "${PGADMIN_URL}/api/v1/preferences" \
+        -H "Content-Type: application/json" \
+        2>&1)
+    
+    if echo "$AUTH_CHECK" | grep -q "errors\|Unauthorized\|401"; then
+        print_warning "Failed to authenticate with pgAdmin - servers may need manual configuration"
+        print_info "You can add servers manually in pgAdmin at ${PGADMIN_URL}"
+        return 0
+    fi
+    
+    # Step 2: Configure PostgreSQL server
+    print_info "Adding PostgreSQL server to pgAdmin..."
+    
+    # Get the database service name and credentials
+    local DB_HOST="${POSTGRES_HOST:-database}"
+    local DB_PORT="${POSTGRES_PORT:-5432}"
+    local DB_USER="${POSTGRES_USER:-postgres}"
+    local DB_NAME="postgres"
+    local DB_PASS="${POSTGRES_PASSWORD:-}"
+    
+    # Create the server configuration JSON
+    local SERVER_CONFIG="{
+        \"name\": \"PrintFarmer PostgreSQL\",
+        \"group_id\": 1,
+        \"host\": \"${DB_HOST}\",
+        \"port\": ${DB_PORT},
+        \"username\": \"${DB_USER}\",
+        \"password\": \"${DB_PASS}\",
+        \"db\": \"${DB_NAME}\",
+        \"ssl_mode\": \"prefer\",
+        \"maintenance_db\": \"postgres\",
+        \"comment\": \"PrintFarmer database server - auto configured\"
+    }"
+    
+    # Add the server via REST API
+    local ADD_SERVER=$(curl -s -b "$COOKIE_JAR" \
+        -X POST "${PGADMIN_URL}/api/v1/servers" \
+        -H "Content-Type: application/json" \
+        -d "$SERVER_CONFIG" \
+        2>&1)
+    
+    # Check if server was added successfully
+    if echo "$ADD_SERVER" | grep -q "\"name\": \"PrintFarmer PostgreSQL\"" || echo "$ADD_SERVER" | grep -q "\"id\""; then
+        print_success "PostgreSQL server configured in pgAdmin successfully"
+        print_info "Server: ${DB_HOST}:${DB_PORT}"
+        print_info "You can access it at ${PGADMIN_URL}"
+    elif echo "$ADD_SERVER" | grep -q "already exists"; then
+        print_info "PostgreSQL server already configured in pgAdmin"
+    else
+        # Log the response for debugging
+        print_warning "Server configuration response: $ADD_SERVER"
+        print_info "You can add the server manually in pgAdmin at ${PGADMIN_URL}"
+        print_info "Use database host: ${DB_HOST}, port: ${DB_PORT}, user: ${DB_USER}"
+    fi
+    
+    rm -f "$COOKIE_JAR"
+    return 0
 }
 
 # Main execution
@@ -5969,6 +6202,41 @@ main() {
     if [ "$TEAR_DOWN" = "true" ]; then
         tear_down_deployment
         # Function exits, so we never reach here
+    fi
+    
+    # Handle regenerate-config mode (regenerates .env and docker-compose without affecting deployment)
+    if [ "$REGENERATE_CONFIG" = "true" ]; then
+        if [ ! -f "$CONFIG_FILE" ]; then
+            print_error "No stored configuration found. Run normal setup first."
+            exit 1
+        fi
+        print_header "🔄 Regenerating Configuration Files"
+        print_info "Loading stored configuration from $CONFIG_FILE"
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
+        
+        generate_env_file
+        generate_react_env_production
+        
+        # Prepare pgAdmin volume and configuration
+        prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
+        
+        # Determine output directory
+        local output_dir="$(pwd)"
+        if generate_deployment_config "$ARCHITECTURE" "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
+            print_success "Configuration regenerated successfully"
+            print_info "Updated files:"
+            print_info "  - .env"
+            print_info "  - docker-compose.yml"
+            print_info "  - .env.react"
+            if [ "${ENABLE_PGADMIN:-false}" = "true" ] && [ "$DB_PROVIDER" = "postgres" ]; then
+                print_info "  - pgadmin-servers.json"
+            fi
+        else
+            print_error "Failed to regenerate configuration"
+            exit 1
+        fi
+        exit 0
     fi
     
     # Handle storage validation-only mode
@@ -6159,6 +6427,9 @@ main() {
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
     
+    # Prepare pgAdmin volume and configuration
+    prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
+    
     # Validate that external storage directories have correct permissions
     # This is a safety check before deployment to catch permission issues early
     validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
@@ -6167,6 +6438,9 @@ main() {
     
     # Deploy pgAdmin if requested
     deploy_pgadmin_if_needed || print_warning "pgAdmin deployment encountered issues"
+    
+    # Configure pgAdmin servers after deployment
+    configure_pgadmin_servers || print_warning "pgAdmin server configuration encountered issues"
     
     # Run auto-admin setup if requested
     setup_initial_admin || true
@@ -6227,6 +6501,10 @@ while [ $# -gt 0 ]; do
             ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
+            shift
+            ;;
+        --regenerate-config)
+            REGENERATE_CONFIG=true
             shift
             ;;
         --build-verbosity)

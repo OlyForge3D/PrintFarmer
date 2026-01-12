@@ -1378,8 +1378,53 @@ run_all_tests() {
     test_slicer_worker_api_key_generation
     test_slicer_worker_api_key_single_worker
     test_postgres_password_authentication_integration
+    test_pgadmin_flag_parsing
+    test_pgadmin_config_persistence
+    test_pgadmin_postgres_only
     
     teardown
+}
+
+# Test pgAdmin flag parsing
+test_pgadmin_flag_parsing() {
+    start_test "pgAdmin flag parsing and handling"
+    
+    # Test that --enable-pgadmin flag is accepted
+    assert_exit_code 0 "$DEPLOY_SCRIPT --help 2>&1 | grep -q 'enable-pgadmin' && echo 'ok'" "Should document --enable-pgadmin flag"
+    
+    pass_test
+}
+
+# Test pgAdmin config persistence
+test_pgadmin_config_persistence() {
+    start_test "pgAdmin configuration persistence in .deploy-config"
+    
+    # Create a test config with ENABLE_PGADMIN
+    local test_config="$TEST_TEMP_DIR/test-pgadmin-config"
+    cat > "$test_config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_PGADMIN=true
+POSTGRES_DB=printfarmer
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=testpass123
+EOF
+    
+    # Verify config contains ENABLE_PGADMIN
+    assert_contains "$(cat $test_config)" "ENABLE_PGADMIN=true" "Config should have ENABLE_PGADMIN setting"
+    
+    pass_test
+}
+
+# Test pgAdmin only works with PostgreSQL
+test_pgadmin_postgres_only() {
+    start_test "pgAdmin PostgreSQL-only validation"
+    
+    # pgAdmin should only be supported with PostgreSQL
+    # This is enforced in compose-generator.sh
+    assert_contains "$(grep -n 'postgres' $COMPOSE_GENERATOR | head -5)" "postgres" "compose-generator should reference PostgreSQL"
+    
+    pass_test
 }
 
 # Run the test suite

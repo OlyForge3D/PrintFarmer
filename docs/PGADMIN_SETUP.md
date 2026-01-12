@@ -56,16 +56,18 @@ http://<your-server-ip>:5050/pgadmin
 The `compose-generator.sh` script detects the `--enable-pgadmin` flag and:
 1. Verifies PostgreSQL is the database provider
 2. Merges the pgAdmin service configuration from `docker-compose.pgadmin.yml`
-3. Applies automatic server configuration from `pgadmin-init.json`
+3. Generates a server configuration file (`pgadmin-servers.json`) with database connection details
 
-### Auto-Configuration
+### Server Configuration
 
-pgAdmin is configured with automatic server connection via:
+During deployment, a `pgadmin-servers.json` file is automatically generated with:
 - **Host**: The `database` service (or `postgres` hostname)
 - **Port**: `5432`
 - **Database**: `printfarmer` (configurable via `POSTGRES_DB`)
 - **Username**: `postgres` (configurable via `POSTGRES_USER`)
-- **Password**: From `POSTGRES_PASSWORD` environment variable
+- **Note**: Password must be entered manually (pgAdmin security requirement)
+
+This file is mounted into the pgAdmin container, but **pgAdmin does not automatically import it**. Instead, it provides a ready-to-import template for manual server registration.
 
 ### Teardown Behavior
 
@@ -81,6 +83,124 @@ pgAdmin includes health monitoring:
 - Interval: 10 seconds
 - Timeout: 5 seconds
 - Retries: 5 before considered unhealthy
+
+## Importing the PostgreSQL Server
+
+PrintFarmer automatically generates a pre-configured `servers.json` file (in `.volumes/printfarmer-pgadmin/servers.json`) with all connection details during deployment. However, pgAdmin does not automatically import this file, so you must import it manually through the web interface.
+
+### Manual Server Import via pgAdmin UI
+
+1. **Login to pgAdmin**
+   - Open: `http://localhost:5050/pgadmin`
+   - Email: `admin@printfarmer.local`
+   - Password: `adminpass`
+
+2. **Navigate to Import**
+   - In the top menu: **Tools** → **Import/Export** → **Import Servers**
+
+3. **Select the Servers File**
+   - The file is located at: `.volumes/printfarmer-pgadmin/servers.json`
+   - Click **Browse** and select the file
+   - Click **Import**
+
+4. **Enter the Database Password**
+   - When prompted, enter the PostgreSQL password from your `.env` file (`POSTGRES_PASSWORD`)
+   - Click **Finish**
+
+5. **Verify Connection**
+   - In the left sidebar, expand **Servers** → **PrintFarmer PostgreSQL**
+   - You should see the database structure
+   - If connection fails, check troubleshooting section below
+
+### Command-Line Server Import (Advanced)
+
+If you prefer command-line automation, you can use pgAdmin's setup.py:
+
+```bash
+docker exec printfarmer-pgadmin python /pgadmin4/setup.py load-servers /pgadmin4/servers.json
+```
+
+**Note**: This requires the pgAdmin container to have all necessary Python dependencies installed.
+
+## Server Configuration File Format
+
+The `servers.json` file is automatically generated in `.volumes/printfarmer-pgadmin/servers.json` during deployment and contains the pgAdmin JSON import format. Understanding this format is helpful if you need to:
+- Edit the file manually
+- Create additional server configurations
+- Understand what will be imported
+
+### File Location
+
+- **On host machine**: `.volumes/printfarmer-pgadmin/servers.json`
+- **In container**: `/var/lib/pgadmin/servers.json`
+
+### JSON Structure
+
+```json
+{
+    "Servers": {
+        "1": {
+            "Name": "PrintFarmer PostgreSQL",
+            "Group": "Servers",
+            "Port": 5432,
+            "Username": "postgres",
+            "Host": "database",
+            "MaintenanceDB": "postgres",
+            "ConnectionParameters": {
+                "sslmode": "prefer"
+            },
+            "Comment": "PrintFarmer database server - password must be entered manually on first connection"
+        }
+    }
+}
+```
+
+### Field Descriptions
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `Name` | Display name for the server in pgAdmin | `PrintFarmer PostgreSQL` |
+| `Group` | Server group for organization | `Servers`, `Development`, etc. |
+| `Host` | PostgreSQL hostname or IP address | `database`, `localhost`, `192.168.1.100` |
+| `Port` | PostgreSQL port number | `5432` |
+| `Username` | PostgreSQL user for connection | `postgres`, `app_user` |
+| `MaintenanceDB` | Database to use for maintenance operations | `postgres` (required) |
+| `ConnectionParameters` | Advanced connection settings | See below |
+| `Comment` | Optional notes about the server | Any text |
+
+### ConnectionParameters Options
+
+```json
+"ConnectionParameters": {
+    "sslmode": "prefer",           // prefer, require, disable
+    "connect_timeout": 10,         // seconds
+    "application_name": "pgadmin"  // optional
+}
+```
+
+### Important Notes
+
+1. **Password Field**: pgAdmin **does not support** importing passwords for security reasons. Passwords must be entered manually through the UI when first connecting.
+
+2. **SSL Mode Options**:
+   - `prefer`: Try SSL first, fall back to non-SSL
+   - `require`: Always use SSL
+   - `disable`: Never use SSL
+
+3. **Multiple Servers**: To add multiple servers, create additional entries in the `Servers` object with unique keys:
+   ```json
+   {
+       "Servers": {
+           "1": { /* first server */ },
+           "2": { /* second server */ },
+           "3": { /* third server */ }
+       }
+   }
+   ```
+
+### Reference
+
+See [pgAdmin Import/Export Documentation](https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html) for complete format specification.
 
 ## Troubleshooting
 
