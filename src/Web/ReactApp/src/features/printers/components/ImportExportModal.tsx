@@ -77,10 +77,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
       // Subscribe to events BEFORE triggering the import
       if (window.PrintFarmerDebug?.import) console.log('[Import] Subscribing to import progress events...');
-      let unsubscribe: () => void;
-      let checkCompletion: NodeJS.Timeout;
-
-      unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
+      const unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
         if (window.PrintFarmerDebug?.import) console.log('[Import] Received progress update:', progress);
 
         setProgressItems(prevItems => {
@@ -101,7 +98,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       });
 
       // Setup completion monitor
-      checkCompletion = setInterval(() => {
+      const checkCompletion = setInterval(() => {
         setProgressItems(prevItems => {
           if (prevItems.length > 0 && prevItems.every(item => item.status !== 'Pending')) {
             clearInterval(checkCompletion);

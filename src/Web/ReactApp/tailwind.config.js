@@ -32,6 +32,7 @@ module.exports = {
           // Accent colors
           'accent': 'var(--pf-accent)',
           'accent-bg': 'var(--pf-accent-bg)',
+          'accent-hover': 'var(--pf-accent-hover)',
           'accent-2': 'var(--pf-accent-2)',
           'success': 'var(--pf-success)',
           'success-bg': 'var(--pf-success-bg)',
@@ -49,6 +50,7 @@ module.exports = {
           // Error and warning
           'error': 'var(--pf-error)',
           'error-bg': 'var(--pf-error-bg)',
+          'error-hover': 'var(--pf-error-hover)',
           'error-text': 'var(--pf-error-text)',
           'error-border': 'var(--pf-error-border)',
           'warning': 'var(--pf-warning)',

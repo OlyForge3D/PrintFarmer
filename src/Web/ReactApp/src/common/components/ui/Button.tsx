@@ -16,11 +16,11 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-gradient-to-b from-pf-gradient-primary-start to-pf-gradient-primary-end text-pf-text-primary border border-pf-border-light hover:from-pf-gradient-secondary-start hover:to-pf-gradient-secondary-end hover:border-pf-accent-2',
-  secondary: 'bg-gradient-to-b from-pf-gradient-gray-start to-pf-gradient-gray-end text-white border border-pf-border-medium hover:from-pf-gradient-gray-dark-start hover:to-pf-gradient-gray-dark-end',
-  danger: 'bg-pf-error hover:bg-pf-error text-white border border-pf-error-border',
+  primary: 'bg-pf-accent-bg hover:bg-pf-accent-hover text-white border border-pf-accent-bg hover:border-pf-accent-hover shadow-md font-semibold',
+  secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light hover:border-pf-border',
+  danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
-  success: 'bg-gradient-to-b from-pf-gradient-success-start to-pf-gradient-success-end text-white border border-pf-success hover:bg-pf-success-hover',
+  success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent text-pf-text-muted border-b-2 border-transparent hover:text-pf-text-primary focus:ring-0',
   toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent'
 };

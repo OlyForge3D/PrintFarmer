@@ -1,32 +1,57 @@
 # UI & Styling Documentation Index
 
-Navigation guide for PrintFarmer UI component styling and controls.
+Navigation guide for PrintFarmer UI component styling, color system, and theme architecture.
 
-## 📚 Documentation
+## 🎨 Frontend Design System (Start Here)
+
+Comprehensive guide to the complete design system with unified documentation:
+
+**[FRONTEND_DESIGN_SYSTEM.md](./FRONTEND_DESIGN_SYSTEM.md)** - Master index for all UI/styling documentation
+- Quick navigation by role and task
+- Architecture overview of three-layer system
+- Common workflows and best practices
+- Links to detailed guides
+
+## 📚 Detailed Documentation
 
 | Document | Purpose | Read Time |
 |----------|---------|-----------|
-| **[`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)** | Complete reference for explicit control styles | 20 min |
+| **[`FRONTEND_DESIGN_SYSTEM.md`](./FRONTEND_DESIGN_SYSTEM.md)** | Master index for design system | 10 min |
+| **[`FRONTEND_THEME_ARCHITECTURE.md`](./FRONTEND_THEME_ARCHITECTURE.md)** | Theme system, CSS variables, customization | 20 min |
+| **[`FRONTEND_COLOR_SYSTEM.md`](./FRONTEND_COLOR_SYSTEM.md)** | Color tokens, accessibility compliance | 15 min |
+| **[`FRONTEND_UI_COMPONENTS.md`](./FRONTEND_UI_COMPONENTS.md)** | React component library reference | 25 min |
+| **[`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)** | Legacy control styling (being migrated) | 20 min |
 
 ## 🎨 What You Get
 
-The PrintFarmer app has centralized control styling to ensure consistency and ease of maintenance.
+The PrintFarmer app has a **three-layer design system** ensuring consistency and ease of maintenance:
 
-**Key files:**
-- `src/Web/ReactApp/src/styles/controls.css` - 1,401 lines of control styles (10 organized sections)
-- `src/Web/ReactApp/src/index.css` - Imports controls.css automatically
+**Layer 1: CSS Custom Properties (Theme Variables)**
+- `src/styles/theme.css` - Main orchestrator
+- `src/styles/themes/github-dark.css`, `printfarmer-dark.css`, `light.css` - Per-theme variables
+- 40+ color variables per theme
+
+**Layer 2: CSS Utility Classes**
+- `src/styles/components.css` - Reusable component classes (`.pf-control-base`, `.pf-btn-primary`, etc.)
+- `src/styles/controls.css` - Legacy control styles (being migrated)
+
+**Layer 3: React Components**
+- `src/components/ui/` - Button, Input, Select, Card, Modal, and more
 
 ## 🚀 Quick Start
 
-**Read**: [`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)
+**New to the design system?**
 
-It includes:
-- Organization & philosophy
-- Section-by-section breakdown with examples
-- CSS variables reference
-- Best practices & accessibility notes
-- Quick reference table
-- How to add new controls
+Start with: [`FRONTEND_DESIGN_SYSTEM.md`](./FRONTEND_DESIGN_SYSTEM.md)
+
+Then choose a detailed guide:
+- **Using components**: [`FRONTEND_UI_COMPONENTS.md`](./FRONTEND_UI_COMPONENTS.md)
+- **Choosing colors**: [`FRONTEND_COLOR_SYSTEM.md`](./FRONTEND_COLOR_SYSTEM.md)
+- **Adding themes**: [`FRONTEND_THEME_ARCHITECTURE.md`](./FRONTEND_THEME_ARCHITECTURE.md)
+
+**Using existing control styles?**
+
+Read: [`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)
 
 ## 💡 Common Tasks
 
@@ -70,11 +95,21 @@ It includes:
 - **Loading States** - Skeletons, spinners, shimmer effects
 - **Utilities** - Truncation, dividers, spacing, accessibility
 
-## 🔗 Related Files
+## 🔗 Key Files & Directories
 
-- `src/Web/ReactApp/src/styles/controls.css` - The actual stylesheet
-- `src/Web/ReactApp/src/styles/theme.css` - CSS variables and theme
-- `src/Web/ReactApp/src/components/ui/` - React component wrappers (Button, Input, Select, etc.)
+**Documentation (in `/docs/`):**
+- `FRONTEND_DESIGN_SYSTEM.md` - Master index (start here)
+- `FRONTEND_THEME_ARCHITECTURE.md` - Theme system and CSS variables
+- `FRONTEND_COLOR_SYSTEM.md` - Color tokens and accessibility
+- `FRONTEND_UI_COMPONENTS.md` - React component reference
+- `CONTROLS_GUIDE.md` - Legacy control styling
+
+**Source Code:**
+- `src/styles/theme.css` - Theme system orchestrator
+- `src/styles/themes/` - Per-theme CSS variable definitions
+- `src/styles/components.css` - Reusable CSS utility classes
+- `src/styles/controls.css` - Legacy control styles
+- `src/components/ui/` - React component implementations
 
 ---
 

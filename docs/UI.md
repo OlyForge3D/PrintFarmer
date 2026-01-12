@@ -1,5 +1,18 @@
 # Frontend (UI) Documentation
 
+## 🎨 Design System & Components
+
+For complete information about styling, themes, colors, and UI components, see:
+
+**[FRONTEND_DESIGN_SYSTEM.md](./FRONTEND_DESIGN_SYSTEM.md)** - Master guide to:
+- Theme system and CSS variables
+- Color tokens and accessibility
+- React component library
+- Quick navigation by task and role
+
+Also see:
+- [UI & Styling Index](./UI_STYLING_INDEX.md) - Navigation index for all UI docs
+
 ## Overview
 
 PrintFarmer uses a **component-based React architecture** with TypeScript for type safety and Tailwind CSS for responsive design.

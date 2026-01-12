@@ -25,7 +25,7 @@ export function AddPrinterButton({ onSuccess }: AddPrinterButtonProps) {
   return (
     <>
       <Button
-        variant="success"
+        variant="primary"
         onClick={handleAddPrinter}
         className="inline-flex items-center"
       >

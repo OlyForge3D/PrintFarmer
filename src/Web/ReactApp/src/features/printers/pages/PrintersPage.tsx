@@ -229,42 +229,16 @@ export function PrintersPage() {
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
     >
-      <div className="flex flex-col md:flex-row md:items-center gap-4 mb-8">
-        <div className="flex flex-col md:flex-row md:items-center gap-3">
-          {/* Overview (admin features inline, permission-gated) */}
-
-          {/* State Filter */}
-          <Select
-            value={stateFilter}
-            onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
-            aria-label="Filter by printer state"
-          >
-            <option value="all">All States</option>
-            <option value="online">Online</option>
-            <option value="printing">Printing</option>
-            <option value="paused">Paused</option>
-            <option value="offline">Offline</option>
-          </Select>
-          {/* Backend Filter */}
-          <Select
-            value={backendFilter}
-            onChange={e => setBackendFilter(e.target.value as BackendFilter)}
-            aria-label="Filter by backend"
-          >
-            <option value="all">All Backends</option>
-            <option value="Moonraker">Moonraker</option>
-            <option value="PrusaLink">PrusaLink</option>
-            <option value="SDCP">SDCP</option>
-            <option value="OctoPrint">OctoPrint</option>
-          </Select>
-          {/* View Mode Toggle */}
-          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+      {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
+      <div className="flex flex-col gap-4 mb-8">
+        {/* Primary Actions Zone (Left) - All consistent sizing and styling */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
           {hasPermission('printers', 'create') && (
             <AddPrinterButton onSuccess={refetchPrinters} />
           )}
           {hasPermission('printers', 'admin') && discoveryAvailable && (
             <Button
-              variant="primary"
+              variant="secondary"
               aria-label="Trigger network discovery to find printers on local network"
               onClick={() => setShowDiscovery(true)}
               iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
@@ -272,33 +246,74 @@ export function PrintersPage() {
               Discover Printers
             </Button>
           )}
-          {/* Admin inline controls (discovery / import / export) */}
-          <div className="hidden md:flex items-center gap-2">
-            <PrinterImportExportControls />
-          </div>
           {hasPermission('printers', 'admin') && (
-            <Button
-              variant="secondary"
-              aria-label="Refresh printer capabilities"
-              onClick={async () => {
-                try {
-                  // Refresh capabilities for all printers
-                  if (!printers || printers.length === 0) {
-                    toast.info('No printers to refresh');
-                    return;
+            <>
+              <PrinterImportExportControls />
+              <Button
+                variant="secondary"
+                aria-label="Refresh printer capabilities"
+                onClick={async () => {
+                  try {
+                    // Refresh capabilities for all printers
+                    if (!printers || printers.length === 0) {
+                      toast.info('No printers to refresh');
+                      return;
+                    }
+                    await Promise.all(printers.map(p => apiClient.refreshCameraUrls(p.id)));
+                    toast.success('Refreshed printer capabilities');
+                    await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                  } catch (err) {
+                    console.error('Failed to refresh capabilities', err);
+                    toast.error('Failed to refresh capabilities');
                   }
-                  await Promise.all(printers.map(p => apiClient.refreshCameraUrls(p.id)));
-                  toast.success('Refreshed printer capabilities');
-                  await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                } catch (err) {
-                  console.error('Failed to refresh capabilities', err);
-                  toast.error('Failed to refresh capabilities');
-                }
-              }}
-            >
-              Refresh Capabilities
-            </Button>
+                }}
+              >
+                Refresh Capabilities
+              </Button>
+            </>
           )}
+        </div>
+
+        {/* View & Filter Controls Zone (Right) */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
+          {/* State Filter */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="state-filter" className="text-sm text-pf-text-secondary hidden sm:inline">State:</label>
+            <Select
+              id="state-filter"
+              value={stateFilter}
+              onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
+              aria-label="Filter by printer state"
+              className="min-w-0"
+            >
+              <option value="all">All States</option>
+              <option value="online">Online</option>
+              <option value="printing">Printing</option>
+              <option value="paused">Paused</option>
+              <option value="offline">Offline</option>
+            </Select>
+          </div>
+
+          {/* Backend Filter */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="backend-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Backend:</label>
+            <Select
+              id="backend-filter"
+              value={backendFilter}
+              onChange={e => setBackendFilter(e.target.value as BackendFilter)}
+              aria-label="Filter by backend"
+              className="min-w-0"
+            >
+              <option value="all">All Backends</option>
+              <option value="Moonraker">Moonraker</option>
+              <option value="PrusaLink">PrusaLink</option>
+              <option value="SDCP">SDCP</option>
+              <option value="OctoPrint">OctoPrint</option>
+            </Select>
+          </div>
+
+          {/* View Mode Toggle */}
+          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
         </div>
       </div>
 

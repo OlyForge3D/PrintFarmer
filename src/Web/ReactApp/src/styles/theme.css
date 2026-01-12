@@ -5,6 +5,10 @@
 /* Import individual theme files */
 @import './themes/github-dark.css';
 @import './themes/printfarmer-dark.css';
+@import './themes/light.css';
+
+/* Import component styling library */
+@import './components.css';
 
 /* Default theme (GitHub Dark) - applied when no data-theme attribute is set */
 /* Use :not([data-theme]) to allow data-theme attribute to override */
@@ -167,25 +171,56 @@
 
 /* High contrast mode (accessibility enhancement) */
 @media (prefers-contrast: high) {
-  :root {
-    /* Increase contrast ratios for high contrast mode */
+  :root:not([data-theme]),
+  [data-theme="github-dark"] {
+    /* Maximum contrast for dark theme */
     --pf-text-primary: #ffffff;
-    --pf-text-secondary: #d1d5db;
-    --pf-border: #4b5563;
-    --pf-border-light: #6b7280;
-  --pf-skeleton-bg: #374151; /* Darker to maintain contrast */
-  --pf-skeleton-bg-alt: #4b5563;
-  --pf-skeleton-accent: #6b7280;
+    --pf-text-secondary: #e5e7eb;
+    --pf-border: #ffffff;
+    --pf-border-light: #d1d5db;
+    --pf-button-primary-bg: #00ff00;   /* Bright green */
+    --pf-button-primary-hover: #00cc00;
+    --pf-button-secondary-bg: #333333; /* Darker gray */
+    --pf-button-secondary-text: #ffffff;
+    --pf-error: #ff0000;               /* Bright red */
+    --pf-validation-error-border: #ff0000;
+    --pf-skeleton-bg: #1a1a1a;
+    --pf-skeleton-bg-alt: #333333;
+    --pf-skeleton-accent: #666666;
+  }
+  
+  [data-theme="printfarmer-dark"] {
+    /* Maximum contrast for PrintFarmer dark */
+    --pf-text-primary: #ffffff;
+    --pf-text-secondary: #e5e7eb;
+    --pf-border: #ffffff;
+    --pf-border-light: #d1d5db;
+    --pf-button-primary-bg: #00ff00;   /* Bright green */
+    --pf-button-primary-hover: #00cc00;
+    --pf-button-secondary-bg: #2d2d2d; /* Darker background */
+    --pf-button-secondary-text: #ffffff;
+    --pf-error: #ff0000;               /* Bright red */
+    --pf-validation-error-border: #ff0000;
+    --pf-skeleton-bg: #1a1a1a;
+    --pf-skeleton-bg-alt: #333333;
+    --pf-skeleton-accent: #666666;
   }
   
   [data-theme="light"] {
+    /* Maximum contrast for light theme */
     --pf-text-primary: #000000;
-    --pf-text-secondary: #374151;
-    --pf-border: #6b7280;
-    --pf-border-light: #4b5563;
-  --pf-skeleton-bg: #d1d5db;
-  --pf-skeleton-bg-alt: #e5e7eb;
-  --pf-skeleton-accent: #9ca3af;
+    --pf-text-secondary: #1a1a1a;
+    --pf-border: #000000;
+    --pf-border-light: #333333;
+    --pf-button-primary-bg: #00cc00;   /* Bright green */
+    --pf-button-primary-hover: #009900;
+    --pf-button-secondary-bg: #e5e5e5; /* Lighter gray */
+    --pf-button-secondary-text: #000000;
+    --pf-error: #cc0000;               /* Dark red */
+    --pf-validation-error-border: #cc0000;
+    --pf-skeleton-bg: #f5f5f5;
+    --pf-skeleton-bg-alt: #eeeeee;
+    --pf-skeleton-accent: #cccccc;
   }
 }
 
