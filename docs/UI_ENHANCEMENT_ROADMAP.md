@@ -11,7 +11,7 @@ This roadmap organizes enhancements by **feature** rather than phase, identifyin
 **Key Principle:** Non-admin users (Printers, Print Queue, Files, Spools, Jobs) are prioritized over admin pages (Settings, Logs, Observability, etc.)
 
 **Total Estimated Effort:** 40-60 hours
-**Completed so far:** 41.5 hours (84% complete) ✅
+**Completed so far:** 45 hours (89% complete) ✅
 **Recommended Pace:** 4-6 weeks (5-6 hour sprints)
 
 ---
@@ -992,14 +992,61 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 ---
 
-### Sprint 8 (Optional): Additional Pages & Advanced React 19 Migration (Week 8+)
-1. **Feature 7 Advanced** - Master-Detail for remaining pages - **6-10 hours** (Optional)
-   - Apply master-detail to Files page (Models list + 3D viewer detail)
-   - Apply master-detail to Admin pages as appropriate
-2. **Feature 9 Advanced** - React 19 Full Migration - **4-6 hours** (Optional)
-   - Migrate form components to useActionState pattern
-   - Update async data fetching to use() hook with Suspense
-   - Implement useEffectEvent in components with complex effects
+### Sprint 8 (In Progress): Files Page Master-Detail Integration
+
+**Estimated Duration:** 6-9 hours  
+**Status:** 📋 PLANNED  
+**Target Date:** January 12-19, 2026
+
+#### Scope
+
+**Primary Goals:**
+1. **FilesPage Master-Detail Integration (4-6 hours)**
+   - Implement master-detail layout for Files page
+   - Master panel: tabbed navigation (Models, G-Code, Harvest)
+   - Detail panel: Model viewer, GCode viewer, or Harvest details based on selected item
+   - Responsive: side-by-side on desktop, stacked on mobile
+   - Keyboard shortcut 'k' to toggle detail panel
+
+2. **FilesPage Keyboard Shortcuts (2-3 hours)**
+   - 'u' - Upload new file
+   - 'v' - Cycle view mode
+   - 'f' - Toggle filters
+   - 't' - Tag selected file
+   - 'k' - Toggle detail panel
+   - Navigation shortcuts: arrow keys
+
+#### Implementation Plan
+
+**Step 1: Create FilesPage Master-Detail Structure**
+- Review current FilesPage component structure with tabs
+- Wrap content with MasterDetailLayout component
+- Master panel: Models/GCode/Harvest tabs + list
+- Detail panel: Viewer (3D or GCode based on item type)
+
+**Step 2: Integrate Keyboard Navigation**
+- Add `useKeyboardNavigation` to selected files in each tab
+- Add `useKeyboardShortcuts` for common actions
+- Ensure arrow key navigation respects view mode (grid columns vs 1 column)
+
+**Step 3: Testing & Validation**
+- All 393 tests must pass
+- Build succeeds in <11 seconds
+- ESLint: 0 errors
+- Responsive testing on mobile/tablet/desktop
+
+#### Quality Checklist
+- ✅ Master-Detail layout responsive (desktop/tablet/mobile)
+- ✅ Keyboard shortcuts documented and tested
+- ✅ Accessibility: WCAG 2.2 Level AA compliant
+- ✅ All tests passing
+- ✅ Zero TypeScript/ESLint errors
+- ✅ Bundle size impact documented
+
+#### Post-Sprint 8
+- Consider SpoolsPage and Admin pages for Sprint 8+ (optional)
+- Optional: React 19 Patterns migration (useActionState, use() hook)
+- Monitor performance metrics with new master-detail layouts
 
 ---
 
@@ -1058,14 +1105,19 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 | Master-Detail Integration (Catalog) | Sprint 7 | ✅ DONE | 4h |
 | Master-Detail Integration (Print Queue) | Sprint 7 Extended | ✅ DONE | 2h |
 | React 19 Patterns Guide (Feature 9) | Sprint 7 Extended | ✅ DONE | 2h |
-| **Total Completed** | | | **41.5h** |
+| ModelsPage Architecture Fix (Modal Pattern) | Sprint 7 Extended | ✅ DONE | 1.5h |
+| ModelsPage 'v' Keyboard Shortcut | Sprint 7 Extended | ✅ DONE | 0.5h |
+| GcodeLibraryPage 'v' Keyboard Shortcut | Sprint 7 Extended | ✅ DONE | 0.5h |
+| **Total Completed** | | | **45h** |
 
 ### In Progress / Upcoming Features 🎯
 
 | Feature | Sprint | Status | Estimated Hours | Pages |
 |---------|--------|--------|---|---|
-| Extend Master-Detail to other pages | Sprint 8+ | 📋 UPCOMING | 8-12h | Files, Admin pages |
-| React 19 Patterns Migration | Sprint 8+ | 📋 OPTIONAL | 4-6h | Codebase-wide (forms, async) |
+| FilesPage Master-Detail Integration | Sprint 8 | 📋 UPCOMING | 4-6h | Files page (Models, GCode, Harvest) |
+| FilesPage Keyboard Shortcuts | Sprint 8 | 📋 UPCOMING | 2-3h | Files page navigation |
+| SpoolsPage Master-Detail Integration | Sprint 8+ | 📋 OPTIONAL | 2-3h | Spools management |
+| React 19 Patterns Migration | Sprint 9+ | 📋 OPTIONAL | 4-6h | Codebase-wide (forms, async) |
 | **Total Remaining** | | | **12-18h** | |
 
 ---
