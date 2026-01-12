@@ -16,16 +16,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class JobSchedulingController : ControllerBase
+public class JobSchedulingController(JobSchedulingService schedulingService, ILogger<JobSchedulingController> logger) : ControllerBase
 {
-    private readonly JobSchedulingService _schedulingService;
-    private readonly ILogger<JobSchedulingController> _logger;
-
-    public JobSchedulingController(JobSchedulingService schedulingService, ILogger<JobSchedulingController> logger)
-    {
-        _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly JobSchedulingService _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
+    private readonly ILogger<JobSchedulingController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Schedule a print job for a specific date and time

@@ -13,16 +13,10 @@ namespace Farm.Web.Api.Controllers
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    public sealed class AssetsController : ControllerBase
+    public sealed class AssetsController(IAssetService assetService, ILogger<AssetsController> logger) : ControllerBase
     {
-        private readonly IAssetService _assetService;
-        private readonly ILogger<AssetsController> _logger;
-
-        public AssetsController(IAssetService assetService, ILogger<AssetsController> logger)
-        {
-            _assetService = assetService ?? throw new ArgumentNullException(nameof(assetService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IAssetService _assetService = assetService ?? throw new ArgumentNullException(nameof(assetService));
+        private readonly ILogger<AssetsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         /// <summary>
         /// Get asset URLs for a printer model
