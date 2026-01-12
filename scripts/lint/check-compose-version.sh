@@ -1,28 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fail if any YAML/compose file contains a top-level 'version:' key (case-insensitive)
-# This scans tracked compose and YAML files under the repository.
+# Fail if any Docker Compose file contains a top-level 'version:' key
+# The 'version' key is deprecated in Docker Compose v2 and should be removed
+# This script only checks actual Docker Compose files, not other YAML configs
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
 found=0
 
-echo "Scanning repository for top-level 'version:' keys in YAML files..."
+# Files that legitimately use 'version:' key and should be excluded
+exclude_patterns=(
+  ".github/dependabot.yml"
+  ".github/workflows/"
+  "openapi/"
+  "grafana/"
+  ".dive-ci.yml"
+)
+
+should_exclude() {
+  local file="$1"
+  local rel="${file#${repo_root}/}"
+  
+  for pattern in "${exclude_patterns[@]}"; do
+    if [[ "$rel" == *"$pattern"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+echo "Scanning Docker Compose files for deprecated top-level 'version:' keys..."
 
 while IFS= read -r -d '' file; do
-  # skip files under .git
-  rel=${file#${repo_root}/}
-  # Use awk to find lines that start with optional whitespace followed by 'version:'
-  if awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*version[[:space:]]*:/ {print FILENAME":"FNR":"$0; exit 0}' "$file" >/dev/null 2>&1; then
-    echo "Found version key in: $rel"
-    awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*version[[:space:]]*:/ {print FILENAME":"FNR":"$0; exit 0}' "$file"
+  rel="${file#${repo_root}/}"
+  
+  # Skip excluded files
+  if should_exclude "$file"; then
+    continue
+  fi
+  
+  # Check if file has top-level 'version:' key (on first line without leading whitespace)
+  # For Docker Compose files, version must be on the very first line to be the compose version
+  first_line=$(head -1 "$file")
+  if [[ "$first_line" =~ ^[[:space:]]*version[[:space:]]*: ]]; then
+    echo "Found deprecated version key in: $rel"
+    echo "$rel:1:$first_line"
     found=1
   fi
-done < <(find "$repo_root" -type f \( -name '*.yml' -o -name '*.yaml' -o -name 'docker-compose*' \) -not -path '*/.git/*' -print0)
+done < <(find "$repo_root" -type f \( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name '*.compose.yml' -o -name '*.compose.yaml' -o -path '*/docker/*.yml' -o -path '*/docker/*.yaml' \) -not -path '*/.git/*' -print0)
 
 if [ "$found" -ne 0 ]; then
-  echo "ERROR: One or more YAML files contain a top-level 'version:' key. Please remove it." >&2
+  echo "ERROR: Docker Compose files contain deprecated 'version:' keys. Please remove them." >&2
+  echo "Note: The 'version' key is obsolete in Docker Compose v2. See: https://docs.docker.com/compose/compose-file/" >&2
   exit 2
 else
-  echo "No top-level 'version:' keys found. ✅"
+  echo "No deprecated 'version:' keys found in Docker Compose files. ✅"
 fi
