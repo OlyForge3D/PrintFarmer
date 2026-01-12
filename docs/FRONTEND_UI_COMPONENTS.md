@@ -6,29 +6,36 @@ PrintFarmer uses a standardized set of shared UI components built with React and
 
 ## Available Components
 
-| Component | Description |
-|-----------|-------------|
-| [`Alert`](#alert) | Success/error/info/warning messages |
-| [`Badge`](#badge) | Status badges and tags |
-| [`Button`](#button) | Consistent button variants |
-| [`Card`](#card) | Content container with header/footer |
-| [`Checkbox`](#checkbox) | Checkbox with optional label |
-| [`FormField`](#formfield) | Form field wrapper with label/error |
-| [`Input`](#input) | Text input |
-| [`Label`](#label) | Simple form field label |
-| [`Modal`](#modal) | Dialog/modal with overlay |
-| [`ProgressBar`](#progressbar) | Progress indicator |
-| [`Radio`](#radio) | Radio button with label |
-| [`RadioGroup`](#radiogroup) | Grouped radio buttons |
-| [`Select`](#select) | Dropdown select |
-| [`Tabs`](#tabs) | Tabbed content navigation |
-| [`Textarea`](#textarea) | Multi-line text input |
-| [`Toggle`](#toggle) | Switch/toggle for booleans |
-| [`Tooltip`](#tooltip) | Hover tooltips |
+| Component | Location | Description |
+|-----------|----------|-------------|
+| [`Alert`](#alert) | `src/components/ui/Alert.tsx` | Success/error/info/warning messages |
+| [`Badge`](#badge) | `src/components/ui/Badge.tsx` | Status badges and tags |
+| [`Breadcrumbs`](#breadcrumbs) | `src/common/components/Breadcrumbs.tsx` | Navigation breadcrumb trail |
+| [`Button`](#button) | `src/components/ui/Button.tsx` | Consistent button variants |
+| [`Card`](#card) | `src/components/ui/Card.tsx` | Content container with header/footer |
+| [`Checkbox`](#checkbox) | `src/components/ui/Checkbox.tsx` | Checkbox with optional label |
+| [`ConfirmationModal`](#confirmationmodal) | `src/common/components/modals/ConfirmationModal.tsx` | Generic confirmation dialog for destructive operations |
+| [`ContextMenu`](#contextmenu) | `src/common/components/ContextMenu.tsx` | Right-click context menu with smart positioning |
+| [`FloatingActionButton`](#floatingactionbutton) | `src/common/components/FloatingActionButton.tsx` | Fixed position action button for primary actions |
+| [`FormField`](#formfield) | `src/components/ui/FormField.tsx` | Form field wrapper with label/error |
+| [`InfiniteScroll`](#infinitescroll) | `src/common/components/InfiniteScroll.tsx` | Infinite scroll wrapper for paginated content |
+| [`Input`](#input) | `src/components/ui/Input.tsx` | Text input |
+| [`Label`](#label) | `src/components/ui/Label.tsx` | Simple form field label |
+| [`Modal`](#modal) | `src/common/components/modals/Modal.tsx` | Dialog/modal with overlay |
+| [`ProgressBar`](#progressbar) | `src/components/ui/ProgressBar.tsx` | Progress indicator |
+| [`Radio`](#radio) | `src/components/ui/Radio.tsx` | Radio button with label |
+| [`RadioGroup`](#radiogroup) | `src/components/ui/RadioGroup.tsx` | Grouped radio buttons |
+| [`Select`](#select) | `src/components/ui/Select.tsx` | Dropdown select |
+| [`Tabs`](#tabs) | `src/components/ui/Tabs.tsx` | Tabbed content navigation |
+| [`Textarea`](#textarea) | `src/components/ui/Textarea.tsx` | Multi-line text input |
+| [`Toggle`](#toggle) | `src/components/ui/Toggle.tsx` | Switch/toggle for booleans |
+| [`Tooltip`](#tooltip) | `src/components/ui/Tooltip.tsx` | Hover tooltips |
 
-## Location
+## Locations
 
-All shared UI components are located in `/src/components/ui/`.
+- **Base UI Components**: `src/components/ui/` - Foundational, low-level UI controls
+- **Shared Modals**: `src/common/components/modals/` - Reusable modal/dialog components
+- **Shared Utilities**: `src/common/components/` - Other reusable components (ContextMenu, etc.)
 
 ## Design System Integration
 
@@ -494,6 +501,78 @@ import { Checkbox } from '@/components/ui/Checkbox';
 
 ---
 
+### FloatingActionButton
+
+Floating action button (FAB) component for primary actions, typically positioned at bottom-right.
+
+**Location**: `src/common/components/FloatingActionButton.tsx`
+
+**Usage**:
+```tsx
+import { FloatingActionButton } from '@/common/components/FloatingActionButton';
+
+// Default FAB (bottom-right)
+<FloatingActionButton 
+  icon={PlusIcon}
+  onClick={handleAddNewItem}
+  label="Add Item"
+/>
+
+// Custom position
+<FloatingActionButton 
+  icon={EditIcon}
+  onClick={handleEdit}
+  label="Edit"
+  position="bottom-center"
+/>
+
+// With loading state
+<FloatingActionButton 
+  icon={SaveIcon}
+  onClick={handleSave}
+  label="Save"
+  loading={isSaving}
+/>
+
+// Disabled FAB
+<FloatingActionButton 
+  icon={DeleteIcon}
+  onClick={handleDelete}
+  label="Delete"
+  disabled={!hasPermission}
+  variant="danger"
+/>
+```
+
+**Props**:
+- `icon: React.ReactNode` - Icon component to display
+- `onClick: () => void` - Click handler
+- `label: string` - Tooltip and aria-label text
+- `position?: 'bottom-right' | 'bottom-center' | 'bottom-left'` (default: `'bottom-right'`)
+- `variant?: 'primary' | 'secondary' | 'danger'` (default: `'primary'`)
+- `loading?: boolean` - Shows spinner overlay (default: `false`)
+- `disabled?: boolean` - Disables button (default: `false`)
+- `className?: string` - Additional CSS classes
+
+**Features**:
+- Fixed positioning (sticky footer area)
+- Smooth fade-in animation on mount
+- Loading spinner with animation during async operations
+- Accessible with ARIA labels
+- Keyboard support (space/enter to activate)
+- Built on Button component foundation
+- Prevents obstruction by scrollable content
+
+**Best Practices**:
+- Use for primary/critical actions (Create, Edit, Save)
+- Keep to one FAB per screen when possible
+- Use appropriate position based on layout (bottom-right most common)
+- Provide meaningful labels for screen readers
+- Show loading state during async operations
+- Disable when action is not available
+
+---
+
 ### Radio
 
 Standardized radio button component with optional label.
@@ -729,6 +808,73 @@ import { Badge } from '@/components/ui/Badge';
 
 ---
 
+### Breadcrumbs
+
+Navigation breadcrumb trail showing hierarchy and current location.
+
+**Location**: `src/common/components/Breadcrumbs.tsx`
+
+**Usage**:
+```tsx
+import { Breadcrumbs } from '@/common/components/Breadcrumbs';
+
+// Basic breadcrumbs
+<Breadcrumbs items={[
+  { label: 'Home', href: '/' },
+  { label: 'Files', href: '/files' },
+  { label: 'Models', current: true }
+]} />
+
+// With navigation
+function ModelsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const breadcrumbs = [
+    { label: 'Dashboard', href: '/' },
+    { label: 'Files', href: '/files' },
+    { label: 'Models', current: true }
+  ];
+
+  return (
+    <>
+      <Breadcrumbs items={breadcrumbs} className="mb-4" />
+      {/* Page content */}
+    </>
+  );
+}
+```
+
+**BreadcrumbItem Interface**:
+```tsx
+interface BreadcrumbItem {
+  label: string;      // Display text
+  href?: string;      // Navigation link (omit for current page)
+  current?: boolean;  // Mark as current/active page
+}
+```
+
+**Props**:
+- `items: BreadcrumbItem[]` - Array of breadcrumb items
+- `className?: string` - Additional CSS classes
+
+**Features**:
+- Accessible navigation with `aria-label="Breadcrumb"`
+- Uses semantic `<nav>` and `<ol>` elements
+- Current page shown in bold with primary text color
+- Navigation items are links with hover state
+- Keyboard-accessible focus ring
+- Chevron separators between items
+
+**Best Practices**:
+- Always include the current page as the last item with `current: true`
+- Don't include the current page in the link (`href` optional for current)
+- Use for navigation pages (not modals or side panels)
+- Keep breadcrumbs to 3-5 levels maximum
+- Start with home/dashboard link
+
+---
+
 ### Card
 
 Content container with optional header and footer.
@@ -830,6 +976,210 @@ import { Modal } from '@/components/ui/Modal';
 
 ---
 
+### ConfirmationModal
+
+Generic confirmation dialog for user confirmation before destructive operations.
+
+**Location**: `src/common/components/modals/ConfirmationModal.tsx`
+
+**Usage**:
+```tsx
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+
+const [showConfirm, setShowConfirm] = useState(false);
+
+// Delete confirmation
+<ConfirmationModal
+  isOpen={showConfirm}
+  title="Delete Model?"
+  message={`Are you sure you want to delete "${modelName}"? This action cannot be undone.`}
+  confirmButtonText="Delete"
+  cancelButtonText="Cancel"
+  isDangerous={true}
+  onConfirm={async () => {
+    await deleteModel(modelId);
+    setShowConfirm(false);
+  }}
+  onCancel={() => setShowConfirm(false)}
+/>
+
+// Generic confirmation
+<ConfirmationModal
+  isOpen={showConfirm}
+  title="Approve Changes?"
+  message="This will permanently update the configuration."
+  confirmButtonText="Approve"
+  isDangerous={false}
+  onConfirm={handleApprove}
+  onCancel={() => setShowConfirm(false)}
+/>
+
+// With additional content
+<ConfirmationModal
+  isOpen={showConfirm}
+  title="Delete User?"
+  message={`Delete "${username}"? This cannot be undone.`}
+  isDangerous={true}
+  onConfirm={handleDelete}
+  onCancel={() => setShowConfirm(false)}
+>
+  <div className="mt-4 p-3 bg-pf-bg-2 rounded text-sm">
+    <p>Associated data will be:</p>
+    <ul className="list-disc ml-5">
+      <li>Removed from all projects</li>
+      <li>Archived, not deleted</li>
+    </ul>
+  </div>
+</ConfirmationModal>
+```
+
+**Props**:
+- `isOpen: boolean` - Controls modal visibility
+- `title: string` - Modal title
+- `message: string` - Confirmation message text
+- `confirmButtonText?: string` - Confirm button label (default: `'Confirm'`)
+- `cancelButtonText?: string` - Cancel button label (default: `'Cancel'`)
+- `isDangerous?: boolean` - Set to `true` for destructive operations (changes button to danger variant, shows alert icon)
+- `onConfirm: () => void` - Confirm handler
+- `onCancel: () => void` - Cancel handler
+- `children?: React.ReactNode` - Additional content below the message
+
+**Best Practices**:
+- Use `isDangerous={true}` for delete/destructive operations
+- Keep message concise and action-focused
+- Always provide `confirmButtonText` that clearly describes the action ("Delete", "Remove", "Proceed", etc.)
+- Place in a state hook near the action that triggers it
+- **Never create a custom delete dialog** - use this component instead
+
+---
+
+### ContextMenu
+
+Right-click context menu with intelligent positioning to prevent viewport overflow.
+
+**Location**: `src/common/components/ContextMenu.tsx`
+
+**Associated Hook**: `src/common/hooks/useContextMenu.ts`
+
+**Usage**:
+```tsx
+import { ContextMenu } from '@/common/components/ContextMenu';
+import { useContextMenu } from '@/common/hooks/useContextMenu';
+import { DeleteIcon, DownloadIcon, TagIcon } from '@/common/components/icons/MdiIcons';
+
+function MyComponent() {
+  const { position, handleContextMenu, closeMenu, isOpen } = useContextMenu();
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+
+  const handleRightClick = (e: React.MouseEvent, item: Item) => {
+    setSelectedItem(item);
+    handleContextMenu(e);
+  };
+
+  return (
+    <>
+      <div onContextMenu={(e) => handleRightClick(e, item)}>
+        {/* Your content */}
+      </div>
+
+      {isOpen && position && (
+        <ContextMenu
+          x={position.x}
+          y={position.y}
+          items={[
+            {
+              label: 'Tag',
+              icon: TagIcon,
+              onClick: () => {
+                onTagItem(selectedItem);
+                closeMenu();
+              },
+            },
+            {
+              label: 'Download',
+              icon: DownloadIcon,
+              onClick: () => {
+                downloadItem(selectedItem);
+                closeMenu();
+              },
+            },
+            { divider: true },
+            {
+              label: 'Delete',
+              icon: DeleteIcon,
+              variant: 'danger',
+              onClick: () => {
+                setConfirmDelete(selectedItem);
+                closeMenu();
+              },
+            },
+          ]}
+          onClose={closeMenu}
+        />
+      )}
+
+      {/* Confirmation dialog for delete */}
+      {confirmDelete && (
+        <ConfirmationModal
+          isOpen={!!confirmDelete}
+          title="Delete Item?"
+          message={`Delete "${confirmDelete.name}"?`}
+          isDangerous={true}
+          onConfirm={() => handleDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </>
+  );
+}
+```
+
+**ContextMenuItem Interface**:
+```tsx
+interface ContextMenuItem {
+  label: string;                                          // Display text
+  icon?: React.ComponentType<{ className?: string }>;    // Icon component (will be positioned LEFT)
+  onClick: () => void;                                    // Click handler
+  variant?: 'default' | 'danger';                        // 'danger' for destructive items
+  disabled?: boolean;                                     // Disabled state
+  divider?: boolean;                                      // Render as divider instead of item
+}
+```
+
+**useContextMenu Hook**:
+```tsx
+const { 
+  position,        // { x: number, y: number } | null - Current menu position
+  isOpen,          // boolean - Whether menu is visible
+  handleContextMenu, // (e: React.MouseEvent) => void - Right-click handler
+  closeMenu        // () => void - Close the menu
+} = useContextMenu();
+```
+
+**Props**:
+- `x: number` - X coordinate (from mouse event)
+- `y: number` - Y coordinate (from mouse event)
+- `items: ContextMenuItem[]` - Menu items
+- `onClose: () => void` - Close handler
+
+**Features**:
+- Auto-closes on outside click (with 50ms delay to prevent immediate close)
+- Escape key closes menu
+- Smart positioning prevents menu from rendering off-screen
+- ARIA-compliant with `role="menu"`
+- Icons positioned to the LEFT of text using Button's `iconLeft` prop
+- Support for dividers and disabled items
+
+**Best Practices**:
+- Always pair with `useContextMenu` hook for consistent positioning
+- Keep menu items to 5-7 items maximum
+- Use dividers to group related items
+- Put destructive actions (delete, remove) at the bottom with `variant="danger"`
+- Always pair delete items with `ConfirmationModal`
+- Close menu immediately after triggering action
+
+---
+
 ### Tooltip
 
 Hover tooltip for additional information.
@@ -871,6 +1221,92 @@ import { Tooltip } from '@/components/ui/Tooltip';
 - `delay?: number` - Show delay in ms (default: `0`)
 - `className?: string` - Additional classes
 - `children: React.ReactNode` - Trigger element
+
+---
+
+### InfiniteScroll
+
+Wrapper component for infinite scrolling with automatic pagination.
+
+**Location**: `src/common/components/InfiniteScroll.tsx`
+
+**Usage**:
+```tsx
+import { InfiniteScroll } from '@/common/components/InfiniteScroll';
+import { useInfiniteList } from '@/common/hooks/useInfiniteList';
+
+interface Item {
+  id: string;
+  title: string;
+}
+
+function ItemsList() {
+  const { allItems, hasMore, isLoadingMore, fetchNextPage } = useInfiniteList<Item>(
+    (pageParam) => fetch(`/api/items?page=${pageParam}`).then(r => r.json()),
+    { initialPageParam: 1 }
+  );
+
+  return (
+    <InfiniteScroll
+      items={allItems}
+      hasMore={hasMore}
+      isLoading={isLoadingMore}
+      onLoadMore={() => fetchNextPage()}
+      renderItem={(item) => (
+        <div key={item.id} className="border-b p-4">
+          {item.title}
+        </div>
+      )}
+    />
+  );
+}
+
+// Custom loader component
+<InfiniteScroll
+  items={items}
+  hasMore={hasMore}
+  isLoading={isLoadingMore}
+  onLoadMore={fetchNextPage}
+  renderItem={renderItem}
+  loader={<CustomLoadingSpinner />}
+/>
+
+// Custom end message
+<InfiniteScroll
+  items={items}
+  hasMore={hasMore}
+  isLoading={isLoadingMore}
+  onLoadMore={fetchNextPage}
+  renderItem={renderItem}
+  endMessage={<p className="text-center text-gray-500">No more items</p>}
+/>
+```
+
+**Props**:
+- `items: T[]` - Array of items to render
+- `hasMore: boolean` - Whether more items are available
+- `isLoading: boolean` - Loading state for next page
+- `onLoadMore: () => void` - Callback when end is reached
+- `renderItem: (item: T) => React.ReactNode` - Render function for each item
+- `loader?: React.ReactNode` - Custom loading indicator (default: spinner)
+- `endMessage?: React.ReactNode` - Message when no more items
+- `threshold?: number` - Pixel distance from bottom to trigger load (default: `200`)
+- `className?: string` - Container CSS classes
+
+**Features**:
+- Uses IntersectionObserver for efficient scroll detection
+- Automatically triggers loading when threshold reached
+- Handles loading and end states
+- Works with `useInfiniteList` hook
+- Customizable loader and end messages
+- Generic type support for any item type
+
+**Best Practices**:
+- Pair with `useInfiniteList` hook for API integration
+- Set appropriate `threshold` for your content (200px-500px typical)
+- Provide meaningful `endMessage` when no more items
+- Use stable key props in rendered items
+- Consider showing total count or remaining items count
 
 ---
 
@@ -1054,6 +1490,134 @@ All components require:
 - `clsx` - For conditional class merging
 - `tailwindcss` - For utility classes
 - PrintFarmer color tokens configured in `tailwind.config.js`
+
+---
+
+## Custom Hooks
+
+### useInfiniteList
+
+React Query hook for handling infinite/paginated data fetching with automatic pagination.
+
+**Location**: `src/common/hooks/useInfiniteList.ts`
+
+**Usage**:
+```tsx
+import { useInfiniteList } from '@/common/hooks/useInfiniteList';
+
+interface Item {
+  id: string;
+  title: string;
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  pageNum: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+function ItemsList() {
+  // Basic usage with API endpoint
+  const { allItems, hasMore, isLoadingMore, fetchNextPage } = useInfiniteList<Item>(
+    (pageParam) => 
+      fetch(`/api/items?page=${pageParam}`).then(r => r.json() as Promise<PaginatedResponse<Item>>),
+    { initialPageParam: 1 }
+  );
+
+  return (
+    <InfiniteScroll
+      items={allItems}
+      hasMore={hasMore}
+      isLoading={isLoadingMore}
+      onLoadMore={fetchNextPage}
+      renderItem={(item) => (
+        <div key={item.id}>{item.title}</div>
+      )}
+    />
+  );
+}
+
+// With filters/search
+function SearchItems() {
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const { allItems, hasMore, isLoadingMore, fetchNextPage } = useInfiniteList<Item>(
+    (pageParam) => 
+      fetch(`/api/items?page=${pageParam}&search=${searchTerm}`)
+        .then(r => r.json() as Promise<PaginatedResponse<Item>>),
+    { 
+      initialPageParam: 1,
+      enabled: searchTerm.length > 0  // Don't fetch if search empty
+    }
+  );
+
+  return (
+    <>
+      <input 
+        value={searchTerm} 
+        onChange={e => setSearchTerm(e.target.value)} 
+        placeholder="Search..."
+      />
+      <InfiniteScroll
+        items={allItems}
+        hasMore={hasMore}
+        isLoading={isLoadingMore}
+        onLoadMore={fetchNextPage}
+        renderItem={(item) => <div key={item.id}>{item.title}</div>}
+      />
+    </>
+  );
+}
+```
+
+**Hook Return Type**:
+```tsx
+interface UseInfiniteListReturn<T> {
+  allItems: T[];                    // Flattened array of all loaded items
+  hasMore: boolean;                 // Whether more items are available
+  isLoading: boolean;               // Initial load state
+  isLoadingMore: boolean;           // Loading next page state
+  isFetching: boolean;              // Any fetch activity
+  error: Error | null;              // Error if fetch failed
+  fetchNextPage: () => void;        // Trigger next page load
+  refetch: () => void;              // Reload all data
+  status: 'idle' | 'pending' | 'success' | 'error';  // Query status
+}
+```
+
+**Parameters**:
+- `queryFn: (pageParam: number) => Promise<PaginatedResponse<T>>` - Async function that fetches paginated data
+- `options?: UseInfiniteQueryOptions` - React Query options (initialPageParam, enabled, etc.)
+
+**Expected PaginatedResponse Format**:
+```tsx
+interface PaginatedResponse<T> {
+  data: T[];           // Array of items for this page
+  pageNum: number;     // Current page number
+  pageSize: number;    // Items per page
+  totalItems: number;  // Total items available
+  totalPages: number;  // Total pages available
+}
+```
+
+**Features**:
+- Generic type support for any item type
+- Automatic page flattening into single array
+- React Query integration for caching and refetching
+- Built-in error handling
+- Disable fetching with `enabled` option
+- Works seamlessly with `InfiniteScroll` component
+
+**Best Practices**:
+- Always type the generic parameter: `useInfiniteList<YourType>(...)`
+- Validate API response has required `PaginatedResponse` structure
+- Use `enabled` option to prevent unnecessary fetches (e.g., when search term empty)
+- Pair with `InfiniteScroll` component for UI rendering
+- Handle empty states (when `allItems.length === 0`)
+- Show error message if `error` is set
+- Consider adding debounce to search filters before refetch
 
 ---
 

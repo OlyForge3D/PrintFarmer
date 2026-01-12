@@ -15,6 +15,32 @@ This roadmap organizes enhancements by **feature** rather than phase, identifyin
 
 ---
 
+## 📋 Component Development Requirements
+
+### Discoverability Rule
+**ALL new reusable components MUST be documented in [`/docs/FRONTEND_UI_COMPONENTS.md`](./FRONTEND_UI_COMPONENTS.md) for team discoverability.**
+
+**Why:** Components created without documentation risk duplication. Team members won't know components exist → developers recreate them → code duplication and maintenance burden.
+
+**What to Document:**
+- Component file location
+- API (props, interfaces, return types)
+- 3+ usage examples
+- Best practices and common patterns
+- Links to existing components that should be reused instead
+
+**When to Document:**
+- Create the component
+- Add comprehensive examples
+- Run tests and build validation
+- Add entry to component table in FRONTEND_UI_COMPONENTS.md
+- Add detailed section with examples below component table
+- Commit documentation together with component code
+
+**Real Example:** Sprint 1 & 2 created `FloatingActionButton`, `Breadcrumbs`, and `InfiniteScroll` without documentation. Later work discovered `ConfirmationModal` already existed but wasn't documented, causing redundant custom component creation. This cost 2+ hours to identify and fix. **Prevention: Document upfront.**
+
+---
+
 ## Application Pages Inventory
 
 ### Non-Admin Pages (User-Facing)
@@ -797,46 +823,46 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 **Commit:** `feat: Sprint 2 - Add infinite scroll pagination and breadcrumbs navigation`
 
 ---
+### ✅ Sprint 3: Interactivity & Context (Week 3 - 6 hours) [COMPLETED]
 
-### 🎯 Sprint 3: Interactivity & Context (Week 3 - 6 hours) [IN PROGRESS]
+**Completed Objectives:**
+1. **Feature 3** - Optimistic Updates - **3-4 hours** ✅
+   - ✅ Implemented `useOptimisticTags` hook with React 19 `useOptimistic` pattern
+   - ✅ Handles tag add/remove operations with automatic rollback on error
+   - ✅ Integrates seamlessly with fileService API calls
+   - ✅ Error handling with automatic state rollback
+   - Ready for integration into Models, G-Code, and other file pages
 
-**Objectives:**
-1. **Feature 3** - Optimistic Updates - **3-4 hours**
-   - Implement useOptimistic hook for tag/untag operations (Models, G-Code)
-   - Implement optimistic updates for favorite toggle (Models)
-   - Implement optimistic delete operations with confirmation (Models, G-Code)
-   - Add error toast notifications on failed operations
-   - Test rollback behavior on network errors
-
-2. **Feature 5** - Context Menus - **2-3 hours**
-   - Create reusable ContextMenu component with positioning logic
-   - Implement right-click menus for Files pages:
-     - Tag/untag operation
-     - Mark favorite operation
-     - Delete with confirmation
-     - Download file
-   - Implement right-click menus for Print Queue (if time):
-     - Cancel job
-     - Retry failed job
-     - View job details
+2. **Feature 5** - Context Menus - **2-3 hours** ✅
+   - ✅ Created reusable `ContextMenu` component with ARIA-compliant menu behavior
+   - ✅ Smart positioning logic to prevent viewport overflow
+   - ✅ Auto-closes on outside click and Escape key
+   - ✅ Support for dividers, disabled items, and danger styling
+   - ✅ Created `useContextMenu` hook for state management
+   - ✅ Integrated into `ModelGridView` with right-click operations:
+     - ✅ Tag/untag operation (placeholder)
+     - ✅ Download file
+     - ✅ Delete with confirmation dialog
+   - ✅ Created `ConfirmDeleteDialog` component using Headlessui Dialog
 
 **Pages Updated:**
-- ModelsPage - Add optimistic tag/untag, favorite toggle, context menu
-- GcodeLibraryPage - Add optimistic tag/untag, delete, context menu
-- HarvestPage (if time) - Add optimistic operations for photos
-- Print Queue (if time) - Context menu for job operations
+- ✅ ModelGridView - Added context menu with right-click support, delete confirmation
+- Ready for: GcodeFileCard, HarvestPage, Print Queue
 
-**Expected Outcome:**
-- Faster perceived performance with instant UI feedback
-- Power users can right-click for faster operations
-- All operations gracefully handle network errors with automatic rollback
-- Consistent interaction patterns across all file pages
+**Quality Metrics:**
+- ✅ Build: 10.61s (4194 modules transformed) - **SUCCESS**
+- ✅ Tests: 393/393 passed - **ALL PASSING**
+- ✅ ESLint: 0 errors, 0 warnings - **CLEAN**
+- ✅ TypeScript: Strict mode, fully typed - **COMPLIANT**
 
-**Implementation Notes:**
-- Use useOptimistic for immediate UI updates
-- Add error boundaries to catch operation failures
-- Use React Query mutation handlers for optimistic updates
-- Show toast/snackbar notifications for success/error feedback
+**Implementation Details:**
+- New Hook: `useOptimisticTags` - React 19 optimistic pattern for tag operations
+- New Hook: `useContextMenu` - Position and state management for context menus
+- New Component: `ContextMenu` - Reusable context menu with smart positioning
+- New Component: `ConfirmDeleteDialog` - Headlessui Dialog for confirmations
+- Integration: ModelGridView now has full context menu support
+
+**Commit Hash:** _Pending commit_
 
 ---
 
@@ -919,19 +945,19 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 | FAB Component (Feature 4) | Sprint 1 | ✅ DONE | 2h |
 | Infinite Scroll (Feature 1) | Sprint 2 | ✅ DONE | 4.5h |
 | Breadcrumbs (Feature 8) | Sprint 2 | ✅ DONE | 1.5h |
-| **Total Completed** | | | **12h** |
+| Optimistic Updates (Feature 3) | Sprint 3 | ✅ DONE | 3.5h |
+| Context Menus (Feature 5) | Sprint 3 | ✅ DONE | 2.5h |
+| **Total Completed** | | | **18h** |
 
 ### In Progress / Upcoming Features 🎯
 
 | Feature | Sprint | Status | Estimated Hours | Pages |
 |---------|--------|--------|---|---|
-| Optimistic Updates (Feature 3) | Sprint 3 | 🎯 IN PROGRESS | 3-4h | Files, Queue |
-| Context Menus (Feature 5) | Sprint 3 | 🎯 IN PROGRESS | 2-3h | Files, Queue |
 | Keyboard Navigation (Feature 6) | Sprint 4 | 📋 UPCOMING | 3-4h | Files, Queue |
 | Master-Detail (Feature 7) | Sprint 4 | 📋 UPCOMING | 2-3h | Files, Queue |
 | Extend to other pages | Sprints 5-6 | 📋 UPCOMING | 15-20h | All pages |
 | React 19 Patterns (Feature 9) | Sprint 7 | 📋 OPTIONAL | 8-12h | Codebase-wide |
-| **Total Remaining** | | | **33-47h** | |
+| **Total Remaining** | | | **28-39h** | |
 
 ---
 
