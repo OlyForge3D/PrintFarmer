@@ -18,18 +18,14 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/filament-types")]
 [Tags("Filament Types")]
-public class FilamentTypeController : ControllerBase
+public class FilamentTypeController(
+    IFilamentTypeService filamentService,
+    IStartupStatus startupStatus,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly IFilamentTypeService _filamentService;
-    private readonly IStartupStatus _startupStatus;
-    private readonly IUnifiedLoggingService _logger;
-
-    public FilamentTypeController(IFilamentTypeService filamentService, IStartupStatus startupStatus, IUnifiedLoggingService logger)
-    {
-        _filamentService = filamentService ?? throw new ArgumentNullException(nameof(filamentService));
-        _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IFilamentTypeService _filamentService = filamentService ?? throw new ArgumentNullException(nameof(filamentService));
+    private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Gets all available filament types.
