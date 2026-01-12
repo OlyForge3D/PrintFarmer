@@ -29,6 +29,7 @@ import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
+import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
@@ -125,7 +126,7 @@ function AuthenticatedAppRoutes() {
           <Route path="workers" element={<WorkerManagementPage />} />
           <Route path="observability" element={<ObservabilityDashboard />} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<SpoolsPage />} />
+          <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
           <Route path="tags" element={<TagAdminPage />} />
         </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
