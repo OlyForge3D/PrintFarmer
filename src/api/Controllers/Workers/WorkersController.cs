@@ -16,21 +16,14 @@ namespace Farm.Web.Api.Controllers.Workers;
 [Route("api/workers")]
 [Tags("Workers")]
 [Authorize] // All endpoints require authentication
-public class WorkersController : ControllerBase
+public class WorkersController(
+    IWorkerRepository workerRepository,
+    ISliceJobRepository jobRepository,
+    ILogger<WorkersController> logger) : ControllerBase
 {
-    private readonly IWorkerRepository _workerRepository;
-    private readonly ISliceJobRepository _jobRepository;
-    private readonly ILogger<WorkersController> _logger;
-
-    public WorkersController(
-        IWorkerRepository workerRepository,
-        ISliceJobRepository jobRepository,
-        ILogger<WorkersController> logger)
-    {
-        _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
-        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+    private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly ILogger<WorkersController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Get all workers

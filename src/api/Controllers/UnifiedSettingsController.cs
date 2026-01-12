@@ -10,20 +10,16 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/settings")]
-public class UnifiedSettingsController : ControllerBase
+public class UnifiedSettingsController(
+    ISettingsService modularSettingsService,
+    ILogger<UnifiedSettingsController> logger) : ControllerBase
 {
-    private readonly ISettingsService _modularSettingsService;
-    private readonly Dictionary<string, string> _keyNameToClassNameMap;
-    private readonly ILogger<UnifiedSettingsController> _logger;
-
-    public UnifiedSettingsController(
-        ISettingsService modularSettingsService,
-        ILogger<UnifiedSettingsController> logger)
-    {
-        _modularSettingsService = modularSettingsService;
-        _logger = logger;
-        _keyNameToClassNameMap = BuildKeyNameToClassNameMap();
-    }
+    private readonly ISettingsService _modularSettingsService = modularSettingsService;
+    private readonly ILogger<UnifiedSettingsController> _logger = logger;
+    
+    // Lazy-initialize this since it depends on _modularSettingsService
+    private Dictionary<string, string>? _keyNameToClassNameMap;
+    private Dictionary<string, string> _keyNameToClassNameMapCache => _keyNameToClassNameMap ??= BuildKeyNameToClassNameMap();
 
     /// <summary>
     /// Gets all application settings sections and their current values.
@@ -335,7 +331,7 @@ public class UnifiedSettingsController : ControllerBase
 
     private string? MapKeyNameToClassName(string keyName)
     {
-        return _keyNameToClassNameMap.TryGetValue(keyName, out string? className) ? className : null;
+        return _keyNameToClassNameMapCache.TryGetValue(keyName, out string? className) ? className : null;
     }
 
     private async Task UpdateAppSettingsPropertyAsync(string keyName, object settingsValues)
