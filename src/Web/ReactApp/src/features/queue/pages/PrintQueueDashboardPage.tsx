@@ -3,6 +3,8 @@ import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { Tabs } from "@/common/components/ui/Tabs";
+import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
+import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
@@ -28,6 +30,44 @@ export function PrintQueueDashboardPage() {
   const [activeTab, setActiveTab] = useState("all-jobs");
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+
+  // Keyboard navigation for job list (only for active tab)
+  const { selectedIndex } = useKeyboardNavigation({
+    items: jobs,
+    columns: 1,  // Single column table-like layout
+    onEnter: (job) => {
+      setSelectedJobId(job.id);
+      setIsJobDetailsModalOpen(true);
+    },
+    onEscapeKey: () => setIsJobDetailsModalOpen(false)
+  });
+
+  // Keyboard shortcuts for queue actions
+  useKeyboardShortcuts([
+    {
+      key: 'd',
+      handler: () => {
+        if (selectedIndex >= 0 && jobs[selectedIndex]) {
+          handleCancelJob(jobs[selectedIndex].id);
+        }
+      },
+      description: 'Cancel selected job'
+    },
+    {
+      key: 'p',
+      handler: async () => {
+        if (selectedIndex >= 0 && jobs[selectedIndex]) {
+          const job = jobs[selectedIndex];
+          if (job.status === 'Running') {
+            await handlePauseJob(job.id);
+          } else if (job.status === 'Paused') {
+            await handleResumeJob(job.id);
+          }
+        }
+      },
+      description: 'Pause/resume selected job'
+    }
+  ]);
 
   const loadJobs = useCallback(async () => {
     try {

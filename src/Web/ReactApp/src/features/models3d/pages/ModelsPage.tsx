@@ -2,6 +2,8 @@ import React, { useState, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { useInfiniteList } from '@/common/hooks/useInfiniteList';
+import { useKeyboardNavigation } from '@/common/hooks/useKeyboardNavigation';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
@@ -45,6 +47,39 @@ export const ModelsPage: React.FC = () => {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
   const [isTaggingModalOpen, setIsTaggingModalOpen] = useState(false);
+
+  // Keyboard navigation for model list
+  const { selectedIndex } = useKeyboardNavigation({
+    items: models,
+    columns: viewMode === 'grid' ? 4 : 1,  // 4 columns for grid, 1 for list
+    onEnter: (model) => setViewerModel(model),
+    onEscapeKey: () => setViewerModel(null)
+  });
+
+  // Keyboard shortcuts for common actions
+  useKeyboardShortcuts([
+    {
+      key: 'u',
+      handler: () => setShowUploadModal(true),
+      description: 'Upload new model'
+    },
+    {
+      key: 'f',
+      handler: () => setShowFiltersPanel(!showFiltersPanel),
+      description: 'Open filters'
+    },
+    {
+      key: 't',
+      handler: () => {
+        if (selectedIndex >= 0 && models[selectedIndex]) {
+          const model = models[selectedIndex];
+          setSelectedModelForTagging(model);
+          setIsTaggingModalOpen(true);
+        }
+      },
+      description: 'Tag selected model'
+    }
+  ]);
 
   // Debounce search query
   React.useEffect(() => {
