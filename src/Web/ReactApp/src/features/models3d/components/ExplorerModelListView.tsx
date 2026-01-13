@@ -39,7 +39,6 @@ interface ExplorerModelListViewProps {
   sortOrder?: 'asc' | 'desc';
   onSort?: (sortBy: string) => void;
   selectedFiles?: string[];
-  onSelectAll?: (files: FileEntry[]) => void;
 }
 
 const formatBytes = (bytes: number): string => {
@@ -56,7 +55,6 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
   onDelete,
   onDownload,
   selectedFiles = [],
-  onSelectAll,
 }) => {
   const [selectedFolder, setSelectedFolder] = useState('/');
   const [expandedFolders, setExpandedFolders] = useState(new Set(['/']));
@@ -257,17 +255,19 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
           <h3 className={`text-sm font-semibold text-pf-text ${isTreeCollapsed ? 'hidden' : ''}`}>
             Folders
           </h3>
-          <button
+          <Button
             onClick={() => setIsTreeCollapsed(!isTreeCollapsed)}
-            className="p-1 hover:bg-pf-bg-1 rounded transition-colors flex-shrink-0"
+            variant="subtle"
+            size="sm"
             title={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
             aria-label={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
             aria-expanded={!isTreeCollapsed}
+            className="p-1 flex-shrink-0"
           >
             <ChevronRightIcon
               className={`w-4 h-4 transition-transform ${isTreeCollapsed ? 'rotate-0' : 'rotate-180'}`}
             />
-          </button>
+          </Button>
         </div>
         {!isTreeCollapsed && <div className="p-2">{renderFolderTree(tree)}</div>}
       </div>

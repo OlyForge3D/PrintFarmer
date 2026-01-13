@@ -452,17 +452,19 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
           <h3 className={`text-sm font-semibold text-pf-text ${isTreeCollapsed ? 'hidden' : ''}`}>
             Folders
           </h3>
-          <button
+          <Button
             onClick={() => setIsTreeCollapsed(!isTreeCollapsed)}
-            className="p-1 hover:bg-pf-bg-1 rounded transition-colors flex-shrink-0"
+            variant="subtle"
+            size="sm"
             title={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
             aria-label={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
             aria-expanded={!isTreeCollapsed}
+            className="p-1 flex-shrink-0"
           >
             <ChevronRightIcon
               className={`w-4 h-4 transition-transform ${isTreeCollapsed ? 'rotate-0' : 'rotate-180'}`}
             />
-          </button>
+          </Button>
         </div>
         {!isTreeCollapsed && (
           <div className="p-2">

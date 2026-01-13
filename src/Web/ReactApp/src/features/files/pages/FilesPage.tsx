@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { CubeIcon, FileIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
@@ -49,10 +49,10 @@ export function FilesPage() {
   });
 
   // Persist tab change to localStorage
-  const handleTabChange = (tab: 'models' | 'gcode' | 'harvest') => {
+  const handleTabChange = useCallback((tab: 'models' | 'gcode' | 'harvest') => {
     setActiveTab(tab);
     localStorage.setItem('pf.filesPageActiveTab', tab);
-  };
+  }, []);
 
   // Sync active tab with URL params if present (URL takes precedence)
   useEffect(() => {

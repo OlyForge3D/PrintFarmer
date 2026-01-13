@@ -108,20 +108,9 @@ export const ModelsFileBrowser: React.FC<ModelsFileBrowserProps> = ({
 }) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [localSelectedModelIds, setLocalSelectedModelIds] = useState<string[]>([]);
 
-  // Use provided selectedModelIds if available, otherwise use local state
-  const activeSelectedIds = selectedModelIds.length > 0 ? selectedModelIds : localSelectedModelIds;
-  
-  const handleSelectModel = (modelId: string, selected: boolean) => {
-    setLocalSelectedModelIds(prev =>
-      selected ? [...prev, modelId] : prev.filter(id => id !== modelId)
-    );
-  };
-  
-  const handleSelectAllModels = (modelIds: string[]) => {
-    setLocalSelectedModelIds(modelIds);
-  };
+  // Use provided selectedModelIds directly
+  const activeSelectedIds = selectedModelIds;
 
   // Fetch models with pagination
   const fetchModels = React.useCallback(
