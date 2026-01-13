@@ -681,70 +681,6 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Uploads multiple G-code files in a single operation with individual error handling per file.
-        /// </summary>
-        /// <param name="path">Virtual directory path where files should be uploaded</param>
-        /// <param name="files">Collection of files to upload</param>
-        /// <param name="uploadSettings">Upload settings including allowed extensions</param>
-        /// <param name="quotaService">Quota service for tracking upload limits</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Response containing lists of successfully uploaded and failed files</returns>
-        /// <remarks>
-        /// This method processes each file independently, so partial success is possible.
-        /// Failed uploads are captured with error messages without stopping the entire operation.
-        /// </remarks>
-        public async Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
-        {
-            List<GcodeFileEntryDto> created = new();
-            List<MultiUploadFailure> failed = new();
-
-            // Resolve path using IStoragePathService
-            (_, string targetDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
-
-            if (!Directory.Exists(targetDirFullPath))
-            {
-                _ = Directory.CreateDirectory(targetDirFullPath);
-            }
-
-            foreach (IFormFile? f in files)
-            {
-                try
-                {
-                    if (f == null || f.Length == 0)
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), "Empty file"));
-                        continue;
-                    }
-                    string ext = Path.GetExtension(f.FileName) ?? string.Empty;
-                    if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Invalid file type '{ext}'"));
-                        continue;
-                    }
-
-                    (string? fullTarget, string? safeName) = await SaveUploadedFileAsync(f, targetDirFullPath, ct);
-                    System.IO.FileInfo info = new(fullTarget);
-                    string virtualFilePath = CombineVirtual(virtualDir, safeName);
-                    created.Add(new GcodeFileEntryDto(
-                        Path: virtualFilePath,
-                        FileName: safeName,
-                        Name: null,  // No name yet for temporary files not in database
-                        Size: info.Length,
-                        ModifiedAt: info.LastWriteTimeUtc,
-                        IsDirectory: false
-                    ));
-                }
-                catch (Exception exFile)
-                {
-                    _logger.LogWarning($"Failed to save uploaded file {f?.FileName}: {exFile.Message}");
-                    failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), exFile.Message));
-                }
-            }
-
-            return new MultiUploadResponse(created, failed, created.Count, failed.Count);
-        }
-
-        /// <summary>
         /// Creates a new virtual folder in the G-code library for organizational purposes.
         /// </summary>
         /// <param name="path">Parent virtual directory path</param>
@@ -1111,84 +1047,12 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Safely extracts the original filename from a path, returning a default if invalid.
-        /// </summary>
-        /// <param name="name">Filename or path</param>
-        /// <returns>Safe filename or "(unnamed)" if null/empty</returns>
-        private static string SafeOriginalName(string? name)
-            => string.IsNullOrWhiteSpace(name) ? "(unnamed)" : Path.GetFileName(name);
-
-        /// <summary>
-        /// Sanitizes a filename by replacing invalid characters with underscores and ensuring proper extension.
-        /// </summary>
-        /// <param name="originalName">Original filename to sanitize</param>
-        /// <param name="ext">File extension to ensure (e.g., ".gcode")</param>
-        /// <returns>Sanitized filename safe for filesystem use</returns>
-        private static string SanitizeFileName(string originalName, string ext)
-        {
-            string safeName = originalName;
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                safeName = safeName.Replace(c, '_');
-            }
-            if (!safeName.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-            {
-                safeName += ext;
-            }
-            return safeName;
-        }
-
-        /// <summary>
-        /// Saves an uploaded file to disk with automatic name collision resolution.
-        /// </summary>
-        /// <param name="file">File to save</param>
-        /// <param name="targetDirFullPath">Physical target directory path</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Tuple of full file path and safe filename</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the resolved path is unsafe (directory traversal attempt)</exception>
-        /// <remarks>
-        /// If a file with the same name exists, appends " (N)" before the extension.
-        /// Performs security checks to prevent directory traversal attacks.
-        /// </remarks>
-        private static async Task<(string fullTargetPath, string safeName)> SaveUploadedFileAsync(IFormFile file, string targetDirFullPath, CancellationToken ct)
-        {
-            string ext = Path.GetExtension(file.FileName) ?? string.Empty;
-            string originalName = Path.GetFileName(file.FileName);
-            if (string.IsNullOrWhiteSpace(originalName))
-            {
-                originalName = "upload" + ext;
-            }
-
-            string safeName = SanitizeFileName(originalName, ext);
-            string destinationPath = Path.Combine(targetDirFullPath, safeName);
-            string fullTarget = Path.GetFullPath(destinationPath);
-
-            if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Unsafe target path");
-            }
-
-            if (File.Exists(fullTarget))
-            {
-                string baseName = Path.GetFileNameWithoutExtension(safeName);
-                int counter = 1;
-                do
-                {
-                    string candidate = baseName + " (" + counter++ + ")" + ext;
-                    fullTarget = Path.GetFullPath(Path.Combine(targetDirFullPath, candidate));
-                } while (File.Exists(fullTarget));
-                safeName = Path.GetFileName(fullTarget);
-            }
-
-            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await file.CopyToAsync(fs, ct);
-            return (fullTarget, safeName);
-        }
-
-        /// <summary>
         /// Helper method to resolve and validate virtual paths consistently throughout the service.
         /// Centralizes path security logic to prevent directory traversal attacks.
         /// </summary>
+        /// <param name="virtualPath">Virtual path to resolve</param>
+        /// <param name="storageRoot">Physical storage root directory</param>
+        /// <returns>Tuple of storage root, full resolved path, and normalized virtual path</returns>
         private static (string storageRoot, string resolvedFullPath, string virtualNormalized) ResolveVirtualPath(
             string? virtualPath,
             string storageRoot)

@@ -317,17 +317,22 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
-                // Construct full path using helper
-                string fullModelPath = _fileOperations.GetFullFilePath(model);
+                // Construct full physical path: all models are stored in _modelsPath regardless of virtual path
+                string fullModelPath = Path.Combine(_modelsPath, model.FileName);
                 if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
                 {
                     System.IO.File.Delete(fullModelPath);
                 }
 
-                string? fullThumbnailPath = _fileOperations.GetFullThumbnailPath(model);
-                if (fullThumbnailPath != null && System.IO.File.Exists(fullThumbnailPath))
+                // Thumbnail is stored in same directory
+                string? thumbnailFileName = model.ThumbnailFileName;
+                if (thumbnailFileName != null)
                 {
-                    System.IO.File.Delete(fullThumbnailPath);
+                    string fullThumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
+                    if (_fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath) && System.IO.File.Exists(fullThumbnailPath))
+                    {
+                        System.IO.File.Delete(fullThumbnailPath);
+                    }
                 }
 
                 await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
@@ -541,7 +546,7 @@ namespace Farm.Web.Api.Services.Model
                     Name = originalName,  // Store user-provided filename for display
                     FileName = fileName,  // Store GUID-based filename (e.g., "abc123.stl")
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
-                    FilePath = _modelsPath,  // Store the models storage directory path (matching GcodeFile pattern)
+                    FilePath = "/",  // Store virtual root path (matching GcodeFile pattern for uploaded files)
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
@@ -810,6 +815,7 @@ namespace Farm.Web.Api.Services.Model
             return new Model3DEntryDto(
                 Path: virtualPath,
                 FileName: file.FileName,
+                Name: file.Name,  // Include original filename for display
                 Size: file.FileSizeBytes,
                 ModifiedAt: file.UploadedAt,
                 IsDirectory: false,

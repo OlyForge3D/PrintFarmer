@@ -4,7 +4,7 @@ import { Button } from '@/common/components/ui/Button';
 
 interface MasterDetailLayoutProps {
   /**
-   * The master (list) panel content
+   * The master (list/nav) panel content
    */
   master: React.ReactNode;
 
@@ -29,9 +29,24 @@ interface MasterDetailLayoutProps {
   detailTitle?: string;
 
   /**
+   * Layout orientation
+   * - 'vertical': master on left (sidebar), detail on right
+   * - 'horizontal': master on top (tabs), detail below
+   * @default 'vertical'
+   */
+  orientation?: 'vertical' | 'horizontal';
+
+  /**
    * Master panel width on desktop (default: 'w-80')
+   * Only used for vertical orientation
    */
   masterWidth?: string;
+
+  /**
+   * Master panel height on desktop (default: 'h-20')
+   * Only used for horizontal orientation
+   */
+  masterHeight?: string;
 
   /**
    * CSS classes for master panel
@@ -51,18 +66,35 @@ interface MasterDetailLayoutProps {
 }
 
 /**
- * Responsive master-detail layout component
- * On desktop: Shows master list (sidebar) + detail panel side-by-side
- * On mobile: Shows either master list OR detail panel (toggled)
+ * Responsive master-detail layout component with flexible orientation
+ *
+ * **Vertical Mode (default):**
+ * - Desktop: Shows master list (sidebar, left) + detail panel (right) side-by-side
+ * - Mobile: Shows either master list OR detail panel (toggled)
+ * - Best for: CRUD operations (User, Location, Tag admin pages)
+ *
+ * **Horizontal Mode:**
+ * - Desktop: Shows master nav (tabs, top) + detail content (below, full-width)
+ * - Mobile: Shows either master nav OR detail (stacked/toggled)
+ * - Best for: Tabbed interfaces (Models/GCode/Harvest on FilesPage)
  *
  * Usage:
  * ```tsx
+ * // Vertical (sidebar) - for admin list pages
  * <MasterDetailLayout
- *   master={<ModelsList selected={selected} onSelect={setSelected} />}
- *   detail={<ModelDetails model={selected} />}
+ *   orientation="vertical"
+ *   master={<UsersList selected={selected} onSelect={setSelected} />}
+ *   detail={<UserDetails user={selected} />}
  *   hasDetail={!!selected}
  *   onCloseDetail={() => setSelected(null)}
- *   detailTitle={selected?.name}
+ * />
+ *
+ * // Horizontal (tabs) - for tabbed content
+ * <MasterDetailLayout
+ *   orientation="horizontal"
+ *   master={<FileTabs activeTab={tab} onChange={setTab} />}
+ *   detail={<FilesList tab={tab} />}
+ *   hasDetail={true}
  * />
  * ```
  */
@@ -72,7 +104,9 @@ export function MasterDetailLayout({
   hasDetail,
   onCloseDetail,
   detailTitle,
+  orientation = 'vertical',
   masterWidth = 'w-80',
+  masterHeight = 'h-auto',
   masterClassName = '',
   detailClassName = '',
   breakpoint = 'lg',
@@ -127,17 +161,23 @@ export function MasterDetailLayout({
   };
 
   return (
-    <div className="flex h-full w-full bg-pf-bg-0">
-      {/* Master Panel - Always visible on desktop, conditional on mobile */}
+    <div className={`flex h-full w-full bg-pf-bg-0 ${orientation === 'horizontal' ? 'flex-col' : 'flex-row'}`}>
+      {/* Master Panel */}
       {(isDesktop || !showDetail) && (
         <div
-          className={`${masterWidth} border-r border-pf-border overflow-hidden flex flex-col ${masterClassName}`}
+          className={`
+            ${orientation === 'vertical' 
+              ? `${masterWidth} border-r border-pf-border` 
+              : `${masterHeight} border-b border-pf-border w-full`
+            }
+            overflow-hidden flex flex-col ${masterClassName}
+          `}
         >
           {master}
         </div>
       )}
 
-      {/* Detail Panel - Overlay on mobile, flex-1 on desktop */}
+      {/* Detail Panel */}
       {(isDesktop || showDetail) && (
         <div className={`flex-1 overflow-hidden flex flex-col ${detailClassName}`}>
           {/* Mobile header with back button */}

@@ -275,6 +275,24 @@ export function UserManagementPage() {
     }
   };
 
+  // Keyboard shortcut: 'k' to create new user
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
+        e.preventDefault();
+        const farmUserRole = roles.find(r => r.name === 'farm_user');
+        setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
+        setSelectedPermissions([]);
+        setCreateErrors({});
+        setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
+        setShowCreateModal(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [roles]);
+
   const filteredUsers = users.filter(user =>
     user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||

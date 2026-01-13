@@ -1533,7 +1533,8 @@ public record Model3DEntryDto(
     bool IsDirectory,
     string? ThumbnailPath = null,
     string? ModelId = null,  // Include model ID for efficient file lookups
-    string? DirectoryId = null  // Include directory ID for efficient directory lookups
+    string? DirectoryId = null,  // Include directory ID for efficient directory lookups
+    string? Name = null  // Original filename for display (not GUID)
 );
 
 /// <summary>

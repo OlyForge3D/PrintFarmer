@@ -5,7 +5,7 @@ import { FileUpload } from '@/common/components/ui/FileUpload';
 import Button from '@/common/components/ui/Button';
 import Select from '@/common/components/ui/Select';
 import { toast } from 'sonner';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { getApiBaseUrl, getAuthHeaders, getHubUrl } from '@/common/utils/apiUrlHelpers';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
 import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
@@ -70,7 +70,6 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       // CRITICAL: Establish SignalR connection BEFORE calling import endpoint
       // This ensures we're ready to receive events from the moment the backend starts broadcasting
       if (!printerHubService.isConnected()) {
-        const { getHubUrl } = await import('@/common/utils/apiUrlHelpers');
         if (window.PrintFarmerDebug?.import) console.log('[Import] Connecting to SignalR hub...');
         await printerHubService.start(getHubUrl(''));
       }

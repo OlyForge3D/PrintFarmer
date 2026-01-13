@@ -113,22 +113,6 @@ namespace Farm.Web.Api.Services.Gcode
         Task<GcodeFile?> FinalizeChunkedUploadAsync(string filePath, string? originalFileName, string? thumbnailPath, string? virtualDirectory, IChunkedUploadService chunkedUploadService, CancellationToken ct);
 
         /// <summary>
-        /// Uploads multiple G-code files to a virtual directory in a single operation.
-        /// </summary>
-        /// <param name="path">Target virtual directory for all files. Null defaults to root.</param>
-        /// <param name="files">Collection of files to upload.</param>
-        /// <param name="uploadSettings">Upload configuration and validation rules.</param>
-        /// <param name="quotaService">Service for quota management across multiple files.</param>
-        /// <param name="ct">Cancellation token.</param>
-        /// <returns>Response containing results for each file (success/failure with details).</returns>
-        /// <remarks>
-        /// Processes multiple files efficiently, validating each against quotas and settings. Returns detailed
-        /// results for each file including error messages for any that fail. Quota is checked cumulatively
-        /// across all files in the batch.
-        /// </remarks>
-        Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, IGcodeUploadQuotaService quotaService, CancellationToken ct);
-
-        /// <summary>
         /// Creates a new virtual directory at the specified path.
         /// </summary>
         /// <param name="path">Parent virtual path where directory will be created (e.g., '/prints'). Null defaults to root.</param>

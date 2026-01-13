@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
@@ -12,6 +13,7 @@ using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
@@ -622,36 +624,6 @@ public class GcodeFilesController(
         {
             logger.LogError($"Error uploading G-code file (path={path}): {ex.Message}");
             return Problem("Failed to upload file", statusCode: 500);
-        }
-    }
-
-    /// <summary>
-    /// Upload multiple G-code files in a single multipart request. Each file is validated independently.
-    /// </summary>
-    /// <param name="path">Target virtual directory (default root '/').</param>
-    /// <param name="files">Multipart form field 'files' (one or more).</param>
-    [HttpPost("upload-multiple")]
-    [RequestSizeLimit(500_000_000)] // 500 MB aggregate limit
-    [ProducesResponseType(typeof(MultiUploadResponse), 201)]
-    [ProducesResponseType(400)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Same safety guarantees as single upload; each filename sanitized and rooted under validated directory.")]
-    public async Task<ActionResult<MultiUploadResponse>> UploadMultipleFilesAsync([FromQuery] string? path = "/", [FromForm(Name = "files")] IFormFileCollection? files = null)
-    {
-        if (files == null || files.Count == 0)
-        {
-            return BadRequest("At least one file is required");
-        }
-
-        try
-        {
-            MultiUploadResponse response = await gcodeFilesService.UploadMultipleFilesAsync(
-                path, files, uploadSettings, quotaService, HttpContext.RequestAborted);
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(path ?? "/")}", response);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Bulk upload failure (path={path}): {ex.Message}");
-            return Problem("Failed to upload files", statusCode: 500);
         }
     }
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
@@ -138,6 +138,22 @@ export const TagAdminPage: React.FC = () => {
         setEditingTag(null);
         // In a full implementation, you'd call an update mutation here
     };
+
+    // Keyboard shortcut: 'k' to create new tag
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
+                e.preventDefault();
+                setShowNewTagForm(true);
+                setNewTagName('');
+                setNewTagColor('#6366f1');
+                setNewTagDescription('');
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     if (isLoading) {
         return (
