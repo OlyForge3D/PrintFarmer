@@ -6193,19 +6193,19 @@ main() {
     fi
     
     # Handle redeploy mode
-    if [ "$REDEPLOY" = "true" ]; then
+    if [ "${REDEPLOY:-false}" = "true" ]; then
         redeploy_existing
         # Function exits, so we never reach here
     fi
     
     # Handle tear-down mode
-    if [ "$TEAR_DOWN" = "true" ]; then
+    if [ "${TEAR_DOWN:-false}" = "true" ]; then
         tear_down_deployment
         # Function exits, so we never reach here
     fi
     
     # Handle regenerate-config mode (regenerates .env and docker-compose without affecting deployment)
-    if [ "$REGENERATE_CONFIG" = "true" ]; then
+    if [ "${REGENERATE_CONFIG:-false}" = "true" ]; then
         if [ ! -f "$CONFIG_FILE" ]; then
             print_error "No stored configuration found. Run normal setup first."
             exit 1
@@ -6719,6 +6719,7 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${_ARGS_KEEP[@]:-}"
+
 postgres_readiness_check() {
     local pg_user="${POSTGRES_USER:-postgres}"
     local pg_db="${POSTGRES_DB:-printfarmer}"
