@@ -1160,3 +1160,19 @@ export interface FileHealthDetailDto {
     details?: string;
   }>;
 }
+
+// GCode Upload Progress - emitted via SignalR during multi-file uploads
+export interface GcodeUploadFailureSummary {
+  fileName: string;
+  error: string;
+}
+
+export interface GcodeUploadProgressDto {
+  sessionId: string;
+  totalFiles: number;
+  processedCount: number;
+  currentFileName?: string | null;
+  successfulFiles?: string[] | null;
+  failedFiles?: GcodeUploadFailureSummary[] | null;
+  errorMessage?: string | null;
+}

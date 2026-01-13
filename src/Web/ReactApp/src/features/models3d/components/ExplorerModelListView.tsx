@@ -33,6 +33,13 @@ interface FolderNode {
 interface ExplorerModelListViewProps {
   onFileSelect?: (file: FileEntry) => void;
   onTagModel?: (model: FileEntry) => void;
+  onDelete?: (file: FileEntry) => void;
+  onDownload?: (modelId: string) => void;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  onSort?: (sortBy: string) => void;
+  selectedFiles?: string[];
+  onSelectAll?: (files: FileEntry[]) => void;
 }
 
 const formatBytes = (bytes: number): string => {
@@ -45,11 +52,16 @@ const formatBytes = (bytes: number): string => {
 
 export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
   onFileSelect,
-  onTagModel
+  onTagModel,
+  onDelete,
+  onDownload,
+  selectedFiles = [],
+  onSelectAll,
 }) => {
   const [selectedFolder, setSelectedFolder] = useState('/');
   const [expandedFolders, setExpandedFolders] = useState(new Set(['/']));
   const [breadcrumbs, setBreadcrumbs] = useState<Array<{ path: string; name: string }>>([]);
+  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
 
   // Update breadcrumbs when selected folder changes
   useEffect(() => {
@@ -124,7 +136,8 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
     fileType: (file.fileName?.split('.').pop() || 'stl') as 'stl' | '3mf' | 'obj' | 'ply',
     uploadedAt: file.modifiedAt,
     thumbnailPath: file.thumbnailPath,
-    tags: file.tags || []
+    tags: file.tags || [],
+    isSelected: selectedFiles.includes(file.modelId || file.path),
   }));
 
   // Build folder tree
@@ -140,13 +153,25 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
     const nodeMap = new Map<string, FolderNode>();
     nodeMap.set('/', root);
 
-    const sortedFolders = [...allFolders].sort();
+    // Build a map of folder paths to their directory IDs from the API response
+    const folderIdMap = new Map<string, string>();
+    (hierarchyData?.files || []).forEach((f: FileEntry) => {
+      if (f.isDirectory && f.directoryId) {
+        folderIdMap.set(f.path, f.directoryId);
+      }
+    });
+
+    // Combine folders from allFolders and current hierarchyData to ensure immediate children are shown
+    const allFolderPaths = new Set(allFolders);
+    folders.forEach((f: FileEntry) => allFolderPaths.add(f.path));
+    
+    const sortedFolders = Array.from(allFolderPaths).sort();
 
     for (const folderPath of sortedFolders) {
       const node: FolderNode = {
         name: folderPath.split('/').filter(Boolean).pop() || folderPath,
         path: folderPath,
-        directoryId: folderPath,
+        directoryId: folderIdMap.get(folderPath) || folderPath,  // Use API directoryId or fall back to path
         children: [],
         expanded: expandedFolders.has(folderPath)
       };
@@ -185,10 +210,10 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
         {node.path !== '/' && (
           <div
             onClick={() => setSelectedFolder(node.path)}
-            className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-pf-bg-secondary transition-colors cursor-pointer ${
-              isSelected ? 'bg-pf-bg-secondary text-pf-accent font-semibold' : 'text-pf-text-primary'
+            className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded transition-colors ${
+              isSelected ? 'bg-pf-accent bg-opacity-40 border-l-2 border-pf-accent text-white font-semibold' : ''
             }`}
-            style={{ paddingLeft: `${depth * 16 + 12}px` }}
+            style={{ paddingLeft: `${depth * 16 + 8}px` }}
           >
             <Button
               onClick={(e) => {
@@ -197,7 +222,7 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
               }}
               variant="subtle"
               size="sm"
-              className="p-0 h-auto hover:bg-pf-bg-1 rounded"
+              className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary"
             >
               <ChevronRightIcon
                 className={`w-4 h-4 transition-transform ${
@@ -205,13 +230,15 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
                 }`}
               />
             </Button>
-            <FolderIcon className="w-4 h-4 text-pf-text-secondary flex-shrink-0" />
-            <span className="truncate">{node.name}</span>
+            <FolderIcon className={`w-4 h-4 flex-shrink-0 ${
+              isSelected ? 'text-white' : 'text-pf-text-secondary'
+            }`} />
+            <span className="truncate text-sm">{node.name}</span>
           </div>
         )}
         {node.expanded && children.length > 0 && (
           <div>
-            {children.map(child => renderFolderTree(child, depth + (node.path === '/' ? 0 : 1)))}
+            {children.map(child => renderFolderTree(child, depth + 1))}
           </div>
         )}
       </div>
@@ -219,21 +246,36 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
   };
 
   return (
-    <div className="flex h-full gap-4">
-      {/* Folder Tree */}
-      <div className="w-56 bg-pf-bg-1 rounded-lg border border-pf-border overflow-y-auto flex-shrink-0">
-        <div className="p-3 border-b border-pf-border sticky top-0 bg-pf-bg-1">
-          <h3 className="text-sm font-semibold text-pf-text-primary">Folders</h3>
+    <div className="flex h-full gap-0 bg-pf-bg rounded-lg border border-pf-border">
+      {/* Left Pane: Collapsible Folder Tree (Option B - narrow sidebar when collapsed) */}
+      <div
+        className={`flex-shrink-0 border-r border-pf-border overflow-y-auto transition-all duration-300 ${
+          isTreeCollapsed ? 'w-16' : 'w-64'
+        }`}
+      >
+        <div className="p-3 sticky top-0 bg-pf-bg border-b border-pf-border flex items-center justify-between">
+          <h3 className={`text-sm font-semibold text-pf-text ${isTreeCollapsed ? 'hidden' : ''}`}>
+            Folders
+          </h3>
+          <button
+            onClick={() => setIsTreeCollapsed(!isTreeCollapsed)}
+            className="p-1 hover:bg-pf-bg-1 rounded transition-colors flex-shrink-0"
+            title={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
+            aria-label={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
+            aria-expanded={!isTreeCollapsed}
+          >
+            <ChevronRightIcon
+              className={`w-4 h-4 transition-transform ${isTreeCollapsed ? 'rotate-0' : 'rotate-180'}`}
+            />
+          </button>
         </div>
-        <div className="p-2">
-          {renderFolderTree(tree)}
-        </div>
+        {!isTreeCollapsed && <div className="p-2">{renderFolderTree(tree)}</div>}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Right Pane: Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Breadcrumbs */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-pf-border">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-pf-border">
           {breadcrumbs.map((crumb, index) => (
             <div key={crumb.path} className="flex items-center gap-2">
               {index > 0 && <span className="text-pf-text-tertiary">/</span>}
@@ -283,6 +325,13 @@ export const ExplorerModelListView: React.FC<ExplorerModelListViewProps> = ({
               onTagModel={(model) => {
                 const file = modelFiles.find((f: FileEntry) => f.modelId === model.id);
                 if (file) onTagModel?.(file);
+              }}
+              onDelete={(model) => {
+                const file = modelFiles.find((f: FileEntry) => f.modelId === model.id);
+                if (file) onDelete?.(file);
+              }}
+              onDownload={(model) => {
+                onDownload?.(model.id);
               }}
               formatFileSize={formatBytes}
             />

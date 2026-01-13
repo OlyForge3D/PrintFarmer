@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronRightIcon, FolderIcon, DocumentIcon, TrashIcon, FolderPlusIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, DocumentIcon, TrashIcon, FolderPlusIcon } from '@heroicons/react/24/outline';
 import { Button, Checkbox } from '@/common/components/ui';
 import { Select } from '@/common/components/ui/Select';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { TreeView, type TreeNode } from './TreeView';
 import type { PrinterModelDto } from '@/types/api';
 
 export interface FileEntry {
@@ -26,18 +27,13 @@ export interface FileEntry {
   extractedPrinterModel?: string;  // Extracted printer model from G-code
 }
 
-interface FolderNode {
-  name: string;
-  path: string;
-  directoryId: string;  // Use GUID for directory lookups
-  children: FolderNode[];
-  expanded: boolean;
-}
-
 interface ExplorerFileBrowserProps {
   endpoint: 'models' | 'gcode';
   onFileSelect?: (file: FileEntry) => void;
   onFileDelete?: (paths: string[]) => void;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  onSort?: (sortBy: string) => void;
 }
 
 const formatBytes = (bytes: number): string => {
@@ -49,18 +45,25 @@ const formatBytes = (bytes: number): string => {
 };
 
 const formatDate = (dateString: string): string => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  if (!dateString) return '—';
+  return new Date(dateString).toLocaleDateString();
+};
+
+const renderSortIndicator = (column: string, sortBy?: string, sortOrder?: 'asc' | 'desc'): string | null => {
+  if (sortBy !== column) return null;
+  return sortOrder === 'asc' ? ' ▲' : ' ▼';
+};
+
+const getSortableHeaderClass = (onSort?: (sortBy: string) => void): string => {
+  return onSort ? 'cursor-pointer hover:text-pf-accent transition-colors' : '';
 };
 
 export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   endpoint,
-  onFileDelete
+  onFileDelete,
+  sortBy,
+  sortOrder,
+  onSort
 }) => {
   const [selectedFolder, setSelectedFolder] = useState('/');
   const [expandedFolders, setExpandedFolders] = useState(new Set(['/']));
@@ -68,6 +71,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [folderNameError, setFolderNameError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
   // Delete flow handled inline via mutation; no dedicated fileToDelete state needed
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('all');
@@ -148,19 +152,8 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     ? allFiles
     : allFiles.filter((f: FileEntry) => f.targetModelName === selectedPrinterModel);
 
-  // Build tree structure for left pane
-  const buildTree = (): FolderNode => {
-    const root: FolderNode = {
-      name: 'Root',
-      path: '/',
-      directoryId: '/',  // Root directory uses its path as ID
-      children: [],
-      expanded: true
-    };
-
-    const nodeMap = new Map<string, FolderNode>();
-    nodeMap.set('/', root);
-
+  // Build tree structure for left pane - returns TreeNode[]
+  const buildTree = (): TreeNode[] => {
     // Build a map of folder paths to their directory IDs from the API response
     const folderIdMap = new Map<string, string>();
     (hierarchyData?.files || []).forEach((f: FileEntry) => {
@@ -169,31 +162,44 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       }
     });
 
+    // Create node map for building hierarchy
+    const nodeMap = new Map<string, TreeNode>();
+    
     // Sort folders for consistent display
-    const sortedFolders = [...allFolders].sort();
+    const sortedFolders = ['/', ...allFolders].sort();
 
     for (const folderPath of sortedFolders) {
-      const node: FolderNode = {
-        name: folderPath.split('/').filter(Boolean).pop() || folderPath,
+      if (nodeMap.has(folderPath)) continue; // Skip root if already added
+      
+      const node: TreeNode = {
+        name: folderPath === '/' ? 'Root' : (folderPath.split('/').filter(Boolean).pop() || folderPath),
         path: folderPath,
-        directoryId: folderIdMap.get(folderPath) || folderPath,  // Use API directoryId or fall back to path
+        isDirectory: true,
         children: [],
-        expanded: expandedFolders.has(folderPath)
+        directoryId: folderIdMap.get(folderPath) || folderPath,
       };
       nodeMap.set(folderPath, node);
+    }
 
-      // Find parent
+    // Build parent-child relationships
+    for (const folderPath of sortedFolders) {
+      if (folderPath === '/') continue; // Skip root for parent lookup
+      
+      const node = nodeMap.get(folderPath)!;
       const parentPath = folderPath.substring(0, folderPath.lastIndexOf('/')) || '/';
       const parent = nodeMap.get(parentPath);
+      
       if (parent) {
-        parent.children.push(node);
+        parent.children!.push(node);
       }
     }
 
-    return root;
+    // Return only root node wrapped in array
+    const root = nodeMap.get('/');
+    return root ? [root] : [];
   };
 
-  const tree = buildTree();
+  const treeNodes = buildTree();
 
   // Delete selected files
   const deleteFilesMutation = useMutation({
@@ -433,65 +439,50 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     }
   };
 
-  // Render tree nodes
-  const renderTreeNode = (node: FolderNode, level: number): React.ReactNode => {
-    const isRoot = node.path === '/';
-    const hasChildren = node.children.length > 0;
-
-    return (
-      <div key={node.path}>
-        <div
-          className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded transition-colors ${
-            selectedFolder === node.path ? 'bg-pf-accent bg-opacity-40 border-l-2 border-pf-accent text-white font-semibold' : ''
-          } ${
-            dragOverPath === node.path 
-              ? 'bg-pf-primary bg-opacity-15 border-l-4 border-pf-primary' 
-              : ''
-          }`}
-          style={{ paddingLeft: `${isRoot ? 8 : level * 16 + 8}px` }}
-          onClick={() => setSelectedFolder(node.path)}
-          onDragOver={(e) => handleDragOver(e, node.path)}
-          onDragLeave={handleDragLeave}
-          onDrop={(e) => handleDropOnFolder(e, node.path, node.directoryId)}
-        >
-          {hasChildren && (
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleToggleFolderExpand(node.path);
-              }}
-              variant="subtle"
-              size="sm"
-              className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary"
-              aria-hidden="true"
-            >
-              <ChevronRightIcon
-                className={`w-4 h-4 transition-transform ${node.expanded ? 'rotate-90' : ''}`}
-              />
-            </Button>
-          )}
-          {!hasChildren && <div className="w-4" />}
-          <FolderIcon className={`w-4 h-4 flex-shrink-0 ${
-            dragOverPath === node.path ? 'text-pf-primary' : 'text-pf-text-secondary'
-          }`} />
-          <span className="text-sm text-pf-text truncate">{node.name}</span>
-        </div>
-
-        {node.expanded &&
-          node.children.map((child) => renderTreeNode(child, level + 1))}
-      </div>
-    );
-  };
-
   return (
     /* eslint-disable local/pf-no-unguarded-console */
-    <div className="flex h-full gap-4 bg-pf-bg rounded-lg border border-pf-border">
-      {/* Left Pane: Folder Tree */}
-      <div className="w-64 flex-shrink-0 border-r border-pf-border overflow-y-auto">
-        <div className="p-3 sticky top-0 bg-pf-bg border-b border-pf-border">
-          <h3 className="text-sm font-semibold text-pf-text">Folders</h3>
+    <div className="flex h-full gap-0 bg-pf-bg rounded-lg border border-pf-border">
+      {/* Left Pane: Collapsible Folder Tree */}
+      <div
+        className={`flex-shrink-0 border-r border-pf-border overflow-y-auto transition-all duration-300 ${
+          isTreeCollapsed ? 'w-16' : 'w-64'
+        }`}
+      >
+        <div className="p-3 sticky top-0 bg-pf-bg border-b border-pf-border flex items-center justify-between">
+          <h3 className={`text-sm font-semibold text-pf-text ${isTreeCollapsed ? 'hidden' : ''}`}>
+            Folders
+          </h3>
+          <button
+            onClick={() => setIsTreeCollapsed(!isTreeCollapsed)}
+            className="p-1 hover:bg-pf-bg-1 rounded transition-colors flex-shrink-0"
+            title={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
+            aria-label={isTreeCollapsed ? 'Expand folder tree' : 'Collapse folder tree'}
+            aria-expanded={!isTreeCollapsed}
+          >
+            <ChevronRightIcon
+              className={`w-4 h-4 transition-transform ${isTreeCollapsed ? 'rotate-0' : 'rotate-180'}`}
+            />
+          </button>
         </div>
-        <div className="p-2">{renderTreeNode(tree, 0)}</div>
+        {!isTreeCollapsed && (
+          <div className="p-2">
+            <TreeView
+              nodes={treeNodes}
+              onSelect={() => {}} // Not used for folders
+              onNavigate={() => {}} // Not used, we use onFolderClick instead
+              currentPath={selectedFolder}
+              selectedFiles={[]}
+              onSelectFile={() => {}} // Not used for folders
+              onFolderClick={setSelectedFolder}
+              onFolderToggleExpand={handleToggleFolderExpand}
+              expandedFolders={expandedFolders}
+              dragOverPath={dragOverPath}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDropOnFolder}
+            />
+          </div>
+        )}
       </div>
 
       {/* Right Pane: Files */}
@@ -591,12 +582,18 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       />
                     )}
                   </th>
-                  <th className="px-4 py-2 text-left font-semibold text-pf-text">Thumbnail / Name</th>
-                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Size</th>
+                  <th className={`px-4 py-2 text-left font-semibold text-pf-text ${getSortableHeaderClass(onSort)}`} onClick={() => onSort?.('name')}>
+                    Thumbnail / Name{renderSortIndicator('name', sortBy, sortOrder)}
+                  </th>
+                  <th className={`px-4 py-2 text-left font-semibold text-pf-text w-24 ${getSortableHeaderClass(onSort)}`} onClick={() => onSort?.('size')}>
+                    Size{renderSortIndicator('size', sortBy, sortOrder)}
+                  </th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Nozzle</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-32">Material</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-32">Printer Model</th>
-                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-40">Modified</th>
+                  <th className={`px-4 py-2 text-left font-semibold text-pf-text w-40 ${getSortableHeaderClass(onSort)}`} onClick={() => onSort?.('date')}>
+                    Modified{renderSortIndicator('date', sortBy, sortOrder)}
+                  </th>
                   <th className="px-4 py-2 text-center font-semibold text-pf-text w-12">Action</th>
                 </tr>
               </thead>
@@ -738,10 +735,10 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       {file.isDirectory ? '-' : file.requiredMaterial || file.extractedMaterial || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
-                      {file.isDirectory ? '-' : file.extractedPrinterModel || file.extractedPrinterModelName || file.targetModelName || '-'}
+                      {file.isDirectory ? '-' : file.extractedPrinterModel || file.targetModelName || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
-                      {formatDate(file.modifiedAt)}
+                      {file.modifiedAt ? formatDate(file.modifiedAt) : '—'}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Button

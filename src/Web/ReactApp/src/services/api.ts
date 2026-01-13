@@ -1042,21 +1042,36 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Upload multiple G-code files sequentially.
+   * Each file is uploaded individually via the single-file endpoint.
+   * This allows per-file progress tracking via onGcodeUploadProgress.
+   */
   async uploadMultipleGcodeLibraryFiles(
     files: File[],
     virtualPath = "/"
   ): Promise<MultiUploadResponse> {
-    const form = new FormData();
-    files.forEach((f) => form.append("files", f));
-    const resp = await this.client.post<MultiUploadResponse>(
-      `/gcode-files/upload-multiple`,
-      form,
-      {
-        params: { path: virtualPath },
-        headers: { "Content-Type": "multipart/form-data" },
+    const created: GcodeUploadResult[] = [];
+    const failed: GcodeUploadFailure[] = [];
+
+    for (const file of files) {
+      try {
+        const result = await this.uploadGcodeLibraryFile(file, virtualPath);
+        created.push(result);
+      } catch (error) {
+        failed.push({
+          fileName: file.name,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
       }
-    );
-    return resp.data as MultiUploadResponse;
+    }
+
+    return {
+      succeededCount: created.length,
+      failedCount: failed.length,
+      created,
+      failed,
+    };
   }
 
   async getGcodeUploadSettings(): Promise<

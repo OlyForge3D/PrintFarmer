@@ -27,6 +27,11 @@ export interface ModelListViewProps {
   onViewerModel: (model: Model) => void;
   onTagModel: (model: Model) => void;
   formatFileSize: (bytes: number) => string;
+  onDelete?: (model: Model) => void;
+  onDownload?: (model: Model) => void;
+  selectedModelIds?: string[];
+  onSelectModel?: (modelId: string, selected: boolean) => void;
+  onSelectAllModels?: (modelIds: string[]) => void;
 }
 
 // ====================================
@@ -212,21 +217,6 @@ export interface QueueGcodeModalProps {
   isOpen: boolean;
   onClose: () => void;
   gcodeFile?: GcodeFile;
-}
-
-export interface GcodeListViewProps {
-  files: GcodeFile[];
-  isLoading: boolean;
-  selectedFiles: string[];
-  onSelectFile: (file: GcodeFile) => void;
-  onSelectAll: (files: GcodeFile[]) => void;
-  onDelete: (file: GcodeFile) => void;
-  onDownload: (file: GcodeFile) => void;
-  onNavigate: (file: GcodeFile) => void;
-  formatters: {
-    formatBytes: (bytes: number) => string;
-    formatDate: (date: string | Date) => string;
-  };
 }
 
 export interface HealthGaugeProps {
