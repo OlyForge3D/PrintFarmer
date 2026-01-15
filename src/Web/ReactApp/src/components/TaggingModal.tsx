@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Alert } from '@/common/components/ui';
-import { XMarkIcon } from '@heroicons/react/24/solid';
 import { TagSelector } from './TagSelector';
-import { gcodeFileTagService, TagOption } from '@/services/gcodeFileTagService';
+import { tagService, type TagDto as TagOption } from '@/services/tagService';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface TaggingModalProps {
   objectId: string;
@@ -31,53 +31,27 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
   // Mutation for saving tags
   const saveMutation = useMutation({
     mutationFn: async (tags: TagOption[]) => {
-      if (objectType === 'GcodeFile') {
-        // Get current tags
-        const currentTags = initialTags;
-        
-        // Tags to remove: in current but not in selected
-        const toRemove = currentTags.filter(
-          ct => !tags.some(st => st.id === ct.id)
-        );
-        
-        // Tags to add: in selected but not in current
-        const toAdd = tags.filter(
-          st => !currentTags.some(ct => ct.id === st.id)
-        );
+      const fileType = objectType === 'Model3D' ? 'model' : 'gcode';
+      const currentTags = initialTags;
+      
+      // Tags to remove: in current but not in selected
+      const toRemove = currentTags.filter(
+        ct => !tags.some(st => st.id === ct.id)
+      );
+      
+      // Tags to add: in selected but not in current
+      const toAdd = tags.filter(
+        st => !currentTags.some(ct => ct.id === st.id)
+      );
 
-        // Remove old tags
-        for (const tag of toRemove) {
-          await gcodeFileTagService.removeTag(objectId, tag.id);
-        }
+      // Remove old tags
+      for (const tag of toRemove) {
+        await tagService.removeTag(objectId, tag.id, fileType as 'model' | 'gcode');
+      }
 
-        // Add new tags
-        for (const tag of toAdd) {
-          await gcodeFileTagService.addTag(objectId, tag.id);
-        }
-      } else if (objectType === 'Model3D') {
-        // Similar logic for Model3D
-        const currentTags = initialTags;
-        const toRemove = currentTags.filter(
-          ct => !tags.some(st => st.id === ct.id)
-        );
-        const toAdd = tags.filter(
-          st => !currentTags.some(ct => ct.id === st.id)
-        );
-
-        // Would use model3DTagService here
-        // For now, just mock the API calls
-        for (const tag of toRemove) {
-          await fetch(
-            `/api/3d-models/${objectId}/tags/${tag.id}`,
-            { method: 'DELETE' }
-          );
-        }
-        for (const tag of toAdd) {
-          await fetch(
-            `/api/3d-models/${objectId}/tags/${tag.id}`,
-            { method: 'POST' }
-          );
-        }
+      // Add new tags
+      for (const tag of toAdd) {
+        await tagService.assignTag(objectId, tag.id, fileType as 'model' | 'gcode');
       }
     },
     onSuccess: () => {
@@ -93,59 +67,49 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isLoading = saveMutation.isPending;
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-pf-bg-0 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-pf-text-primary">
-            Tag {objectType === 'GcodeFile' ? 'G-Code File' : objectType}
-          </h2>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Tag ${objectType === 'GcodeFile' ? 'G-Code File' : objectType === 'Model3D' ? 'Model File' : objectType}`}
+      isDisabled={isLoading}
+      footer={
+        <div className="flex gap-2 w-full">
           <Button
             onClick={onClose}
-            className="text-pf-text-tertiary hover:text-pf-text-secondary transition-colors"
-            variant="subtle"
-            size="sm"
-          >
-            <XMarkIcon className="w-5 h-5" />
-          </Button>
-        </div>
-
-        {/* Error Alert */}
-        {error && (
-          <Alert type="error" title="Error" className="mb-4">
-            {error}
-          </Alert>
-        )}
-
-        {/* Tag Selector */}
-        <TagSelector
-          selectedTags={selectedTags}
-          onTagsChange={setSelectedTags}
-          isSaving={saveMutation.isPending}
-          placeholder={`Search tags for this ${objectType === 'GcodeFile' ? 'gcode file' : objectType.toLowerCase()}...`}
-        />
-
-        {/* Actions */}
-        <div className="flex gap-2 mt-6">
-          <Button
-            onClick={() => saveMutation.mutate(selectedTags)}
-            disabled={saveMutation.isPending}
-            variant="primary"
-            className="flex-1"
-          >
-            {saveMutation.isPending ? 'Saving...' : 'Save Tags'}
-          </Button>
-          <Button
-            onClick={onClose}
-            disabled={saveMutation.isPending}
+            disabled={isLoading}
             variant="secondary"
             className="flex-1"
           >
             Cancel
           </Button>
+          <Button
+            onClick={() => saveMutation.mutate(selectedTags)}
+            disabled={isLoading}
+            variant="primary"
+            className="flex-1"
+          >
+            {isLoading ? 'Saving...' : 'Save Tags'}
+          </Button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      {/* Error Alert */}
+      {error && (
+        <Alert type="error" title="Error" className="mb-4">
+          {error}
+        </Alert>
+      )}
+
+      {/* Tag Selector */}
+      <TagSelector
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+        isSaving={isLoading}
+        placeholder={`Search tags for this ${objectType === 'GcodeFile' ? 'gcode file' : objectType.toLowerCase()}...`}
+      />
+    </Modal>
   );
 };

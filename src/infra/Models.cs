@@ -1510,8 +1510,11 @@ public class Model3DDto
     public long FileSize { get; set; }
     public string FileType { get; set; } = string.Empty; // stl, 3mf, obj, ply
     public DateTime UploadedAt { get; set; }
-    public string Url { get; set; } = string.Empty;
-    public string? ThumbnailPath { get; set; }
+    /// <summary>
+    /// URL to download the file. Auto-generated from Id if not explicitly set.
+    /// </summary>
+    public string Url { get; init; } = string.Empty;
+    public string? ThumbnailUrl { get; set; }
     public string? Description { get; set; }
     public double? DimensionX { get; set; } // in mm
     public double? DimensionY { get; set; } // in mm
@@ -1519,7 +1522,7 @@ public class Model3DDto
     public int? TriangleCount { get; set; }
     public bool IsValid { get; set; } = true;
     public string? ValidationErrors { get; set; }
-    public Model3DTagDto[]? Tags { get; set; }
+    public TagDto[]? Tags { get; set; }
 }
 
 /// <summary>
@@ -1528,13 +1531,14 @@ public class Model3DDto
 public record Model3DEntryDto(
     string Path,
     string FileName,
-    long Size,
-    DateTime ModifiedAt,
+    long FileSize,
+    DateTime UploadedAt,
     bool IsDirectory,
-    string? ThumbnailPath = null,
-    string? ModelId = null,  // Include model ID for efficient file lookups
+    string? ThumbnailUrl = null,
+    string? Id = null,  // Include model ID for efficient file lookups
     string? DirectoryId = null,  // Include directory ID for efficient directory lookups
-    string? Name = null  // Original filename for display (not GUID)
+    string? Name = null,  // Original filename for display (not GUID)
+    string? FileType = null  // File extension: stl, 3mf, obj, ply
 );
 
 /// <summary>
@@ -1548,13 +1552,6 @@ public record Model3DListResponse(
     int PageSize,
     int TotalPages,
     int TotalItems);
-
-/// <summary>
-/// Request to delete models by file paths (for hierarchical browser)
-/// </summary>
-public record DeleteModelsRequest(
-    [property: JsonPropertyName("modelPaths")] IReadOnlyList<string> ModelPaths
-);
 
 /// <summary>
 /// Request to create a new folder in the models directory
@@ -1590,7 +1587,10 @@ public record FolderOperationResultDto(
 /// <summary>
 /// Tag for organizing and categorizing 3D models
 /// </summary>
-public class Model3DTagDto
+/// <summary>
+/// Tag data transfer object (works for any taggable object type)
+/// </summary>
+public class TagDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1599,9 +1599,9 @@ public class Model3DTagDto
 }
 
 /// <summary>
-/// Request to create or update a tag
+/// Request to create or update a tag (generic for any object type)
 /// </summary>
-public class CreateModel3DTagDto
+public class CreateTagDto
 {
     public string Name { get; set; } = string.Empty;
     public string? Color { get; set; }
@@ -1609,9 +1609,9 @@ public class CreateModel3DTagDto
 }
 
 /// <summary>
-/// Request to assign tags to a model
+/// Request to assign tags to an object (generic - works for models, gcode files, etc.)
 /// </summary>
-public class AssignTagsToModelDto
+public class AssignTagsDto
 {
     public Guid[] TagIds { get; set; } = [];
 }

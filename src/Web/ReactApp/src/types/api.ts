@@ -749,16 +749,16 @@ export interface StartBulkHarvestRequest {
 
 // Lightweight file browser entry for hierarchical navigation
 export interface GcodeFile {
-  id: string;
+  id: string; // Unique ID for the gcode file
   path: string;
   fileName: string; // GUID-based filename for internal storage
-  name?: string; // Original filename uploaded by user (for display)
-  fileSize: number;
-  uploadedAt: Date;
+  name: string; // Original filename uploaded by user (for display)
+  fileSize: number; // File size in bytes
+  uploadedAt: Date; // Upload timestamp
   isDirectory: boolean;
-  harvestOperationId?: string;
-  thumbnailUrl?: string;
+  thumbnailUrl?: string; // URL to thumbnail image
   tags?: Array<{ id: string; name: string; color?: string; description?: string }>; // Tags applied to this gcode file
+  requiredMaterial?: string; // Material required for the print
   // Extracted metadata from G-code
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;
@@ -768,6 +768,9 @@ export interface GcodeFile {
   extractedMaterial?: string;
   extractedPrinterModel?: string;
   extractedPrinterModelName?: string; // Raw extracted printer model name (fallback if resolution failed)
+  extractedLayerHeight?: number;
+  extractedInfill?: number;
+  extractedPerimeters?: number;
   extractedHotendTemp?: number;
   extractedBedTemp?: number;
 }
@@ -789,6 +792,7 @@ export interface GetGcodeFilesResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+  availablePrinterModels?: Array<{ id: string | null; name: string }>;
 }
 
 // 3D Model file entry (hierarchical browser)
@@ -798,7 +802,7 @@ export interface Model3DFile {
   size: number;
   modifiedAt: Date;
   isDirectory: boolean;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
 }
 
 export interface Model3DListResponse {
@@ -809,6 +813,16 @@ export interface Model3DListResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+}
+
+export interface Model3DUploadResultDto {
+  id: string;
+  name: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedAt: string;
+  url: string;
 }
 
 // G-code library runtime settings

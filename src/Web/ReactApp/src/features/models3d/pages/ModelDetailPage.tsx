@@ -66,7 +66,7 @@ export const ModelDetailPage: React.FC = () => {
     useQuery<TagOption[]>({
         queryKey: ['model-tags'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
+            const response = await fetch(`${getApiBaseUrl()}/tags`, {
                 headers: getAuthHeaders()
             });
             if (!response.ok) throw new Error('Failed to fetch tags');
@@ -112,7 +112,7 @@ export const ModelDetailPage: React.FC = () => {
                 for (const newTag of payload.newTags) {
                     try {
                         const createResponse = await fetch(
-                            `${getApiBaseUrl()}/3d-models/tags`,
+                            `${getApiBaseUrl()}/tags`,
                             {
                                 method: 'POST',
                                 headers: {
@@ -145,14 +145,42 @@ export const ModelDetailPage: React.FC = () => {
             }
 
             // Then update the model with all tag IDs (only real IDs, no temp IDs)
+            // Determine current tags from model to calculate diff
+            const diff = {
+                toAdd: finalTagIds.filter((id: string) => !currentTags.includes(id)),
+                toRemove: currentTags.filter((id: string) => !finalTagIds.includes(id))
+            };
+
+            // Assign new tags
+            for (const tagId of diff.toAdd) {
+                const response = await fetch(
+                    `${getApiBaseUrl()}/tags/assign-to-model/${modelId}/${tagId}`,
+                    {
+                        method: 'POST',
+                        headers: getAuthHeaders()
+                    }
+                );
+                if (!response.ok) throw new Error(`Failed to assign tag ${tagId}`);
+            }
+
+            // Remove tags
+            for (const tagId of diff.toRemove) {
+                const response = await fetch(
+                    `${getApiBaseUrl()}/tags/remove-from-model/${modelId}/${tagId}`,
+                    {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
+                    }
+                );
+                if (!response.ok) throw new Error(`Failed to remove tag ${tagId}`);
+            }
+
             const response = await fetch(
-                `${getApiBaseUrl()}/3d-models/${modelId}/tags`,
+                `${getApiBaseUrl()}/3d-models/${modelId}`,
                 {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                },
                     body: JSON.stringify({ tagIds: finalTagIds })
                 }
             );

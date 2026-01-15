@@ -16,7 +16,7 @@ public class UnifiedSettingsController(
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
-    
+
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
     private Dictionary<string, string> _keyNameToClassNameMapCache => _keyNameToClassNameMap ??= BuildKeyNameToClassNameMap();

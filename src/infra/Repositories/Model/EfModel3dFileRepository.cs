@@ -163,6 +163,76 @@ namespace Farm.Infrastructure.Repositories.Model
             return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);
         }
 
+        public async Task<(List<Model3D> models, int totalCount)> QueryModelsAsync(
+            string? path,
+            string? search,
+            Guid[]? tagIds,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize,
+            CancellationToken ct)
+        {
+            // Start with base query - only valid models
+            IQueryable<Model3D> query = _db.Models3D.Where(m => m.IsValid);
+
+            // Apply path filter
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                // Normalize path: remove trailing slashes, ensure leading slash
+                string normalizedPath = path.TrimEnd('/');
+                if (!normalizedPath.StartsWith('/'))
+                {
+                    normalizedPath = '/' + normalizedPath;
+                }
+
+                // Join with FolderNode and filter by path
+                query = query.Where(m => m.Folder != null && m.Folder.Path == normalizedPath);
+            }
+            // If path is null/empty, include ALL files (no filter)
+
+            // Apply search filter at database level
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                query = query.Where(m => m.FileName.Contains(search));
+            }
+
+            // Apply tag filtering at database level (AND logic - must have all tags)
+            if (tagIds?.Length > 0)
+            {
+                // For each tag, ensure the model has a mapping to it
+                foreach (Guid tagId in tagIds)
+                {
+                    query = query.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                }
+                // Ensure tag mappings are included for the result
+                query = query.Include(m => m.TagMappings).ThenInclude(tm => tm.Tag);
+            }
+
+            // Get total count BEFORE pagination (for UI to show "X of Y")
+            int totalCount = await query.CountAsync(ct);
+
+            // Apply sorting at database level
+            query = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+            {
+                ("size", "desc") => query.OrderByDescending(m => m.FileSizeBytes),
+                ("size", _) => query.OrderBy(m => m.FileSizeBytes),
+                ("date", "desc") => query.OrderByDescending(m => m.UploadedAt),
+                ("date", _) => query.OrderBy(m => m.UploadedAt),
+                ("name", "desc") => query.OrderByDescending(m => m.FileName),
+                _ => query.OrderBy(m => m.FileName) // Default: name ascending
+            };
+
+            // Apply pagination at database level with Skip/Take
+            int skip = (page - 1) * pageSize;
+            List<Model3D> models = await query
+                .Skip(skip)
+                .Take(pageSize)
+                .ToListAsync(ct);
+
+            return (models, totalCount);
+        }
+
         public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
         {
             // Load all valid models with includes first (required for SQLite compatibility with case-insensitive Contains)

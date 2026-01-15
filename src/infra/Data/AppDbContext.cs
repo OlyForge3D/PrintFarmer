@@ -39,8 +39,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
-    public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
-    public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<TagMapping> TagMappings => Set<TagMapping>();
     public DbSet<FolderNode> Folders => Set<FolderNode>();
@@ -818,11 +816,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(m => m.UploadedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // Navigation: Model3D -> TagMappings
+            // Navigation: Model3D -> TagMappings (uses polymorphic TagMapping)
             _ = b.HasMany(m => m.TagMappings)
-                .WithOne(tm => tm.Model3D)
-                .HasForeignKey(tm => tm.Model3DId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .WithMany()
+                .UsingEntity(j => j.ToTable("ModelTagMappings")); // Override table name for clarity
 
             // Indexes
             _ = b.HasIndex(m => m.FileHash).IsUnique();
@@ -835,53 +832,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
         });
 
-        // Model3DTag Entity Configuration
-        _ = modelBuilder.Entity<Model3DTag>(b =>
-        {
-            _ = b.HasKey(t => t.Id);
-            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
-            _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
-            _ = b.Property(t => t.Description).HasMaxLength(512);
-
-            // Navigation: Model3DTag -> TagMappings
-            _ = b.HasMany(t => t.TagMappings)
-                .WithOne(tm => tm.Tag)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Index for quick tag lookups
-            _ = b.HasIndex(t => t.Name).IsUnique();
-
-            // Index for analytics (Phase 3D - tag creation trends)
-            _ = b.HasIndex(t => t.CreatedAt);
-        });
-
-        // Model3DTagMapping Entity Configuration
-        _ = modelBuilder.Entity<Model3DTagMapping>(b =>
-        {
-            _ = b.HasKey(tm => tm.Id);
-            _ = b.Property(tm => tm.Model3DId).IsRequired();
-            _ = b.Property(tm => tm.TagId).IsRequired();
-
-            // Foreign Keys
-            _ = b.HasOne(tm => tm.Model3D)
-                .WithMany(m => m.TagMappings)
-                .HasForeignKey(tm => tm.Model3DId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            _ = b.HasOne(tm => tm.Tag)
-                .WithMany(t => t.TagMappings)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Composite index to prevent duplicate tag assignments
-            _ = b.HasIndex(tm => new { tm.Model3DId, tm.TagId }).IsUnique();
-
-            // Index for finding all models with a tag
-            _ = b.HasIndex(tm => tm.TagId);
-        });
-
-        // Generic Tag Entity Configuration
+        // Tag Entity Configuration (Generic tag for all object types)
         _ = modelBuilder.Entity<Tag>(b =>
         {
             _ = b.HasKey(t => t.Id);
@@ -898,16 +849,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // Index for quick tag lookups
             _ = b.HasIndex(t => t.Name).IsUnique();
 
-            // Index for analytics (tag creation trends)
+            // Index for analytics
             _ = b.HasIndex(t => t.CreatedAt);
         });
 
-        // Generic TagMapping Entity Configuration (Polymorphic join table)
+        // TagMapping Entity Configuration (Polymorphic join table)
         _ = modelBuilder.Entity<TagMapping>(b =>
         {
             _ = b.HasKey(tm => tm.Id);
             _ = b.Property(tm => tm.TagId).IsRequired();
-            _ = b.Property(tm => tm.ObjectType).IsRequired().HasMaxLength(50); // "Model3D", "GcodeFile", "Printer", etc.
+            _ = b.Property(tm => tm.ObjectType).IsRequired().HasMaxLength(50); // "Model3D", "GcodeFile", etc.
             _ = b.Property(tm => tm.ObjectId).IsRequired();
 
             // Foreign Key to Tag
@@ -916,13 +867,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(tm => tm.TagId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Composite index to prevent duplicate tag assignments
+            // Composite index to prevent duplicate tag assignments to same object
             _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId, tm.TagId }).IsUnique();
 
             // Index for finding all objects with a tag
             _ = b.HasIndex(tm => tm.TagId);
 
-            // Index for finding all tags for an object
+            // Index for finding tags on a specific object type
             _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId });
         });
 

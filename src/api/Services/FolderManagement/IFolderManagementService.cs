@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 
@@ -19,5 +20,15 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// <param name="ct">Cancellation token</param>
         /// <returns>Existing or newly created FolderNode entity</returns>
         Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
+
+        /// <summary>
+        /// Get all folder paths recursively for a given folder type (flat list).
+        /// Used by file services to build folder hierarchies for UI tree views.
+        /// </summary>
+        /// <param name="folderType">Type of folder: "gcode", "models", etc.</param>
+        /// <param name="parentPath">Optional parent path to limit results (e.g., "/" for root)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Sorted list of all folder paths recursively under parent</returns>
+        Task<List<string>> GetAllFolderPathsRecursiveAsync(string folderType, string? parentPath = "/", CancellationToken ct = default);
     }
 }

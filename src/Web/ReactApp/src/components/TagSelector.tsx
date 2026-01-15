@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Input } from '@/common/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import { XMarkIcon } from '@heroicons/react/24/solid';
+import { XMarkIcon, PlusIcon } from '@heroicons/react/24/solid';
 
 interface TagOption {
   id: string;
@@ -33,12 +33,38 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   placeholder = 'Search tags...'
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const queryClient = useQueryClient();
+
+  // Create new tag mutation
+  const createTagMutation = useMutation({
+    mutationFn: async (tagName: string) => {
+      const response = await fetch(`${getApiBaseUrl()}/tags`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          name: tagName,
+          color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
+          description: ''
+        })
+      });
+      if (!response.ok) throw new Error('Failed to create tag');
+      return response.json();
+    },
+    onSuccess: (newTag) => {
+      queryClient.invalidateQueries({ queryKey: ['all-tags'] });
+      handleAddTag(newTag);
+      setSearchTerm('');
+    }
+  });
 
   // Fetch all available tags
   const { data: allTags = [], isLoading: isLoadingTags } = useQuery<TagOption[]>({
     queryKey: ['all-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
+      const response = await fetch(`${getApiBaseUrl()}/tags`, {
         headers: getAuthHeaders()
       });
       if (!response.ok) throw new Error('Failed to fetch tags');
@@ -86,9 +112,8 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
               title={`Remove ${tag.name} tag`}
               variant="subtle"
               size="sm"
-            >
-              <XMarkIcon className="w-4 h-4" />
-            </Button>
+              iconCenter={<XMarkIcon className="w-4 h-4" />}
+            />
           </div>
         ))}
       </div>
@@ -148,9 +173,17 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="p-3 text-sm text-pf-text-tertiary text-center">
-                No tags match your search
-              </div>
+              <Button
+                onClick={() => createTagMutation.mutate(searchTerm)}
+                disabled={createTagMutation.isPending}
+                className="w-full text-left px-3 py-2 hover:bg-pf-bg-2 transition-colors flex items-center gap-2"
+                variant="subtle"
+                iconLeft={<PlusIcon className="w-4 h-4 text-pf-accent" />}
+              >
+                <span className="text-sm text-pf-text-primary">
+                  {createTagMutation.isPending ? 'Creating...' : `Create tag "${searchTerm}"`}
+                </span>
+              </Button>
             )}
           </div>
         )}

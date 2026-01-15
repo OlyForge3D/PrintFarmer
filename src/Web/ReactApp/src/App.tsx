@@ -220,7 +220,13 @@ function App() {
             <QueryClientProvider client={queryClient}>
               <SlicerUIProvider>
                 <SetupWizard onComplete={handleSetupComplete} />
-                <Toaster position="top-right" richColors />
+              <Toaster 
+                position="top-right" 
+                duration={3000}
+                visibleToasts={2}
+                theme="system"
+                gap={8}
+              />
               </SlicerUIProvider>
             </QueryClientProvider>
           </AuthProvider>
@@ -257,7 +263,13 @@ function App() {
                 <AuthenticatedAppRoutes />
               </Router>
               <ReactQueryDevtools initialIsOpen={false} />
-              <Toaster position="top-right" richColors />
+              <Toaster 
+                position="top-right" 
+                duration={3000}
+                visibleToasts={2}
+                theme="system"
+                gap={8}
+              />
             </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>

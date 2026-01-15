@@ -9,13 +9,14 @@
  */
 export interface Model {
   id: string;
+  path: string;
   name: string;
   fileName: string;
   fileSize: number;
   fileType: 'stl' | '3mf' | 'obj' | 'ply';
   uploadedAt: string;
   url?: string;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
   tags?: Array<{
     id: string;
     name: string;

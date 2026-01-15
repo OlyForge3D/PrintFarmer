@@ -35,22 +35,10 @@ describe('GcodeLibraryPage', () => {
 
   it('should render without crashing', () => {
     renderComponent();
-    expect(screen.getByText('G-code Library')).toBeInTheDocument();
+    expect(screen.getByText('GcodeFileBrowser')).toBeInTheDocument();
   });
 
-  it('should display page title and subtitle', () => {
-    renderComponent();
-    expect(screen.getByText('G-code Library')).toBeInTheDocument();
-    expect(screen.getByText('Browse and manage your G-code files')).toBeInTheDocument();
-  });
-
-  it('should render breadcrumbs with Files link', () => {
-    renderComponent();
-    const breadcrumbLink = screen.getByRole('link', { name: /Files/i });
-    expect(breadcrumbLink).toBeInTheDocument();
-  });
-
-  it('should render GcodeFileBrowser component', () => {
+  it('should display GcodeFileBrowser component', () => {
     renderComponent();
     expect(screen.getByText('GcodeFileBrowser')).toBeInTheDocument();
   });

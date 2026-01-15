@@ -28,13 +28,79 @@ namespace Farm.Infrastructure.Repositories.Tags
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
         }
 
-        public async Task<TagMapping?> GetMappingAsync(string objectType, Guid objectId, Guid tagId, CancellationToken ct)
+        public async Task<TagMapping?> GetMappingAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
         {
             return await _dbContext.TagMappings
                 .FirstOrDefaultAsync(m => m.ObjectType == objectType && m.ObjectId == objectId && m.TagId == tagId, ct);
         }
 
-        public async Task<IReadOnlyList<TagMapping>> GetMappingsByObjectAsync(string objectType, Guid objectId, CancellationToken ct)
+        public async Task<IReadOnlyList<TagMapping>> GetObjectsWithTagsAsync(IEnumerable<Guid> tagIds, string objectType, bool requireAllTags, CancellationToken ct)
+        {
+            var tagIdList = tagIds.ToList();
+            if (!tagIdList.Any())
+            {
+                return new List<TagMapping>();
+            }
+
+            IQueryable<TagMapping> query = _dbContext.TagMappings
+                .Where(m => m.ObjectType == objectType && tagIdList.Contains(m.TagId));
+
+            if (requireAllTags)
+            {
+                var objectIds = await query
+                    .GroupBy(m => m.ObjectId)
+                    .Where(g => g.Count() == tagIdList.Count)
+                    .Select(g => g.Key)
+                    .ToListAsync(ct);
+
+                return await _dbContext.TagMappings
+                    .Where(m => objectIds.Contains(m.ObjectId) && m.ObjectType == objectType)
+                    .OrderBy(m => m.TaggedAt)
+                    .ToListAsync(ct);
+            }
+
+            return await query
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<TagMapping>> GetObjectsExcludingTagsAsync(IEnumerable<Guid> tagIds, string objectType, CancellationToken ct)
+        {
+            var tagIdList = tagIds.ToList();
+            if (!tagIdList.Any())
+            {
+                return await GetAllObjectsOfTypeAsync(objectType, ct);
+            }
+
+            var objectIdsToExclude = await _dbContext.TagMappings
+                .Where(m => m.ObjectType == objectType && tagIdList.Contains(m.TagId))
+                .Select(m => m.ObjectId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            return await _dbContext.TagMappings
+                .Where(m => m.ObjectType == objectType && !objectIdsToExclude.Contains(m.ObjectId))
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<TagMapping>> GetAllObjectsOfTypeAsync(string objectType, CancellationToken ct)
+        {
+            return await _dbContext.TagMappings
+                .Where(m => m.ObjectType == objectType)
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<TagMapping>> GetObjectsByTagAsync(Guid tagId, string objectType, CancellationToken ct)
+        {
+            return await _dbContext.TagMappings
+                .Where(m => m.TagId == tagId && m.ObjectType == objectType)
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<TagMapping>> GetByObjectAsync(Guid objectId, string objectType, CancellationToken ct)
         {
             return await _dbContext.TagMappings
                 .Where(m => m.ObjectType == objectType && m.ObjectId == objectId)
@@ -42,10 +108,18 @@ namespace Farm.Infrastructure.Repositories.Tags
                 .ToListAsync(ct);
         }
 
-        public async Task<IReadOnlyList<TagMapping>> GetMappingsByTagAsync(Guid tagId, CancellationToken ct)
+        public async Task<IReadOnlyList<TagMapping>> GetByTagIdAsync(Guid tagId, CancellationToken ct)
         {
             return await _dbContext.TagMappings
                 .Where(m => m.TagId == tagId)
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<TagMapping>> GetByTagIdAndObjectTypeAsync(Guid tagId, string objectType, CancellationToken ct)
+        {
+            return await _dbContext.TagMappings
+                .Where(m => m.TagId == tagId && m.ObjectType == objectType)
                 .OrderBy(m => m.TaggedAt)
                 .ToListAsync(ct);
         }
@@ -84,6 +158,15 @@ namespace Farm.Infrastructure.Repositories.Tags
             if (mappings.Any())
             {
                 _dbContext.TagMappings.RemoveRange(mappings);
+            }
+        }
+
+        public async Task RemoveByObjectAndTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
+        {
+            var mapping = await GetMappingAsync(objectId, tagId, objectType, ct);
+            if (mapping != null)
+            {
+                _dbContext.TagMappings.Remove(mapping);
             }
         }
 

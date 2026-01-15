@@ -23,7 +23,6 @@ import {
   LoginRequest,
   ManufacturerDto,
   MoveRequest,
-  MultiUploadResponse,
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
@@ -804,7 +803,7 @@ export class ApiClient {
     if (nozzleDiameter) params.nozzleDiameter = nozzleDiameter;
     if (targetPrinterId) params.targetPrinterId = targetPrinterId;
 
-    const response = await this.client.get<GcodeLibraryFile[]>("/gcode-library", {
+    const response = await this.client.get<GcodeLibraryFile[]>("/gcode-files-library", {
       params,
     });
     return response.data;
@@ -836,7 +835,7 @@ export class ApiClient {
       minFileSizeBytes: opts?.minFileSizeBytes,
       duplicateHandling: opts?.duplicateHandling,
     };
-    const response = await this.client.post("/gcode-harvest/start", payload);
+    const response = await this.client.post("/gcode-files-harvest/start", payload);
     return response.data as { queueItemId: string };
   }
 
@@ -903,7 +902,7 @@ export class ApiClient {
     if (offset) params.offset = offset;
 
     const response = await this.client.get<GcodeHarvestOperation[]>(
-      "/gcode-harvest/operations",
+      "/gcode-files-harvest/operations",
       { params }
     );
     return response.data;
@@ -950,7 +949,7 @@ export class ApiClient {
 
   async getAllActiveHarvests(): Promise<GcodeHarvestOperation[]> {
     const response = await this.client.get<GcodeHarvestOperation[]>(
-      "/gcode-harvest/active"
+      "/gcode-files-harvest/active"
     );
     return response.data;
   }
@@ -1001,13 +1000,51 @@ export class ApiClient {
   async getGcodeFilesWithFilter(
     request: Record<string, unknown>
   ): Promise<GetGcodeFilesResponse> {
-    // Filter out undefined values to avoid sending them as query parameters
+    // Filter out undefined values and viewMode (viewMode is for frontend routing, not API)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { viewMode, ...apiRequest } = request;
     const params = Object.fromEntries(
-      Object.entries(request).filter(([, value]) => value !== undefined && value !== null)
+      Object.entries(apiRequest).filter(([, value]) => value !== undefined)
     );
+    
+    // Debug logging
+    if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
+      console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
+    }
+    
     const response = await this.client.get<GetGcodeFilesResponse>(
       "/gcode-files",
       { params }
+    );
+    return response.data;
+  }
+
+  async getGcodeFilesQuery(
+    request: Record<string, unknown>
+  ): Promise<GetGcodeFilesResponse> {
+    // New efficient endpoint with database-level filtering
+    // Filter out undefined values and viewMode (viewMode is for frontend routing, not API)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { viewMode, ...apiRequest } = request;
+    const params = Object.fromEntries(
+      Object.entries(apiRequest).filter(([, value]) => value !== undefined)
+    );
+    
+    // Debug logging
+    if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
+      console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
+    }
+    
+    const response = await this.client.get<GetGcodeFilesResponse>(
+      "/gcode-files/query",
+      { params }
+    );
+    return response.data;
+  }
+
+  async getGcodeFilesFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
+    const response = await this.client.get<Array<{ path: string; fileName: string; isDirectory: boolean }>>(
+      "/gcode-files/folders"
     );
     return response.data;
   }
@@ -1016,62 +1053,154 @@ export class ApiClient {
     await this.client.delete("/gcode-files", { data: { fileIds } });
   }
 
-  async downloadGcodeFile(filePath: string): Promise<void> {
+  async deleteModel3dFile(id: string): Promise<void> {
+    await this.client.delete(`/3d-models/${id}`);
+  }
+
+  async deleteModel3dFiles(modelIds: string[]): Promise<void> {
+    await this.client.delete("/3d-models", { data: { modelIds } });
+  }
+
+  async downloadGcodeFile(filePath: string, originalName?: string): Promise<void> {
     const response = await this.client.get(`/gcode-files/download`, {
       params: { path: filePath },
       responseType: "blob",
     });
 
-    // Create a download link
+    // Create a download link using original filename if available
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", filePath.split("/").pop() || "file.gcode");
+    const fileName = originalName || filePath.split("/").pop() || "file.gcode";
+    link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
   }
 
-  async uploadGcodeLibraryFile(file: File, virtualPath = "/"): Promise<void> {
+  async uploadGcodeLibraryFile(
+    file: File,
+    virtualPath = "/",
+    onProgress?: (fileName: string, progress: number) => void
+  ): Promise<GcodeLibraryFile> {
     const form = new FormData();
     form.append("file", file);
-    await this.client.post(`/gcode-files/upload`, form, {
-      params: { path: virtualPath },
-      headers: { "Content-Type": "multipart/form-data" },
+    
+    // Create a new XMLHttpRequest to track progress
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      if (onProgress) {
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            onProgress(file.name, percentComplete);
+          }
+        });
+      }
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText) as GcodeLibraryFile;
+            if (onProgress) {
+              onProgress(file.name, 100);
+            }
+            resolve(response);
+          } catch {
+            reject(new Error("Failed to parse upload response"));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener("error", () => {
+        reject(new Error("Upload request failed"));
+      });
+
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Upload was cancelled"));
+      });
+
+      // Build URL with params
+      const params = new URLSearchParams({ path: virtualPath });
+      xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
+
+      // Set auth header if available
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.send(form);
     });
   }
 
   /**
-   * Upload multiple G-code files sequentially.
-   * Each file is uploaded individually via the single-file endpoint.
-   * This allows per-file progress tracking via onGcodeUploadProgress.
+   * Upload a single 3D model file.
+   * Supports progress tracking via XMLHttpRequest upload event.
    */
-  async uploadMultipleGcodeLibraryFiles(
-    files: File[],
-    virtualPath = "/"
-  ): Promise<MultiUploadResponse> {
-    const created: GcodeUploadResult[] = [];
-    const failed: GcodeUploadFailure[] = [];
+  async uploadModel3dFile(
+    file: File,
+    virtualPath = "/",
+    onProgress?: (fileName: string, progress: number) => void
+  ): Promise<import("@/types/api").Model3DUploadResultDto> {
+    const form = new FormData();
+    form.append("file", file);
+    
+    // Create a new XMLHttpRequest to track progress
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
 
-    for (const file of files) {
-      try {
-        const result = await this.uploadGcodeLibraryFile(file, virtualPath);
-        created.push(result);
-      } catch (error) {
-        failed.push({
-          fileName: file.name,
-          error: error instanceof Error ? error.message : "Unknown error",
+      // Track upload progress
+      if (onProgress) {
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            onProgress(file.name, percentComplete);
+          }
         });
       }
-    }
 
-    return {
-      succeededCount: created.length,
-      failedCount: failed.length,
-      created,
-      failed,
-    };
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText) as import("@/types/api").Model3DUploadResultDto;
+            if (onProgress) {
+              onProgress(file.name, 100);
+            }
+            resolve(response);
+          } catch {
+            reject(new Error("Failed to parse upload response"));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener("error", () => {
+        reject(new Error("Upload request failed"));
+      });
+
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Upload was cancelled"));
+      });
+
+      // Build URL with params
+      const params = new URLSearchParams({ path: virtualPath });
+      xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
+
+      // Set auth header if available
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.send(form);
+    });
   }
 
   async getGcodeUploadSettings(): Promise<
@@ -1098,34 +1227,35 @@ export class ApiClient {
     return resp.data as { path: string; isDirectory: boolean };
   }
 
+  async moveGcodeFiles(
+    fileIds: string[],
+    targetFolderPath: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const resp = await this.client.post("/gcode-files/move", {
+      modelIds: fileIds,
+      targetDirectoryId: targetFolderPath,
+    });
+    return resp.data as { success: boolean; message?: string };
+  }
+
   // ============ 3D Model methods ============
 
-  async listModelsHierarchical(
-    path: string = "/",
-    sortBy: string = "name",
-    sortOrder: string = "asc",
-    search?: string,
-    page: number = 1,
-    pageSize: number = 50
-  ): Promise<import("@/types/api").Model3DListResponse> {
-    const params: Record<string, string | number | undefined> = {
-      path,
-      sortBy,
-      sortOrder,
-      page,
-      pageSize,
-    };
-    if (search) params.search = search;
-
-    const response = await this.client.get<import("@/types/api").Model3DListResponse>(
-      "/3d-models/hierarchy",
-      { params }
+  async listModelsFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
+    const response = await this.client.get<Array<{ path: string; fileName: string; isDirectory: boolean }>>(
+      "/3d-models/folders"
     );
     return response.data;
   }
 
-  async deleteModels(modelPaths: string[]): Promise<void> {
-    await this.client.delete("/3d-models", { data: { modelPaths } });
+  async moveModel3dFiles(
+    fileIds: string[],
+    targetFolderPath: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const resp = await this.client.post("/3d-models/move", {
+      modelIds: fileIds,
+      targetDirectoryId: targetFolderPath,
+    });
+    return resp.data as { success: boolean; message?: string };
   }
 
   // ============ Job Queue methods ============

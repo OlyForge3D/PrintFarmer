@@ -39,7 +39,7 @@ export interface TagAnalyticsDto {
  * Handles all tag-related API calls with error handling and caching
  */
 class TagService {
-  private readonly baseUrl = '/api/catalog';
+  private readonly baseUrl = '/api/tags';
   private readonly debounceDelay = 300;
   private searchTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private tagsCache: Map<string, TagDto> = new Map();
@@ -283,6 +283,72 @@ class TagService {
     this.tagsCache.clear();
     this.popularTagsCache = [];
     this.lastCacheTime = 0;
+  }
+
+  /**
+   * Assign a tag to an object (model, gcode file, etc.)
+   * @param objectId - The ID of the object to tag
+   * @param tagId - The tag ID to assign
+   * @param objectType - Type of object ('model' or 'gcode')
+   */
+  async assignTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
+    try {
+      const endpoint = objectType === 'gcode' ? 'assign-to-gcode' : 'assign-to-model';
+      await axios.post(
+        `${this.baseUrl}/${endpoint}/${objectId}/${tagId}`
+      );
+    } catch (error) {
+      this.handleError(`Failed to assign tag to ${objectType}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a tag from an object (model, gcode file, etc.)
+   * @param objectId - The ID of the object to untag
+   * @param tagId - The tag ID to remove
+   * @param objectType - Type of object ('model' or 'gcode')
+   */
+  async removeTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
+    try {
+      const endpoint = objectType === 'gcode' ? 'remove-from-gcode' : 'remove-from-model';
+      await axios.delete(
+        `${this.baseUrl}/${endpoint}/${objectId}/${tagId}`
+      );
+    } catch (error) {
+      this.handleError(`Failed to remove tag from ${objectType}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get tags for a gcode file
+   * Note: Only gcode files have a dedicated endpoint. Model tags come from the model data itself.
+   */
+  async getGcodeFileTags(gcodeFileId: string): Promise<TagDto[]> {
+    try {
+      const response = await axios.get<TagDto[]>(
+        `${this.baseUrl}/gcode-file/${gcodeFileId}`
+      );
+      return response.data || [];
+    } catch (error) {
+      this.handleError('Failed to fetch gcode file tags', error);
+      return [];
+    }
+  }
+
+  /**
+   * Batch assign multiple tags to an object
+   */
+  async assignTags(objectId: string, tagIds: string[], objectType: 'model' | 'gcode' = 'model'): Promise<void> {
+    try {
+      for (const tagId of tagIds) {
+        await this.assignTag(objectId, tagId, objectType);
+      }
+    } catch (error) {
+      this.handleError(`Failed to batch assign tags to ${objectType}`, error);
+      throw error;
+    }
   }
 
   /**

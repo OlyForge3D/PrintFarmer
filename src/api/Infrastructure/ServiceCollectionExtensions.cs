@@ -247,7 +247,7 @@ public static class ServiceCollectionExtensions
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.IModelTagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfModelTagMappingRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfTagMappingRepository>();
 
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();

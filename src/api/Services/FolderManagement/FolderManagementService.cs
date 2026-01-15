@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -44,6 +46,41 @@ namespace Farm.Web.Api.Services.FolderManagement
         public async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
             return await _unitOfWork.Folders.GetOrCreateFolderAsync(directoryPath, folderType, ct);
+        }
+
+        /// <summary>
+        /// Get all folder paths recursively for a given folder type (flat list).
+        /// Used by file services to build folder hierarchies for UI tree views.
+        /// Returns a simple flat list of all folder paths ordered for consistent tree building.
+        /// </summary>
+        public async Task<List<string>> GetAllFolderPathsRecursiveAsync(
+            string folderType,
+            string? parentPath = "/",
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(folderType))
+            {
+                throw new ArgumentException("Folder type is required", nameof(folderType));
+            }
+
+            // Normalize parent path
+            string normalizedParent = string.IsNullOrWhiteSpace(parentPath) ? "/" : parentPath.Trim();
+            if (!normalizedParent.StartsWith('/'))
+            {
+                normalizedParent = "/" + normalizedParent;
+            }
+
+            // Get all folders of this type from the repository
+            var allFolders = await _unitOfWork.Folders.GetAllByFolderTypeAsync(folderType, ct);
+
+            // Filter folders to those under the parent path and extract their paths
+            var folderPaths = allFolders
+                .Where(f => f.Path.StartsWith(normalizedParent) && f.Path != normalizedParent)
+                .Select(f => f.Path)
+                .OrderBy(p => p)  // Consistent ordering for tree building
+                .ToList();
+
+            return folderPaths;
         }
     }
 }

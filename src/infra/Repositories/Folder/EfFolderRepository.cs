@@ -1,4 +1,8 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -64,6 +68,18 @@ public class EfFolderRepository : IFolderRepository
         return await _db.Folders
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get all folders of a specific type
+    /// </summary>
+    public async Task<List<FolderNode>> GetAllByFolderTypeAsync(string folderType, CancellationToken cancellationToken = default)
+    {
+        return await _db.Folders
+            .AsNoTracking()
+            .Where(f => f.FolderType == folderType && !f.DeletedAt.HasValue)
+            .OrderBy(f => f.Path)
+            .ToListAsync(cancellationToken);
     }
 
     /// <summary>

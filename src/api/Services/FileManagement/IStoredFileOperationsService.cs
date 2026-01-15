@@ -39,24 +39,68 @@ public interface IStoredFileOperationsService
     string ExtractFileNameForStorage(string fullPath);
 
     /// <summary>
-    /// Builds a download-based thumbnail URL using query parameters (path-based pattern).
-    /// Returns null if file has no thumbnail.
-    /// Format: /api/{endpoint}/download?path={relativePath}
-    /// </summary>
-    /// <param name="file">The stored file containing thumbnail filename and path.</param>
-    /// <param name="apiDownloadEndpoint">The API download endpoint (e.g., "/api/gcode-files/download" or "/api/3d-models/download").</param>
-    /// <param name="storageDirectory">The root storage directory for computing relative paths.</param>
-    /// <remarks>
-    /// This method computes the relative path from the storage directory to the thumbnail file,
-    /// properly handling path normalization and URL encoding for safe transmission. This pattern
-    /// is more efficient than id-based lookups because the thumbnail path is already known from
-    /// the file metadata, avoiding unnecessary database queries.
-    /// </remarks>
-    string? BuildThumbnailUrl(StoredFile file, string apiDownloadEndpoint, string storageDirectory);
-
-    /// <summary>
     /// Validates that a file path is within the expected storage directory.
     /// Prevents directory traversal attacks.
     /// </summary>
+    /// <param name="candidatePath">The file path to validate.</param>
+    /// <param name="storageRoot">The root storage directory.</param>
     bool IsValidStoragePath(string candidatePath, string storageRoot);
+
+    /// <summary>
+    /// Builds the file download/view URL for a GCode file.
+    /// Format: /api/gcode/file/{id}
+    /// </summary>
+    string BuildGcodeFileUrl(Guid gcodeFileId);
+
+    /// <summary>
+    /// Builds the thumbnail URL for a GCode file.
+    /// Format: /api/gcode/thumbnail/{id}
+    /// </summary>
+    string BuildGcodeThumbnailUrl(Guid gcodeFileId);
+
+    /// <summary>
+    /// Builds the file download/view URL for a 3D model.
+    /// Handles format-specific parameters (e.g., forceStl=true for 3MF files).
+    /// Format: /api/3d-models/file/{id}[?forceStl=true]
+    /// </summary>
+    string BuildModel3DFileUrl(Guid modelId, ModelFileFormat format);
+
+    /// <summary>
+    /// Builds the thumbnail URL for a 3D model.
+    /// Format: /api/3d-models/thumbnail/{id}
+    /// </summary>
+    string BuildModel3DThumbnailUrl(Guid modelId);
+
+    /// <summary>
+    /// Builds the slicer job GCode download URL.
+    /// Format: /api/slicer/jobs/{jobId}/gcode
+    /// </summary>
+    string BuildSlicerJobGcodeUrl(Guid jobId);
+
+    /// <summary>
+    /// Resolves a relative or virtual path to an absolute path within a storage root.
+    /// Handles virtual paths (leading slashes), relative paths, and already-absolute paths.
+    /// This is the canonical path resolution logic used by all file controllers.
+    /// </summary>
+    /// <param name="relativePath">The relative or virtual path to resolve.</param>
+    /// <param name="storageRoot">The root storage directory (must be absolute).</param>
+    /// <returns>The resolved absolute path.</returns>
+    string ResolveStoragePath(string? relativePath, string storageRoot);
+
+    /// <summary>
+    /// Validates that a file exists at the given path and is safe to serve.
+    /// Performs both safety check (directory traversal prevention) and existence check.
+    /// </summary>
+    /// <param name="fullPath">The absolute file path to validate.</param>
+    /// <param name="storageRoot">The root storage directory for safety validation.</param>
+    /// <returns>True if file is safe and exists; false otherwise.</returns>
+    bool FileExistsAndIsSafe(string fullPath, string storageRoot);
+
+    /// <summary>
+    /// Gets the appropriate content type for a file based on its extension.
+    /// Used for consistent download content-type headers across all file types.
+    /// </summary>
+    /// <param name="fileExtension">The file extension (e.g., ".gcode", ".stl", ".obj").</param>
+    /// <returns>The MIME type to use for the file.</returns>
+    string GetContentTypeForFile(string fileExtension);
 }

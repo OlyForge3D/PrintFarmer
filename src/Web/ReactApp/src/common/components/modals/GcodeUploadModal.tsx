@@ -7,7 +7,11 @@ import { Modal } from './Modal';
 interface GcodeUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onFilesSelected: (files: File[]) => void;
+  onFilesSelected: (
+    files: File[],
+    onProgress?: (fileName: string, progress: number) => void,
+    onItemComplete?: (fileName: string, status: 'done' | 'error', error?: string) => void
+  ) => void;
   harvestId?: string;
   printerId?: string;
 }
@@ -97,8 +101,26 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
       ));
     });
 
-    // Pass files to parent for upload handling
-    onFilesSelected(queuedFiles.map(item => item.file));
+    // Create progress callback
+    const handleProgress = (fileName: string, progress: number) => {
+      setUploadQueue(prev => prev.map(item =>
+        item.file.name === fileName
+          ? { ...item, progress: Math.round(progress) }
+          : item
+      ));
+    };
+
+    // Create completion callback
+    const handleItemComplete = (fileName: string, status: 'done' | 'error', error?: string) => {
+      setUploadQueue(prev => prev.map(item =>
+        item.file.name === fileName
+          ? { ...item, status, error, progress: status === 'done' ? 100 : item.progress }
+          : item
+      ));
+    };
+
+    // Pass files to parent for upload handling with callbacks
+    onFilesSelected(queuedFiles.map(item => item.file), handleProgress, handleItemComplete);
   };
 
   const handleClose = () => {

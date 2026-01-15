@@ -8,11 +8,11 @@ namespace Farm.Infrastructure.Repositories.Tags
 {
     public interface ITagRepository
     {
-        Task<Model3DTag?> GetByIdAsync(Guid id, CancellationToken ct);
-        Task<Model3DTag?> GetByNameAsync(string name, CancellationToken ct);
-        Task<IReadOnlyList<Model3DTag>> ListAllAsync(CancellationToken ct);
-        Task AddAsync(Model3DTag tag, CancellationToken ct);
-        Task RemoveAsync(Model3DTag tag, CancellationToken ct);
+        Task<Tag?> GetByIdAsync(Guid id, CancellationToken ct);
+        Task<Tag?> GetByNameAsync(string name, CancellationToken ct);
+        Task<IReadOnlyList<Tag>> ListAllAsync(CancellationToken ct);
+        Task AddAsync(Tag tag, CancellationToken ct);
+        Task RemoveAsync(Tag tag, CancellationToken ct);
         Task SaveChangesAsync(CancellationToken ct);
     }
 }

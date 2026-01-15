@@ -79,52 +79,135 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     }
 
     /// <summary>
-    /// Builds a download-based thumbnail URL using query parameters (path-based pattern).
-    /// Returns null if file has no thumbnail.
-    /// Format: /api/{endpoint}/download?path={relativePath}
-    /// </summary>
-    public string? BuildThumbnailUrl(StoredFile file, string apiDownloadEndpoint, string storageDirectory)
-    {
-        ArgumentNullException.ThrowIfNull(file);
-
-        if (string.IsNullOrEmpty(file.ThumbnailFileName))
-        {
-            return null;
-        }
-
-        if (string.IsNullOrEmpty(apiDownloadEndpoint))
-        {
-            throw new ArgumentException("API download endpoint cannot be null or empty", nameof(apiDownloadEndpoint));
-        }
-
-        if (string.IsNullOrEmpty(storageDirectory))
-        {
-            throw new ArgumentException("Storage directory cannot be null or empty", nameof(storageDirectory));
-        }
-
-        string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-        string normalizedStorageDir = Path.GetFullPath(storageDirectory);
-        string normalizedThumbnailPath = Path.GetFullPath(fullThumbnailPath);
-
-        // Compute relative path for URL
-        if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
-        {
-            string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
-                .TrimStart(Path.DirectorySeparatorChar, '/');
-            relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
-            return $"{apiDownloadEndpoint}?path={Uri.EscapeDataString(relativePath)}";
-        }
-
-        // Fallback to using just the filename if not under storage directory
-        return $"{apiDownloadEndpoint}?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
-    }
-
-    /// <summary>
     /// Validates that a file path is within the expected storage directory.
     /// Prevents directory traversal attacks.
     /// </summary>
     public bool IsValidStoragePath(string candidatePath, string storageRoot)
     {
         return _fileManagementService.IsSafePath(candidatePath, storageRoot);
+    }
+
+    /// <summary>
+    /// Builds the file download/view URL for a GCode file.
+    /// Single source of truth for GCode file URLs.
+    /// </summary>
+    public string BuildGcodeFileUrl(Guid gcodeFileId)
+    {
+        return $"/api/gcode/file/{gcodeFileId}";
+    }
+
+    /// <summary>
+    /// Builds the file download/view URL for a 3D model.
+    /// Handles format-specific parameters (e.g., forceStl=true for 3MF files).
+    /// Single source of truth for Model3D file URLs.
+    /// </summary>
+    public string BuildModel3DFileUrl(Guid modelId, ModelFileFormat format)
+    {
+        if (format == ModelFileFormat.TMF) // 3MF format needs conversion
+        {
+            return $"/api/3d-models/file/{modelId}?forceStl=true";
+        }
+
+        return $"/api/3d-models/file/{modelId}";
+    }
+
+    /// <summary>
+    /// Builds the slicer job GCode download URL.
+    /// Single source of truth for slicer job URLs.
+    /// </summary>
+    public string BuildSlicerJobGcodeUrl(Guid jobId)
+    {
+        return $"/api/slicer/jobs/{jobId}/gcode";
+    }
+
+    /// <summary>
+    /// Builds the thumbnail URL for a GCode file.
+    /// Single source of truth for GCode thumbnail URLs.
+    /// </summary>
+    public string BuildGcodeThumbnailUrl(Guid gcodeFileId)
+    {
+        return $"/api/gcode/thumbnail/{gcodeFileId}";
+    }
+
+    /// <summary>
+    /// Builds the thumbnail URL for a 3D model.
+    /// Single source of truth for Model3D thumbnail URLs.
+    /// </summary>
+    public string BuildModel3DThumbnailUrl(Guid modelId)
+    {
+        return $"/api/3d-models/thumbnail/{modelId}";
+    }
+
+    /// <summary>
+    /// Resolves a relative or virtual path to an absolute path within a storage root.
+    /// Handles virtual paths (leading slashes), relative paths, and already-absolute paths.
+    /// This is the canonical path resolution logic used by all file controllers.
+    /// </summary>
+    public string ResolveStoragePath(string? relativePath, string storageRoot)
+    {
+        if (string.IsNullOrEmpty(relativePath))
+        {
+            return string.Empty;
+        }
+
+        // Normalize virtual paths - strip leading slashes to handle virtual path format
+        string normalizedPath = relativePath.TrimStart('/').Trim();
+        if (string.IsNullOrEmpty(normalizedPath))
+        {
+            return storageRoot;
+        }
+
+        // If the normalized path is already absolute, return as-is (Windows C:\ or Unix /mnt/etc)
+        if (Path.IsPathRooted(normalizedPath))
+        {
+            return normalizedPath;
+        }
+
+        // Combine relative path with storage root (guaranteed to be absolute)
+        return Path.Combine(storageRoot, normalizedPath);
+    }
+
+    /// <summary>
+    /// Validates that a file exists at the given path and is safe to serve.
+    /// Performs both safety check (directory traversal prevention) and existence check.
+    /// </summary>
+    public bool FileExistsAndIsSafe(string fullPath, string storageRoot)
+    {
+        if (string.IsNullOrEmpty(fullPath) || !_fileManagementService.IsSafePath(fullPath, storageRoot))
+        {
+            return false;
+        }
+
+        return File.Exists(fullPath);
+    }
+
+    /// <summary>
+    /// Gets the appropriate content type for a file based on its extension.
+    /// Provides unified content-type handling across GCode and Model3D downloads.
+    /// All files default to application/octet-stream to force browser download behavior.
+    /// </summary>
+    public string GetContentTypeForFile(string fileExtension)
+    {
+        return fileExtension.ToLowerInvariant() switch
+        {
+            // Common image thumbnail types
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+
+            // GCode files - force download
+            ".gcode" => "application/octet-stream",
+            ".bgcode" => "application/octet-stream",
+
+            // 3D Model formats
+            ".stl" => "application/vnd.ms-pki.stl",
+            ".3mf" => "model/3mf",
+            ".obj" => "text/plain",
+            ".ply" => "application/octet-stream",
+
+            // Default to octet-stream for unknown types (forces download)
+            _ => "application/octet-stream"
+        };
     }
 }

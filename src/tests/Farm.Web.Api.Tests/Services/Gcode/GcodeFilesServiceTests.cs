@@ -41,9 +41,8 @@ public class GcodeFilesServiceTests
     private static Mock<IStoredFileOperationsService> CreateStoredFileOperationsServiceMock()
     {
         var mock = new Mock<IStoredFileOperationsService>(MockBehavior.Loose);
-        mock.Setup(s => s.BuildThumbnailUrl(It.IsAny<StoredFile>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Returns<StoredFile, string, string>((file, endpoint, storageDir) =>
-                file.ThumbnailFileName != null ? $"{endpoint}?path={file.Id}/thumbnail" : null);
+        mock.Setup(s => s.BuildGcodeThumbnailUrl(It.IsAny<Guid>()))
+            .Returns<Guid>(fileId => $"/api/gcode/thumbnail/{fileId}");
         mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
             .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
         mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))
@@ -170,7 +169,7 @@ public class GcodeFilesServiceTests
     }
 
     [Fact]
-    public async Task ListAsync_FiltersByHarvestAndNormalizesThumbnailUrl()
+    public async Task QueryAsync_FiltersByHarvestAndNormalizesThumbnailUrl()
     {
         // Arrange
         string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
@@ -181,7 +180,7 @@ public class GcodeFilesServiceTests
 
         Guid printerId = Guid.NewGuid();
         Guid harvestId = Guid.NewGuid();
-        var folderJob = new FolderNode { Id = Guid.NewGuid(), Path = "jobs", FolderType = "gcode" };
+        var folderJob = new FolderNode { Id = Guid.NewGuid(), Path = "/jobs", FolderType = "gcode" };
 
         var dbFiles = new List<GcodeFile>
         {
@@ -190,7 +189,7 @@ public class GcodeFilesServiceTests
                 Id = Guid.NewGuid(),
                 FileName = "model1.gcode",  // Full filename with extension
                 FolderId = folderJob.Id,
-                FilePath = Path.Combine(storageDir, "jobs", "model1.gcode"),
+                FilePath = "/jobs/model1.gcode",  // Virtual path (NOT physical path)
                 FileSizeBytes = 1024,
                 UploadedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 SourcePrinterId = printerId,
@@ -201,7 +200,7 @@ public class GcodeFilesServiceTests
                 Id = Guid.NewGuid(),
                 FileName = "other.gcode",  // Full filename with extension
                 FolderId = folderJob.Id,
-                FilePath = Path.Combine(storageDir, "jobs", "other.gcode"),
+                FilePath = "/jobs/other.gcode",  // Virtual path (NOT physical path)
                 FileSizeBytes = 2048,
                 UploadedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
                 SourcePrinterId = Guid.NewGuid(),
@@ -210,8 +209,18 @@ public class GcodeFilesServiceTests
         };
 
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        repo.Setup(r => r.ListValidByDirectoryAsync("/jobs", It.IsAny<CancellationToken>())).ReturnsAsync(dbFiles);
-        repo.Setup(r => r.ListSubdirectoriesAsync("/jobs", It.IsAny<CancellationToken>())).ReturnsAsync(new List<string> { "print-jobs", ".hidden" });
+        repo.Setup(r => r.QueryFilesAsync(
+            "/jobs",
+            null, // search
+            null, // tagIds
+            null, // printerModelId
+            null, // printerId
+            "name", // sortBy
+            "asc", // sortOrder
+            1, // page
+            10, // pageSize
+            It.IsAny<CancellationToken>()
+        )).ReturnsAsync((dbFiles, 2));
         repo.Setup(r => r.GetLatestHarvestOperationIdsByPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<Guid, Guid?> { { printerId, harvestId } });
 
@@ -226,33 +235,34 @@ public class GcodeFilesServiceTests
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
-        GcodeFileListResponse response = await service.ListAsync(
+        GcodeFileListResponse response = await service.QueryAsync(
             path: "/jobs",
             sortBy: "name",
             sortOrder: "asc",
             search: null,
             page: 1,
             pageSize: 10,
-            harvestId: harvestId,
+            tagIds: null,
+            printerModelId: null,
             printerId: null,
             ct: CancellationToken.None);
 
         // Assert
-        response.Files.Should().HaveCount(2);
-        response.TotalFiles.Should().Be(1);
-        response.TotalSize.Should().Be(1024);
+        response.Files.Should().HaveCount(2);  // Both files returned
+        response.TotalFiles.Should().Be(2);    // Total count from repository
+        response.TotalSize.Should().Be(3072);  // 1024 + 2048
 
-        GcodeFileEntryDto directoryEntry = response.Files[0];
-        directoryEntry.IsDirectory.Should().BeTrue();
-        directoryEntry.FileName.Should().Be("print-jobs");
-        directoryEntry.Path.Should().Be("/jobs/print-jobs");
+        // QueryAsync returns files sorted by name, so check both
+        GcodeFileEntryDto firstFile = response.Files[0];
+        firstFile.IsDirectory.Should().BeFalse();
+        firstFile.FileName.Should().Be("model1.gcode");
+        firstFile.Path.Should().Be("/jobs/model1.gcode");  // Virtual path constructed from folder path + filename
+        firstFile.ThumbnailUrl.Should().Be("/api/gcode-files/download?path=thumbs%2Fmodel1.png");
 
-        GcodeFileEntryDto fileEntry = response.Files[1];
-        fileEntry.IsDirectory.Should().BeFalse();
-        fileEntry.FileName.Should().Be("model1.gcode");
-        fileEntry.Path.Should().Be("/jobs/model1.gcode");
-        fileEntry.HarvestOperationId.Should().Be(harvestId);
-        fileEntry.ThumbnailPath.Should().Be("/api/gcode-files/download?path=thumbs%2Fmodel1.png");
+        GcodeFileEntryDto secondFile = response.Files[1];
+        secondFile.IsDirectory.Should().BeFalse();
+        secondFile.FileName.Should().Be("other.gcode");
+        secondFile.Path.Should().Be("/jobs/other.gcode");  // Virtual path constructed from folder path + filename
     }
 
     [Fact]

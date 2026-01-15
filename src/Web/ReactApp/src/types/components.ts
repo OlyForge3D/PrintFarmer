@@ -7,7 +7,7 @@ import type { Model } from './models';
 import type { HistoryJob, HistoryStats, ModelStats, JobAction, JobStatus, JobDetails } from './queue';
 import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
 import type { MachineProfile, SliceCompleteResult } from './slicer';
-import type { GcodeFile, Printer, QueueJob } from './api';
+import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
 
 // ====================================
 // Models3D Component Props
@@ -69,7 +69,7 @@ export interface HistoryJobCardProps {
 }
 
 export interface QueueJobsTableProps {
-  jobs: QueueJob[];
+  jobs: JobQueuePrintJob[];
   isLoading: boolean;
   onJobAction?: (jobId: string, action: JobAction) => void;
 }
