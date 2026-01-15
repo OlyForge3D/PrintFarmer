@@ -31,7 +31,7 @@ export interface GcodeFileItem extends FileItem {
   meta: NonNullable<FileItem['meta']>;
 }
 
-export interface Model3DFileItem extends FileItem {
+export interface  Model3DFileItem extends FileItem {
   meta: NonNullable<FileItem['meta']>
 }
 

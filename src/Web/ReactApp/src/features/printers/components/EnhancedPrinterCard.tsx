@@ -5,7 +5,7 @@ import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import {
   ChevronDown, ChevronUp, Cog, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, FileText
@@ -63,14 +63,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
   const isPaused = currentStatus.isOnline && currentStatus.state === 'paused';
   const isShutdown = currentStatus.state === 'shutdown';
   const apiCall = (path: string, body?: unknown) => {
-    const init: RequestInit = { method: 'POST' };
-    if (body && typeof body === 'object') {
-      init.headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
-      init.body = JSON.stringify(body);
-    } else {
-      init.headers = getAuthHeaders();
-    }
-    return fetch(`${getApiBaseUrl()}${path}`, init).catch(e => console.error(e));
+    return apiClient.genericPost(path, body as Record<string, unknown>).catch(e => console.error(e));
   };
   const handlePause = useCallback(() => apiCall(`/api/printers/${printer.id}/pause`), [printer.id]);
   const handleResume = useCallback(() => apiCall(`/api/printers/${printer.id}/resume`), [printer.id]);
@@ -82,7 +75,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
   const handleApplyPreset = useCallback((m: keyof TempPresets) => { const p = DEFAULT_PRESETS[m]; setTempInputs(p); apiCall(`/api/printers/${printer.id}/temps`, p); }, [printer.id]);
   const handleMove = useCallback((x?: number | null, y?: number | null, z?: number | null) => apiCall(`/api/printers/${printer.id}/move`, { x: x || undefined, y: y || undefined, z: z || undefined }), [printer.id]);
   const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/move-to`, moveInputs), [printer.id, moveInputs]);
-  const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/files/upload`, { method: 'POST', body: formData, headers: getAuthHeaders() }); if (r.ok) setSelectedFile(null); } finally { setIsUploading(false); } }, [printer.id, selectedFile]);
+  const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await apiClient.uploadGcodeLibraryFile(selectedFile); if (r) setSelectedFile(null); } finally { setIsUploading(false); } }, [selectedFile]);
 
   if (!isExpanded) {
     return (
@@ -460,7 +453,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><FileText className="h-4 w-4 mr-2" />Files</h4>
         <div className="flex items-center space-x-2">
           <div className="flex-1">
-            <FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} />
+            <FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(files: FileList | null) => setSelectedFile(files?.[0] || null)} disabled={isPrinting || isUploading} />
           </div>
           <Button
             type="button"

@@ -55,8 +55,12 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
-      queryClient.invalidateQueries({ queryKey: ['models-3d'] });
+      // Invalidate file browser queries (both gcode and models use 'file-browser' prefix)
+      queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      // Also invalidate tag queries that might be cached
+      queryClient.invalidateQueries({ queryKey: ['gcode-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['model-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
       setError(null);
       onClose();
     },

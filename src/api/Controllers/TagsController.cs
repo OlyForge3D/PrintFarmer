@@ -295,13 +295,13 @@ public class TagsController(
     /// <param name="objectType">Type of object: Model3D or GcodeFile</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>No content on success</returns>
-    /// <response code="204">Tag assigned successfully</response>
+    /// <response code="200">Tag successfully assigned</response>
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Object or tag not found</response>
     /// <response code="500">Internal server error</response>
     [HttpPost("{objectId:guid}/{tagId:guid}/assign")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -320,7 +320,10 @@ public class TagsController(
             }
 
             await _tagService.AssignTagAsync(objectId, tagId, objectType, ct);
-            return NoContent();
+
+            // Fetch and return the assigned tag
+            TagDto? tag = await _tagService.GetTagByIdAsync(tagId, ct);
+            return Ok(tag);
         }
         catch (KeyNotFoundException ex)
         {

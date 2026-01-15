@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 interface ModelUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onUploadSuccess?: () => Promise<void>;
 }
 
 interface UploadItem {
@@ -21,7 +22,8 @@ interface UploadItem {
 
 export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   isOpen,
-  onClose
+  onClose,
+  onUploadSuccess
 }) => {
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
@@ -123,9 +125,19 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
     setUploadQueue(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     // Invalidate models-search query to refresh the models list
     queryClient.invalidateQueries({ queryKey: ['models-search'] });
+    
+    // Call onUploadSuccess callback if provided
+    if (onUploadSuccess) {
+      try {
+        await onUploadSuccess();
+      } catch (error) {
+        console.error('Error calling onUploadSuccess:', error);
+      }
+    }
+    
     onClose();
   };
 

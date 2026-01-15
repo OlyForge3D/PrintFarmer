@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 export interface PasswordPolicy {
   minLength: number;
@@ -12,7 +12,7 @@ export interface PasswordPolicy {
 const QUERY_KEY = ['passwordPolicy'];
 
 async function fetchPolicy(): Promise<PasswordPolicy> {
-  const resp = await fetch(`${getApiBaseUrl()}/settings/security/password-policy`, { headers: getAuthHeaders() });
+  const resp = await apiClient.getPasswordPolicy();
   if (!resp.ok) {
     throw new Error(`Failed to load password policy (HTTP ${resp.status})`);
   }
@@ -27,11 +27,7 @@ async function fetchPolicy(): Promise<PasswordPolicy> {
 }
 
 async function updatePolicy(policy: PasswordPolicy): Promise<PasswordPolicy> {
-  const resp = await fetch(`${getApiBaseUrl()}/settings/security/password-policy`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify(policy)
-  });
+  const resp = await apiClient.updatePasswordPolicy(policy as unknown as Record<string, unknown>);
   if (!resp.ok) {
     throw new Error(`Failed to save password policy (HTTP ${resp.status})`);
   }

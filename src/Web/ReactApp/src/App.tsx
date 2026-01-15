@@ -13,9 +13,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-
 // Services
+import { apiClient } from '@/services/api';
 import { assetService } from '@/services/assetService';
 import { printerSignalRService } from '@/services/printer-signalr';
 
@@ -170,23 +169,14 @@ function App() {
   useEffect(() => {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
+      setCheckingSetup(true);
       try {
-        const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
-          headers: getAuthHeaders()
+        const data = await apiClient.getSetupStatus();
+        setSetupComplete(!data.needsSetup);
+        logger.info('Setup status retrieved', {
+          needsSetup: data.needsSetup,
+          setupComplete: !data.needsSetup
         });
-        if (response.ok) {
-          const data = await response.json();
-          setSetupComplete(!data.needsSetup);
-          logger.info('Setup status retrieved', {
-            needsSetup: data.needsSetup,
-            setupComplete: !data.needsSetup
-          });
-        } else {
-          setSetupComplete(false);
-          logger.warn('Setup status check failed - assuming setup needed', {
-            status: response.status
-          });
-        }
       } catch (error) {
         logger.error('Error checking setup status', {
           error: error instanceof Error ? error.message : String(error)

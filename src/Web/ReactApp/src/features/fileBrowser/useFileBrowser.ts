@@ -67,6 +67,7 @@ export interface UseFileBrowserResult {
   clearSelection: () => void;
   createDirectory: () => void;
   moveFiles: (fileIds: string[], targetPath: string) => Promise<void>;
+  refetch: () => Promise<void>;
   columns?: ColumnDef[];
   currentPath: string;
 }
@@ -287,6 +288,9 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
     clearSelection,
     createDirectory,
     moveFiles,
+    refetch: async () => {
+      await filesQuery.refetch();
+    },
     columns,
     currentPath: filesQuery.data?.currentPath ?? path,
   };

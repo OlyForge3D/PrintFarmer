@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/services/api';
 import { Button, Input } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { XMarkIcon, PlusIcon } from '@heroicons/react/24/solid';
 
 interface TagOption {
@@ -38,24 +38,15 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   // Create new tag mutation
   const createTagMutation = useMutation({
     mutationFn: async (tagName: string) => {
-      const response = await fetch(`${getApiBaseUrl()}/tags`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          name: tagName,
-          color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
-          description: ''
-        })
-      });
-      if (!response.ok) throw new Error('Failed to create tag');
-      return response.json();
+      return await apiClient.createTag(
+        tagName,
+        '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
+        ''
+      );
     },
     onSuccess: (newTag) => {
       queryClient.invalidateQueries({ queryKey: ['all-tags'] });
-      handleAddTag(newTag);
+      if (newTag) handleAddTag(newTag as unknown as TagOption);
       setSearchTerm('');
     }
   });
@@ -64,18 +55,15 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   const { data: allTags = [], isLoading: isLoadingTags } = useQuery<TagOption[]>({
     queryKey: ['all-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/tags`, {
-        headers: getAuthHeaders()
-      });
-      if (!response.ok) throw new Error('Failed to fetch tags');
-      return response.json();
+      const result = await apiClient.listTags();
+      return (result as unknown as TagOption[]) || [];
     },
     staleTime: 5 * 60 * 1000
   });
 
   // Filter tags based on search
-  const filteredTags = allTags.filter(
-    tag =>
+  const filteredTags = (Array.isArray(allTags) ? allTags : []).filter(
+    (tag: TagOption) =>
       tag.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
       !selectedTags.some(st => st.id === tag.id)
   );

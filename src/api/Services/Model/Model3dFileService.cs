@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
@@ -203,7 +204,7 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Model DTO with file details, or null if not found</returns>
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
             if (model == null)
             {
                 return null;
@@ -727,6 +728,11 @@ namespace Farm.Web.Api.Services.Model
         {
             string? thumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id);
 
+            // Map tags from the eagerly-loaded Tags collection
+            var tags = model.Tags
+                ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                .ToArray() ?? Array.Empty<TagDto>();
+
             return new Model3DDto
             {
                 Id = model.Id,
@@ -736,7 +742,8 @@ namespace Farm.Web.Api.Services.Model
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
-                ThumbnailUrl = thumbnailUrl
+                ThumbnailUrl = thumbnailUrl,
+                Tags = tags
             };
         }
 

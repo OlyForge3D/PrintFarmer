@@ -1019,7 +1019,7 @@ public record GcodeFileDto(
     string? OriginalPrinterPath = null,
     DateTime? LastSeenOnPrinter = null,
     string? Description = null,
-    string[]? Tags = null,
+    IEnumerable<TagDto>? Tags = null,
     double? RequiredNozzleDiameter = null,
     string? RequiredMaterial = null,
     double? EstimatedPrintTimeMinutes = null,

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
 import type { TagOption, EditingTag } from '@/types/admin';
 
@@ -23,21 +23,18 @@ export const TagAdminPage: React.FC = () => {
         queryKey: ['admin-all-tags'],
         queryFn: async () => {
             // Fetch tags
-            const tagsResponse = await fetch(`${getApiBaseUrl()}/tags`, {
-                headers: getAuthHeaders()
-            });
-            if (!tagsResponse.ok) throw new Error('Failed to fetch tags');
-            const tagsData = await tagsResponse.json();
+            const tagsData = await apiClient.getTags();
 
-            // Fetch models to calculate usage count
-            const modelsResponse = await fetch(`${getApiBaseUrl()}/3d-models`, {
-                headers: getAuthHeaders()
-            });
-            if (!modelsResponse.ok) throw new Error('Failed to fetch models');
-            const modelsData = await modelsResponse.json();
+            // Fetch both Model3D and GcodeFile data to calculate usage count
+            const [modelsData, gcodeFilesData] = await Promise.all([
+                apiClient.get3DModels(),
+                apiClient.getGcodeFilesQuery({})
+            ]);
 
-            // Calculate usage count for each tag
+            // Calculate usage count for each tag (from both Model3D and GcodeFile)
             const usageMap = new Map<string, number>();
+            
+            // Count Model3D tags
             for (const model of modelsData) {
                 if (model.tags && Array.isArray(model.tags)) {
                     for (const tag of model.tags) {
@@ -45,8 +42,20 @@ export const TagAdminPage: React.FC = () => {
                     }
                 }
             }
+            
+            // Count GcodeFile tags
+            if (gcodeFilesData && gcodeFilesData.files && Array.isArray(gcodeFilesData.files)) {
+                for (const file of gcodeFilesData.files) {
+                    if (file.tags && Array.isArray(file.tags)) {
+                        for (const tag of file.tags) {
+                            usageMap.set(tag.id, (usageMap.get(tag.id) || 0) + 1);
+                        }
+                    }
+                }
+            }
 
-            return tagsData.map((tag: TagOption) => ({
+            const typedTags = tagsData as unknown as TagOption[];
+            return typedTags.map((tag: TagOption) => ({
                 ...tag,
                 usageCount: usageMap.get(tag.id) || 0
             }));
@@ -60,25 +69,11 @@ export const TagAdminPage: React.FC = () => {
         mutationFn: async () => {
             if (!newTagName.trim()) throw new Error('Tag name is required');
 
-            const response = await fetch(`${getApiBaseUrl()}/tags`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders()
-                },
-                body: JSON.stringify({
-                    name: newTagName.trim(),
-                    color: newTagColor,
-                    description: newTagDescription.trim()
-                })
+            return apiClient.createNewTag({
+                name: newTagName.trim(),
+                color: newTagColor,
+                description: newTagDescription.trim()
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to create tag');
-            }
-
-            return response.json();
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
@@ -93,18 +88,7 @@ export const TagAdminPage: React.FC = () => {
     // Delete tag mutation
     const deleteTagMutation = useMutation({
         mutationFn: async (tagId: string) => {
-            const response = await fetch(
-                `${getApiBaseUrl()}/tags/${tagId}`,
-                {
-                    method: 'DELETE',
-                    headers: getAuthHeaders()
-                }
-            );
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to delete tag');
-            }
+            return apiClient.deleteTagById(tagId);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
@@ -417,7 +401,7 @@ export const TagAdminPage: React.FC = () => {
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Delete tag"
-                                                        disabled={deleteTagMutation.isPending || (tag.usageCount || 0) > 0}
+                                                        disabled={deleteTagMutation.isPending}
                                                     >
                                                         {deleteTagMutation.isPending ? (
                                                             <LoadingIcon className="w-4 h-4" />

@@ -1141,8 +1141,8 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("directoryId")] string? DirectoryId = null,   // Include directory ID for efficient directory lookups (virtual path)
     [property: JsonPropertyName("targetModelName")] string? TargetModelName = null,  // Printer model this gcode was sliced for
     [property: JsonPropertyName("requiredMaterial")] string? RequiredMaterial = null,  // Required filament type (e.g., "PLA", "PETG")
-                                                                                       // Extracted metadata from G-code
-    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,
+    [property: JsonPropertyName("tags")] IReadOnlyList<TagDto>? Tags = null,  // Tags assigned to this gcode file
+    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,  // Slicer used (PrusaSlicer, OrcaSlicer, etc.)
     [property: JsonPropertyName("extractedSlicerVersion")] string? ExtractedSlicerVersion = null,
     [property: JsonPropertyName("extractedPrintTime")] double? ExtractedPrintTime = null,  // Minutes
     [property: JsonPropertyName("extractedFilamentLength")] double? ExtractedFilamentLength = null,  // Millimeters

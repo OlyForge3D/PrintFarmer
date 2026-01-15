@@ -1,7 +1,7 @@
 import { CheckIcon } from '@/common/components/icons/MdiIcons';
 import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { Button, Checkbox } from '@/common/components/ui';
 import { Modal } from './Modal';
 import { TagSelector } from '@/components/TagSelector';
@@ -44,11 +44,8 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const { data: models = [] } = useQuery<ModelOption[]>({
         queryKey: ['all-models-bulk'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/3d-models`, {
-                headers: getAuthHeaders()
-            });
-            if (!response.ok) throw new Error('Failed to fetch models');
-            return response.json();
+          const result = await apiClient.get3DModels();
+          return (result as unknown as ModelOption[]) || [];
         },
         enabled: isOpen,
         staleTime: 5 * 60 * 1000,
@@ -62,27 +59,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                 throw new Error('Please select at least one model and one tag');
             }
 
-            const response = await fetch(
-                `${getApiBaseUrl()}/tags/bulk-assign`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({
-                        modelIds: selectedModelIds,
-                        tagIds: selectedTags.map(t => t.id)
-                    })
-                }
-            );
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to assign tags');
-            }
-
-            return response.json();
+            return apiClient.bulkAssignTags(selectedModelIds, selectedTags.map(t => t.id));
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['models-search'] });
@@ -98,7 +75,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const handleSelectAllModels = (checked: boolean) => {
         setSelectAllModels(checked);
         if (checked) {
-            setSelectedModelIds(models.map(m => m.id));
+            if (models && Array.isArray(models)) setSelectedModelIds(models.map((m: ModelOption) => (m as unknown as { id: string }).id));
         } else {
             setSelectedModelIds([]);
         }
@@ -153,8 +130,8 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                         </label>
                     </div>
                     <div className="bg-pf-bg-2 rounded-lg border border-pf-border p-4 max-h-48 overflow-y-auto space-y-2">
-                        {models.length > 0 ? (
-                            models.map(model => (
+                        {models && Array.isArray(models) && models.length > 0 ? (
+                            models.map((model: ModelOption) => (
                                 <label
                                     key={model.id}
                                     className={`flex items-center gap-3 p-2 rounded transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}

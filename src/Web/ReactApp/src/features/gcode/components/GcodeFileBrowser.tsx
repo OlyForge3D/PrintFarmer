@@ -9,7 +9,7 @@ import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon } from '@/com
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { signalRService } from '@/services/harvest-signalr';
 import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 
@@ -442,17 +442,9 @@ export const GcodeFileBrowser = ({
         onCreateDirectory: async (path: string, folderName: string) => {
           try {
             const fullPath = path === '/' ? `/${folderName}` : `${path}/${folderName}`;
-            const resp = await fetch(`${getApiBaseUrl()}/gcode-files/folder`, {
-              method: 'POST',
-              headers: {
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ path: fullPath }),
-            });
-            if (!resp.ok) {
-              const text = await resp.text();
-              throw new Error(text || 'Failed to create directory');
+            const result = await apiClient.createGcodeDirectory(fullPath);
+            if (!result.success) {
+              throw new Error(result.message || 'Failed to create directory');
             }
             toast.success(`Created folder "${folderName}"`);
           } catch (error) {

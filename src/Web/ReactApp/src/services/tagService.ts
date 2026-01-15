@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios';
+import { apiClient } from '@/services/api';
 
 /**
  * Tag data transfer object
@@ -25,10 +25,23 @@ export interface TagSuggestionDto {
  */
 export interface TagAnalyticsDto {
   totalTags: number;
-  totalAssignments: number;
+  tagsInUse: number;
+  unusedTags: number;
+  totalModelTagAssociations: number;
   averageTagsPerModel: number;
-  mostUsedTags: TagSuggestionDto[];
-  leastUsedTags: TagSuggestionDto[];
+  topTags: TagStatDto[];
+  unusedTagsList: TagStatDto[];
+}
+
+/**
+ * Individual tag statistics
+ */
+export interface TagStatDto {
+  id: string;
+  name: string;
+  modelCount: number;
+  createdAt: string;
+  lastUsedAt?: string | null;
 }
 
 /**
@@ -37,9 +50,9 @@ export interface TagAnalyticsDto {
 /**
  * Tag service for API integration
  * Handles all tag-related API calls with error handling and caching
+ * Delegated to apiClient singleton which handles authentication automatically
  */
 class TagService {
-  private readonly baseUrl = '/api/tags';
   private readonly debounceDelay = 300;
   private searchTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private tagsCache: Map<string, TagDto> = new Map();
@@ -52,15 +65,15 @@ class TagService {
    */
   async listTags(): Promise<TagDto[]> {
     try {
-      const response = await axios.get<TagDto[]>(`${this.baseUrl}/tags`);
-      const tags = response.data || [];
+      const tags = await apiClient.listTags();
       
       // Update cache
-      tags.forEach(tag => {
-        this.tagsCache.set(tag.id, tag);
+      const typedTags = tags as unknown as TagDto[];
+      typedTags.forEach((tag: TagDto) => {
+        this.tagsCache.set((tag as unknown as Record<string, unknown>).id as string, tag);
       });
       
-      return tags;
+      return typedTags;
     } catch (error) {
       this.handleError('Failed to list tags', error);
       return [];
@@ -85,11 +98,8 @@ class TagService {
     // Set new timeout for debouncing
     const timeout = setTimeout(async () => {
       try {
-        const response = await axios.get<TagSuggestionDto[]>(
-          `${this.baseUrl}/tags/search`,
-          { params: { q: query } }
-        );
-        callback(response.data || []);
+        const results = await apiClient.searchTags(query);
+        callback((results as unknown as TagSuggestionDto[]) || []);
       } catch (error) {
         this.handleError('Failed to search tags', error);
         callback([]);
@@ -110,12 +120,8 @@ class TagService {
         return this.popularTagsCache.slice(0, count);
       }
 
-      const response = await axios.get<TagSuggestionDto[]>(
-        `${this.baseUrl}/tags/popular`,
-        { params: { count: count * 2 } } // Fetch extra in case some are filtered
-      );
-
-      this.popularTagsCache = response.data || [];
+      const popular = await apiClient.getPopularTags(count * 2);
+      this.popularTagsCache = popular as unknown as TagSuggestionDto[];
       this.lastCacheTime = now;
 
       return this.popularTagsCache.slice(0, count);
@@ -130,8 +136,8 @@ class TagService {
    */
   async getAnalytics(): Promise<TagAnalyticsDto | null> {
     try {
-      const response = await axios.get<TagAnalyticsDto>(`${this.baseUrl}/tags/analytics`);
-      return response.data || null;
+      const analytics = await apiClient.getTagAnalytics();
+      return (analytics as unknown as TagAnalyticsDto) || null;
     } catch (error) {
       this.handleError('Failed to get tag analytics', error);
       return null;
@@ -143,18 +149,12 @@ class TagService {
    */
   async createTag(name: string, color?: string, description?: string): Promise<TagDto | null> {
     try {
-      const response = await axios.post<TagDto>(`${this.baseUrl}/tags`, {
-        name,
-        color,
-        description,
-      });
-
-      const tag = response.data;
+      const tag = await apiClient.createTag(name, color, description);
       if (tag) {
-        this.tagsCache.set(tag.id, tag);
+        const typedTag = tag as unknown as TagDto;
+        this.tagsCache.set((typedTag as unknown as Record<string, unknown>).id as string, typedTag);
       }
-
-      return tag || null;
+      return (tag as unknown as TagDto) || null;
     } catch (error) {
       this.handleError('Failed to create tag', error);
       return null;
@@ -166,7 +166,7 @@ class TagService {
    */
   async deleteTag(tagId: string): Promise<boolean> {
     try {
-      await axios.delete(`${this.baseUrl}/tags/${tagId}`);
+      await apiClient.deleteTag(tagId);
       this.tagsCache.delete(tagId);
       return true;
     } catch (error) {
@@ -184,15 +184,13 @@ class TagService {
       return this.tagsCache.get(tagId) || null;
     }
 
-    try {
-      const response = await axios.get<TagDto>(`${this.baseUrl}/tags/${tagId}`);
-      const tag = response.data;
-
-      if (tag) {
-        this.tagsCache.set(tag.id, tag);
-      }
-
-      return tag || null;
+      try {
+        const tag = await apiClient.getTagById(tagId);
+        if (tag) {
+          const typedTag = tag as unknown as TagDto;
+          this.tagsCache.set(((typedTag as unknown as Record<string, unknown>).id as string), typedTag);
+        }
+        return (tag as unknown as TagDto) || null;
     } catch (error) {
       this.handleError(`Failed to get tag ${tagId}`, error);
       return null;
@@ -208,12 +206,7 @@ class TagService {
     }
 
     try {
-      const response = await axios.get<string[]>(
-        `${this.baseUrl}/models/filter/all-tags`,
-        { params: { tags: tagIds.join(',') } }
-      );
-
-      return response.data || [];
+      return await apiClient.filterModelsWithAllTags(tagIds);
     } catch (error) {
       this.handleError('Failed to filter models with all tags', error);
       return [];
@@ -229,12 +222,7 @@ class TagService {
     }
 
     try {
-      const response = await axios.get<string[]>(
-        `${this.baseUrl}/models/filter/any-tags`,
-        { params: { tags: tagIds.join(',') } }
-      );
-
-      return response.data || [];
+      return await apiClient.filterModelsWithAnyTag(tagIds);
     } catch (error) {
       this.handleError('Failed to filter models with any tag', error);
       return [];
@@ -250,26 +238,7 @@ class TagService {
     excludeTagIds?: string[]
   ): Promise<string[]> {
     try {
-      const params: Record<string, string> = {};
-      
-      if (includeAllTagIds && includeAllTagIds.length > 0) {
-        params.includeAll = includeAllTagIds.join(',');
-      }
-      
-      if (includeAnyTagIds && includeAnyTagIds.length > 0) {
-        params.includeAny = includeAnyTagIds.join(',');
-      }
-      
-      if (excludeTagIds && excludeTagIds.length > 0) {
-        params.exclude = excludeTagIds.join(',');
-      }
-
-      const response = await axios.get<string[]>(
-        `${this.baseUrl}/models/filter`,
-        { params }
-      );
-
-      return response.data || [];
+      return await apiClient.filterModelsComplex(includeAllTagIds, includeAnyTagIds, excludeTagIds);
     } catch (error) {
       this.handleError('Failed to filter models with complex criteria', error);
       return [];
@@ -294,9 +263,7 @@ class TagService {
   async assignTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
     try {
       const type = objectType === 'gcode' ? 'GcodeFile' : 'Model3D';
-      await axios.post(
-        `${this.baseUrl}/${objectId}/${tagId}/assign?objectType=${type}`
-      );
+      await apiClient.assignTagToObject(objectId, tagId, type);
     } catch (error) {
       this.handleError(`Failed to assign tag to ${objectType}`, error);
       throw error;
@@ -312,9 +279,7 @@ class TagService {
   async removeTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
     try {
       const type = objectType === 'gcode' ? 'GcodeFile' : 'Model3D';
-      await axios.delete(
-        `${this.baseUrl}/${objectId}/${tagId}/remove?objectType=${type}`
-      );
+      await apiClient.removeTagFromObject(objectId, tagId, type);
     } catch (error) {
       this.handleError(`Failed to remove tag from ${objectType}`, error);
       throw error;
@@ -327,10 +292,8 @@ class TagService {
    */
   async getGcodeFileTags(gcodeFileId: string): Promise<TagDto[]> {
     try {
-      const response = await axios.get<TagDto[]>(
-        `${this.baseUrl}/gcode-file/${gcodeFileId}`
-      );
-      return response.data || [];
+      const fileTags = await apiClient.getGcodeFileTags(gcodeFileId);
+      return (fileTags as unknown as TagDto[]) || [];
     } catch (error) {
       this.handleError('Failed to fetch gcode file tags', error);
       return [];
@@ -355,12 +318,8 @@ class TagService {
    * Handle API errors
    */
   private handleError(message: string, error: unknown): void {
-    if (axios.isAxiosError(error)) {
-      const axiosError = error as AxiosError;
-      console.error(
-        `${message}: ${axiosError.response?.status} ${axiosError.response?.statusText}`,
-        axiosError.response?.data
-      );
+    if (error instanceof Error) {
+      console.error(`${message}: ${error.message}`, error);
     } else {
       console.error(message, error);
     }

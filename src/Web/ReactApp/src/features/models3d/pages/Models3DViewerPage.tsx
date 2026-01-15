@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '@/services/api';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert } from '@/common/components/ui';
 import { UploadIcon, DeleteIcon, CubeIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
@@ -32,9 +33,7 @@ export const Models3DViewerPage: React.FC = () => {
     queryKey: ['models-3d-all'],
     queryFn: async () => {
       try {
-        const response = await fetch('/api/models');
-        if (!response.ok) throw new Error('Failed to fetch models');
-        return response.json();
+        return await apiClient.getModels3D();
       } catch (err) {
         console.error('Error fetching models:', err);
         return [];

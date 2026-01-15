@@ -292,7 +292,7 @@ public abstract class StoredFile
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
-    public string? Tags { get; set; } // JSON array of tags
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>(); // Skip-navigation collection for modern EF Core
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     // File health status (populated by FileConsistencyAuditService)
@@ -334,9 +334,6 @@ public class GcodeFile : StoredFile
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
-
-    // Navigation property for tags (via generic TagMapping)
-    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
 }
 
 public enum GcodeSource
@@ -437,9 +434,6 @@ public class Model3D : StoredFile
     public string? ValidationErrors { get; set; } // JSON array of validation issues
     public Guid? UploadedByUserId { get; set; }
     public User? UploadedByUser { get; set; }
-
-    // Navigation property for tags (populated dynamically from TagMappings where ObjectType = "Model3D")
-    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
 }
 
 public enum ModelFileFormat
@@ -982,25 +976,6 @@ public class Tag
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-
-    // Navigation
-    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
-}
-
-/// <summary>
-/// Polymorphic join table for many-to-many relationship between any taggable object and Tag.
-/// The ObjectType discriminator determines what type of object is being tagged (Model3D, GcodeFile, etc.)
-/// </summary>
-public class TagMapping
-{
-    public Guid Id { get; set; }
-    public Guid TagId { get; set; }
-    public string ObjectType { get; set; } = string.Empty; // "Model3D", "GcodeFile", "Printer", etc.
-    public Guid ObjectId { get; set; } // FK to the actual object (could be Model3DId, GcodeFileId, PrinterId, etc.)
-    public DateTime TaggedAt { get; set; }
-
-    // Navigation properties
-    public Tag? Tag { get; set; }
 }
 
 /// <summary>/// Queue item for G-code harvest operations. Decouples the API request from the background processing.

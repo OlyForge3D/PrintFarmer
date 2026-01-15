@@ -5,7 +5,7 @@ import { FileUpload } from '@/common/components/ui/FileUpload';
 import Button from '@/common/components/ui/Button';
 import Select from '@/common/components/ui/Select';
 import { toast } from 'sonner';
-import { getApiBaseUrl, getAuthHeaders, getHubUrl } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
 import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
@@ -111,14 +111,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       // NOW that SignalR is connected and listening, trigger the import
       const form = new FormData();
       form.append('file', selectedFile);
-      const resp = await fetch(`${getApiBaseUrl()}/printers/import`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: form
-      });
-      if (!resp.ok) {
-        const t = await resp.text().catch(() => 'Unknown');
-        throw new Error(t || `HTTP ${resp.status}`);
+      try {
+        await apiClient.uploadPrinterImport(form);
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error('Unknown import error');
+        throw error;
       }
 
     } catch (err) {

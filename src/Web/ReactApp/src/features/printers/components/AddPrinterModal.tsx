@@ -3,7 +3,7 @@ import styles from './AddPrinterModal.module.css';
 import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -63,13 +63,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   const loadManufacturers = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/manufacturers`, {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setManufacturers(data);
-      }
+      const data = await apiClient.getManufacturers();
+      setManufacturers(data);
     } catch (err) {
       console.error('Failed to load manufacturers:', err);
     }
@@ -77,13 +72,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   const loadModels = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models`, {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setModels(data);
-      }
+      const data = await apiClient.getModels();
+      setModels(data);
     } catch (err) {
       console.error('Failed to load models:', err);
     }
@@ -144,29 +134,17 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setError('');
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/printers`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
-        onSuccess();
-        handleClose();
+      await apiClient.createPrinter(formData);
+      onSuccess();
+      handleClose();
+    } catch (err: unknown) {
+      const error = err as Record<string, unknown>;
+      if (error?.response && (error.response as Record<string, unknown>)?.status === 400 && ((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.errors) {
+        // Handle validation errors from the server
+        setValidationErrors((error.response as Record<string, unknown>).data as Record<string, string[]>);
       } else {
-        const errorData = await response.json().catch(() => null);
-        if (response.status === 400 && errorData?.errors) {
-          // Handle validation errors from the server
-          setValidationErrors(errorData.errors);
-        } else {
-          setError(errorData?.message || `Failed to add printer (${response.status})`);
-        }
+        setError(((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.message as string || 'Failed to add printer');
       }
-    } catch (err) {
-      setError('Network error. Please check your connection and try again.');
       console.error('Add printer error:', err);
     } finally {
       setIsLoading(false);

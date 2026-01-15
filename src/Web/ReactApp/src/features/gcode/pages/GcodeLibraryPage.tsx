@@ -11,7 +11,7 @@ import { TaggingModal } from '@/components/TaggingModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { Button } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
 import type { ModelTag } from '@/types/models';
 
@@ -31,11 +31,8 @@ export const GcodeLibraryPage: React.FC = () => {
   const { data: allTags = [] } = useQuery<ModelTag[]>({
     queryKey: ['gcode-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/tags`, {
-        headers: getAuthHeaders()
-      });
-      if (!response.ok) throw new Error('Failed to fetch tags');
-      return response.json();
+      const result = await apiClient.getTags();
+      return (result as unknown as ModelTag[]) || [];
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000
@@ -128,7 +125,7 @@ export const GcodeLibraryPage: React.FC = () => {
                 )}
               </div>
               <TagInput
-                selectedTags={allTags.filter(t => selectedTags.includes(t.id))}
+                selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
                 onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
                 placeholder="Select tags..."
                 maxTags={undefined}

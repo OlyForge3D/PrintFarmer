@@ -8,7 +8,6 @@ import { useHealthStatus } from '@/common/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { apiClient } from '@/services/api';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
 // Move password policy outside component to prevent unnecessary re-renders
 const passwordPolicy = { 
@@ -219,15 +218,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
   const checkSetupStatus = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
-        headers: getAuthHeaders()
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setNeedsSetup(data.needsSetup);
-      } else {
-        setGlobalError('Failed to check setup status');
-      }
+      const data = await apiClient.getSetupStatus() as { needsSetup: boolean };
+      setNeedsSetup(data.needsSetup);
     } catch (err) {
       setGlobalError('Error checking setup status');
       console.error('Setup status check error:', err);
@@ -300,27 +292,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setSpoolmanTestResult('URL must start with http:// or https://');
         return;
       }
-      const resp = await fetch(`${getApiBaseUrl()}/spoolman/test`, { 
-        method: 'POST', 
-        headers: { 
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        }, 
-        body: JSON.stringify({ baseUrl: normalized }) 
-      });
-      if (!resp.ok) {
-        setSpoolmanTestOk(false);
-        setSpoolmanTestResult(`Test request failed: HTTP ${resp.status}`);
-        return;
-      }
-      const data = await resp.json();
+      const data = (await apiClient.testSpoolmanConnection()) as unknown as { success?: boolean; version?: string; endpointTried?: string; errorCategory?: string; message?: string };
       if (data.success) {
         setSpoolmanTestOk(true);
         const parts: string[] = ['Reachable'];
         if (data.version) { parts.push(`v${data.version}`); setSpoolmanVersion(data.version); }
         if (data.endpointTried) { parts.push(`endpoint ${data.endpointTried}`); setSpoolmanEndpoint(data.endpointTried); }
         setSpoolmanTestResult(parts.join(' · '));
-        updateSpoolmanSuccessCtx({ version: data.version, endpoint: data.endpointTried });
+        updateSpoolmanSuccessCtx({ version: data.version || null, endpoint: data.endpointTried || null });
       } else {
         setSpoolmanTestOk(false);
         if (data.errorCategory) setSpoolmanErrorCategory(data.errorCategory);
@@ -335,9 +314,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           } else {
             setSpoolmanTestResult(serverMsg || 'Unreachable');
           }
-          updateSpoolmanFailureCtx({ errorCategory: data.errorCategory, message: data.message });
+          updateSpoolmanFailureCtx({ errorCategory: data.errorCategory || '', message: data.message || '' });
         } else {
-          setSpoolmanTestResult(data.message || 'Unreachable');
+          setSpoolmanTestResult((data.message as string) || 'Unreachable');
         }
       }
     } catch (e) {
@@ -386,21 +365,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     try {
       // 1. Ensure admin exists & login
       if (!adminCreated) {
-        const resp = await fetch(`${getApiBaseUrl()}/setup/initial-admin`, { 
-          method: 'POST', 
-          headers: { 
-            'Content-Type': 'application/json',
-            ...getAuthHeaders()
-          }, 
-          body: JSON.stringify({ username: formData.username, email: formData.email, password: formData.password, firstName: formData.firstName, lastName: formData.lastName }) 
+        const result = await apiClient.createInitialAdmin({ 
+          username: formData.username, 
+          email: formData.email, 
+          password: formData.password, 
+          firstName: formData.firstName, 
+          lastName: formData.lastName 
         });
-        if (!resp.ok) {
-          const txt = await resp.text();
-          throw new Error(txt || 'Admin creation failed');
-        }
-        const result = await resp.json();
-        if (!(result.success && result.token)) throw new Error(result.error || 'Admin creation failed');
-        localStorage.setItem('auth-token', result.token);
+        const adminResult = result as unknown as { success?: boolean; token?: string; error?: string };
+        if (!(adminResult.success && adminResult.token)) throw new Error((adminResult.error as string) || 'Admin creation failed');
+        localStorage.setItem('auth-token', (adminResult.token as string));
         await login({ username: formData.username, password: formData.password });
         setAdminCreated(true);
       }
@@ -421,15 +395,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           if (win.PrintFarmerDebug?.setupWizard) {
             console.log('[SetupWizard] JWT token before Spoolman config request:', token);
           }
-        const saveResp = await fetch(`${getApiBaseUrl()}/spoolman/config`, { 
-          method: 'POST', 
-          headers: { 
-            'Content-Type': 'application/json', 
-            ...getAuthHeaders()
-          }, 
-          body: JSON.stringify({ baseUrl: normalized }) 
-        });
-        if (!saveResp.ok && saveResp.status !== 204) throw new Error('Failed to save Spoolman config');
+        await apiClient.saveSpoolmanConfig({ baseUrl: normalized });
         // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
         localStorage.setItem('spoolman-base-url', normalized);
       }
@@ -439,17 +405,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         const enabled = filamentPresets.filter(f => f.enabled);
         const payload: Record<string, { hotend: number; bed: number }> = {};
         enabled.forEach(f => { payload[f.name] = { hotend: f.hotend, bed: f.bed }; });
-  await fetch(`${getApiBaseUrl()}/filament-types/presets`, { 
-    method: 'POST', 
-    headers: { 
-      'Content-Type': 'application/json',
-      ...getAuthHeaders()
-    }, 
-    body: JSON.stringify({ presets: payload }) 
-  });
+        await apiClient.getFilamentTypePresets();
         const disabledIds = filamentPresets.filter(f => !f.enabled && f.id).map(f => f.id!);
         for (const id of disabledIds) {
-          try { await fetch(`${getApiBaseUrl()}/filament-types/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); } catch {/* ignore individual failures */}
+          try { await apiClient.deleteFilamentType(id); } catch {/* ignore individual failures */}
         }
       }
 

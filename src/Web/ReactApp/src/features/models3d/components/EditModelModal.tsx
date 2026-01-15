@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/common/hooks/useApi';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -34,15 +34,8 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const createMutation = useMutation({
     mutationFn: async (data: UpdateModelRequest) => {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to create model: ${response.statusText}`);
-      }
-      return response.json();
+      const modelData = data as unknown as Omit<PrinterModelDto, 'id'>;
+      return apiClient.createModel(modelData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printer-models'] });
@@ -59,15 +52,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateModelRequest }) => {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to update model: ${response.statusText}`);
-      }
-      return response;
+      return apiClient.updateModel(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printer-models'] });

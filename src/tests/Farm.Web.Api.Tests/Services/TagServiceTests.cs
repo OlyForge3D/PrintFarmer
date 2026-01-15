@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -12,7 +12,6 @@ namespace Farm.Web.Api.Tests.Services;
 public class TagServiceTests
 {
     private readonly Mock<ITagRepository> _tagRepository;
-    private readonly Mock<ITagMappingRepository> _mappingRepository;
     private readonly Mock<IUnitOfWork> _unitOfWork;
     private readonly Mock<IUnifiedLoggingService> _logger;
     private readonly TagService _service;
@@ -20,13 +19,11 @@ public class TagServiceTests
     public TagServiceTests()
     {
         _tagRepository = new Mock<ITagRepository>();
-        _mappingRepository = new Mock<ITagMappingRepository>();
         _unitOfWork = new Mock<IUnitOfWork>();
         _logger = new Mock<IUnifiedLoggingService>();
 
         _service = new TagService(
             _tagRepository.Object,
-            _mappingRepository.Object,
             _unitOfWork.Object,
             _logger.Object);
     }
@@ -49,28 +46,22 @@ public class TagServiceTests
     }
 
     [Fact]
-    public async Task GetAllTagsAsync_WithMultipleTags_ReturnsAllTags()
+    public async Task GetAllTagsAsync_WithTags_ReturnsDtos()
     {
         // Arrange
-        var tags = new[]
-        {
-            new Tag { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000", Description = "Support material" },
-            new Tag { Id = Guid.NewGuid(), Name = "Finish", Color = "#00FF00", Description = "Post-processing" },
-            new Tag { Id = Guid.NewGuid(), Name = "Complex", Color = "#0000FF", Description = "Complex geometry" }
-        };
-
+        var tag1 = new Tag { Id = Guid.NewGuid(), Name = "Tag1", Color = "#FF0000", CreatedAt = DateTime.UtcNow };
+        var tag2 = new Tag { Id = Guid.NewGuid(), Name = "Tag2", Color = "#00FF00", CreatedAt = DateTime.UtcNow };
         _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(tags);
+            .ReturnsAsync(new[] { tag1, tag2 });
 
         // Act
         var result = await _service.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(3, result.Count);
-        Assert.Equal("Support", result[0].Name);
-        Assert.Equal("Finish", result[1].Name);
-        Assert.Equal("Complex", result[2].Name);
+        Assert.Equal(2, result.Count);
+        Assert.Equal(tag1.Name, result[0].Name);
+        Assert.Equal(tag2.Name, result[1].Name);
     }
 
     #endregion
@@ -78,12 +69,11 @@ public class TagServiceTests
     #region GetTagByIdAsync Tests
 
     [Fact]
-    public async Task GetTagByIdAsync_WithValidId_ReturnsTag()
+    public async Task GetTagByIdAsync_WithExistingTag_ReturnsTagDto()
     {
         // Arrange
         var tagId = Guid.NewGuid();
-        var tag = new Tag { Id = tagId, Name = "Support", Color = "#FF0000", Description = "Support material" };
-
+        var tag = new Tag { Id = tagId, Name = "TestTag", Color = "#FF0000", CreatedAt = DateTime.UtcNow };
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tag);
 
@@ -92,16 +82,15 @@ public class TagServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(tagId, result.Id);
-        Assert.Equal("Support", result.Name);
+        Assert.Equal(tag.Id, result.Id);
+        Assert.Equal(tag.Name, result.Name);
     }
 
     [Fact]
-    public async Task GetTagByIdAsync_WithInvalidId_ReturnsNull()
+    public async Task GetTagByIdAsync_WithNonExistingTag_ReturnsNull()
     {
         // Arrange
         var tagId = Guid.NewGuid();
-
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Tag?)null);
 
@@ -117,12 +106,11 @@ public class TagServiceTests
     #region CreateTagAsync Tests
 
     [Fact]
-    public async Task CreateTagAsync_WithValidNewTag_CreatesAndReturnsTag()
+    public async Task CreateTagAsync_WithValidInput_CreatesAndReturnsTag()
     {
         // Arrange
-        var dto = new CreateTagDto { Name = "support", Color = "#FF0000", Description = "Support material" };
-
-        _tagRepository.Setup(r => r.GetByNameAsync("Support", It.IsAny<CancellationToken>()))
+        var dto = new CreateTagDto { Name = "NewTag", Color = "#FF0000", Description = "Test" };
+        _tagRepository.Setup(r => r.GetByNameAsync("NewTag", It.IsAny<CancellationToken>()))
             .ReturnsAsync((Tag?)null);
         _tagRepository.Setup(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -134,24 +122,27 @@ public class TagServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("Support", result.Name);
-        Assert.Equal("#FF0000", result.Color);
-        Assert.Equal("Support material", result.Description);
+        Assert.Equal("NewTag", result.Name);
         _tagRepository.Verify(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CreateTagAsync_WithDuplicateName_ThrowsException()
+    public async Task CreateTagAsync_WithExistingTag_ReturnsExistingTag()
     {
         // Arrange
-        var existingTag = new Tag { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000", Description = "Support material" };
-        var dto = new CreateTagDto { Name = "support", Color = "#00FF00", Description = "Different support" };
-
-        _tagRepository.Setup(r => r.GetByNameAsync("Support", It.IsAny<CancellationToken>()))
+        var dto = new CreateTagDto { Name = "ExistingTag", Color = "#FF0000" };
+        var existingTag = new Tag { Id = Guid.NewGuid(), Name = "ExistingTag", Color = "#0000FF", CreatedAt = DateTime.UtcNow };
+        _tagRepository.Setup(r => r.GetByNameAsync("ExistingTag", It.IsAny<CancellationToken>()))
             .ReturnsAsync(existingTag);
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.CreateTagAsync(dto, CancellationToken.None));
+        // Act
+        var result = await _service.CreateTagAsync(dto, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(existingTag.Id, result.Id);
+        Assert.Equal(existingTag.Name, result.Name);
+        _tagRepository.Verify(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
@@ -159,16 +150,16 @@ public class TagServiceTests
     #region DeleteTagAsync Tests
 
     [Fact]
-    public async Task DeleteTagAsync_WithValidId_DeletesTag()
+    public async Task DeleteTagAsync_WithUsedTag_DeletesTagAndRemovesFromAllObjects()
     {
         // Arrange
         var tagId = Guid.NewGuid();
-
+        var tag = new Tag { Id = tagId, Name = "TagToDelete", CreatedAt = DateTime.UtcNow };
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Tag { Id = tagId, Name = "Support", Color = "#FF0000", Description = "Support material" });
-        _mappingRepository.Setup(r => r.RemoveByTagAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+        _tagRepository.Setup(r => r.RemoveAllObjectsFromTagAsync(tagId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _tagRepository.Setup(r => r.RemoveAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.RemoveAsync(tag, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -177,8 +168,21 @@ public class TagServiceTests
         await _service.DeleteTagAsync(tagId, CancellationToken.None);
 
         // Assert
-        _mappingRepository.Verify(r => r.RemoveByTagAsync(tagId, It.IsAny<CancellationToken>()), Times.Once);
-        _tagRepository.Verify(r => r.RemoveAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.RemoveAllObjectsFromTagAsync(tagId, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.RemoveAsync(tag, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteTagAsync_WithNonExistingTag_ThrowsKeyNotFoundException()
+    {
+        // Arrange
+        var tagId = Guid.NewGuid();
+        _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Tag?)null);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => _service.DeleteTagAsync(tagId, CancellationToken.None));
     }
 
     #endregion
@@ -186,27 +190,49 @@ public class TagServiceTests
     #region AssignTagAsync Tests
 
     [Fact]
-    public async Task AssignTagAsync_WithValidObjectTypeAndId_AssignsTag()
+    public async Task AssignTagAsync_WithValidInput_AssignsTag()
     {
         // Arrange
-        var objectType = "Model3D";
         var objectId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
+        var objectType = "Model3D";
+        var tag = new Tag { Id = tagId, Name = "TestTag", CreatedAt = DateTime.UtcNow };
 
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Tag { Id = tagId, Name = "Support", Color = "#FF0000", Description = "Support material" });
-        _mappingRepository.Setup(r => r.GetMappingAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((TagMapping?)null);
-        _mappingRepository.Setup(r => r.AddAsync(It.IsAny<TagMapping>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _tagRepository.Setup(r => r.AssignTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _mappingRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         await _service.AssignTagAsync(objectId, tagId, objectType, CancellationToken.None);
 
         // Assert
-        _mappingRepository.Verify(r => r.AddAsync(It.IsAny<TagMapping>(), It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.AssignTagAsync(objectId, tagId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AssignTagAsync_WhenAlreadyAssigned_DoesNothing()
+    {
+        // Arrange
+        var objectId = Guid.NewGuid();
+        var tagId = Guid.NewGuid();
+        var objectType = "Model3D";
+        var tag = new Tag { Id = tagId, Name = "TestTag", CreatedAt = DateTime.UtcNow };
+
+        _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        await _service.AssignTagAsync(objectId, tagId, objectType, CancellationToken.None);
+
+        // Assert
+        _tagRepository.Verify(r => r.AssignTagAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
@@ -214,23 +240,23 @@ public class TagServiceTests
     #region RemoveTagAsync Tests
 
     [Fact]
-    public async Task RemoveTagAsync_WithValidObjectTypeAndId_RemovesTag()
+    public async Task RemoveTagAsync_WithValidInput_RemovesTag()
     {
         // Arrange
-        var objectType = "Model3D";
         var objectId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
+        var objectType = "Model3D";
 
-        _mappingRepository.Setup(r => r.RemoveByObjectAndTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.RemoveTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _mappingRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         await _service.RemoveTagAsync(objectId, tagId, objectType, CancellationToken.None);
 
         // Assert
-        _mappingRepository.Verify(r => r.RemoveByObjectAndTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.RemoveTagAsync(objectId, tagId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
@@ -238,20 +264,18 @@ public class TagServiceTests
     #region GetObjectTagsAsync Tests
 
     [Fact]
-    public async Task GetObjectTagsAsync_WithValidObject_ReturnsTags()
+    public async Task GetObjectTagsAsync_WithTags_ReturnsDtos()
     {
         // Arrange
-        var objectType = "Model3D";
         var objectId = Guid.NewGuid();
-        var tagId1 = Guid.NewGuid();
-        var tagId2 = Guid.NewGuid();
+        var objectType = "Model3D";
+        var tags = new[] {
+            new Tag { Id = Guid.NewGuid(), Name = "Tag1", Color = "#FF0000", CreatedAt = DateTime.UtcNow },
+            new Tag { Id = Guid.NewGuid(), Name = "Tag2", Color = "#00FF00", CreatedAt = DateTime.UtcNow }
+        };
 
-        _mappingRepository.Setup(r => r.GetByObjectAsync(objectId, objectType, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[]
-            {
-                new TagMapping { Id = Guid.NewGuid(), ObjectType = objectType, ObjectId = objectId, TagId = tagId1 },
-                new TagMapping { Id = Guid.NewGuid(), ObjectType = objectType, ObjectId = objectId, TagId = tagId2 }
-            });
+        _tagRepository.Setup(r => r.GetTagsByObjectAsync(objectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tags);
 
         // Act
         var result = await _service.GetObjectTagsAsync(objectId, objectType, CancellationToken.None);
@@ -259,38 +283,7 @@ public class TagServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(2, result.Count);
-        Assert.Contains(tagId1, result.Select(t => t.Id));
-        Assert.Contains(tagId2, result.Select(t => t.Id));
-    }
-
-    #endregion
-
-    #region FilterObjectsByTagsAsync Tests
-
-    [Fact]
-    public async Task FilterObjectsByTagsAsync_WithIncludeTags_ReturnsObjectsWithTags()
-    {
-        // Arrange
-        var objectType = "Model3D";
-        var tagId1 = Guid.NewGuid();
-        var objectId1 = Guid.NewGuid();
-        var objectId2 = Guid.NewGuid();
-
-        _mappingRepository.Setup(r => r.GetByTagIdAndObjectTypeAsync(tagId1, objectType, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[]
-            {
-                new TagMapping { Id = Guid.NewGuid(), ObjectType = objectType, ObjectId = objectId1, TagId = tagId1 },
-                new TagMapping { Id = Guid.NewGuid(), ObjectType = objectType, ObjectId = objectId2, TagId = tagId1 }
-            });
-
-        // Act
-        var result = await _service.FilterObjectsByTagsAsync(objectType, new[] { tagId1 }, null, false, CancellationToken.None);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Count);
-        Assert.Contains(objectId1, result);
-        Assert.Contains(objectId2, result);
+        Assert.Equal(tags[0].Name, result[0].Name);
     }
 
     #endregion

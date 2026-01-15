@@ -40,7 +40,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<Tag> Tags => Set<Tag>();
-    public DbSet<TagMapping> TagMappings => Set<TagMapping>();
     public DbSet<FolderNode> Folders => Set<FolderNode>();
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
@@ -333,6 +332,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(g => g.PrinterModelId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Navigation: GcodeFile -> Tags (skip-navigation collection)
+            // Skip-navigation: GcodeFile.Tags - join table managed by EF Core
+            _ = b.HasMany(g => g.Tags)
+                .WithMany();
 
             // Indexes
             _ = b.HasIndex(g => g.FileHash).IsUnique();
@@ -807,6 +811,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
             // Foreign Keys
+            // Foreign Keys
             _ = b.HasOne(m => m.Folder)
                 .WithMany(f => f.Models)
                 .HasForeignKey(m => m.FolderId)
@@ -816,10 +821,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(m => m.UploadedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // Navigation: Model3D -> TagMappings (uses polymorphic TagMapping)
-            _ = b.HasMany(m => m.TagMappings)
-                .WithMany()
-                .UsingEntity(j => j.ToTable("ModelTagMappings")); // Override table name for clarity
+            // Navigation: Model3D -> Tags (skip-navigation collection)
+            // Skip-navigation: Model3D.Tags - join table managed by EF Core
+            _ = b.HasMany(m => m.Tags)
+                .WithMany();
 
             // Indexes
             _ = b.HasIndex(m => m.FileHash).IsUnique();
@@ -840,11 +845,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
             _ = b.Property(t => t.Description).HasMaxLength(512);
 
-            // Navigation: Tag -> TagMappings
-            _ = b.HasMany(t => t.TagMappings)
-                .WithOne(tm => tm.Tag)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
 
             // Index for quick tag lookups
             _ = b.HasIndex(t => t.Name).IsUnique();
@@ -853,30 +853,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(t => t.CreatedAt);
         });
 
-        // TagMapping Entity Configuration (Polymorphic join table)
-        _ = modelBuilder.Entity<TagMapping>(b =>
-        {
-            _ = b.HasKey(tm => tm.Id);
-            _ = b.Property(tm => tm.TagId).IsRequired();
-            _ = b.Property(tm => tm.ObjectType).IsRequired().HasMaxLength(50); // "Model3D", "GcodeFile", etc.
-            _ = b.Property(tm => tm.ObjectId).IsRequired();
-
-            // Foreign Key to Tag
-            _ = b.HasOne(tm => tm.Tag)
-                .WithMany(t => t.TagMappings)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Composite index to prevent duplicate tag assignments to same object
-            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId, tm.TagId }).IsUnique();
-
-            // Index for finding all objects with a tag
-            _ = b.HasIndex(tm => tm.TagId);
-
-            // Index for finding tags on a specific object type
-            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId });
-        });
-
+ 
         // FolderNode Entity Configuration
         _ = modelBuilder.Entity<FolderNode>(b =>
         {

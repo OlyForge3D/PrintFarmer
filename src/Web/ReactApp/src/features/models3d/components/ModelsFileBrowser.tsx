@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
-import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
+import { useCallback, useMemo, useState, useRef } from 'react';
+import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
   type FileItem,
@@ -11,8 +11,7 @@ import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal'
 import { Button } from '@/common/components/ui';
 import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import type { Model } from '@/types/models';
+import type { Model, Model3DSearchResponse } from '@/types/models';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -126,6 +125,7 @@ export const ModelsFileBrowser = ({
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
+  const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
   const handleSliceModel = useCallback(
     (model: Model) => {
@@ -140,9 +140,9 @@ export const ModelsFileBrowser = ({
 
   const handleDownload = useCallback((file: FileItem) => {
     if (file.isDirectory) return;
-    const model3dFile = file.meta?.model3d as any | undefined;
+    const model3dFile = file.meta?.model3d as { name?: string } | undefined;
     const originalName = model3dFile?.name || file.fileName;
-    const downloadUrl = `${getApiBaseUrl()}/3d-models/file/${file.id}`;
+    const downloadUrl = `/api/3d-models/file/${file.id}`;
     
     // Create a link with the original filename for download
     const link = document.createElement('a');
@@ -207,7 +207,7 @@ export const ModelsFileBrowser = ({
       tagIds: selectedTags.length ? selectedTags : undefined,
       page: query.page,
       pageSize: query.pageSize,
-      sortBy: query.sortBy === 'name' ? 'fileName' : query.sortBy === 'size' ? 'fileSize' : 'uploadedAt',
+      sortBy: query.sortBy === 'name' ? 'name' : query.sortBy === 'size' ? 'size' : 'uploadedAt',
       descending: query.sortOrder === 'desc',
     }),
     [selectedTags]
@@ -216,32 +216,17 @@ export const ModelsFileBrowser = ({
   const fetcher = useCallback(
     async (params: unknown) => {
       const payload = params as ReturnType<typeof mapQueryParams>;
-      const response = await fetch(`${getApiBaseUrl()}/3d-models/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify(payload),
-      });
+      const response = await apiClient.get3DModelsQuery(payload);
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch models');
-      }
-
-      const data = await response.json();
-      const models: Model[] = data.models || [];
-      const totalItems = data.totalModels ?? data.totalItems ?? models.length;
-      const totalSize = models.reduce((sum, model) => sum + (model.fileSize || 0), 0);
-      const page = data.page ?? payload.page ?? 1;
-      const totalPages = data.totalPages ?? Math.max(1, Math.ceil(totalItems / (payload.pageSize || 50)));
+      const searchResponse = response as unknown as Model3DSearchResponse;
+      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: models,
-        totalItems,
-        totalPages,
+        items: searchResponse.models,
+        totalItems: searchResponse.totalCount,
+        totalPages: searchResponse.totalPages,
         totalSize,
-        page,
+        page: searchResponse.page,
       };
     },
     []
@@ -360,6 +345,7 @@ export const ModelsFileBrowser = ({
   return (
     <>
       <FileBrowser<Model>
+        ref={fileBrowserRef}
         config={config}
         sortOptions={sortOptions}
         columns={modelColumns}
@@ -371,6 +357,7 @@ export const ModelsFileBrowser = ({
       <ModelUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
+        onUploadSuccess={() => fileBrowserRef.current?.refetch() ?? Promise.resolve()}
       />
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}

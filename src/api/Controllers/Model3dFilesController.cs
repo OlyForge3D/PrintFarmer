@@ -214,12 +214,12 @@ public class Model3DFilesController(
                 TriangleCount = model.TriangleCount,
                 IsValid = model.IsValid,
                 ValidationErrors = model.ValidationErrors,
-                Tags = model.TagMappings.Select(tm => new TagDto
+                Tags = model.Tags.Select(t => new TagDto
                 {
-                    Id = tm.Tag!.Id,
-                    Name = tm.Tag!.Name,
-                    Color = tm.Tag!.Color,
-                    Description = tm.Tag!.Description
+                    Id = t.Id,
+                    Name = t.Name,
+                    Color = t.Color,
+                    Description = t.Description
                 }).ToArray()
             };
 
@@ -605,12 +605,12 @@ public class Model3DFilesController(
                 UploadedAt = m.UploadedAt,
                 Url = _fileOperations.BuildModel3DFileUrl(m.Id, m.FileFormat),
                 ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(m.Id),
-                Tags = m.TagMappings.Select(tm => new TagDto
+                Tags = m.Tags.Select(t => new TagDto
                 {
-                    Id = tm.Tag!.Id,
-                    Name = tm.Tag!.Name,
-                    Color = tm.Tag!.Color,
-                    Description = tm.Tag!.Description
+                    Id = t.Id,
+                    Name = t.Name,
+                    Color = t.Color,
+                    Description = t.Description
                 }).ToArray()
             }).ToList();
 

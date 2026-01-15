@@ -105,6 +105,45 @@ Instructions for building high-quality ReactJS applications with modern patterns
 - Use proper navigation patterns and back button handling
 - Implement breadcrumbs and navigation state management
 
+### API Integration (PrintFarmer Specific)
+- **MANDATORY**: All API calls must use `apiClient` from `src/services/api.ts`
+- **NEVER** create raw axios instances, use `fetch`, or direct HTTP calls
+- **NEVER** manually add authentication headers - apiClient handles this automatically
+- **NEVER** bypass apiClient for convenience - centralization is critical for:
+  - Consistent auth token management (localStorage → Bearer header)
+  - Automatic correlation ID tracking (request tracing)
+  - Centralized 401 error handling (automatic logout)
+  - Global timeout settings (30 seconds)
+  - Error transformation and handling
+
+**API Client Usage:**
+
+```typescript
+// ✅ CORRECT: Use apiClient directly
+import { apiClient } from '@/services/api';
+const printers = await apiClient.getPrinters();
+const locations = await apiClient.getAllLocations();
+
+// ✅ CORRECT: Use service wrappers (for caching/debouncing)
+import { jobSchedulingService } from '@/services/jobSchedulingService';
+const job = await jobSchedulingService.getScheduledJob(jobId);
+
+// ❌ WRONG: Creating raw axios instances
+const api = axios.create({ baseURL: '/api' }); // DON'T DO THIS
+
+// ❌ WRONG: Using fetch for API calls
+const response = await fetch('/api/printers', { ...options }); // DON'T DO THIS
+
+// ❌ WRONG: Manual header management
+axios.defaults.headers.common['Authorization'] = `Bearer ${token}`; // DON'T DO THIS
+```
+
+**When to extend apiClient:**
+- Add new service methods to `ApiClient` class in `src/services/api.ts`
+- Create service wrapper files for domain-specific operations (caching, debouncing, etc.)
+- Service wrappers should delegate to apiClient, not make raw HTTP calls
+- Keep apiClient as single source of truth for all HTTP communication
+
 ### Testing
 - Write unit tests for components using React Testing Library
 - Test component behavior, not implementation details

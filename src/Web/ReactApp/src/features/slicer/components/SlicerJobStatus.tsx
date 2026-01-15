@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button, Input, FormField, Alert, Card } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 interface JobStatus {
   id: string;
@@ -37,12 +37,8 @@ export function SlicerJobStatus({ initialId }: { initialId?: string }) {
     setLoading(true);
     setStatus(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/slicer/jobs/${encodeURIComponent(id)}/status`, { headers: getAuthHeaders() });
-      if (!res.ok) {
-        if (res.status === 404) throw new Error('Job not found');
-        throw new Error('Failed to fetch job status');
-      }
-      setStatus(await res.json());
+      const result = await apiClient.getSlicerJobStatus(id);
+      setStatus((result as unknown as JobStatus));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setLoading(false); }
@@ -72,7 +68,7 @@ export function SlicerJobStatus({ initialId }: { initialId?: string }) {
                 />
                 <Button
                   variant="primary"
-                  onClick={fetchStatus}
+                  onClick={() => fetchStatus()}
                   disabled={loading || !jobId}
                 >
                   Fetch

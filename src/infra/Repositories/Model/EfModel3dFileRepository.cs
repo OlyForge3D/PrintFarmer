@@ -37,14 +37,17 @@ namespace Farm.Infrastructure.Repositories.Model
         {
             return await _db.Models3D
                 .Where(m => m.Id == id && m.IsValid)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
+                .Include(m => m.Tags)
                 .FirstOrDefaultAsync(ct);
         }
 
         public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
         {
-            return await _db.Models3D.Where(m => m.IsValid).OrderByDescending(m => m.UploadedAt).ToListAsync(ct);
+            return await _db.Models3D
+                .Where(m => m.IsValid)
+                .Include(m => m.Tags)
+                .OrderByDescending(m => m.UploadedAt)
+                .ToListAsync(ct);
         }
 
         public async Task<List<Model3D>> ListValidByDirectoryAsync(string directory, CancellationToken ct)
@@ -66,6 +69,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 return await _db.Models3D
                     .Where(m => m.IsValid && ((m.Folder != null && m.Folder.Path == directory) || m.Folder == null))
+                    .Include(m => m.Tags)
                     .OrderByDescending(m => m.UploadedAt)
                     .ToListAsync(ct);
             }
@@ -73,6 +77,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 return await _db.Models3D
                     .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
+                    .Include(m => m.Tags)
                     .OrderByDescending(m => m.UploadedAt)
                     .ToListAsync(ct);
             }
@@ -176,6 +181,9 @@ namespace Farm.Infrastructure.Repositories.Model
             // Start with base query - only valid models
             IQueryable<Model3D> query = _db.Models3D.Where(m => m.IsValid);
 
+            // Always include tags for all queries
+            query = query.Include(m => m.Tags);
+
             // Apply path filter
             if (!string.IsNullOrWhiteSpace(path))
             {
@@ -200,13 +208,11 @@ namespace Farm.Infrastructure.Repositories.Model
             // Apply tag filtering at database level (AND logic - must have all tags)
             if (tagIds?.Length > 0)
             {
-                // For each tag, ensure the model has a mapping to it
+                // For each tag, ensure the model has it
                 foreach (Guid tagId in tagIds)
                 {
-                    query = query.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                    query = query.Where(m => m.Tags.Any(t => t.Id == tagId));
                 }
-                // Ensure tag mappings are included for the result
-                query = query.Include(m => m.TagMappings).ThenInclude(tm => tm.Tag);
             }
 
             // Get total count BEFORE pagination (for UI to show "X of Y")
@@ -238,8 +244,7 @@ namespace Farm.Infrastructure.Repositories.Model
             // Load all valid models with includes first (required for SQLite compatibility with case-insensitive Contains)
             List<Model3D> allModels = await _db.Models3D
                 .Where(m => m.IsValid)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
+                .Include(m => m.Tags)
                 .ToListAsync(ct);
 
             // Apply client-side filtering for text search and tags
@@ -259,7 +264,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 foreach (Guid tagId in tagIds)
                 {
-                    queryable = queryable.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                    queryable = queryable.Where(m => m.Tags.Any(t => t.Id == tagId));
                 }
             }
 

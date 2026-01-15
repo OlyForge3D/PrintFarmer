@@ -28,7 +28,6 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         private ILocationRepository? _locationRepository;
         private IQueueRepository? _queueRepository;
         private ITagRepository? _tagRepository;
-        private ITagMappingRepository? _tagMappingRepository;
 
         public AppUnitOfWork(AppDbContext db)
         {
@@ -78,15 +77,10 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
 
         /// <summary>
         /// Lazy-initializes the Tag repository, reusing the same DbContext.
-        /// Coordinated with tag mapping operations for generic tagging support.
+        /// Coordinated with tag operations for generic tagging support.
+        /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
         /// </summary>
         public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db);
-
-        /// <summary>
-        /// Lazy-initializes the Tag Mapping repository, reusing the same DbContext.
-        /// Supports polymorphic tagging for gcode files, models, printers, and other objects.
-        /// </summary>
-        public ITagMappingRepository TagMappings => _tagMappingRepository ??= new EfTagMappingRepository(_db);
 
         /// <summary>
         /// Persists all pending changes from both repositories in a single atomic transaction.

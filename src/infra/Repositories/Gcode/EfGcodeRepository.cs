@@ -25,6 +25,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             List<GcodeFile> allFiles = await _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.PrinterModel)
+                .Include(g => g.Tags)
                 .ToListAsync(ct);
 
             // Apply client-side filtering for case-insensitive search
@@ -62,6 +63,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             return _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.PrinterModel)
+                .Include(g => g.Tags)
                 .FirstOrDefaultAsync(g => g.Id == id, ct);
         }
 
@@ -119,8 +121,8 @@ namespace Farm.Infrastructure.Repositories.Gcode
             int pageSize,
             CancellationToken ct)
         {
-            // Start with base query
-            IQueryable<GcodeFile> query = _db.GcodeFiles;
+            // Build base query for filtering (without includes to avoid query complexity)
+            IQueryable<GcodeFile> filterQuery = _db.GcodeFiles;
 
             // Apply path filter
             if (!string.IsNullOrWhiteSpace(path))
@@ -133,60 +135,77 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 }
 
                 // Join with FolderNode and filter by path
-                query = query.Where(f => f.Folder != null && f.Folder.Path == normalizedPath);
+                filterQuery = filterQuery.Where(f => f.Folder != null && f.Folder.Path == normalizedPath);
             }
             // If path is null/empty, include ALL files (no filter)
 
             // Apply search filter at database level
             if (!string.IsNullOrWhiteSpace(search))
             {
-                query = query.Where(g => g.FileName.Contains(search));
+                filterQuery = filterQuery.Where(g => g.FileName.Contains(search));
             }
 
             // Apply tag filtering at database level (AND logic - must have all tags)
             if (tagIds?.Length > 0)
             {
-                // For each tag, ensure the gcode file has a mapping to it
+                // For each tag, ensure the gcode file has it
                 foreach (Guid tagId in tagIds)
                 {
-                    query = query.Where(g => g.TagMappings.Any(tm => tm.TagId == tagId));
+                    filterQuery = filterQuery.Where(g => g.Tags.Any(t => t.Id == tagId));
                 }
-                // Ensure tag mappings are included for the result
-                query = query.Include(g => g.TagMappings).ThenInclude(tm => tm.Tag);
             }
 
             // Apply printer model filter at database level
             if (printerModelId.HasValue)
             {
-                query = query.Where(g => g.PrinterModelId == printerModelId.Value);
+                filterQuery = filterQuery.Where(g => g.PrinterModelId == printerModelId.Value);
             }
 
             // Apply printerId filter at database level
             if (printerId.HasValue)
             {
-                query = query.Where(g => g.SourcePrinterId == printerId.Value);
+                filterQuery = filterQuery.Where(g => g.SourcePrinterId == printerId.Value);
             }
 
-            // Get total count BEFORE pagination (for UI to show "X of Y")
-            int totalCount = await query.CountAsync(ct);
+            // Get total count BEFORE pagination
+            int totalCount = await filterQuery.CountAsync(ct);
 
             // Apply sorting at database level
-            query = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+            var sortedQuery = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
             {
-                ("size", "desc") => query.OrderByDescending(g => g.FileSizeBytes),
-                ("size", _) => query.OrderBy(g => g.FileSizeBytes),
-                ("date", "desc") => query.OrderByDescending(g => g.UploadedAt),
-                ("date", _) => query.OrderBy(g => g.UploadedAt),
-                ("name", "desc") => query.OrderByDescending(g => g.FileName),
-                _ => query.OrderBy(g => g.FileName) // Default: name ascending
+                ("size", "desc") => filterQuery.OrderByDescending(g => g.FileSizeBytes),
+                ("size", _) => filterQuery.OrderBy(g => g.FileSizeBytes),
+                ("date", "desc") => filterQuery.OrderByDescending(g => g.UploadedAt),
+                ("date", _) => filterQuery.OrderBy(g => g.UploadedAt),
+                ("name", "desc") => filterQuery.OrderByDescending(g => g.FileName),
+                _ => filterQuery.OrderBy(g => g.FileName) // Default: name ascending
             };
 
-            // Apply pagination at database level with Skip/Take
+            // Apply pagination
             int skip = (page - 1) * pageSize;
-            List<GcodeFile> files = await query
+
+            // Get the IDs and order info of files that match the filters and pagination
+            var paginatedFiles = await sortedQuery
                 .Skip(skip)
                 .Take(pageSize)
+                .Select(g => new { g.Id, g.FileName, g.UploadedAt, g.FileSizeBytes })
                 .ToListAsync(ct);
+
+            // Extract IDs in order
+            var fileIds = paginatedFiles.Select(x => x.Id).ToList();
+
+            // Now load the full files WITH includes using the IDs
+            var filesByIdDict = await _db.GcodeFiles
+                .AsNoTracking()
+                .Where(g => fileIds.Contains(g.Id))
+                .Include(g => g.Tags)  // Use skip-navigation instead of TagMappings
+                .Include(g => g.PrinterModel)
+                .ToDictionaryAsync(g => g.Id, ct);
+
+            // Reconstruct list in original sort order
+            var files = fileIds
+                .Select(id => filesByIdDict[id])
+                .ToList();
 
             return (files, totalCount);
         }

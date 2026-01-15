@@ -247,7 +247,7 @@ public static class ServiceCollectionExtensions
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfTagMappingRepository>();
+        // Note: TagMappingRepository no longer needed - skip-navigation managed by EF Core
 
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();

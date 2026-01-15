@@ -165,8 +165,12 @@ namespace Farm.Web.Api.Services.Gcode
                     }
                 }
 
+                // Map tags from the eagerly-loaded Tags collection
+                var tags = file.Tags
+                    ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                    .ToList() ?? new List<TagDto>();
 
-                entries.Add(new GcodeFileEntryDto(
+                var entry = new GcodeFileEntryDto(
                     Path: file.FilePath,
                     FileName: file.FileName,
                     FileSize: file.FileSizeBytes,
@@ -175,10 +179,11 @@ namespace Farm.Web.Api.Services.Gcode
                     Name: file.Name,
                     ThumbnailUrl: thumbnailUrl,
                     Id: file.Id.ToString(),
-                    FileType: file.FileType,  // Use computed property from entity
+                    FileType: file.FileType,
                     DirectoryId: null,
                     TargetModelName: file.PrinterModel?.Name,
                     RequiredMaterial: file.RequiredMaterial,
+                    Tags: tags,
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
                     ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
@@ -192,7 +197,8 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
-                ));
+                );
+                entries.Add(entry);
 
                 totalSize += file.FileSizeBytes;
             }
@@ -307,19 +313,25 @@ namespace Farm.Web.Api.Services.Gcode
                     }
                 }
 
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
+                // Map tags from the eagerly-loaded Tags skip-navigation collection
+                var tags = file.Tags
+                    ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                    .ToList() ?? new List<TagDto>();
+
+                var entry = new GcodeFileEntryDto(
+                    Path: file.FilePath,
                     FileName: file.FileName,
                     FileSize: file.FileSizeBytes,
                     UploadedAt: file.UploadedAt,
                     IsDirectory: false,
-                    Name: file.Name,  // Original filename for display
+                    Name: file.Name,
                     ThumbnailUrl: thumbnailUrl,
-                    Id: file.Id.ToString(),  // GUID as string for file ID
-                    FileType: file.FileType,  // Use computed property from entity
+                    Id: file.Id.ToString(),
+                    FileType: file.FileType,
                     DirectoryId: null,
-                    TargetModelName: file.PrinterModel?.Name,  // Include printer model name
-                    RequiredMaterial: file.RequiredMaterial,  // Include required filament type
+                    TargetModelName: file.PrinterModel?.Name,
+                    RequiredMaterial: file.RequiredMaterial,
+                    Tags: tags,
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
                     ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
@@ -327,13 +339,14 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
                     ExtractedPrinterModel: file.PrinterModel?.Name,
-                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,  // Raw extracted name for fallback
+                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,
                     ExtractedLayerHeight: file.LayerHeight,
                     ExtractedInfill: file.InfillPercentage,
                     ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
-                ));
+                );
+                entries.Add(entry);
             }
 
             // Apply sorting
@@ -1384,10 +1397,7 @@ namespace Farm.Web.Api.Services.Gcode
                 {
                     gcodeFile.Description = metadata.Description;
                 }
-                if (metadata.Tags != null && metadata.Tags.Any())
-                {
-                    gcodeFile.Tags = string.Join(',', metadata.Tags);
-                }
+                // Note: Tags are managed separately through the tagging service, not during upload
                 // User-provided printer model overrides extracted one
                 if (metadata.PrinterModelId.HasValue)
                 {
@@ -1452,11 +1462,7 @@ namespace Farm.Web.Api.Services.Gcode
                 file.Description = request.Description;
             }
 
-            if (request.Tags != null)
-            {
-                file.Tags = string.Join(',', request.Tags);
-            }
-
+            // Note: Tags are managed separately through the tagging service, not through updates
             if (request.RequiredNozzleDiameter.HasValue)
             {
                 file.RequiredNozzleDiameter = request.RequiredNozzleDiameter;
@@ -1609,6 +1615,11 @@ namespace Farm.Web.Api.Services.Gcode
             // Use centralized service method for thumbnail URL
             string? thumbnailUrl = _fileOperations.BuildGcodeThumbnailUrl(file.Id);
 
+            // Map tags from Tags collection
+            var tags = file.Tags?
+                .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                .ToArray() ?? Array.Empty<TagDto>();
+
             return new GcodeFileDto(
                 Id: file.Id,
                 Name: file.Name,
@@ -1622,7 +1633,7 @@ namespace Farm.Web.Api.Services.Gcode
                 OriginalPrinterPath: file.OriginalPrinterPath,
                 LastSeenOnPrinter: file.LastSeenOnPrinter,
                 Description: file.Description,
-                Tags: file.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+                Tags: tags,
                 RequiredNozzleDiameter: file.RequiredNozzleDiameter,
                 RequiredMaterial: file.RequiredMaterial,
                 EstimatedPrintTimeMinutes: file.EstimatedPrintTimeMinutes,

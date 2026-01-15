@@ -1,5 +1,5 @@
-import { getApiBaseUrl, getAuthHeaders } from "@/common/utils/apiUrlHelpers";
-import axios, { AxiosInstance, AxiosError } from "axios";
+import { apiClient } from "@/services/api";
+import type { AxiosError } from "axios";
 
 // ============= TYPES =============
 
@@ -177,28 +177,7 @@ export interface QueueOperationFailureDto {
 // ============= SERVICE =============
 
 class PrintQueueService {
-  private apiClient: AxiosInstance;
   private baseUrl = "printQueue";
-
-  constructor() {
-    const apiBaseUrl = getApiBaseUrl();
-    this.apiClient = axios.create({
-      baseURL: apiBaseUrl,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    });
-
-    // Add request interceptor to include auth headers
-    this.apiClient.interceptors.request.use((config) => {
-      const authHeaders = getAuthHeaders();
-      if (typeof authHeaders === 'object' && authHeaders !== null && 'Authorization' in authHeaders) {
-        config.headers.Authorization = (authHeaders as Record<string, string>).Authorization;
-      }
-      return config;
-    });
-  }
 
   /**
    * Get all queued and printing jobs with optional filtering
@@ -218,7 +197,7 @@ class PrintQueueService {
       params.append("limit", limit.toString());
       params.append("offset", offset.toString());
 
-      const response = await this.apiClient.get<QueuedPrintJobWithFileMetaDto[]>(
+      const response = await apiClient.get<QueuedPrintJobWithFileMetaDto[]>(
         `${this.baseUrl}?${params.toString()}`
       );
       return response.data;
@@ -236,7 +215,7 @@ class PrintQueueService {
     limit: number = 50
   ): Promise<QueuedPrintJobDto[]> {
     try {
-      const response = await this.apiClient.get<QueuedPrintJobDto[]>(
+      const response = await apiClient.get<QueuedPrintJobDto[]>(
         `${this.baseUrl}/printer/${printerId}`,
         { params: { limit } }
       );
@@ -252,7 +231,7 @@ class PrintQueueService {
    */
   async getQueueStatsAsync(): Promise<QueueStatsDto> {
     try {
-      const response = await this.apiClient.get<QueueStatsDto>(
+      const response = await apiClient.get<QueueStatsDto>(
         `${this.baseUrl}/stats`
       );
       return response.data;
@@ -267,7 +246,7 @@ class PrintQueueService {
    */
   async getModelStatsAsync(): Promise<QueuePrinterModelStatsDto[]> {
     try {
-      const response = await this.apiClient.get<QueuePrinterModelStatsDto[]>(
+      const response = await apiClient.get<QueuePrinterModelStatsDto[]>(
         `${this.baseUrl}/stats/models`
       );
       return response.data;
@@ -286,7 +265,7 @@ class PrintQueueService {
     sortBy: string = "completedAtUtc"
   ): Promise<QueueHistoryPageDto> {
     try {
-      const response = await this.apiClient.get<QueueHistoryPageDto>(
+      const response = await apiClient.get<QueueHistoryPageDto>(
         `${this.baseUrl}/history`,
         { params: { limit, offset, sortBy } }
       );
@@ -304,7 +283,7 @@ class PrintQueueService {
     request: EnqueueQueueJobRequest
   ): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.post<QueuedPrintJobDto>(
+      const response = await apiClient.post<QueuedPrintJobDto>(
         `${this.baseUrl}`,
         request
       );
@@ -323,7 +302,7 @@ class PrintQueueService {
     request: UpdateQueueJobRequest
   ): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.put<QueuedPrintJobDto>(
+      const response = await apiClient.put<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}`,
         request
       );
@@ -342,7 +321,7 @@ class PrintQueueService {
     newPriority: number
   ): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.put<QueuedPrintJobDto>(
+      const response = await apiClient.put<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}/priority`,
         { newPriority }
       );
@@ -358,7 +337,7 @@ class PrintQueueService {
    */
   async pauseJobAsync(jobId: string): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.post<QueuedPrintJobDto>(
+      const response = await apiClient.post<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}/pause`
       );
       return response.data;
@@ -373,7 +352,7 @@ class PrintQueueService {
    */
   async resumeJobAsync(jobId: string): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.post<QueuedPrintJobDto>(
+      const response = await apiClient.post<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}/resume`
       );
       return response.data;
@@ -388,7 +367,7 @@ class PrintQueueService {
    */
   async cancelJobAsync(jobId: string): Promise<void> {
     try {
-      await this.apiClient.delete(`${this.baseUrl}/jobs/${jobId}`);
+      await apiClient.delete(`${this.baseUrl}/jobs/${jobId}`);
     } catch (error) {
       this.handleError(error);
       throw error;
@@ -400,7 +379,7 @@ class PrintQueueService {
    */
   async rerunJobAsync(jobId: string): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.post<QueuedPrintJobDto>(
+      const response = await apiClient.post<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}/rerun`
       );
       return response.data;
@@ -417,7 +396,7 @@ class PrintQueueService {
     request: BulkCancelQueueJobsRequest
   ): Promise<QueueBulkOperationResultDto> {
     try {
-      const response = await this.apiClient.post<QueueBulkOperationResultDto>(
+      const response = await apiClient.post<QueueBulkOperationResultDto>(
         `${this.baseUrl}/bulk/cancel`,
         request
       );
@@ -436,7 +415,7 @@ class PrintQueueService {
     daysBack: number = 30
   ): Promise<void> {
     try {
-      await this.apiClient.post(`${this.baseUrl}/history/seed`, {
+      await apiClient.post(`${this.baseUrl}/history/seed`, {
         printerIds,
         daysBack,
       });
@@ -453,7 +432,7 @@ class PrintQueueService {
    */
   async getJobDetailsAsync(jobId: string): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.get<QueuedPrintJobDto>(
+      const response = await apiClient.get<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}`
       );
       return response.data;
@@ -478,7 +457,7 @@ class PrintQueueService {
     }
   ): Promise<QueuedPrintJobDto> {
     try {
-      const response = await this.apiClient.put<QueuedPrintJobDto>(
+      const response = await apiClient.put<QueuedPrintJobDto>(
         `${this.baseUrl}/jobs/${jobId}`,
         {
           name: updates.name,
@@ -501,7 +480,7 @@ class PrintQueueService {
    */
   async updateJobNotesAsync(jobId: string, notes: string): Promise<void> {
     try {
-      await this.apiClient.put(`${this.baseUrl}/jobs/${jobId}/notes`, {
+      await apiClient.put(`${this.baseUrl}/jobs/${jobId}/notes`, {
         notes: notes || null,
       });
     } catch (error) {
@@ -528,7 +507,7 @@ class PrintQueueService {
       if (filterStatus) params.append("filterStatus", filterStatus);
       params.append("limit", limit.toString());
 
-      const response = await this.apiClient.get<TimelineEventDto[]>(
+      const response = await apiClient.get<TimelineEventDto[]>(
         `${this.baseUrl}/timeline?${params.toString()}`
       );
       return response.data;
@@ -543,7 +522,7 @@ class PrintQueueService {
    */
   async getJobStateHistoryAsync(jobId: string): Promise<JobStateHistoryDto> {
     try {
-      const response = await this.apiClient.get<JobStateHistoryDto>(
+      const response = await apiClient.get<JobStateHistoryDto>(
         `${this.baseUrl}/jobs/${jobId}/state-history`
       );
       return response.data;
@@ -567,7 +546,7 @@ class PrintQueueService {
       if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
       if (dateTo) params.append("dateTo", dateTo.toISOString());
 
-      const response = await this.apiClient.get<DurationAnalyticsDto>(
+      const response = await apiClient.get<DurationAnalyticsDto>(
         `${this.baseUrl}/duration-analytics?${params.toString()}`
       );
       return response.data;

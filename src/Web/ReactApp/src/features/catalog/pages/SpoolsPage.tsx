@@ -22,7 +22,7 @@ import { SpoolUsageBar } from '@/features/catalog/components/SpoolUsageBar';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import '@/features/catalog/components/spool-components.css';
 
 // Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
@@ -173,12 +173,8 @@ export function SpoolsPage() {
   useEffect(() => {
     const run = async () => {
       try {
-        const r = await fetch(`${getApiBaseUrl()}/spoolman/health`, {
-          headers: getAuthHeaders()
-        });
-        if (!r.ok) return;
-        const data = await r.json();
-        setHealth(data);
+        const data = await apiClient.getSpoolmanHealth();
+        setHealth(data as { configured: boolean; success: boolean; message?: string });
       } catch { /* ignore */ }
     };
     run();
@@ -270,25 +266,9 @@ export function SpoolsPage() {
     try {
       setLoading(true);
       setSpoolmanError(null);
-
-  const response = await fetch(`${getApiBaseUrl()}/spoolman/spools`, { 
-    headers: { 
-      'Accept': 'application/json',
-      ...getAuthHeaders()
-    } 
-  });
-      if (!response.ok) {
-        if (response.status === 503) {
-          setSpoolmanError('Spoolman not configured or unavailable');
-        } else {
-          setSpoolmanError(`Backend error: HTTP ${response.status}`);
-        }
-        setSpools([]);
-        return;
-      }
-  const data = await response.json();
-  const list: SpoolmanSpoolDto[] = Array.isArray(data) ? data : (data.items || []);
-  setSpools(list);
+      const data = await apiClient.getSpools();
+      const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
+      setSpools(list);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setSpoolmanError(`Failed to load spools: ${message}`);
@@ -301,13 +281,9 @@ export function SpoolsPage() {
   useEffect(() => {
     const init = async () => {
       try {
-        const cfgResp = await fetch(`${getApiBaseUrl()}/spoolman/config`, {
-          headers: getAuthHeaders()
-        });
-        if (cfgResp.ok) {
-          const cfg = await cfgResp.json();
-          if (cfg?.baseUrl) setSpoolmanBaseUrl(cfg.baseUrl);
-        } else {
+        const cfg = await apiClient.getSpoolmanConfig();
+        if ((cfg as Record<string, unknown>)?.baseUrl) setSpoolmanBaseUrl((cfg as Record<string, unknown>).baseUrl as string);
+        else {
           const saved = localStorage.getItem('spoolman-base-url');
           if (saved) setSpoolmanBaseUrl(saved);
         }

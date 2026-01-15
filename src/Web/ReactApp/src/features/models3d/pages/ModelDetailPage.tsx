@@ -6,7 +6,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import TagInput from '@/components/TagInput';
 import TagDisplay from '@/components/TagDisplay';
 import { Button, Input, FormField, Textarea } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 interface ModelDetail {
     id: string;
@@ -50,12 +50,9 @@ export const ModelDetailPage: React.FC = () => {
     const { data: model, isLoading: modelLoading } = useQuery<ModelDetail>({
         queryKey: ['model-detail', modelId],
         queryFn: async () => {
-            const response = await fetch(
-                `${getApiBaseUrl()}/3d-models/${modelId}/details`,
-                { headers: getAuthHeaders() }
-            );
-            if (!response.ok) throw new Error('Failed to fetch model');
-            return response.json();
+            if (!modelId) throw new Error('Model ID is required');
+            const result = await apiClient.getModel3DDetails(modelId);
+            return result as unknown as ModelDetail;
         },
         enabled: !!modelId,
         staleTime: 5 * 60 * 1000,
@@ -66,11 +63,8 @@ export const ModelDetailPage: React.FC = () => {
     useQuery<TagOption[]>({
         queryKey: ['model-tags'],
         queryFn: async () => {
-            const response = await fetch(`${getApiBaseUrl()}/tags`, {
-                headers: getAuthHeaders()
-            });
-            if (!response.ok) throw new Error('Failed to fetch tags');
-            return response.json();
+            const result = await apiClient.getTags();
+            return result as unknown as TagOption[];
         },
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000
@@ -79,18 +73,8 @@ export const ModelDetailPage: React.FC = () => {
     // Update model mutation (name and/or description)
     const updateModelMutation = useMutation({
         mutationFn: async (updates: { name?: string; description?: string }) => {
-            const response = await fetch(
-                `${getApiBaseUrl()}/3d-models/${modelId}`,
-                {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify(updates)
-                }
-            );
-            if (!response.ok) throw new Error('Failed to update model');
+            if (!modelId) throw new Error('Model ID is required');
+            await apiClient.updateModel3D(modelId, updates as Record<string, unknown>);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['model-detail', modelId] });
@@ -111,33 +95,16 @@ export const ModelDetailPage: React.FC = () => {
             if (payload.newTags && payload.newTags.length > 0) {
                 for (const newTag of payload.newTags) {
                     try {
-                        const createResponse = await fetch(
-                            `${getApiBaseUrl()}/tags`,
-                            {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    ...getAuthHeaders()
-                                },
-                                body: JSON.stringify({
-                                    name: newTag.name,
-                                    color: newTag.color,
-                                    description: newTag.description
-                                })
-                            }
-                        );
-                        if (createResponse.ok) {
-                            const createdTag = await createResponse.json();
-                            // Add the new tag ID to the list
-                            if (createdTag.id && !finalTagIds.includes(createdTag.id)) {
-                                finalTagIds = [...finalTagIds, createdTag.id];
-                            }
-                        } else {
-                            const errorText = await createResponse.text();
-                            console.error(`Failed to create tag "${newTag.name}":`, createResponse.status, errorText);
-                            throw new Error(`Failed to create tag: ${errorText}`);
+                        const createdTag = await apiClient.createNewTag({
+                            name: newTag.name,
+                            color: newTag.color,
+                            description: newTag.description
+                        });
+                        // Add the new tag ID to the list
+                        if ((createdTag as Record<string, unknown>).id && !finalTagIds.includes((createdTag as Record<string, unknown>).id as string)) {
+                            finalTagIds = [...finalTagIds, (createdTag as Record<string, unknown>).id as string];
                         }
-                    } catch (error) {
+                    } catch (error: unknown) {
                         console.error('Failed to create tag:', error);
                         throw error;
                     }
@@ -147,47 +114,21 @@ export const ModelDetailPage: React.FC = () => {
             // Then update the model with all tag IDs (only real IDs, no temp IDs)
             // Determine current tags from model to calculate diff
             const diff = {
-                toAdd: finalTagIds.filter((id: string) => !currentTags.includes(id)),
-                toRemove: currentTags.filter((id: string) => !finalTagIds.includes(id))
+                toAdd: finalTagIds.filter((tagId: string) => !currentTags.map(t => t.id).includes(tagId)),
+                toRemove: currentTags.map(t => t.id).filter((tagId: string) => !finalTagIds.includes(tagId))
             };
 
             // Assign new tags
             for (const tagId of diff.toAdd) {
-                const response = await fetch(
-                    `${getApiBaseUrl()}/tags/assign-to-model/${modelId}/${tagId}`,
-                    {
-                        method: 'POST',
-                        headers: getAuthHeaders()
-                    }
-                );
-                if (!response.ok) throw new Error(`Failed to assign tag ${tagId}`);
+                await apiClient.assignTagToModel(modelId, tagId);
             }
 
             // Remove tags
             for (const tagId of diff.toRemove) {
-                const response = await fetch(
-                    `${getApiBaseUrl()}/tags/remove-from-model/${modelId}/${tagId}`,
-                    {
-                        method: 'DELETE',
-                        headers: getAuthHeaders()
-                    }
-                );
-                if (!response.ok) throw new Error(`Failed to remove tag ${tagId}`);
+                await apiClient.removeTagFromModel(modelId, tagId);
             }
 
-            const response = await fetch(
-                `${getApiBaseUrl()}/3d-models/${modelId}`,
-                {
-                    method: 'GET',
-                    headers: getAuthHeaders()
-                },
-                    body: JSON.stringify({ tagIds: finalTagIds })
-                }
-            );
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to update tags: ${errorText}`);
-            }
+            await apiClient.updateModel3D(modelId, { tagIds: finalTagIds } as Record<string, unknown>);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['model-detail', modelId] });

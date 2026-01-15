@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { forwardRef, useImperativeHandle, ReactNode, type Ref } from 'react';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
@@ -16,87 +16,97 @@ interface FileBrowserProps<TDomain> {
   onViewModeChange?: (mode: ViewMode) => void;
 }
 
-export function FileBrowser<TDomain>({
-  config,
-  sortOptions = [
-    { value: 'name', label: 'Name' },
-    { value: 'size', label: 'Size' },
-    { value: 'date', label: 'Date' },
-  ],
-  columns,
-  renderItemActions,
-  renderMetadata,
-  extraToolbarActions,
-  viewMode,
-  onViewModeChange,
-}: FileBrowserProps<TDomain>) {
-  const browser = useFileBrowser({ ...config, viewMode, onViewModeChange });
+export interface FileBrowserHandle {
+  refetch: () => Promise<void>;
+}
 
-  const isBusy = browser.isLoading || browser.isMutating;
+export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknown>>(
+  function FileBrowser<TDomain = unknown>({
+    config,
+    sortOptions = [
+      { value: 'name', label: 'Name' },
+      { value: 'size', label: 'Size' },
+      { value: 'date', label: 'Date' },
+    ],
+    columns,
+    renderItemActions,
+    renderMetadata,
+    extraToolbarActions,
+    viewMode,
+    onViewModeChange,
+  }: FileBrowserProps<TDomain>, ref: Ref<FileBrowserHandle>) {
+    const browser = useFileBrowser({ ...config, viewMode, onViewModeChange });
 
-  return (
-    <div
-      className="flex flex-col gap-4"
-      role="region"
-      aria-label="File browser"
-      aria-busy={isBusy}
-    >
-      <FileBrowserToolbar
-        search={browser.search}
-        onSearchChange={browser.setSearch}
-        sortBy={browser.sortBy}
-        sortOrder={browser.sortOrder}
-        sortOptions={sortOptions}
-        onSortChange={(value) => browser.setSort(value)}
-        onToggleSortOrder={() => browser.setSort(browser.sortBy)}
-        viewMode={browser.viewMode}
-        onViewModeChange={browser.setViewMode}
-        extraActions={extraToolbarActions}
-      />
+    useImperativeHandle(ref, () => ({
+      refetch: browser.refetch,
+    }), [browser.refetch]);
 
-      <div className="sr-only" aria-live="polite">
-        {browser.selectedIds.length} item{browser.selectedIds.length === 1 ? '' : 's'} selected
-      </div>
-      <div className="sr-only" aria-live="polite">
-        {isBusy ? (browser.isMutating ? 'Applying changes…' : 'Loading files…') : 'Ready'}
-      </div>
+    const isBusy = browser.isLoading || browser.isMutating;
 
-      {browser.viewMode === 'grid' ? (
-        <GridView
-          files={browser.files}
-          selectedIds={browser.selectedIds}
-          onToggle={browser.toggleSelect}
-          onSelectAll={browser.selectAll}
-          renderItemActions={renderItemActions}
-          renderMetadata={renderMetadata}
-          isBusy={browser.isMutating}
-        />
-      ) : (
-        <ExplorerView
-          folders={browser.folders}
-          files={browser.files}
-          selectedIds={browser.selectedIds}
-          onToggle={browser.toggleSelect}
-          onSelectAll={browser.selectAll}
-          onNavigate={(path) => browser.navigate(path)}
-          currentPath={browser.currentPath}
-          onCreateDirectory={
-            config.canCreateDirectory && config.onCreateDirectory
-              ? () => browser.createDirectory()
-              : undefined
-          }
-          onMoveFiles={config.onMoveFiles ? browser.moveFiles : undefined}
-          renderActions={renderItemActions}
+    return (
+      <div
+        className="flex flex-col gap-4"
+        role="region"
+        aria-label="File browser"
+        aria-busy={isBusy}
+      >
+        <FileBrowserToolbar
+          search={browser.search}
+          onSearchChange={browser.setSearch}
           sortBy={browser.sortBy}
           sortOrder={browser.sortOrder}
-          onSort={(key) => browser.setSort(key)}
-          page={browser.page}
-          totalPages={browser.totalPages}
-          onPageChange={browser.setPage}
-          columns={columns}
-          isBusy={browser.isMutating}
+          sortOptions={sortOptions}
+          onSortChange={(value) => browser.setSort(value)}
+          onToggleSortOrder={() => browser.setSort(browser.sortBy)}
+          viewMode={browser.viewMode}
+          onViewModeChange={browser.setViewMode}
+          extraActions={extraToolbarActions}
         />
-      )}
-    </div>
-  );
-}
+
+        <div className="sr-only" aria-live="polite">
+          {browser.selectedIds.length} item{browser.selectedIds.length === 1 ? '' : 's'} selected
+        </div>
+        <div className="sr-only" aria-live="polite">
+          {isBusy ? (browser.isMutating ? 'Applying changes…' : 'Loading files…') : 'Ready'}
+        </div>
+
+        {browser.viewMode === 'grid' ? (
+          <GridView
+            files={browser.files}
+            selectedIds={browser.selectedIds}
+            onToggle={browser.toggleSelect}
+            onSelectAll={browser.selectAll}
+            renderItemActions={renderItemActions}
+            renderMetadata={renderMetadata}
+            isBusy={browser.isMutating}
+          />
+        ) : (
+          <ExplorerView
+            folders={browser.folders}
+            files={browser.files}
+            selectedIds={browser.selectedIds}
+            onToggle={browser.toggleSelect}
+            onSelectAll={browser.selectAll}
+            onNavigate={(path) => browser.navigate(path)}
+            currentPath={browser.currentPath}
+            onCreateDirectory={
+              config.canCreateDirectory && config.onCreateDirectory
+                ? () => browser.createDirectory()
+                : undefined
+            }
+            onMoveFiles={config.onMoveFiles ? browser.moveFiles : undefined}
+            renderActions={renderItemActions}
+            sortBy={browser.sortBy}
+            sortOrder={browser.sortOrder}
+            onSort={(key) => browser.setSort(key)}
+            page={browser.page}
+            totalPages={browser.totalPages}
+            onPageChange={browser.setPage}
+            columns={columns}
+            isBusy={browser.isMutating}
+          />
+        )}
+      </div>
+    );
+  }
+);

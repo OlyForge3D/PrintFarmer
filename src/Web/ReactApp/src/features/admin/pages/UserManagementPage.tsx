@@ -1,4 +1,3 @@
-/* eslint-disable local/pf-no-unguarded-console */
 import React, { useState, useEffect } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
@@ -10,11 +9,11 @@ import {
   UserCheck,
   UserX,
 } from 'lucide-react';
+import { apiClient } from '@/services/api';
 import { DeleteIcon, SearchIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/common/components/ui';
 import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import type { User, Role } from '@/types/admin';
 
 export function UserManagementPage() {
@@ -75,12 +74,7 @@ export function UserManagementPage() {
     const ctrl = new AbortController();
     const handle = setTimeout(async () => {
       try {
-        const params = new URLSearchParams();
-        if (username) params.append('username', username);
-        if (email) params.append('email', email);
-        const res = await fetch(`${getApiBaseUrl()}/users/availability?${params.toString()}`, { signal: ctrl.signal, headers: getAuthHeaders() });
-        if (!res.ok) throw new Error('availability failed');
-        const data: { usernameExists?: boolean; emailExists?: boolean } = await res.json();
+        const data = await apiClient.checkUserAvailability(username, email);
 
         if (username) {
           const uTaken = data.usernameExists === true;
@@ -144,56 +138,15 @@ export function UserManagementPage() {
       setCreating(true);
       setCreateErrors({});
 
-      const response = await fetch(`${getApiBaseUrl()}/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          username: newUser.username.trim(),
-          email: newUser.email.trim(),
-          password: newUser.password,
-          firstName: newUser.firstName.trim() || undefined,
-          lastName: newUser.lastName.trim() || undefined,
-          roleIds: selectedRoleId ? [selectedRoleId] : [],
-          accessibleAreas: selectedPermissions
-        })
+      await apiClient.createUser({
+        username: newUser.username.trim(),
+        email: newUser.email.trim(),
+        password: newUser.password,
+        firstName: newUser.firstName.trim() || undefined,
+        lastName: newUser.lastName.trim() || undefined,
+        roleIds: selectedRoleId ? [selectedRoleId] : [],
+        accessibleAreas: selectedPermissions
       });
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to create user';
-        let json: { message?: string; error?: string; title?: string; errors?: Record<string, string[]> } | null = null;
-        try {
-          // API may return JSON or plain text
-          const contentType = response.headers.get('Content-Type') || '';
-          if (contentType.includes('application/json')) {
-            json = await response.json();
-            if (json) {
-              errorMessage = json.error || json.message || json.title || errorMessage;
-            }
-          } else {
-            errorMessage = (await response.text()) || errorMessage;
-          }
-        } catch (e) {
-          console.warn('Failed to parse error response:', e);
-        }
-
-        // Extract field errors if any
-        if (json?.errors) {
-          const fieldErrors: Record<string, string> = {};
-          for (const key in json.errors) {
-            const msgArray = json.errors[key];
-            if (Array.isArray(msgArray) && msgArray.length > 0) {
-              fieldErrors[key] = msgArray[0];
-            }
-          }
-          setCreateErrors(fieldErrors);
-        }
-
-        toast.error(errorMessage);
-        return;
-      }
 
       // We could optimistically insert but reloading ensures roles & computed fields
       await loadUsers();
@@ -203,8 +156,28 @@ export function UserManagementPage() {
       setSelectedRoleId('');
       setSelectedPermissions([]);
     } catch (err) {
-      console.error('Error creating user', err);
-      toast.error('Unexpected error creating user');
+      const error = err as { response?: { data?: Record<string, unknown> } };
+      let errorMessage = 'Failed to create user';
+
+      // Handle apiClient errors
+      if (error.response?.data) {
+        const data = error.response.data as Record<string, unknown>;
+        errorMessage = (data.error || data.message || data.title || errorMessage) as string;
+
+        // Extract field errors if any
+        if (data.errors && typeof data.errors === 'object') {
+          const fieldErrors: Record<string, string> = {};
+          for (const key in data.errors) {
+            const msgArray = (data.errors as Record<string, unknown>)[key];
+            if (Array.isArray(msgArray) && msgArray.length > 0) {
+              fieldErrors[key] = msgArray[0];
+            }
+          }
+          setCreateErrors(fieldErrors);
+        }
+      }
+
+      toast.error(errorMessage);
     } finally {
       setCreating(false);
     }
@@ -235,19 +208,8 @@ export function UserManagementPage() {
 
   const loadUsers = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/users`, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data);
-      } else {
-        console.error('Failed to load users');
-      }
+      const data = await apiClient.getUsers();
+      setUsers((data as unknown) as User[]);
     } catch (error) {
       console.error('Error loading users:', error);
     } finally {
@@ -257,19 +219,8 @@ export function UserManagementPage() {
 
   const loadRoles = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/users/roles`, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setRoles(data);
-      } else {
-        console.error('Failed to load roles');
-      }
+      const data = await apiClient.getRoles();
+      setRoles((data as unknown) as Role[]);
     } catch (error) {
       console.error('Error loading roles:', error);
     }
@@ -753,32 +704,22 @@ export function UserManagementPage() {
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
-                  const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
-                    method: 'PUT',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({
-                      firstName: selectedUser.firstName,
-                      lastName: selectedUser.lastName,
-                      email: selectedUser.email,
-                      isActive: selectedUser.isActive,
-                      roles: selectedUser.roles,
-                      permissions: selectedUser.permissions
-                    })
+                  await apiClient.updateUser(selectedUser.id, {
+                    firstName: selectedUser.firstName,
+                    lastName: selectedUser.lastName,
+                    email: selectedUser.email,
+                    isActive: selectedUser.isActive,
+                    roles: selectedUser.roles,
+                    permissions: selectedUser.permissions
                   });
-                  if (response.ok) {
-                    toast.success('User updated successfully');
-                    setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
-                    setShowEditModal(false);
-                    setSelectedUser(null);
-                  } else {
-                    const err = await response.json().catch(() => ({}));
-                    toast.error(err.message || 'Failed to update user');
-                  }
-                } catch {
-                  toast.error('Error updating user');
+                  toast.success('User updated successfully');
+                  setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                } catch (err: unknown) {
+                  const error = err as { response?: { data?: Record<string, unknown> } };
+                  const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
+                  toast.error(message);
                 }
               }}
               className="space-y-4"
@@ -899,32 +840,22 @@ export function UserManagementPage() {
                 variant="primary"
                 onClick={async () => {
                   try {
-                    const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
-                      method: 'PUT',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                      },
-                      body: JSON.stringify({
-                        firstName: selectedUser.firstName,
-                        lastName: selectedUser.lastName,
-                        email: selectedUser.email,
-                        isActive: selectedUser.isActive,
-                        roles: selectedUser.roles,
-                        permissions: selectedUser.permissions
-                      })
+                    await apiClient.updateUser(selectedUser.id, {
+                      firstName: selectedUser.firstName,
+                      lastName: selectedUser.lastName,
+                      email: selectedUser.email,
+                      isActive: selectedUser.isActive,
+                      roles: selectedUser.roles,
+                      permissions: selectedUser.permissions
                     });
-                    if (response.ok) {
-                      toast.success('User updated successfully');
-                      setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
-                      setShowEditModal(false);
-                      setSelectedUser(null);
-                    } else {
-                      const err = await response.json().catch(() => ({}));
-                      toast.error(err.message || 'Failed to update user');
-                    }
-                  } catch {
-                    toast.error('Error updating user');
+                    toast.success('User updated successfully');
+                    setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                    setShowEditModal(false);
+                    setSelectedUser(null);
+                  } catch (err) {
+                    const error = err as { response?: { data?: Record<string, unknown> } };
+                    const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
+                    toast.error(message);
                   }
                 }}
               >
@@ -992,25 +923,16 @@ export function UserManagementPage() {
                 variant="primary"
                 onClick={async () => {
                   try {
-                    const response = await fetch(
-                      `${getApiBaseUrl()}/users/${selectedUser.id}`,
-                      {
-                        method: 'PUT',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          ...getAuthHeaders()
-                        },
-                        body: JSON.stringify({
-                          accessibleAreas: selectedUser.permissions
-                        })
-                      }
-                    );
-                    if (!response.ok) throw new Error('Failed to update permissions');
+                    await apiClient.updateUser(selectedUser.id, {
+                      accessibleAreas: selectedUser.permissions
+                    });
                     toast.success('Permissions updated');
                     setShowPermissionsModal(false);
                     loadUsers();
-                  } catch {
-                    toast.error('Failed to update permissions');
+                  } catch (err) {
+                    const error = err as { response?: { data?: Record<string, unknown> } };
+                    const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update permissions';
+                    toast.error(message);
                   }
                 }}
               >

@@ -45,3 +45,14 @@ export interface ModelListItem {
   uploadedAt: string;
   filePath?: string;
 }
+
+/**
+ * Response from backend /3d-models/query endpoint
+ */
+export interface Model3DSearchResponse {
+  models: Model[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}

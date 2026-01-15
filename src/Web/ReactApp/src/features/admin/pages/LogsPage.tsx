@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import { apiClient } from "@/services/api";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
@@ -64,9 +64,9 @@ export function LogsPage() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      let res;
+      let logs;
       if (useAdvancedQuery) {
-        res = await axios.get("/api/systemlogs/query", { params: { q: queryString } });
+        logs = await apiClient.getSystemLogsQuery(queryString);
       } else {
         const params: Record<string, string> = {};
         if (filters.correlationId) params.correlationId = filters.correlationId;
@@ -75,9 +75,9 @@ export function LogsPage() {
         if (filters.from) params.from = `${filters.from}T00:00:00Z`;
         if (filters.to) params.to = `${filters.to}T23:59:59Z`;
         if (filters.metadata) params.metadata = filters.metadata;
-        res = await axios.get("/api/systemlogs", { params });
+        logs = await apiClient.getSystemLogs(params);
       }
-      setLogs(res.data);
+      setLogs(logs);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch logs';
       alert(message);
@@ -94,8 +94,8 @@ export function LogsPage() {
       if (filters.from) params.from = `${filters.from}T00:00:00Z`;
       if (filters.to) params.to = `${filters.to}T23:59:59Z`;
       if (filters.metadata) params.metadata = filters.metadata;
-      const res = await axios.get("/api/systemlogs/export", { params, responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const blob = await apiClient.exportSystemLogs(params);
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute("download", `systemlogs_export.json`);

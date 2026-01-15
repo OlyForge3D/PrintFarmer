@@ -9,7 +9,7 @@ import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { Button } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ModelsFileBrowser } from '@/features/models3d/components/ModelsFileBrowser';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -37,11 +37,8 @@ export const ModelsPage: React.FC = () => {
   const { data: allTags = [] } = useQuery<ModelTag[]>({
     queryKey: ['model-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/tags`, {
-        headers: getAuthHeaders()
-      });
-      if (!response.ok) throw new Error('Failed to fetch tags');
-      return response.json();
+      const result = await apiClient.getTags();
+      return (result as unknown as ModelTag[]) || [];
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000
@@ -115,7 +112,7 @@ export const ModelsPage: React.FC = () => {
               </div>
             </div>
             <TagInput
-              selectedTags={allTags.filter(t => selectedTags.includes(t.id))}
+              selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
               onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
               placeholder="Select tags to filter models..."
               maxTags={undefined}

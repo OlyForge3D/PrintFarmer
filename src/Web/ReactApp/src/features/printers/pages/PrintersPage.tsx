@@ -3,7 +3,6 @@ import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
@@ -196,29 +195,16 @@ export function PrintersPage() {
         console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
       }
       
-      const results = await Promise.all(printers.map(async (printer) => {
+      await Promise.all(printers.map(async (printer) => {
         if (window.PrintFarmerDebug?.printers) {
           console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
         }
-        const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify(inMaintenance)
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.text();
-          if (window.PrintFarmerDebug?.printers) {
-            console.error(`Failed to update maintenance for ${printer.id}:`, response.status, errorData);
-          }
-          throw new Error(`HTTP ${response.status}: ${errorData}`);
-        }
-        
-        return response.json();
+        await apiClient.setPrinterMaintenance(printer.id, { inMaintenance });
       }));
       
+      
       if (window.PrintFarmerDebug?.printers) {
-        console.log('Maintenance status updated successfully:', results);
+        console.log('Maintenance status updated successfully');
         console.log('Refetching printer queries...');
       }
       await queryClient.refetchQueries({ queryKey: ['printers'] });

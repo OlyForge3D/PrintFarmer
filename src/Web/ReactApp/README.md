@@ -124,13 +124,39 @@ Tests use Vitest and React Testing Library. See `src/test/` for examples.
 
 ## API Integration
 
-The React app communicates with the ASP.NET Core API backend:
+The React app communicates with the ASP.NET Core API backend using a centralized **apiClient** singleton:
 
 - **API Base URL**: `http://localhost:5245`
 - **SignalR Hub**: `/hubs/printers`
 - **REST Endpoints**: `/api/printers`, `/api/catalog`, etc.
 
-See `src/services/` for API client implementations.
+### Using apiClient (Required Pattern)
+
+All API communication **must** go through `apiClient` from `src/services/api.ts`. This ensures:
+- ✅ **Authentication**: Bearer token automatically added to all requests
+- ✅ **Correlation IDs**: X-Correlation-Id header automatically added for request tracing
+- ✅ **Error Handling**: Centralized 401/error handling with automatic logout on auth failures
+- ✅ **Request Timeout**: 30-second timeout configured globally
+
+**Example:**
+
+```typescript
+import { apiClient } from '@/services/api';
+
+// Direct usage (recommended for simple calls)
+const printers = await apiClient.getPrinters();
+
+// Through service wrapper (for caching/debouncing)
+import { jobSchedulingService } from '@/services/jobSchedulingService';
+const scheduled = await jobSchedulingService.getScheduledJob(jobId);
+```
+
+**DO NOT create raw axios instances or use fetch for API calls.** All services delegate to `apiClient`:
+- ✗ Don't: `axios.get('/api/printers')`
+- ✗ Don't: `fetch('/api/printers').then(...)`
+- ✅ Do: `apiClient.getPrinters()`
+
+See `src/services/` for all available API methods and service wrappers.
 
 ## Deployment
 
