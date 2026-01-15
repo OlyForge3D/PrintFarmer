@@ -288,50 +288,58 @@ public class TagsController(
     }
 
     /// <summary>
-    /// Assigns a tag to a 3D model.
+    /// Assigns a tag to an object (Model3D, GcodeFile, etc.).
     /// </summary>
-    /// <param name="modelId">Unique model identifier</param>
+    /// <param name="objectId">Unique object identifier</param>
     /// <param name="tagId">Unique tag identifier</param>
+    /// <param name="objectType">Type of object: Model3D or GcodeFile</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>No content on success</returns>
     /// <response code="204">Tag assigned successfully</response>
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
-    /// <response code="404">Model or tag not found</response>
+    /// <response code="404">Object or tag not found</response>
     /// <response code="500">Internal server error</response>
-    [HttpPost("assign-to-model/{modelId:guid}/{tagId:guid}")]
+    [HttpPost("{objectId:guid}/{tagId:guid}/assign")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> AssignTagAsync(
-        [FromRoute] Guid modelId,
+    public async Task<IActionResult> AssignTagToObjectAsync(
+        [FromRoute] Guid objectId,
         [FromRoute] Guid tagId,
+        [FromQuery] string? objectType,
         CancellationToken ct)
     {
         try
         {
-            await _tagService.AssignTagAsync(modelId, tagId, "Model3D", ct);
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile"))
+            {
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D' or 'GcodeFile'" });
+            }
+
+            await _tagService.AssignTagAsync(objectId, tagId, objectType, ct);
             return NoContent();
         }
         catch (KeyNotFoundException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] AssignTagAsync - Object or tag not found: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] AssignTagToObjectAsync - Object or tag not found: {ex.Message}");
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] AssignTagAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, $"[TagsController] AssignTagToObjectAsync failed: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to assign tag" });
         }
     }
 
     /// <summary>
-    /// Unassigns a tag from a 3D model.
+    /// Unassigns a tag from an object (Model3D, GcodeFile, etc.).
     /// </summary>
-    /// <param name="modelId">Unique model identifier</param>
+    /// <param name="objectId">Unique object identifier</param>
     /// <param name="tagId">Unique tag identifier</param>
+    /// <param name="objectType">Type of object: Model3D or GcodeFile</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>No content on success</returns>
     /// <response code="204">Tag unassigned successfully</response>
@@ -339,30 +347,36 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Mapping not found</response>
     /// <response code="500">Internal server error</response>
-    [HttpDelete("remove-from-model/{modelId:guid}/{tagId:guid}")]
+    [HttpDelete("{objectId:guid}/{tagId:guid}/remove")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> RemoveTagAsync(
-        [FromRoute] Guid modelId,
+    public async Task<IActionResult> RemoveTagFromObjectAsync(
+        [FromRoute] Guid objectId,
         [FromRoute] Guid tagId,
+        [FromQuery] string? objectType,
         CancellationToken ct)
     {
         try
         {
-            await _tagService.RemoveTagAsync(modelId, tagId, "Model3D", ct);
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile"))
+            {
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D' or 'GcodeFile'" });
+            }
+
+            await _tagService.RemoveTagAsync(objectId, tagId, objectType, ct);
             return NoContent();
         }
         catch (KeyNotFoundException ex)
         {
-            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] RemoveTagAsync - Mapping not found: {ex.Message}");
+            _unifiedLoggingService?.LogWarning(ex, $"[TagsController] RemoveTagFromObjectAsync - Mapping not found: {ex.Message}");
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _unifiedLoggingService?.LogError(ex, $"[TagsController] RemoveTagAsync failed: {ex.Message}");
+            _unifiedLoggingService?.LogError(ex, $"[TagsController] RemoveTagFromObjectAsync failed: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to remove tag" });
         }
     }

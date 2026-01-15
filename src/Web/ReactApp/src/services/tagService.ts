@@ -293,9 +293,9 @@ class TagService {
    */
   async assignTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
     try {
-      const endpoint = objectType === 'gcode' ? 'assign-to-gcode' : 'assign-to-model';
+      const type = objectType === 'gcode' ? 'GcodeFile' : 'Model3D';
       await axios.post(
-        `${this.baseUrl}/${endpoint}/${objectId}/${tagId}`
+        `${this.baseUrl}/${objectId}/${tagId}/assign?objectType=${type}`
       );
     } catch (error) {
       this.handleError(`Failed to assign tag to ${objectType}`, error);
@@ -311,9 +311,9 @@ class TagService {
    */
   async removeTag(objectId: string, tagId: string, objectType: 'model' | 'gcode' = 'model'): Promise<void> {
     try {
-      const endpoint = objectType === 'gcode' ? 'remove-from-gcode' : 'remove-from-model';
+      const type = objectType === 'gcode' ? 'GcodeFile' : 'Model3D';
       await axios.delete(
-        `${this.baseUrl}/${endpoint}/${objectId}/${tagId}`
+        `${this.baseUrl}/${objectId}/${tagId}/remove?objectType=${type}`
       );
     } catch (error) {
       this.handleError(`Failed to remove tag from ${objectType}`, error);
