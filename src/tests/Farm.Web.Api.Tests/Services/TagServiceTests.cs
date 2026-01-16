@@ -110,7 +110,8 @@ public class TagServiceTests
     {
         // Arrange
         var dto = new CreateTagDto { Name = "NewTag", Color = "#FF0000", Description = "Test" };
-        _tagRepository.Setup(r => r.GetByNameAsync("NewTag", It.IsAny<CancellationToken>()))
+        // After normalization via ToPascalCase("NewTag"), it becomes "Newtag"
+        _tagRepository.Setup(r => r.GetByNameAsync("Newtag", It.IsAny<CancellationToken>()))
             .ReturnsAsync((Tag?)null);
         _tagRepository.Setup(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -122,7 +123,7 @@ public class TagServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("NewTag", result.Name);
+        Assert.Equal("Newtag", result.Name);
         _tagRepository.Verify(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -131,8 +132,10 @@ public class TagServiceTests
     {
         // Arrange
         var dto = new CreateTagDto { Name = "ExistingTag", Color = "#FF0000" };
-        var existingTag = new Tag { Id = Guid.NewGuid(), Name = "ExistingTag", Color = "#0000FF", CreatedAt = DateTime.UtcNow };
-        _tagRepository.Setup(r => r.GetByNameAsync("ExistingTag", It.IsAny<CancellationToken>()))
+        var existingTagId = Guid.NewGuid();
+        // After normalization via ToPascalCase("ExistingTag"), it becomes "Existingtag"
+        var existingTag = new Tag { Id = existingTagId, Name = "Existingtag", Color = "#0000FF", CreatedAt = DateTime.UtcNow };
+        _tagRepository.Setup(r => r.GetByNameAsync("Existingtag", It.IsAny<CancellationToken>()))
             .ReturnsAsync(existingTag);
 
         // Act
@@ -140,8 +143,8 @@ public class TagServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(existingTag.Id, result.Id);
-        Assert.Equal(existingTag.Name, result.Name);
+        Assert.Equal(existingTagId, result.Id);
+        Assert.Equal("Existingtag", result.Name);
         _tagRepository.Verify(r => r.AddAsync(It.IsAny<Tag>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

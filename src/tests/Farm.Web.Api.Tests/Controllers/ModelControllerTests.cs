@@ -62,6 +62,27 @@ namespace Farm.Web.Api.Tests.Controllers
                 .Returns<Guid>(modelId => $"/api/3d-models/thumbnail/{modelId}");
             mock.Setup(x => x.ExtractFileNameForStorage(It.IsAny<string>()))
                 .Returns<string>(path => Path.GetFileName(path));
+            // Mock FileExistsAndIsSafe to return true (allow file to be returned)
+            mock.Setup(x => x.FileExistsAndIsSafe(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns(true);
+            // Mock ResolveStoragePath to resolve relative paths
+            mock.Setup(x => x.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns<string, string>((relativePath, basePath) => 
+                    string.IsNullOrEmpty(relativePath) 
+                        ? basePath 
+                        : Path.Combine(basePath, relativePath));
+            // Mock GetContentTypeForFile to return appropriate MIME types
+            mock.Setup(x => x.GetContentTypeForFile(It.IsAny<string>()))
+                .Returns<string>(ext => ext switch
+                {
+                    ".stl" => "application/vnd.ms-pki.stl",
+                    ".3mf" => "model/3mf",
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    _ => "application/octet-stream"
+                });
             return mock;
         }
 
