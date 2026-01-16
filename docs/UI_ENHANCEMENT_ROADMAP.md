@@ -1300,6 +1300,186 @@ Implemented per accessibility standards:
 
 ---
 
+## Sprint 9: React 19 Patterns Adoption (Week 9 - 8-10 hours) 🚀 PLANNED
+
+**Objective:** Migrate high-impact forms and components to modern React 19 patterns for improved DX and code clarity.
+
+### High-Impact Components for React 19 Migration
+
+**Priority 1: Form Components (3-4 hours)**
+1. **SetupWizard.tsx** - Currently uses useState for multi-step form
+   - Migrate step state to `useActionState` pattern
+   - Use `useFormStatus` for submit button feedback
+   - Benefit: Cleaner form state management, automatic loading states
+   
+2. **ModelUploadModal.tsx** - Currently uses multiple useState calls
+   - Migrate to `useActionState` with FormData handling
+   - Implement `useFormStatus` for progress feedback
+   - Benefit: Unified form handling, cleaner component
+
+3. **UserManagementPage.tsx** - Complex form with validation
+   - Migrate creation form to `useActionState`
+   - Use `useFormStatus` for availability checking
+   - Benefit: Simplified async validation, reduced callback hell
+
+**Priority 2: Async Data Fetching (2-3 hours)**
+1. **Printer Details Modal** - Currently uses useQuery + manual loading
+   - Use `use()` hook for promise handling inside component
+   - Wrap with Suspense for cleaner loading UI
+   - Benefit: Removes prop drilling, cleaner data flow
+
+2. **File Details Component** - useQuery pattern
+   - Migrate to `use()` hook with Suspense boundaries
+   - Better error handling with Error Boundary
+   - Benefit: More readable async patterns, better UX
+
+3. **Job Details Modal** - Manual promise handling
+   - Use `use()` for fetching job details
+   - Implement proper Suspense fallback
+   - Benefit: Simpler, more readable async code
+
+**Priority 3: Component API Cleanup (2-3 hours)**
+1. **Remove forwardRef usage** - Scan for components using forwardRef
+   - Migrate to direct ref prop (React 19 feature)
+   - Simplify component definitions
+   - Benefit: Cleaner, fewer wrapper components
+
+2. **Activity Component** - For tab state preservation
+   - Already implemented in FilesPage - document usage
+   - Potential extension to other tabbed interfaces
+   - Benefit: Preserve scroll/focus when tabs switch
+
+### Implementation Plan
+
+**Phase 1: Set Up Testing Framework (1 hour)**
+- Create test file: `src/Web/ReactApp/src/test/react19-migrations.test.ts`
+- Add test utilities for `useActionState`, form handling, async patterns
+- Document testing strategies for each pattern
+
+**Phase 2: Form Component Migrations (3-4 hours)**
+```typescript
+// Example: Migrate SetupWizard to useActionState
+async function setupWizardAction(prevState, formData: FormData) {
+  const username = formData.get('username') as string;
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  
+  try {
+    await apiClient.setupAdmin({ username, email, password });
+    return { success: true, step: prevState.step + 1 };
+  } catch (error) {
+    return { error: error.message, ...prevState };
+  }
+}
+
+export function SetupWizard({ onComplete }: SetupWizardProps) {
+  const [state, formAction] = useActionState(setupWizardAction, { step: 0 });
+  const { pending } = useFormStatus();
+  
+  return (
+    <form action={formAction}>
+      {/* form fields */}
+      <button disabled={pending}>{pending ? 'Setting up...' : 'Continue'}</button>
+    </form>
+  );
+}
+```
+
+**Phase 3: Async Data Migrations (2-3 hours)**
+```typescript
+// Example: Migrate Printer Details to use()
+async function fetchPrinterDetails(id: string) {
+  const res = await fetch(`/api/printers/${id}`);
+  if (!res.ok) throw new Error('Failed to load printer');
+  return res.json();
+}
+
+function PrinterDetailsContent({ detailsPromise }: Props) {
+  const details = use(detailsPromise); // Suspends until resolved
+  return <div>{details.name}</div>;
+}
+
+function PrinterDetailsModal({ printerId }: Props) {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <ErrorBoundary>
+        <PrinterDetailsContent 
+          detailsPromise={fetchPrinterDetails(printerId)} 
+        />
+      </ErrorBoundary>
+    </Suspense>
+  );
+}
+```
+
+**Phase 4: Component API Cleanup (2-3 hours)**
+- Scan codebase: `grep -r "forwardRef" src/Web/ReactApp/src/`
+- Remove unnecessary forwardRef wrappers
+- Update component props to accept ref directly
+- Simplify component definitions
+
+### Quality Criteria
+
+- ✅ All tests pass (including new React 19 migration tests)
+- ✅ Build succeeds with <11s target
+- ✅ ESLint: 0 errors, 0 warnings
+- ✅ TypeScript: Strict mode, fully typed
+- ✅ Code size: No significant increase
+- ✅ Documentation: Updated FRONTEND_UI_COMPONENTS.md
+
+### Files to Modify
+
+**High Priority:**
+- `src/Web/ReactApp/src/features/auth/components/SetupWizard.tsx`
+- `src/Web/ReactApp/src/features/models3d/components/ModelUploadModal.tsx`
+- `src/Web/ReactApp/src/features/admin/pages/UserManagementPage.tsx`
+- `src/Web/ReactApp/src/features/printers/components/PrinterDetailsModal.tsx`
+
+**Medium Priority:**
+- `src/Web/ReactApp/src/features/queue/components/JobDetailsModal.tsx`
+- `src/Web/ReactApp/src/features/files/components/FileDetailsModal.tsx`
+- Any components using `forwardRef` (scan needed)
+
+**Documentation:**
+- Update `useReact19Patterns.ts` with migration examples
+- Add section to `FRONTEND_UI_COMPONENTS.md`: "React 19 Migration Guide"
+- Document when to use each pattern
+
+### Expected Benefits
+
+**Code Quality:**
+- 20-30% reduction in form component boilerplate
+- Clearer intent with explicit `useActionState`, `use()` patterns
+- Fewer state management bugs from manual form handling
+
+**Developer Experience:**
+- Simpler async patterns without extra wrappers
+- Automatic form state tracking with `useFormStatus`
+- Better error handling boundaries
+
+**Performance:**
+- Suspense boundaries improve perceived performance
+- `useOptimistic` already integrated (Sprint 3)
+- Proper concurrent rendering support
+
+### Effort Estimate
+- **Total:** 8-10 hours (for this sprint and follow-up refactoring)
+- **Forms:** 3-4 hours
+- **Async Data:** 2-3 hours
+- **Cleanup:** 2-3 hours
+- **Testing & Docs:** 1-2 hours
+
+### Success Metrics
+
+Post-completion metrics:
+- ✅ 5+ form components migrated to `useActionState`
+- ✅ 3+ async data patterns migrated to `use()` + Suspense
+- ✅ 0 forwardRef usage (all refs as props)
+- ✅ 100% test pass rate
+- ✅ Documentation complete with examples
+
+---
+
 ## Success Metrics
 
 After completing all sprints:
@@ -1310,6 +1490,7 @@ After completing all sprints:
 - ✅ Mobile users have responsive master-detail layouts
 - ✅ Context menus provide fast access to operations
 - ✅ Application feels professional and responsive
+- 🚀 React 19 patterns used throughout for modern, maintainable code
 
 ---
 

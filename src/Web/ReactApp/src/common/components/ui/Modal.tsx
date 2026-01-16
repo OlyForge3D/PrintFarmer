@@ -1,6 +1,6 @@
+import React, { useEffect, useCallback } from 'react';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 // No MdiIcons used in this component
 

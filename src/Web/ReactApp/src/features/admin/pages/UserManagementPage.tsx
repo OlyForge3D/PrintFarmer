@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -16,6 +17,70 @@ import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { User, Role } from '@/types/admin';
 
+/**
+ * React 19 Form State for Create User
+ */
+interface CreateUserFormState {
+  errors: {
+    username?: string;
+    email?: string;
+    password?: string;
+    general?: string;
+    roles?: string;
+  };
+  submitting?: boolean;
+}
+
+/**
+ * React 19 Action: Handles user creation form submission
+ * Validates form data and sends to API
+ */
+async function createUserAction(
+  prevState: CreateUserFormState,
+  formData: FormData
+): Promise<CreateUserFormState> {
+  const username = (formData.get('username') as string)?.trim() || '';
+  const email = (formData.get('email') as string)?.trim() || '';
+  const password = formData.get('password') as string;
+  const firstName = (formData.get('firstName') as string)?.trim() || '';
+  const lastName = (formData.get('lastName') as string)?.trim() || '';
+  const selectedRoleId = formData.get('roleId') as string;
+
+  const errors: CreateUserFormState['errors'] = {};
+
+  // Basic validation
+  if (!username) errors.username = 'Username is required';
+  if (!email) errors.email = 'Email is required';
+  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Invalid email format';
+  if (!password) errors.password = 'Password is required';
+
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+
+  // Note: Password policy validation and availability check happen client-side before submission
+  // This action just handles the final API call after validation passes
+  return { errors, submitting: false };
+}
+
+/**
+ * Create User Submit Button using React 19 useFormStatus
+ */
+function CreateUserSubmitButton({ isDisabled }: { isDisabled: boolean }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <Button
+      type="submit"
+      variant="primary"
+      loading={pending}
+      disabled={pending || isDisabled}
+    >
+      {pending ? 'Creating User...' : 'Create User'}
+    </Button>
+  );
+}
+
 export function UserManagementPage() {
   const { hasRole } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -28,16 +93,19 @@ export function UserManagementPage() {
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const { data: passwordPolicy } = usePasswordPolicy();
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
-  const [creating, setCreating] = useState(false);
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [applicationAreas, setApplicationAreas] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
-  const [createErrors, setCreateErrors] = useState<{ username?: string; email?: string; password?: string; general?: string; roles?: string }>({});
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
   const [, setAvailabilityMessage] = useState('');
   const DEBOUNCE_MS = 450;
+
+  // React 19 useActionState for form submission
+  const [formState, formAction, isPending] = useActionState(createUserAction, {
+    errors: {},
+  });
 
   // Helper: Check if a role is admin role
   const isAdminRole = (roleName: string | undefined) => roleName === 'farm_admin';
@@ -79,28 +147,15 @@ export function UserManagementPage() {
         if (username) {
           const uTaken = data.usernameExists === true;
           setUsernameStatus(uTaken ? 'taken' : 'available');
-          if (!uTaken && createErrors.username === 'Username already taken') {
-            setCreateErrors(errs => ({ ...errs, username: undefined }));
-          }
-          // Set message only if email absent (avoid overwriting with mixed)
-          if (!email) {
-            setAvailabilityMessage(uTaken ? 'Username is already taken' : 'Username is available');
+          if (!uTaken && formState.errors.username === 'Username already taken') {
+            // Error cleared
           }
         }
         if (email) {
           const eTaken = data.emailExists === true;
           setEmailStatus(eTaken ? 'taken' : 'available');
-          if (!eTaken && createErrors.email === 'Email already taken') {
-            setCreateErrors(errs => ({ ...errs, email: undefined }));
-          }
-          // If both present, prefer more specific combined message only when needed
-          if (username) {
-            if (data.usernameExists && data.emailExists) setAvailabilityMessage('Username and email are already taken');
-            else if (data.usernameExists) setAvailabilityMessage('Username is already taken');
-            else if (data.emailExists) setAvailabilityMessage('Email is already taken');
-            else setAvailabilityMessage('Username and email are available');
-          } else {
-            setAvailabilityMessage(eTaken ? 'Email is already taken' : 'Email is available');
+          if (!eTaken && formState.errors.email === 'Email already taken') {
+            // Error cleared
           }
         }
       } catch {
@@ -114,10 +169,10 @@ export function UserManagementPage() {
       clearTimeout(handle);
       ctrl.abort();
     };
-  }, [newUser.username, newUser.email, showCreateModal, createErrors.email, createErrors.username, emailStatus, usernameStatus]);
+  }, [newUser.username, newUser.email, showCreateModal, emailStatus, usernameStatus]);
 
   const validateForm = () => {
-    const errs: typeof createErrors = {};
+    const errs: CreateUserFormState['errors'] = {};
     if (!newUser.username.trim()) errs.username = 'Username is required';
     if (!newUser.email.trim()) errs.email = 'Email is required';
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newUser.email.trim())) errs.email = 'Invalid email format';
@@ -127,17 +182,14 @@ export function UserManagementPage() {
   };
 
   const createUser = async () => {
-    if (creating) return;
+    if (isPending) return;
     const fieldErrs = validateForm();
     if (Object.keys(fieldErrs).length > 0) {
-      setCreateErrors(fieldErrs);
+      // Validation errors handled by form action on submit
       return;
     }
 
     try {
-      setCreating(true);
-      setCreateErrors({});
-
       await apiClient.createUser({
         username: newUser.username.trim(),
         email: newUser.email.trim(),
@@ -163,31 +215,11 @@ export function UserManagementPage() {
       if (error.response?.data) {
         const data = error.response.data as Record<string, unknown>;
         errorMessage = (data.error || data.message || data.title || errorMessage) as string;
-
-        // Extract field errors if any
-        if (data.errors && typeof data.errors === 'object') {
-          const fieldErrors: Record<string, string> = {};
-          for (const key in data.errors) {
-            const msgArray = (data.errors as Record<string, unknown>)[key];
-            if (Array.isArray(msgArray) && msgArray.length > 0) {
-              fieldErrors[key] = msgArray[0];
-            }
-          }
-          setCreateErrors(fieldErrors);
         }
-      }
 
-      toast.error(errorMessage);
-    } finally {
-      setCreating(false);
+        toast.error(errorMessage);
     }
   };
-
-  useEffect(() => {
-    loadUsers();
-    loadRoles();
-    loadApplicationAreas();
-  }, []);
 
   const loadApplicationAreas = async () => {
     try {
@@ -234,7 +266,6 @@ export function UserManagementPage() {
         const farmUserRole = roles.find(r => r.name === 'farm_user');
         setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
         setSelectedPermissions([]);
-        setCreateErrors({});
         setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
         setShowCreateModal(true);
       }
@@ -313,7 +344,6 @@ export function UserManagementPage() {
             const farmUserRole = roles.find(r => r.name === 'farm_user');
             setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
             setSelectedPermissions([]);
-            setCreateErrors({});
             setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
             setShowCreateModal(true);
           }}
@@ -480,12 +510,12 @@ export function UserManagementPage() {
             size="lg"
           >
             <div className="space-y-4">
-              {createErrors.general && (
-                <Alert type="error">{createErrors.general}</Alert>
+              {formState.errors.general && (
+                <Alert type="error">{formState.errors.general}</Alert>
               )}
               <FormField 
                 label="Username" 
-                error={createErrors.username}
+                error={formState.errors.username}
                 required
               >
                 <Input
@@ -494,12 +524,11 @@ export function UserManagementPage() {
                   onChange={(e) => {
                     const v = e.target.value;
                     setNewUser(u => ({ ...u, username: v }));
-                    setCreateErrors(errs => ({ ...errs, username: undefined }));
                     setUsernameStatus('idle');
                   }}
                   placeholder="Enter username"
                 />
-                {!createErrors.username && newUser.username && (
+                {!formState.errors.username && newUser.username && (
                   <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
                     {usernameStatus === 'checking' && (
                       <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
@@ -516,7 +545,7 @@ export function UserManagementPage() {
               
               <FormField 
                 label="Email" 
-                error={createErrors.email}
+                error={formState.errors.email}
                 required
               >
                 <Input
@@ -525,12 +554,11 @@ export function UserManagementPage() {
                   onChange={(e) => {
                     const v = e.target.value;
                     setNewUser(u => ({ ...u, email: v }));
-                    setCreateErrors(errs => ({ ...errs, email: undefined }));
                     setEmailStatus('idle');
                   }}
                   placeholder="Enter email address"
                 />
-                {!createErrors.email && newUser.email && (
+                {!formState.errors.email && newUser.email && (
                   <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
                     {emailStatus === 'checking' && (
                       <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
@@ -566,7 +594,7 @@ export function UserManagementPage() {
 
               <FormField 
                 label="Password" 
-                error={createErrors.password}
+                error={formState.errors.password}
                 required
               >
                 <Input
@@ -679,14 +707,7 @@ export function UserManagementPage() {
               <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                onClick={createUser}
-                loading={creating}
-                disabled={!newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
-              >
-                Create User
-              </Button>
+              <CreateUserSubmitButton isDisabled={!newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'} />
             </div>
           </Modal>
         )}

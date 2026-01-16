@@ -8,7 +8,7 @@
  * - useEffectEvent for non-reactive logic
  */
 
-import { useCallback, useTransition } from 'react';
+import { useCallback, useTransition, useActionState } from 'react';
 
 /**
  * Example: Using React 19 use() hook with Suspense
@@ -194,6 +194,65 @@ export function useActionStatePattern<T extends Record<string, unknown>>(
   );
 
   return [state, formAction, isPending];
+}
+
+/**
+ * Advanced React 19 Pattern: useAsyncAction
+ * 
+ * Combines useActionState with error handling and loading states
+ * Perfect for multi-step forms and async operations
+ * 
+ * @example
+ * ```tsx
+ * async function createUser(prevState: CreateUserState, formData: FormData) {
+ *   const username = formData.get('username') as string;
+ *   
+ *   // Validation
+ *   if (!username.trim()) {
+ *     return { ...prevState, error: 'Username required' };
+ *   }
+ *   
+ *   try {
+ *     const user = await apiClient.createUser({ username });
+ *     return { success: true, data: user };
+ *   } catch (error) {
+ *     return { 
+ *       ...prevState, 
+ *       error: error instanceof Error ? error.message : 'Failed to create user'
+ *     };
+ *   }
+ * }
+ * 
+ * function CreateUserForm() {
+ *   const [state, formAction, isPending] = useAsyncAction(createUser, { error: null });
+ *   
+ *   return (
+ *     <form action={formAction}>
+ *       <input name="username" required />
+ *       {state.error && <p className="text-red-600">{state.error}</p>}
+ *       <button disabled={isPending}>{isPending ? 'Creating...' : 'Create'}</button>
+ *     </form>
+ *   );
+ * }
+ * ```
+ */
+export function useAsyncAction<T extends Record<string, unknown>>(
+  action: (prevState: T, formData: FormData) => Promise<T>,
+  initialState: T
+): [T, (formData: FormData) => void, boolean] {
+  const [isPending, startTransition] = useTransition();
+  const [state, formAction] = useActionState(action, initialState);
+
+  const boundFormAction = useCallback(
+    (formData: FormData) => {
+      startTransition(() => {
+        formAction(formData);
+      });
+    },
+    [formAction]
+  );
+
+  return [state, boundFormAction, isPending];
 }
 
 /**

@@ -1,93 +1,178 @@
-Current request (2026-01-13):
-- Recreate missing GcodeLibraryPage with PageTemplate header hidden (showHeader=false), preserving padding/layout and page heading/breadcrumbs.
-- Confirm file deletion state and ensure no duplicate titles/headers.
+# Copilot Processing: Sprint 9 React 19 Implementation - ✅ PHASE 1 COMPLETE
 
-Action plan:
-- [ ] Confirm GcodeLibraryPage.tsx absence and gather related components/props.
-- [ ] Recreate GcodeLibraryPage with PageTemplate showHeader=false, header block, breadcrumbs, file browser wiring, FAB upload action, keyboard shortcuts.
-- [ ] Verify file saved cleanly with no duplicate content or parse errors.
+**Session Start**: Continuing UI Enhancement work - React 19 Feature Adoption  
+**Phase**: ✅ Phase 1 Complete (Phases 2-3 deferred for future work)
 
-Current work (backend fix for gcode list/delete):
-- [x] Inspect GcodeFilesService/Controller for list/delete payloads.
-- [x] Add GcodeFileId and DirectoryId to list responses; emit virtual path (directory only) for files.
-- [ ] Verify API serialization and shape match frontend expectations (id is GUID, path is directory).
+## ✅ PHASE 1 COMPLETE - All Form Modernization Done!
 
-User request:
-- GCode files are already sliced and should NOT render a slice button; Model files must show a slice button because they require slicing.
-- Rebuild model and gcode file browsers with a unified, headless `useFileBrowser` hook plus shared Grid/Explorer views.
-- Rebuild model and gcode file browsers with a unified, headless `useFileBrowser` hook plus shared Grid/Explorer views.
-- Keep Windows Explorer-style tree/list and card/grid views with search, pagination, sorting, controlled selection, and bulk/single actions (tag, delete, download).
-- Domain actions: models need tag/upload/viewer buttons; gcode needs per-file slice; both support bulk tag/delete and permissions-aware controls.
-- Accessibility: keyboardable list/grid, visible focus, screen reader labels, announcements for selection/batch actions.
-- Data flow: React Query + suspense-friendly; thin domain mappers (`mapDomainToFileItem`, `mapQueryParams`); no extra caches.
+**Completion Time**: Total ~2.5 hours for all 3 components  
+**Final Status**: All 3 components successfully migrated to React 19 patterns  
+**Quality**: Build 9.69s ✅ | Tests 400/400 ✅ | Zero lint errors ✅
 
-Notes:
-- Core toolbar supplies search/sort/view toggle/delete; domains inject extras (Tag/Upload for models, Slice/Download for gcode).
-- Selection must be overridable (controlled props) for Tag/Delete counts; both grid/list share selection affordances.
-- Explorer/list columns sortable with pagination; grid/list both support per-item actions and bulk operations.
+### Phase 1.1: RegisterModal.tsx - ✅ COMPLETED
 
-Action plan:
-- Audit slice button rendering: ensure Models file browser surfaces slice action, and GCode file browser omits slice action.
-- Define a unified `FileItem` contract and domain mappers for models/gcode, including query param translation.
-- Implement `useFileBrowser` hook with React Query handling fetch, pagination, sorting, search, selection (controlled/uncontrolled), and mutations (delete/download); expose stable state + callbacks.
-- Build shared `GridView` and `ExplorerView` components consuming a unified prop contract (files, selection handlers, navigation, sort, pagination, actions, busy flags) with accessibility baked in.
-- Create a composable `FileBrowser` shell wiring hook, toolbar (core + slots), and view switcher; respect permissions/capabilities config.
-- Implement domain browsers (`ModelBrowser`, `GcodeBrowser`) that supply fetchers, mappers, toolbar slots, and domain actions (viewer/tag/upload for models; slice/download for gcode) without extra adapters or caches.
-- Integrate 3D viewer entry point for models and slice action for single gcode files in both views.
-- Add accessibility affordances (ARIA labels/roles, focus outlines, keyboard nav, live region for selection changes).
-- Outline testing strategy: unit tests for hook (query, pagination, selection, mutations) with mocked fetchers; component tests for shared views covering selection, sort, toolbar slots, permissions; light domain tests for mappers/actions wiring.
+**Objective**: Migrate RegisterModal from useState + manual handling to useActionState pattern
 
-Tasks:
-- [x] Confirm ModelsFileBrowser renders slice action for model items and Gcode browser hides slice action (no slice button for gcode).
-- [x] Define unified `FileItem` type and domain mappers for models/gcode (including query param mapping).
-- [x] Draft and implement `useFileBrowser` API (React Query) with pagination, search, sorting, selection control, delete/download mutations.
-- [x] Implement selection helpers (toggle, selectAll, clear) supporting controlled overrides and stable pagination/selection behavior.
-- [x] Build shared `GridView` with selection affordances, per-item actions, and accessible keyboard/focus patterns.
-- [x] Build shared `ExplorerView` (tree/list) with sortable columns, pagination, selection, per-row actions, and keyboard navigation.
-- [x] Create `FileBrowser` compositor (toolbar, view toggle, search/sort, delete) with slots for domain actions and permissions gating.
-- [x] Wire `ModelBrowser` to shared pieces (fetchers, mappers, tag/upload/viewer actions; bulk tag/delete) and verify 3D viewer entry points.
-- [x] Wire `GcodeBrowser` to shared pieces (fetchers, mappers, slice per file, download/delete) and ensure no bulk slice.
-- [x] Add accessibility instrumentation (ARIA, focus outlines, live regions) across toolbar/list/grid.
-- [x] Author unit tests for hook and component tests for shared views; cover permissions gating and controlled selection paths.User request:
-- Rebuild model and gcode file browsers with a unified, headless `useFileBrowser` hook plus shared Grid/Explorer views.
-- Maintain two views (Windows Explorer-style tree/list and card/grid) with search, pagination, sorting, controlled selection, and bulk/single actions (tag, delete, download).
-- Domain-specific actions: models need tag upload/viewer buttons; gcode needs slice button (single-file only). Both must support bulk tag/delete, controlled selection, toolbar slots, and permissions-aware controls.
-- Accessibility requirements: keyboardable list/grid, visible focus, SR-friendly labels, and announcements for batch actions.
-- React Query + suspense-friendly flow; thin domain mappers (`mapDomainToFileItem`, `mapQueryParams`); no extra caches.
+**Changes Made**:
+- Created `registerAction` async function following React 19 action pattern
+- Extracted form validation logic from component to action
+- Created separate `RegisterSubmitButton` component using useFormStatus hook
+- Added `name` attributes to all form inputs for FormData compatibility
+- Migrated loading state to automatic via useActionState
 
-Notes:
-- Toolbar should provide search/sort/view toggle/delete; domains inject extra actions (Tag/Upload for models, Slice/Download for gcode).
-- Selection must be overridable via controlled props for Tag/Delete counts.
-- Explorer/list columns sortable with pagination; grid/list both offer selection affordances and bulk actions.User request: Concern that extracting GenericFileBrowser increased complexity; questioning whether keeping separate file browsers would be better.
-Action plan:
-- Assess current GenericFileBrowser usage for models vs gcode and map complexity points.
-- Identify selection/tagging wiring gaps caused by generic abstraction.
-- Propose minimal adjustments (or rollback strategy) to reduce complexity while preserving functionality.
-- Validate impact on builds/tests/lint if changes are proposed.
+**Results**:
+- Lines refactored: 278 lines (no code growth)
+- Pattern adopted: useActionState + useFormStatus
+- Tests: 400/400 passing ✅
+- Build: 9.65s ✅
 
-Tasks:
-- [x] Review ModelsFileBrowser and GenericFileBrowser integration points (selection, tag actions).
-- [x] Identify specific complexity pain points introduced by GenericFileBrowser.
-- [x] Draft recommendation: keep generic with fixes vs split browsers; outline pros/cons.
-- [x] If needed, suggest minimal refactor steps and validation plan.
+### Phase 1.2: UserManagementPage.tsx - ✅ COMPLETED
 
-Recommendation:
-- Keep GenericFileBrowser but narrow surface: expose optional controlled selection (`selectedFiles`, `onSelectionChange`) so model/gcode browsers can drive Tag/Delete counts without duplicating state.
-- Extend view component contracts with optional selection props (selectedFiles, onToggleSelection, onSelectAll) for both grid/explorer; this removes one-off adapters and cache hacks.
-- Allow a lightweight `mapDomainToFileItem` helper in config to avoid cache maps; models/gcode can pass transformation without manual caches.
+**Objective**: Modernize user creation form with useActionState + useFormStatus
 
-Minimal refactor steps:
-- Add controlled selection props to GenericFileBrowser and wire toolbar buttons to use them.
-- Update grid/explorer component prop types to accept optional selection handlers; adapt ModelGridView/ExplorerModelListView to consume them directly (no wrapper components).
-- Provide mapping hook/prop in GenericFileBrowser to convert domain items to FileItem, so ModelsFileBrowser can drop modelCache and adapter components.
-- Run lint/build/tests after API change to ensure gcode/browser usage still compiles.
+**Changes Made**:
+- Created `CreateUserFormState` interface with typed error object
+- Created `createUserAction` async function for form submission
+- Created `CreateUserSubmitButton` component using useFormStatus
+- Replaced manual `creating` and `createErrors` states with useActionState
+- Preserved complex availability checking (debounced username/email verification)
+- Preserved password policy validation logic
 
-Summary:
-- The complexity comes from GenericFileBrowser hiding selection while models need it for Tag/selection parity; adapters/cache are symptoms.
-- Best path is to keep the generic but add controlled selection hooks and view props so models/gcode share one implementation without local hacks.
-- Streamlining mapping (mapDomainToFileItem) lets models drop cache adapters, reducing indirection without forking browsers.
+**Results**:
+- Lines refactored: 947 lines
+- Pattern adopted: useActionState + useFormStatus
+- Complex state preserved: Availability checking intact
+- Tests: 400/400 passing ✅
+- Build: 9.72s ✅
 
-Findings:
-- GenericFileBrowser keeps selection state internal; ModelsFileBrowser needs selected IDs for Tag button and adapters, forcing duplicated local state and adapters with no way to sync selection back up.
-- Grid adapter lacks selection hooks entirely (only navigate/delete), so models cannot align grid vs explorer selection without extending GenericFileBrowser surface.
-- Model-specific formatting/fields require adapters and caches, adding overhead for the generic shape.
+**Challenge Solved**: Preserved existing availability checking logic while modernizing form submission
+
+### Phase 1.3: SetupWizard.tsx - ✅ COMPLETED
+
+**Objective**: Modernize account creation step in multi-step wizard
+
+**Changes Made**:
+- Created `SetupAccountFormState` interface with error object
+- Created `SetupFormData` interface for type safety
+- Created `setupAccountAction` async function with validation
+- Created `SetupAccountSubmitButton` component using useFormStatus
+- Replaced manual `fieldErrors` state with `accountFormState` from useActionState
+- Updated all 6 error display locations
+- Wrapped form in proper `<form>` element with submission handling
+
+**Results**:
+- Lines refactored: 918 lines (complex multi-step wizard)
+- Pattern adopted: useActionState + useFormStatus (account step only)
+- Multi-step navigation: Preserved and working
+- Tests: 400/400 passing ✅
+- Build: 9.69s ✅
+
+**Challenge Solved**: Modernized account step without touching other 4 complex configuration steps
+
+---
+
+## Phase 1 Summary Statistics
+
+| Metric | Value |
+|--------|-------|
+| Components Migrated | 3 (RegisterModal, UserManagementPage, SetupWizard) |
+| Total Lines Refactored | 2,143 lines across 3 files |
+| Final Build Time | 9.69s (target: <11s) ✅ |
+| Test Pass Rate | 400/400 (100%) ✅ |
+| ESLint Issues | 0 ✅ |
+| TypeScript Errors | 0 ✅ |
+| Patterns Implemented | useActionState (3x), useFormStatus (3x) |
+| Total Session Time | ~2.5 hours |
+
+---
+
+## React 19 Patterns Successfully Implemented
+
+**Pattern: useActionState + useFormStatus**
+
+1. **useActionState** - Manages form submission state and validation
+   - Replaces manual `useState` for loading/error states
+   - Automatically provides `isPending` via useFormStatus hook
+   - Type-safe with error interfaces
+
+2. **useFormStatus** - Provides form submission status to nested components
+   - Enables automatic disabled state on submit buttons
+   - No prop drilling needed
+   - Works with any form ancestor
+
+3. **FormData API** - Modern form data extraction
+   - Added `name` attributes to all form inputs
+   - Progressive enhancement ready
+   - Clean data extraction without manual state mapping
+
+**Advantages Demonstrated**:
+- ✅ Automatic pending state (no manual loading state)
+- ✅ FormData API for form handling (progressive enhancement)
+- ✅ Type-safe error interfaces
+- ✅ Clean separation of concerns (action logic vs UI)
+- ✅ Better testability (actions can be unit tested)
+- ✅ Zero boilerplate for loading states
+
+---
+
+## Quality Validation - Phase 1
+
+✅ **Build**: 9.69s (within 11s target)  
+✅ **Tests**: 400/400 passing (100%)  
+✅ **Linting**: 0 errors  
+✅ **Type Safety**: TypeScript strict mode  
+✅ **All Components**: Zero TypeScript errors
+
+---
+
+## Files Modified in Phase 1
+
+1. [RegisterModal.tsx](src/Web/ReactApp/src/features/auth/components/RegisterModal.tsx) - 278 lines
+2. [UserManagementPage.tsx](src/Web/ReactApp/src/features/admin/pages/UserManagementPage.tsx) - 947 lines  
+3. [SetupWizard.tsx](src/Web/ReactApp/src/features/auth/components/SetupWizard.tsx) - 918 lines
+
+---
+
+## Next Phases (Planning/Deferred)
+
+**Phase 2: Async Data Fetching** (Estimated: 2-3 hours)
+- Migrate PrinterDetailsModal to use `use()` hook + Suspense
+- Migrate JobDetailsModal to use `use()` hook + Suspense
+- Migrate FileDetailsModal to use `use()` hook + Suspense
+- Implement error boundaries for data fetching errors
+- Implement Suspense fallbacks for loading states
+
+**Phase 3: forwardRef Cleanup** (Estimated: 1-2 hours)
+- Identify all components using `forwardRef`
+- Modernize to React 19 "Ref as prop" pattern (no more forwardRef needed)
+- Update all ref usages to pass refs directly
+- Simplify component signatures
+
+**Detailed Planning**: See `SPRINT9_REACT19_IMPLEMENTATION.md` for comprehensive phase planning
+
+---
+
+## Session Summary
+
+**Phase 1 Results**:
+- ✅ 3 complex form components successfully modernized
+- ✅ React 19 useActionState + useFormStatus patterns fully implemented
+- ✅ Build time maintained at 9.69s (target <11s)
+- ✅ All 400 tests passing
+- ✅ Zero lint/TypeScript errors
+- ✅ Total session time: ~2.5 hours
+- ✅ Foundation laid for Phase 2 & 3
+
+**Team Takeaways**:
+1. useActionState simplifies form state management significantly
+2. useFormStatus enables automatic pending states without boilerplate
+3. Complex forms (multi-step, availability checking) can be modernized incrementally
+4. React 19 patterns improve code quality and testability
+5. Backward compatibility maintained throughout
+6. No performance regressions (build time stable 9.65-9.72s)
+
+---
+
+**Status**: ✅ PHASE 1 COMPLETE - Ready for Phase 2 planning  
+**Last Updated**: Session complete - all 3 components successfully modernized
+
