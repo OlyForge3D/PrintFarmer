@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace Farm.Web.Api.Controllers
 {
     [ApiController]
-    [Route("api/octoprint")]
+    [Route("api")]
     public class OctoPrintCompatController : ControllerBase
     {
         private readonly ILogger<OctoPrintCompatController> _logger;
