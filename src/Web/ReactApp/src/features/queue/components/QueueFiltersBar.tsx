@@ -82,7 +82,7 @@ export function TableFiltersBar({
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between p-4 bg-pf-bg-2 hover:bg-pf-bg-1 transition-colors"
         type="button"
-        variant="ghost"
+        variant="subtle"
       >
         <h3 className="font-semibold text-pf-text-primary flex-1 text-left">FILTERS</h3>
         {isExpanded ? (

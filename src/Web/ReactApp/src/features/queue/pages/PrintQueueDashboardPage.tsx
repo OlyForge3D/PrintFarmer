@@ -36,19 +36,21 @@ export function PrintQueueDashboardPage() {
   const [showDetailPanel, setShowDetailPanel] = useState(false);
 
   // Keyboard navigation for job list (only for active tab)
-  const { selectedIndex } = useKeyboardNavigation({
-    items: jobs,
-    columns: 1,  // Single column table-like layout
-    onEnter: (job) => {
+  const { selectedIndex } = useKeyboardNavigation(
+    jobs,
+    (job: QueuedPrintJobWithFileMetaDto) => {
       setSelectedJobId(job.id);
       setShowDetailPanel(true);
       setIsJobDetailsModalOpen(true);
     },
-    onEscapeKey: () => {
-      setShowDetailPanel(false);
-      setIsJobDetailsModalOpen(false);
+    {
+      columns: 1,  // Single column table-like layout
+      onEscapeKey: () => {
+        setShowDetailPanel(false);
+        setIsJobDetailsModalOpen(false);
+      }
     }
-  });
+  );
 
   // Keyboard shortcuts for queue actions
   useKeyboardShortcuts([
@@ -66,9 +68,9 @@ export function PrintQueueDashboardPage() {
       handler: async () => {
         if (selectedIndex >= 0 && jobs[selectedIndex]) {
           const job = jobs[selectedIndex];
-          if (job.status === 'Running') {
+          if (job.job.status === 'Printing') {
             await handlePauseJob(job.id);
-          } else if (job.status === 'Paused') {
+          } else if (job.job.status === 'Paused') {
             await handleResumeJob(job.id);
           }
         }
@@ -95,11 +97,11 @@ export function PrintQueueDashboardPage() {
         100,
         0
       );
-      setJobs(data);
+      setJobs(data as QueuedPrintJobWithFileMetaDto[]);
 
       // Also load stats
       const queueStats = await apiClient.getAnalyticsQueueStats();
-      setStats(queueStats);
+      setStats(queueStats as QueueStatsDto);
 
       setLoading(false);
     } catch (err) {
@@ -290,11 +292,11 @@ export function PrintQueueDashboardPage() {
                       <h3 className="text-lg font-semibold">Job Details</h3>
                       <Button
                         onClick={() => setShowDetailPanel(false)}
-                        variant="ghost"
+                        variant="subtle"
                         size="sm"
                         title="Close detail panel (Esc)"
                       >
-                        <ArrowLeftIcon size="1.2rem" />
+                        <ArrowLeftIcon className="w-5 h-5" />
                       </Button>
                     </div>
 
@@ -309,7 +311,6 @@ export function PrintQueueDashboardPage() {
                           setSelectedJobId(null);
                           loadJobs();
                         }}
-                        onRefresh={loadJobs}
                       />
                     </div>
                   </div>
@@ -391,7 +392,6 @@ export function PrintQueueDashboardPage() {
           isOpen={isJobDetailsModalOpen}
           onClose={handleCloseJobDetailsModal}
           onSave={handleJobDetailsSaved}
-          onRefresh={loadJobs}
         />
       )}
     </PageTemplate>

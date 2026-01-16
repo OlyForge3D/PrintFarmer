@@ -35,7 +35,7 @@ vi.mock('@/common/components/ErrorBoundary', () => ({ ErrorBoundary: ({ children
 // Minimal mock for Toaster so it doesn't render complex UI
 vi.mock('sonner', () => ({ Toaster: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 
-import App from '@/App';
+import App from '../App';
 
 describe('App smoke', () => {
   beforeEach(() => {
