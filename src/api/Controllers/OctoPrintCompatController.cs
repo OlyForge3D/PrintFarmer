@@ -56,7 +56,7 @@ namespace Farm.Web.Api.Controllers
             var limitOk = rateLimiter?.TryConsume(rateKey, octoSettings.RateLimitPerMinute, TimeSpan.FromMinutes(1)) ?? true;
             if (!limitOk)
             {
-                _logger.LogWarning("Rate limit exceeded for {key}", rateKey);
+                _logger.LogWarning("Rate limit exceeded for {Key}", rateKey);
                 return StatusCode(429, new { message = "Rate limit exceeded" });
             }
 
@@ -76,7 +76,7 @@ namespace Farm.Web.Api.Controllers
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
                 var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
                 var uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
-                _logger.LogInformation("OctoPrint upload saved: {file} name={name}", file.FileName, uploadDto.FileName);
+                _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
 
                 if (print)
                 {

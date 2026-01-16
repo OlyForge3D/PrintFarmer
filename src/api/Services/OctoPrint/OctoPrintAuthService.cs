@@ -58,7 +58,7 @@ namespace Farm.Web.Api.Services.OctoPrint
                 return false;
             }
 
-            _logger.LogInformation("OctoPrint API key validated for user {userId}", stored.UserId);
+            _logger.LogInformation("OctoPrint API key validated for user {UserId}", stored.UserId);
             return true;
         }
 
