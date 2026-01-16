@@ -117,6 +117,18 @@ namespace Farm.Web.Api.Controllers
         /// <summary>
         /// OctoPrint API: Get version information
         /// Slicers use this to verify OctoPrint compatibility
+        /// 
+        /// ⚠️ CRITICAL: The response format MUST match OctoPrint/fdm-monster exactly!
+        /// Slicers validate the 'text' field for the keyword "OctoPrint" to detect
+        /// the print host type. If this field contains anything else, slicers will
+        /// reject the connection with "Mismatched type of print host" error.
+        /// 
+        /// The exact values are:
+        /// - api: "0.1" (OctoPrint API version)
+        /// - server: "1.9.0" (server version - must match what OctoPrint returns)
+        /// - text: "OctoPrint 1.9.3" (MUST contain "OctoPrint" keyword for slicer validation)
+        /// 
+        /// Do not modify these values without verifying slicer compatibility!
         /// </summary>
         [HttpGet("version")]
         [AllowAnonymous]
@@ -125,8 +137,8 @@ namespace Farm.Web.Api.Controllers
             return Ok(new
             {
                 api = "0.1",
-                server = "1.9.3", // Mimics OctoPrint 1.9.3 for slicer compatibility
-                text = "PrintFarmer OctoPrint-Compatible API"
+                server = "1.9.0",
+                text = "OctoPrint 1.9.3"
             });
         }
 
