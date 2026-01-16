@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -37,7 +37,10 @@ namespace Farm.Web.Api.Services.PrintJobs
         public async Task<bool> ApproveAsync(Guid approvalId, string? approvedBy)
         {
             var approval = await _repo.GetAsync(approvalId);
-            if (approval is null) return false;
+            if (approval is null)
+            {
+                return false;
+            }
 
             var req = new EnqueuePrintJobRequest(approval.PrintJobId, approval.PrinterId, priority: null, requiredNozzleDiameter: null, requiredMaterialType: null);
             var enqueued = await _queueService.EnqueueAsync(req);

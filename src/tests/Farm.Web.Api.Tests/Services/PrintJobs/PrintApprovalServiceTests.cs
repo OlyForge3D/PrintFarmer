@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Data.Repositories;
-using Farm.Web.Api.Services.PrintJobs;
 using Farm.Web.Api.Services.PrintJobQueue;
+using Farm.Web.Api.Services.PrintJobs;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -125,7 +125,7 @@ public class PrintApprovalServiceTests : IDisposable
 
         // Assert
         result.Should().BeFalse();
-        
+
         // Approval should still exist since enqueue failed
         var approval = await _repository.GetAsync(approvalId);
         approval.Should().NotBeNull();
@@ -171,7 +171,7 @@ public class PrintApprovalServiceTests : IDisposable
         // Arrange
         var approval1Id = await _service.CreatePendingApprovalAsync(Guid.NewGuid(), Guid.NewGuid(), "user1");
         var approval2Id = await _service.CreatePendingApprovalAsync(Guid.NewGuid(), null, "user2");
-        
+
         // Approve one
         await _service.ApproveAsync(approval1Id, "approver");
 

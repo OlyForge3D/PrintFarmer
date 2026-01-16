@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.OctoPrint
+﻿namespace Farm.Web.Api.Services.OctoPrint
 {
     public class OctoPrintSettings
     {

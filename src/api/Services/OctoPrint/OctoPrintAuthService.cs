@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Services.OctoPrint
 {

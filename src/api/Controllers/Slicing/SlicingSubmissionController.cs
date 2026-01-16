@@ -25,7 +25,7 @@ public class SlicingSubmissionController(
 #pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
     private readonly object _tempDirInitializer = EnsureTempDirectoryExists(cfg, tempPathProvider);
 #pragma warning restore CA1823, S1144
-    
+
     private static object EnsureTempDirectoryExists(IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider)
     {
         ArgumentNullException.ThrowIfNull(cfg);

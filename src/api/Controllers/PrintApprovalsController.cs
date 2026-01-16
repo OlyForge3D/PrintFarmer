@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Linq;
-using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Farm.Web.Api.Services.PrintJobs;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers
 {
@@ -36,17 +36,27 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> ApproveAsync([FromRoute] Guid id)
         {
             var ok = await _approvalService.ApproveAsync(id, User?.Identity?.Name);
-            if (!ok) return NotFound();
+            if (!ok)
+            {
+                return NotFound();
+            }
+
             return NoContent();
         }
 
         [HttpPost("{id:guid}/reject")]
         public async Task<IActionResult> RejectAsync([FromRoute] Guid id)
         {
-            if (_repo == null) return NotFound();
+            if (_repo == null)
+            {
+                return NotFound();
+            }
 
             var approval = await _repo.GetAsync(id);
-            if (approval is null) return NotFound();
+            if (approval is null)
+            {
+                return NotFound();
+            }
 
             await _repo.RemoveAsync(approval);
             return NoContent();

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,7 +19,11 @@ namespace Farm.Web.Api.Middleware
                 return true;
             }
 
-            if (entry.Count + 1 > limit) return false;
+            if (entry.Count + 1 > limit)
+            {
+                return false;
+            }
+
             _counts[key] = (entry.Count + 1, entry.WindowStart);
             return true;
         }
