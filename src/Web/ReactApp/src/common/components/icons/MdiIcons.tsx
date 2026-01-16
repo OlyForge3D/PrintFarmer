@@ -33,6 +33,7 @@ import {
   mdiEye,
   mdiEyeOff,
   mdiLock,
+  mdiKey,
   mdiServer,
   mdiHistory,
   mdiTag,
@@ -1007,6 +1008,32 @@ export function LockIcon({ className = 'w-4 h-4', ariaLabel = 'Lock' }: Omit<Ico
       role="img"
     >
       <path fill="currentColor" d={mdiLock} />
+    </svg>
+  );
+}
+
+/**
+ * Key icon
+ * 
+ * Material Design icon component for API keys or security keys.
+ * 
+ * @component
+ * @preview ![key](https://unpkg.com/@mdi/svg@7.4.47/svg/key.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/key.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <KeyIcon className="w-5 h-5" ariaLabel="API Key" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function KeyIcon({ className = 'w-4 h-4', ariaLabel = 'Key' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiKey} />
     </svg>
   );
 }

@@ -146,11 +146,11 @@ describe('Button', () => {
     it('applies correct variant classes', () => {
       const { rerender } = render(<Button variant="primary">Primary</Button>);
       let button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-gradient-to-b');
+      expect(button).toHaveClass('bg-pf-accent-bg');
       
       rerender(<Button variant="secondary">Secondary</Button>);
       button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-gradient-to-b');
+      expect(button).toHaveClass('bg-pf-bg-2');
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');

@@ -212,6 +212,10 @@ builder.Services.AddCors(options =>
     });
 });
 
+// TODO: Simple rate limiting scaffold for OctoPrint endpoints - implementation pending
+// NOTE: This is a lightweight scaffold; replace with production-ready rate limiter if needed
+// builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
+
 // Configure OpenTelemetry (skippable for tests)
 bool disableTelemetry = false;
 try
@@ -355,6 +359,21 @@ builder.Services.AddHealthChecks()
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// OctoPrint compatibility settings and services
+builder.Services.Configure<Farm.Web.Api.Services.OctoPrint.OctoPrintSettings>(builder.Configuration.GetSection("OctoPrint"));
+builder.Services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
+builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
+
+// ApiKey repository
+builder.Services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp =>
+{
+    var db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+    return new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(db);
+});
+
+// Print job approval service
+builder.Services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
 
 // File Management Services
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();

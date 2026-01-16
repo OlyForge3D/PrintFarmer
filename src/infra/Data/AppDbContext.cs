@@ -54,6 +54,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 
+    // Print approvals (pending Upload+Print approvals)
+    public DbSet<PrintApproval> PrintApprovals => Set<PrintApproval>();
+
     // File Health & Consistency Auditing
     public DbSet<FileHealthAudit> FileHealthAudits => Set<FileHealthAudit>();
 
@@ -74,6 +77,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
+    // API Keys for OctoPrint API
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -139,6 +144,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(t => t.PrinterId)
              .OnDelete(DeleteBehavior.Cascade);
         });
+
+        // TODO: ApiKey entity mapping - entity not yet implemented
+        // _ = modelBuilder.Entity<Farm.Infrastructure.Domain.ApiKey>(b =>
+        // {
+        //     _ = b.HasKey(a => a.Id);
+        //     _ = b.Property(a => a.UserId);
+        //     _ = b.Property(a => a.Name).HasMaxLength(128);
+        //     _ = b.Property(a => a.KeyHash).IsRequired().HasMaxLength(128);
+        //     _ = b.Property(a => a.IsActive).HasDefaultValue(true);
+        //     _ = b.HasIndex(a => a.KeyHash).IsUnique();
+        //     _ = b.Property(a => a.CreatedAt).IsRequired();
+        // });
 
         // Toolhead Entity Configuration
         _ = modelBuilder.Entity<Toolhead>(b =>
@@ -571,6 +588,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(h => h.StartedAt);
             _ = b.HasIndex(h => h.Status);
         });
+
+        // TODO: PrintApproval entity mapping - entity not yet implemented
+        // _ = modelBuilder.Entity<Farm.Infrastructure.Domain.PrintApproval>(b =>
+        // {
+        //     _ = b.HasKey(p => p.Id);
+        //     _ = b.Property(p => p.PrintJobId).IsRequired();
+        //     _ = b.Property(p => p.PrinterId);
+        //     _ = b.Property(p => p.RequestedBy).HasMaxLength(128);
+        //     _ = b.Property(p => p.CreatedAt).IsRequired();
+        //     _ = b.HasIndex(p => p.CreatedAt);
+        // });
 
         // HarvestDiscoveredFile Entity Configuration
         _ = modelBuilder.Entity<HarvestDiscoveredFile>(b =>
@@ -1293,6 +1321,43 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             // Unique constraint - one preferences per user
             _ = b.HasIndex(np => np.UserId).IsUnique();
+        });
+
+        // ApiKey Entity Configuration (OctoPrint API)
+        _ = modelBuilder.Entity<ApiKey>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.UserId).IsRequired(false); // Nullable for global keys
+            _ = b.Property(a => a.Name).IsRequired().HasMaxLength(256);
+            _ = b.Property(a => a.KeyHash).IsRequired().HasMaxLength(64); // SHA256 hex = 64 chars
+            _ = b.Property(a => a.IsActive).IsRequired().HasDefaultValue(true);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
+            _ = b.Property(a => a.ExpiresAt).IsRequired(false);
+
+            // Indexes for efficient querying
+            _ = b.HasIndex(a => a.KeyHash).IsUnique(); // Fast lookup by hash
+            _ = b.HasIndex(a => a.UserId); // Find user's keys
+            _ = b.HasIndex(a => new { a.UserId, a.IsActive }); // Active keys for user
+        });
+
+        // PrintApproval Entity Configuration (OctoPrint API Upload+Print)
+        _ = modelBuilder.Entity<PrintApproval>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.PrintJobId).IsRequired();
+            _ = b.Property(a => a.PrinterId).IsRequired(false);
+            _ = b.Property(a => a.RequestedBy).HasMaxLength(256);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
+
+            // Foreign keys
+            _ = b.HasOne<PrintJob>()
+                .WithMany()
+                .HasForeignKey(a => a.PrintJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for efficient querying
+            _ = b.HasIndex(a => a.PrintJobId);
+            _ = b.HasIndex(a => a.CreatedAt).IsDescending(); // Most recent first
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
