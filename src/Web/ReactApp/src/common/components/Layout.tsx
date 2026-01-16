@@ -22,9 +22,9 @@ import {
   TagIcon,
   WrenchIcon,
   TrendingUpIcon,
-  DatabaseIcon
-  ,
-  LocationIcon
+  DatabaseIcon,
+  LocationIcon,
+  KeyIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -84,6 +84,12 @@ const navigation: NavigationElement[] = [
     name: 'Spools', 
     href: '/spools', 
     icon: SpoolIcon
+  },
+  { name: '', isDivider: true },
+  {
+    name: 'API Keys',
+    href: '/profile/api-keys',
+    icon: KeyIcon
   },
   { name: '', isDivider: true },
   {

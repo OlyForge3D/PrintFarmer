@@ -9,6 +9,9 @@ namespace Farm.Web.Api.Data.Repositories
     {
         Task<ApiKey?> GetByKeyHashAsync(string keyHash);
         Task<IEnumerable<ApiKey>> GetByUserIdAsync(Guid userId);
+        Task<ApiKey?> GetByIdAsync(Guid id);
         Task AddAsync(ApiKey key);
+        Task UpdateAsync(ApiKey key);
+        Task DeleteAsync(Guid id);
     }
 }

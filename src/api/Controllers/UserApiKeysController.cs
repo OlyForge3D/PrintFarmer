@@ -18,6 +18,22 @@ namespace Farm.Web.Api.Controllers
             _repo = repo;
         }
 
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> ListApiKeysAsync([FromRoute] Guid userId)
+        {
+            // TODO: verify caller is same user or admin
+            var keys = await _repo.GetByUserIdAsync(userId);
+            var result = keys.Select(k => new ApiKeyDto(
+                k.Id,
+                k.Name,
+                k.IsActive,
+                k.CreatedAt,
+                k.ExpiresAt
+            ));
+            return Ok(result);
+        }
+
         [HttpPost]
         [Authorize]
         public async Task<IActionResult> CreateApiKeyAsync([FromRoute] Guid userId, [FromBody] CreateApiKeyRequest req)
@@ -39,6 +55,53 @@ namespace Farm.Web.Api.Controllers
             return Ok(new { key = rawKey, id = key.Id });
         }
 
+        [HttpPatch("{keyId:guid}/toggle")]
+        [Authorize]
+        public async Task<IActionResult> ToggleApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
+        {
+            // TODO: verify caller is same user or admin
+            var key = await _repo.GetByIdAsync(keyId);
+            if (key == null || key.UserId != userId)
+                return NotFound();
+
+            key.IsActive = !key.IsActive;
+            await _repo.UpdateAsync(key);
+
+            return Ok(new { id = key.Id, isActive = key.IsActive });
+        }
+
+        [HttpDelete("{keyId:guid}")]
+        [Authorize]
+        public async Task<IActionResult> DeleteApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
+        {
+            // TODO: verify caller is same user or admin
+            var key = await _repo.GetByIdAsync(keyId);
+            if (key == null || key.UserId != userId)
+                return NotFound();
+
+            await _repo.DeleteAsync(keyId);
+            return NoContent();
+        }
+
+        [HttpPost("{keyId:guid}/rotate")]
+        [Authorize]
+        public async Task<IActionResult> RotateApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
+        {
+            // TODO: verify caller is same user or admin
+            var oldKey = await _repo.GetByIdAsync(keyId);
+            if (oldKey == null || oldKey.UserId != userId)
+                return NotFound();
+
+            // Generate new key
+            string rawKey = GenerateKey();
+            string hash = ComputeSha256Hash(rawKey);
+
+            oldKey.KeyHash = hash;
+            await _repo.UpdateAsync(oldKey);
+
+            return Ok(new { key = rawKey, id = oldKey.Id });
+        }
+
         private static string GenerateKey()
         {
             byte[] data = new byte[32];
@@ -57,4 +120,12 @@ namespace Farm.Web.Api.Controllers
     }
 
     public record CreateApiKeyRequest(string? Name);
+
+    public record ApiKeyDto(
+        Guid Id,
+        string Name,
+        bool IsActive,
+        DateTime CreatedAt,
+        DateTime? ExpiresAt
+    );
 }

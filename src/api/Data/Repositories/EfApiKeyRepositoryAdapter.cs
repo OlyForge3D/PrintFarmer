@@ -33,5 +33,26 @@ namespace Farm.Web.Api.Data.Repositories
         {
             return await _db.Set<ApiKey>().Where(k => k.UserId == userId).ToArrayAsync();
         }
+
+        public async Task<ApiKey?> GetByIdAsync(Guid id)
+        {
+            return await _db.Set<ApiKey>().FirstOrDefaultAsync(k => k.Id == id);
+        }
+
+        public async Task UpdateAsync(ApiKey key)
+        {
+            _db.Set<ApiKey>().Update(key);
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task DeleteAsync(Guid id)
+        {
+            var key = await GetByIdAsync(id);
+            if (key != null)
+            {
+                _db.Set<ApiKey>().Remove(key);
+                await _db.SaveChangesAsync();
+            }
+        }
     }
 }

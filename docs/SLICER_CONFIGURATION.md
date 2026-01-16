@@ -15,15 +15,15 @@ PrintFarmer implements OctoPrint-compatible API endpoints that allow slicers to 
 
 ## API Endpoints
 
-PrintFarmer provides the following OctoPrint-compatible endpoints:
+PrintFarmer provides the following OctoPrint-compatible endpoints required for slicer integration:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/octoprint/version` | GET | Returns server version information |
+| `/api/octoprint/version` | GET | Returns server version information (required by slicers for compatibility check) |
 | `/api/octoprint/server` | GET | Returns server status |
-| `/api/octoprint/files` | GET | Lists all uploaded G-code files |
-| `/api/octoprint/files/local` | POST | Uploads a new G-code file |
-| `/api/octoprint/files/local/{filename}` | DELETE | Deletes a G-code file |
+| `/api/octoprint/files/local` | POST | Uploads a new G-code file with optional auto-print |
+
+These are the minimal endpoints required for PrusaSlicer, OrcaSlicer, and SuperSlicer to upload files to PrintFarmer.
 
 ## Configuration Steps
 
@@ -169,55 +169,7 @@ Body:
 }
 ```
 
-### List Files Endpoint
-
-```http
-GET /api/octoprint/files
-Headers:
-  X-Api-Key: your-api-key-here (optional)
-```
-
-**Response**:
-```json
-{
-  "files": [
-    {
-      "name": "model.gcode",
-      "display": "model.gcode",
-      "path": "local/model.gcode",
-      "type": "machinecode",
-      "origin": "local",
-      "refs": {
-        "resource": "http://server:5245/api/octoprint/files/local/model.gcode",
-        "download": "http://server:5245/api/gcode-files/{id}/download"
-      },
-      "gcodeAnalysis": {
-        "estimatedPrintTime": 7200,
-        "filament": {
-          "tool0": {
-            "length": 25000.0,
-            "volume": 60125.0
-          }
-        }
-      },
-      "date": 1704067200,
-      "size": 1234567
-    }
-  ],
-  "free": 1000000000,
-  "total": 10000000000
-}
-```
-
-### Delete File Endpoint
-
-```http
-DELETE /api/octoprint/files/local/{filename}
-Headers:
-  X-Api-Key: your-api-key-here
-```
-
-**Response**: 204 No Content (success) or 404 Not Found
+**Note**: File management (listing, deleting) should be done through the PrintFarmer web interface, not through the OctoPrint API.
 
 ## Security Notes
 
