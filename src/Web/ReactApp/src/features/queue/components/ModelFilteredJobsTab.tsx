@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { QueueJob } from "@/types/api";
-import { printQueueService } from "@/services/printQueueService";
+import { apiClient } from "@/services/api";
 import { Alert } from "@/common/components/ui/Alert";
 import ModelFiltersBar from "./ModelFiltersBar";
 import ModelStatisticsPanel from "./ModelStatisticsPanel";
@@ -49,7 +49,7 @@ export default function ModelFilteredJobsTab({
     try {
       setLoading(true);
       setError(null);
-      const response = await printQueueService.getAllQueuedJobsAsync(
+      const response = await apiClient.getAnalyticsQueueJobs(
         undefined,
         undefined,
         undefined,

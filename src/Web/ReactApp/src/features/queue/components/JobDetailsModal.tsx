@@ -1,6 +1,6 @@
 import React, { useCallback, use, Suspense, useState } from 'react';
 import { Button } from '@/common/components/ui/Button';
-import { printQueueService } from '../../../services/printQueueService';
+import { apiClient } from '@/services/api';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
 import JobTagsEditor from './JobTagsEditor';
@@ -12,7 +12,7 @@ import type { JobDetailsModalProps } from '@/types/components';
  * React 19 async data fetching: returns a promise that resolves to job details
  */
 function fetchJobDetails(jobId: string): Promise<JobDetails> {
-  return printQueueService.getJobDetailsAsync(jobId).then(response => response as unknown as JobDetails);
+  return apiClient.getAnalyticsJobDetails(jobId).then(response => response as unknown as JobDetails);
 }
 
 /**
@@ -82,7 +82,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
       setError(null);
 
       // Call update endpoint with changed fields
-      const updatedJob = await printQueueService.updateJobDetailsAsync(
+      const updatedJob = await apiClient.updateJobDetails(
         jobDetails.id,
         editedDetails
       );

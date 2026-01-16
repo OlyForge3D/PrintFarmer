@@ -5,7 +5,7 @@ import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
-import { printQueueService } from "@/services/printQueueService";
+import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
 import type { QueueHistoryTabProps } from "@/types/components";
 
@@ -53,7 +53,7 @@ export default function QueueHistoryTab({
       setLoading(true);
       setError(null);
       
-      const response = await printQueueService.getQueueHistoryAsync(pageSize, currentPage * pageSize, sortBy);
+      const response = await apiClient.getAnalyticsQueueHistory(pageSize, currentPage * pageSize, sortBy);
       
       // Convert API response to HistoryJob format
       const historyJobs: HistoryJob[] = (response?.entries || []).map((job) => ({

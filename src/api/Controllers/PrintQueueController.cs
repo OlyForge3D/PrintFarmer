@@ -6,19 +6,19 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Api.Controllers;
 
 /// <summary>
-/// API endpoints for print queue management
+/// API endpoints for print queue analytics and historical data
 /// </summary>
 [ApiController]
-[Route("api/printQueue")]
+[Route("api/job-queue-analytics")]
 [Authorize]
 [Produces("application/json")]
-public class PrintQueueController(
+public class JobQueueAnalyticsController(
     IPrintQueueService printQueueService,
-    ILogger<PrintQueueController> logger
+    ILogger<JobQueueAnalyticsController> logger
 ) : ControllerBase
 {
     private readonly IPrintQueueService _printQueueService = printQueueService ?? throw new ArgumentNullException(nameof(printQueueService));
-    private readonly ILogger<PrintQueueController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // ============= QUERY ENDPOINTS =============
 

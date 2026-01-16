@@ -14,11 +14,11 @@ import JobDetailsModal from "../components/JobDetailsModal";
 import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import TimingTab from "../components/TimingTab";
-import {
-  printQueueService,
+import { apiClient } from "@/services/api";
+import type {
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
-} from "@/services/printQueueService";
+} from "@/types/api";
 
 export function PrintQueueDashboardPage() {
   const [jobs, setJobs] = useState<QueuedPrintJobWithFileMetaDto[]>([]);
@@ -88,7 +88,7 @@ export function PrintQueueDashboardPage() {
     try {
       setError(null);
       setLoading(true);
-      const data = await printQueueService.getAllQueuedJobsAsync(
+      const data = await apiClient.getAnalyticsQueueJobs(
         statusFilter || undefined,
         modelFilter || undefined,
         materialFilter || undefined,
@@ -98,7 +98,7 @@ export function PrintQueueDashboardPage() {
       setJobs(data);
 
       // Also load stats
-      const queueStats = await printQueueService.getQueueStatsAsync();
+      const queueStats = await apiClient.getAnalyticsQueueStats();
       setStats(queueStats);
 
       setLoading(false);
@@ -125,7 +125,7 @@ export function PrintQueueDashboardPage() {
     if (!jobToCancel) return;
 
     try {
-      await printQueueService.cancelJobAsync(jobToCancel);
+      await apiClient.cancelPrintQueueJob(jobToCancel);
       setShowCancelConfirmation(false);
       setJobToCancel(null);
       loadJobs();
@@ -140,7 +140,7 @@ export function PrintQueueDashboardPage() {
 
   const handlePauseJob = async (jobId: string) => {
     try {
-      await printQueueService.pauseJobAsync(jobId);
+      await apiClient.pauseJob(jobId);
       loadJobs();
     } catch (err) {
       const errorMessage =
@@ -151,7 +151,7 @@ export function PrintQueueDashboardPage() {
 
   const handleResumeJob = async (jobId: string) => {
     try {
-      await printQueueService.resumeJobAsync(jobId);
+      await apiClient.resumeJob(jobId);
       loadJobs();
     } catch (err) {
       const errorMessage =
@@ -162,7 +162,7 @@ export function PrintQueueDashboardPage() {
 
   const handleRerunJob = async (jobId: string) => {
     try {
-      await printQueueService.rerunJobAsync(jobId);
+      await apiClient.rerunJob(jobId);
       setError(null);
       // Reload jobs to show the new job in the queue
       await loadJobs();
@@ -175,7 +175,7 @@ export function PrintQueueDashboardPage() {
 
   const handlePriorityChange = async (jobId: string, newPriority: number) => {
     try {
-      await printQueueService.updateJobPriorityAsync(jobId, newPriority);
+      await apiClient.updateJobPriority(jobId, newPriority);
       loadJobs();
     } catch (err) {
       const errorMessage =

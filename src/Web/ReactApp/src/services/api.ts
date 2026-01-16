@@ -1300,6 +1300,8 @@ export class ApiClient {
   }
 
   // ============ Job Queue methods ============
+  // NOTE: This is the simpler job queue API for basic queue management.
+  // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
   async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {
     const params = printerId ? { printerId } : {};
@@ -2233,6 +2235,238 @@ export class ApiClient {
   async removeTagFromModel(modelId?: string, tagId?: string): Promise<void> {
     if (!modelId || !tagId) return;
     await this.client.delete(`/3d-models/${modelId}/tags/${tagId}`);
+  }
+
+  // ============ Job Queue Analytics methods (advanced dashboard) ============
+  // NOTE: These are read-only analytics methods for the Print Queue Dashboard.
+  // For basic queue management (queue, cancel, delete jobs), use Job Queue methods above.
+  // Endpoint: /api/job-queue-analytics (renamed from /api/printQueue for clarity)
+
+  /**
+   * Get all queued and printing jobs with optional filtering (analytics view)
+   */
+  async getAnalyticsQueueJobs(
+    filterStatus?: string,
+    filterModel?: string,
+    filterMaterial?: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (filterStatus) params.append("filterStatus", filterStatus);
+    if (filterModel) params.append("filterModel", filterModel);
+    if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("limit", limit.toString());
+    params.append("offset", offset.toString());
+
+    const response = await this.client.get(`/job-queue-analytics?${params.toString()}`);
+    return response.data;
+  }
+
+  /**
+   * Get print jobs for a specific printer (analytics view)
+   */
+  async getAnalyticsPrinterQueue(
+    printerId: string,
+    limit: number = 50
+  ): Promise<unknown[]> {
+    const response = await this.client.get(`/job-queue-analytics/printer/${printerId}`, {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  /**
+   * Get queue statistics (analytics)
+   */
+  async getAnalyticsQueueStats(): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/stats`);
+    return response.data;
+  }
+
+  /**
+   * Get queue statistics by model (analytics)
+   */
+  async getAnalyticsQueueModelStats(): Promise<unknown[]> {
+    const response = await this.client.get(`/job-queue-analytics/stats/models`);
+    return response.data;
+  }
+
+  /**
+   * Get queue history with pagination (analytics)
+   */
+  async getAnalyticsQueueHistory(
+    limit: number = 50,
+    offset: number = 0,
+    sortBy: string = "completedAtUtc"
+  ): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/history`, {
+      params: { limit, offset, sortBy },
+    });
+    return response.data;
+  }
+
+  /**
+   * Enqueue a new print job
+   */
+  async enqueueJob(request: unknown): Promise<unknown> {
+    const response = await this.client.post(`/job-queue`, request);
+    return response.data;
+  }
+
+  /**
+   * Update a print job
+   */
+  async updateJob(jobId: string, request: unknown): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}`,
+      request
+    );
+    return response.data;
+  }
+
+  /**
+   * Update job priority
+   */
+  async updateJobPriority(jobId: string, newPriority: number): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}/priority`,
+      { newPriority }
+    );
+    return response.data;
+  }
+
+  /**
+   * Pause a print job
+   */
+  async pauseJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/pause`
+    );
+    return response.data;
+  }
+
+  /**
+   * Resume a print job
+   */
+  async resumeJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/resume`
+    );
+    return response.data;
+  }
+
+  /**
+   * Cancel a print job
+   */
+  async cancelPrintQueueJob(jobId: string): Promise<void> {
+    await this.client.delete(`/job-queue/${jobId}`);
+  }
+
+  /**
+   * Rerun a completed job (add it back to queue)
+   */
+  async rerunJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/rerun`
+    );
+    return response.data;
+  }
+
+  /**
+   * Bulk cancel multiple print jobs
+   */
+  async bulkCancelJobs(request: unknown): Promise<unknown> {
+    const response = await this.client.post(`/job-queue/bulk/cancel`, request);
+    return response.data;
+  }
+
+  /**
+   * Seed history from printer APIs
+   */
+  async seedHistory(printerIds?: string[], daysBack: number = 30): Promise<void> {
+    await this.client.post(`/job-queue/history/seed`, {
+      printerIds,
+      daysBack,
+    });
+  }
+
+  /**
+   * Get detailed information about a specific job (analytics)
+   */
+  async getAnalyticsJobDetails(jobId: string): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/jobs/${jobId}`);
+    return response.data;
+  }
+
+  /**
+   * Update job details (name, priority, notes, tags, material, nozzle)
+   */
+  async updateJobDetails(jobId: string, updates: unknown): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}`,
+      updates
+    );
+    return response.data;
+  }
+
+  /**
+   * Update job notes only
+   */
+  async updateJobNotes(jobId: string, notes: string): Promise<void> {
+    await this.client.put(`/job-queue/${jobId}/notes`, {
+      notes: notes || null,
+    });
+  }
+
+  /**
+   * Get timeline events with optional filtering (analytics)
+   */
+  async getAnalyticsTimeline(
+    dateFrom?: Date,
+    dateTo?: Date,
+    printerId?: string,
+    filterStatus?: string,
+    limit: number = 100
+  ): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+    if (dateTo) params.append("dateTo", dateTo.toISOString());
+    if (printerId) params.append("printerId", printerId);
+    if (filterStatus) params.append("filterStatus", filterStatus);
+    params.append("limit", limit.toString());
+
+    const response = await this.client.get(`/job-queue-analytics/timeline?${params.toString()}`);
+    return response.data;
+  }
+
+  /**
+   * Get state history for a specific job (analytics)
+   */
+  async getAnalyticsJobStateHistory(jobId: string): Promise<unknown> {
+    const response = await this.client.get(
+      `/job-queue-analytics/jobs/${jobId}/state-history`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get duration analytics with optional filtering (analytics)
+   */
+  async getAnalyticsDurationAnalytics(
+    printerId?: string,
+    dateFrom?: Date,
+    dateTo?: Date
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (printerId) params.append("printerId", printerId);
+    if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+    if (dateTo) params.append("dateTo", dateTo.toISOString());
+
+    const response = await this.client.get(
+      `/job-queue-analytics/duration-analytics?${params.toString()}`
+    );
+    return response.data;
   }
 }
 
