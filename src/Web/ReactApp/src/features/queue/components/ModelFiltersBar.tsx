@@ -1,5 +1,6 @@
 import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
+import { RefreshIcon, ClearFiltersIcon } from "@/common/components/icons/MdiIcons";
 import { ChangeEvent } from "react";
 import type { JobStatus } from "@/types/queue";
 import type { ModelFiltersBarProps } from "@/types/components";
@@ -83,14 +84,26 @@ export default function ModelFiltersBar({
         </div>
 
         {/* Refresh Button */}
-        <div className="flex items-end">
+        <div className="flex items-end gap-2">
           <Button
             onClick={onRefresh}
             disabled={isLoading}
             variant="secondary"
-            className="w-full sm:w-auto"
+            iconCenter={<RefreshIcon />}
+            title="Refresh data"
           >
-            {isLoading ? "Loading..." : "🔄 Refresh"}
+          </Button>
+          <Button
+            onClick={() => {
+              onModelChange(null);
+              onStatusChange(["queued", "printing", "paused"]);
+              onSortChange("name");
+            }}
+            disabled={isLoading}
+            variant="secondary"
+            iconCenter={<ClearFiltersIcon />}
+            title="Reset all filters"
+          >
           </Button>
         </div>
       </div>

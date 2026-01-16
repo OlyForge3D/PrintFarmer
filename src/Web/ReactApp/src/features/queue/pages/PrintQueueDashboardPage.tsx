@@ -252,19 +252,21 @@ export function PrintQueueDashboardPage() {
           {/* Tab 1: All Jobs with Master-Detail Layout */}
           <Tabs.Panel id="all-jobs">
             <MasterDetailLayout
-              masterPanel={
-                <div className="flex flex-col h-full">
+              master={
+                <div className="flex flex-col h-full w-full min-h-0">
                   {/* Filters */}
-                  <TableFiltersBar
-                    onStatusChange={setStatusFilter}
-                    onModelChange={setModelFilter}
-                    onMaterialChange={setMaterialFilter}
-                    onRefresh={loadJobs}
-                    isLoading={loading}
-                  />
+                  <div className="flex-shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
+                    <TableFiltersBar
+                      onStatusChange={setStatusFilter}
+                      onModelChange={setModelFilter}
+                      onMaterialChange={setMaterialFilter}
+                      onRefresh={loadJobs}
+                      isLoading={loading}
+                    />
+                  </div>
 
                   {/* Jobs Table */}
-                  <div className="flex-1 overflow-auto bg-pf-bg-1 border border-pf-border rounded-lg p-4 mt-4">
+                  <div className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
                     <QueueJobsTable
                       jobs={jobs}
                       isLoading={loading}
@@ -280,7 +282,7 @@ export function PrintQueueDashboardPage() {
                   </div>
                 </div>
               }
-              detailPanel={
+              detail={
                 selectedJobId ? (
                   <div className="flex flex-col h-full">
                     {/* Detail Header with Close Button */}
@@ -317,8 +319,8 @@ export function PrintQueueDashboardPage() {
                   </div>
                 )
               }
-              showDetail={showDetailPanel}
-              onToggleDetail={setShowDetailPanel}
+              hasDetail={!!selectedJobId}
+              onCloseDetail={() => setShowDetailPanel(false)}
             />
           </Tabs.Panel>
 
