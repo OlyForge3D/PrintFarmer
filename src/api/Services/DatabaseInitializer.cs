@@ -282,11 +282,186 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 }
             }
             _ = await _context.SaveChangesAsync();
+            await SeedPrinterModelAliasesAsync();
             await SeedModelFilamentTypesAsync(modelSeeds);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Catalog seeding error");
+            throw;
+        }
+    }
+
+    private async Task SeedPrinterModelAliasesAsync()
+    {
+        try
+        {
+            // Map OrcaSlicer model names to our canonical model names
+            // These are the names used by OrcaSlicer when exporting gcode
+            var orcaSlicerNames = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                // Prusa models
+                { "Prusa MINI", "Prusa MINI" },
+                { "Prusa MK3S", "Prusa MK3S" },
+                { "Prusa MK3.5", "Prusa MK3.5" },
+                { "Prusa MK4", "Prusa MK4" },
+                { "Prusa MK4S", "Prusa MK4S" },
+                { "Prusa CORE One", "Prusa CORE One" },
+                { "Prusa XL", "Prusa XL" },
+                
+                // Voron models
+                { "Voron 0.1", "Voron 0.1" },
+                { "Voron 2.4 250", "Voron 2.4 250" },
+                { "Voron 2.4 300", "Voron 2.4 300" },
+                { "Voron 2.4 350", "Voron 2.4 350" },
+                { "Voron Switchwire 250", "Voron Switchwire 250" },
+                { "Voron Trident 250", "Voron Trident 250" },
+                { "Voron Trident 300", "Voron Trident 300" },
+                { "Voron Trident 350", "Voron Trident 350" },
+                
+                // RatRig models
+                { "RatRig V-Core 3 200", "RatRig V-Core 3 200" },
+                { "RatRig V-Core 3 300", "RatRig V-Core 3 300" },
+                { "RatRig V-Core 3 400", "RatRig V-Core 3 400" },
+                { "RatRig V-Core 3 500", "RatRig V-Core 3 500" },
+                { "RatRig V-Core 4 300", "RatRig V-Core 4 300" },
+                { "RatRig V-Core 4 400", "RatRig V-Core 4 400" },
+                { "RatRig V-Core 4 500", "RatRig V-Core 4 500" },
+                { "RatRig V-Core 4 HYBRID 300", "RatRig V-Core 4 HYBRID 300" },
+                { "RatRig V-Core 4 HYBRID 400", "RatRig V-Core 4 HYBRID 400" },
+                { "RatRig V-Core 4 HYBRID 500", "RatRig V-Core 4 HYBRID 500" },
+                { "RatRig V-Core 4 IDEX 300", "RatRig V-Core 4 IDEX 300" },
+                { "RatRig V-Core 4 IDEX 400", "RatRig V-Core 4 IDEX 400" },
+                { "RatRig V-Core 4 IDEX 500", "RatRig V-Core 4 IDEX 500" },
+                
+                // Sovol models
+                { "Sovol SV08", "Sovol SV08" },
+                { "Sovol SV08 MAX", "Sovol SV08 MAX" },
+                { "Sovol Zero", "Sovol Zero" },
+                
+                // Other manufacturers
+                { "Flashforge AD5X", "Flashforge AD5X" },
+                { "Phrozen Arco", "Phrozen Arco" },
+                { "Thinker X400", "Thinker X400" },
+                { "Elegoo Neptune 4", "Elegoo Neptune 4" },
+                { "Elegoo Neptune 4 Max", "Elegoo Neptune 4 Max" },
+                { "Elegoo Centauri", "Elegoo Centauri" },
+                { "Elegoo Centauri Carbon", "Elegoo Centauri Carbon" },
+                { "SaladFork 120", "SaladFork 120" },
+                { "SaladFork 180", "SaladFork 180" },
+                { "Micron 120", "Micron 120" },
+                { "Micron 180", "Micron 180" },
+            };
+
+            // Map PrusaSlicer model names to our canonical model names
+            // These are the names used by PrusaSlicer when exporting gcode
+            var prusaSlicerNames = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                // Prusa models - PrusaSlicer uses abbreviated names
+                { "MINIIS", "Prusa MINI" },
+                { "MK3S", "Prusa MK3S" },
+                { "MK3.5", "Prusa MK3.5" },
+                { "MK4IS", "Prusa MK4" },
+                { "MK4S", "Prusa MK4S" },
+                { "COREONE", "Prusa CORE" },
+                { "COREONEL", "Prusa CORE One" },
+                { "XLIS", "Prusa XL" },
+                
+                // Voron models - PrusaSlicer abbreviations
+                { "Voron_v0_120", "Voron 0.1" },
+                
+                // RatRig models
+                { "VC3_200", "RatRig V-Core 3 200" },
+                { "VC3_300", "RatRig V-Core 3 300" },
+                { "VC3_400", "RatRig V-Core 3 400" },
+                { "VC3_500 COREXY", "RatRig V-Core 3 500" },
+                { "VC4_300 COREXY", "RatRig V-Core 4 300" },
+                { "VC4_400 COREXY", "RatRig V-Core 4 400" },
+                { "VC4_500 COREXY", "RatRig V-Core 4 500" },
+                { "VC4_300 HYBRID", "RatRig V-Core 4 HYBRID 300" },
+                { "VC4_400 HYBRID", "RatRig V-Core 4 HYBRID 400" },
+                { "VC4_500 HYBRID", "RatRig V-Core 4 HYBRID 500" },
+                { "VC4_300 IDEX", "RatRig V-Core 4 IDEX 300" },
+                { "VC4_400 IDEX", "RatRig V-Core 4 IDEX 400" },
+                { "VC4_500 IDEX", "RatRig V-Core 4 IDEX 500" },
+                                
+                // Other manufacturers
+                { "SaladFork 120", "SaladFork 120" },
+                { "SaladFork 180", "SaladFork 180" },
+                { "Micron 120", "Micron 120" },
+                { "Micron 180", "Micron 180" },
+            };
+
+            // Seed OrcaSlicer aliases
+            foreach (var (slicerName, canonicalName) in orcaSlicerNames)
+            {
+                // Find the canonical PrinterModel
+                var model = await _context.PrinterModels
+                    .FirstOrDefaultAsync(pm => pm.Name == canonicalName);
+
+                if (model == null)
+                {
+                    _logger.LogWarning($"[DB] Skipping OrcaSlicer alias '{slicerName}' -> '{canonicalName}': canonical model not found");
+                    continue;
+                }
+
+                // Check if alias already exists
+                bool aliasExists = await _context.PrinterModelAliases
+                    .AnyAsync(a => a.PrinterModelId == model.Id &&
+                        a.SlicerModelName == slicerName &&
+                        a.SlicerType == "OrcaSlicer");
+
+                if (!aliasExists)
+                {
+                    _context.PrinterModelAliases.Add(new PrinterModelAlias
+                    {
+                        Id = Guid.NewGuid(),
+                        PrinterModelId = model.Id,
+                        SlicerModelName = slicerName,
+                        SlicerType = "OrcaSlicer",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            // Seed PrusaSlicer aliases
+            foreach (var (slicerName, canonicalName) in prusaSlicerNames)
+            {
+                // Find the canonical PrinterModel
+                var model = await _context.PrinterModels
+                    .FirstOrDefaultAsync(pm => pm.Name == canonicalName);
+
+                if (model == null)
+                {
+                    _logger.LogWarning($"[DB] Skipping PrusaSlicer alias '{slicerName}' -> '{canonicalName}': canonical model not found");
+                    continue;
+                }
+
+                // Check if alias already exists
+                bool aliasExists = await _context.PrinterModelAliases
+                    .AnyAsync(a => a.PrinterModelId == model.Id &&
+                        a.SlicerModelName == slicerName &&
+                        a.SlicerType == "PrusaSlicer");
+
+                if (!aliasExists)
+                {
+                    _context.PrinterModelAliases.Add(new PrinterModelAlias
+                    {
+                        Id = Guid.NewGuid(),
+                        PrinterModelId = model.Id,
+                        SlicerModelName = slicerName,
+                        SlicerType = "PrusaSlicer",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[DB] Printer model aliases seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Printer model alias seeding error");
             throw;
         }
     }
