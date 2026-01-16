@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useEffectEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
@@ -261,22 +261,23 @@ export function UserManagementPage() {
     }
   };
 
+  // Extract keyboard handler with useEffectEvent to access latest state without retriggers
+  const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
+      e.preventDefault();
+      const farmUserRole = roles.find(r => r.name === 'farm_user');
+      setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
+      setSelectedPermissions([]);
+      setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
+      setShowCreateModal(true);
+    }
+  });
+
   // Keyboard shortcut: 'k' to create new user
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
-        e.preventDefault();
-        const farmUserRole = roles.find(r => r.name === 'farm_user');
-        setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
-        setSelectedPermissions([]);
-        setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
-        setShowCreateModal(true);
-      }
-    };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [roles]);
+  }, [handleKeyDown]);
 
   const filteredUsers = users.filter(user =>
     user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||

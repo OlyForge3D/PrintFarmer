@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useOptimistic, useTransition } from 'react';
+import React, { useState, useEffect, useOptimistic, useTransition, useEffectEvent } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
@@ -148,21 +148,22 @@ export const TagAdminPage: React.FC = () => {
         // In a full implementation, you'd call an update mutation here
     };
 
+    // Extract keyboard handler with useEffectEvent to access latest state without retriggers
+    const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+        if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
+            e.preventDefault();
+            setShowNewTagForm(true);
+            setNewTagName('');
+            setNewTagColor('#6366f1');
+            setNewTagDescription('');
+        }
+    });
+
     // Keyboard shortcut: 'k' to create new tag
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
-                e.preventDefault();
-                setShowNewTagForm(true);
-                setNewTagName('');
-                setNewTagColor('#6366f1');
-                setNewTagDescription('');
-            }
-        };
-
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    }, [handleKeyDown]);
 
     if (isLoading) {
         return (

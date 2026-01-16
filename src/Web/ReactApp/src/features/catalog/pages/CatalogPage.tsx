@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useOptimistic, useTransition } from 'react';
 import { apiClient } from '@/services/api';
 import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -26,6 +26,17 @@ export function CatalogPage() {
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'manufacturer' | 'model'; id: string; name: string } | null>(null);
+  
+  // Optimistic state for deletions
+  const [, startTransition] = useTransition();
+  const [optimisticManufacturers, addOptimisticManufacturerDelete] = useOptimistic(
+    manufacturers,
+    (state, deletedId: string) => state.filter(m => m.id !== deletedId)
+  );
+  const [optimisticModels, addOptimisticModelDelete] = useOptimistic(
+    models,
+    (state, deletedId: string) => state.filter(m => m.id !== deletedId)
+  );
 
   useEffect(() => {
     loadData();
@@ -72,12 +83,12 @@ export function CatalogPage() {
   };
 
   const getModelCount = (manufacturerId: string): number => {
-    return models.filter(m => m.manufacturerId === manufacturerId).length;
+    return optimisticModels.filter(m => m.manufacturerId === manufacturerId).length;
   };
 
   const getFilteredModels = (): PrinterModelDto[] => {
-    if (!selectedManufacturer) return models;
-    return models.filter(m => m.manufacturerId === selectedManufacturer.id);
+    if (!selectedManufacturer) return optimisticModels;
+    return optimisticModels.filter(m => m.manufacturerId === selectedManufacturer.id);
   };
 
   const getMotionTypeDisplayName = (type?: MotionTypeString): string => {
@@ -178,26 +189,42 @@ export function CatalogPage() {
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
 
-    try {
-      if (deleteTarget.type === 'manufacturer') {
-        await apiClient.deleteManufacturer(deleteTarget.id);
-        setManufacturers(manufacturers.filter(m => m.id !== deleteTarget.id));
-        setModels(models.filter(m => m.manufacturerId !== deleteTarget.id));
-        if (selectedManufacturer?.id === deleteTarget.id) {
-          setSelectedManufacturer(null);
+    setShowDeleteConfirmation(false);
+    
+    startTransition(async () => {
+      try {
+        if (deleteTarget.type === 'manufacturer') {
+          // Optimistically remove manufacturer and its models
+          addOptimisticManufacturerDelete(deleteTarget.id);
+          // Also mark all models of this manufacturer as deleted
+          const modelIds = models.filter(m => m.manufacturerId === deleteTarget.id).map(m => m.id);
+          modelIds.forEach(id => addOptimisticModelDelete(id));
+          
+          await apiClient.deleteManufacturer(deleteTarget.id);
+          
+          // Confirm deletion by updating state
+          setManufacturers(manufacturers => manufacturers.filter(m => m.id !== deleteTarget.id));
+          setModels(models => models.filter(m => m.manufacturerId !== deleteTarget.id));
+          if (selectedManufacturer?.id === deleteTarget.id) {
+            setSelectedManufacturer(null);
+          }
+        } else {
+          // Optimistically remove model
+          addOptimisticModelDelete(deleteTarget.id);
+          
+          await apiClient.deleteModel(deleteTarget.id);
+          
+          // Confirm deletion
+          setModels(models => models.filter(m => m.id !== deleteTarget.id));
         }
-      } else {
-        await apiClient.deleteModel(deleteTarget.id);
-        setModels(models.filter(m => m.id !== deleteTarget.id));
+        setDeleteTarget(null);
+      } catch (err) {
+        setError('Failed to delete');
+        console.error('Error deleting:', err);
+        setDeleteTarget(null);
+        // Automatic rollback via useOptimistic
       }
-      setShowDeleteConfirmation(false);
-      setDeleteTarget(null);
-    } catch (err) {
-      setError('Failed to delete');
-      console.error('Error deleting:', err);
-      setShowDeleteConfirmation(false);
-      setDeleteTarget(null);
-    }
+    });
   };
   if (loading) {
     return (
@@ -239,7 +266,7 @@ export function CatalogPage() {
       </Card.Header>
       <Card.Body>
         <div className="space-y-2 max-h-96 overflow-y-auto">
-          {manufacturers.map((manufacturer) => (
+          {optimisticManufacturers.map((manufacturer) => (
             <div
               key={manufacturer.id}
               className={`p-3 border border-pf-border rounded cursor-pointer hover:bg-pf-bg-2 transition-colors ${selectedManufacturer?.id === manufacturer.id ? 'bg-blue-900/30 border-blue-600' : ''

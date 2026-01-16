@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useEffectEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -39,7 +39,27 @@ export const HarvestPage: React.FC = () => {
 
   // All hooks must be called before any return (including useEffect)
 
+  // Extract event handlers with useEffectEvent to prevent effect retriggers
+  const handleHarvestFileProgress = useEffectEvent((progress: import('@/services/harvest-signalr').HarvestFileProgress) => {
+    const prev = perFileProgressMapRef.current ?? {};
+    const opMap = prev[progress.operationId] ? { ...prev[progress.operationId] } : {};
+    opMap[progress.fileName] = progress;
+    perFileProgressMapRef.current = { ...prev, [progress.operationId]: opMap };
+  });
+
+  const handleHarvestOperationProgress = useEffectEvent(() => {
+    // Invalidate operations on progress updates
+    queryClient.invalidateQueries({ queryKey: ['harvest-operations'] });
+  });
+
+  const handleHarvestUpdate = useEffectEvent(() => {
+    // Use latest refetchOperations from closure
+    queryClient.invalidateQueries({ queryKey: ['harvest-operations'] });
+  });
+
   // Set up real-time updates for harvest progress and per-file progress
+  const joinedOpsRef = React.useRef<Set<string>>(new Set());
+
   useEffect(() => {
     // Async setup function
     const setupSignalR = async () => {
@@ -47,43 +67,34 @@ export const HarvestPage: React.FC = () => {
 
       // Join SignalR group for each running operation
       if (harvestOperations) {
+        joinedOpsRef.current.clear();
         for (const op of harvestOperations) {
           if (op.status === GcodeHarvestStatus.Running && op.id) {
             await signalRService.joinHarvestGroup(op.id);
-            joinedOps.add(op.id);
+            joinedOpsRef.current.add(op.id);
           }
         }
       }
     };
 
-    const joinedOps = new Set<string>();
     setupSignalR();
 
-    // Subscribe to per-file progress events and store in ref
-    const unsubscribeFileProgress = signalRService.onHarvestFileProgress((progress) => {
-      const prev = perFileProgressMapRef.current ?? {};
-      const opMap = prev[progress.operationId] ? { ...prev[progress.operationId] } : {};
-      opMap[progress.fileName] = progress;
-      perFileProgressMapRef.current = { ...prev, [progress.operationId]: opMap };
-    });
+    // Subscribe to events using extracted handlers (no dependency on callbacks)
+    const unsubscribeFileProgress = signalRService.onHarvestFileProgress(handleHarvestFileProgress);
+    const unsubscribeOperationProgress = signalRService.onHarvestOperationProgress(handleHarvestOperationProgress);
+    const unsubscribe = signalRService.onHarvestUpdate(handleHarvestUpdate);
 
-    // Subscribe to operation progress events
-    const unsubscribeOperationProgress = signalRService.onHarvestOperationProgress(() => {
-      refetchOperations();
-    });
-
-    // Subscribe to harvest update for total progress
-    const unsubscribe = signalRService.onHarvestUpdate(() => {
-      refetchOperations();
-    });
+    // Copy ref to local variable to avoid ref warning in cleanup
+    const opsToClean = new Set(joinedOpsRef.current);
 
     return () => {
       unsubscribe();
       unsubscribeFileProgress();
       unsubscribeOperationProgress();
-      joinedOps.forEach(opId => signalRService.leaveHarvestGroup(opId));
+      // Clean up joined ops using local copy
+      opsToClean.forEach(opId => signalRService.leaveHarvestGroup(opId));
     };
-  }, [refetchOperations, harvestOperations]);
+  }, [harvestOperations, handleHarvestFileProgress, handleHarvestOperationProgress, handleHarvestUpdate]);
 
   // Update selectedOperation when harvestOperations changes
   useEffect(() => {
