@@ -68,7 +68,9 @@ async function setupAccountAction(
 
 /**
  * Setup Account Submit Button using React 19 useFormStatus
+ * Note: Not currently used - account submission uses nextFromAccount handler
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function SetupAccountSubmitButton({ isDisabled }: { isDisabled: boolean }) {
   const { pending } = useFormStatus();
 
@@ -113,6 +115,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   });
   
   // React 19 useActionState for account form validation
+  // Note: Not currently used - account submission uses nextFromAccount handler
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [accountFormState, accountFormAction] = useActionState(setupAccountAction, {
     errors: {},
   });

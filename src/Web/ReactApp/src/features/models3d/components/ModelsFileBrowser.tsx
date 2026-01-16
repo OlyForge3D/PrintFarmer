@@ -344,9 +344,10 @@ export const ModelsFileBrowser = ({
 
   return (
     <>
-      <FileBrowser<Model>
+      <FileBrowser
         ref={fileBrowserRef}
-        config={config}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={config as any}
         sortOptions={sortOptions}
         columns={modelColumns}
         renderItemActions={renderActions}

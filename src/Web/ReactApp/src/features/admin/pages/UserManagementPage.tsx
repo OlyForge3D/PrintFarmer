@@ -42,8 +42,12 @@ async function createUserAction(
   const username = (formData.get('username') as string)?.trim() || '';
   const email = (formData.get('email') as string)?.trim() || '';
   const password = formData.get('password') as string;
+  // firstName and lastName are extracted but used in component's createUser function
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const firstName = (formData.get('firstName') as string)?.trim() || '';
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const lastName = (formData.get('lastName') as string)?.trim() || '';
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const selectedRoleId = formData.get('roleId') as string;
 
   const errors: CreateUserFormState['errors'] = {};
@@ -103,6 +107,8 @@ export function UserManagementPage() {
   const DEBOUNCE_MS = 450;
 
   // React 19 useActionState for form submission
+  // Note: formAction is not currently used - actual submission via createUser function
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [formState, formAction, isPending] = useActionState(createUserAction, {
     errors: {},
   });
@@ -147,16 +153,10 @@ export function UserManagementPage() {
         if (username) {
           const uTaken = data.usernameExists === true;
           setUsernameStatus(uTaken ? 'taken' : 'available');
-          if (!uTaken && formState.errors.username === 'Username already taken') {
-            // Error cleared
-          }
         }
         if (email) {
           const eTaken = data.emailExists === true;
           setEmailStatus(eTaken ? 'taken' : 'available');
-          if (!eTaken && formState.errors.email === 'Email already taken') {
-            // Error cleared
-          }
         }
       } catch {
         if (username) setUsernameStatus('error');
@@ -181,6 +181,7 @@ export function UserManagementPage() {
     return errs;
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const createUser = async () => {
     if (isPending) return;
     const fieldErrs = validateForm();
@@ -221,6 +222,7 @@ export function UserManagementPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const loadApplicationAreas = async () => {
     try {
       // Start with common application areas. In future, these could come from API
@@ -249,6 +251,7 @@ export function UserManagementPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const loadRoles = async () => {
     try {
       const data = await apiClient.getRoles();

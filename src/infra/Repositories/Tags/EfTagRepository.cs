@@ -499,7 +499,7 @@ namespace Farm.Infrastructure.Repositories.Tags
             {
                 return gcodeLastUsed > model3dLastUsed ? gcodeLastUsed : model3dLastUsed;
             }
-            
+
             return gcodeLastUsed ?? model3dLastUsed;
         }
 

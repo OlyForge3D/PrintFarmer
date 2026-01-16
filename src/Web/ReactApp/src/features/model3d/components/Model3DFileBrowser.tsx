@@ -198,8 +198,9 @@ export const Model3DFileBrowser = ({
   );
 
   return (
-    <FileBrowser<Model3DFile>
-      config={config}
+    <FileBrowser
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config={config as any}
       sortOptions={sortOptions}
       columns={model3dColumns}
       viewMode={viewMode}

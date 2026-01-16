@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useActionState, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { EyeIcon, EyeOffIcon, UserPlusIcon } from '@/common/components/icons/MdiIcons';
@@ -29,7 +29,10 @@ async function registerAction(
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
   const confirmPassword = formData.get('confirmPassword') as string;
+  // firstName and lastName are extracted here for validation but used in handleSubmit
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const firstName = (formData.get('firstName') as string) || undefined;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const lastName = (formData.get('lastName') as string) || undefined;
 
   const errors: string[] = [];

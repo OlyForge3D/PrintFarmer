@@ -853,7 +853,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(t => t.CreatedAt);
         });
 
- 
         // FolderNode Entity Configuration
         _ = modelBuilder.Entity<FolderNode>(b =>
         {

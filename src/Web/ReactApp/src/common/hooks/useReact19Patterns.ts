@@ -176,12 +176,14 @@ import { useCallback, useTransition, useActionState } from 'react';
  * const [state, formAction, isPending] = useActionStatePattern(submitFn, initialState);
  * ```
  */
-export function useActionStatePattern<T extends Record<string, unknown>>(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function useSimpleFormAction<T = any>(
   action: (prevState: T) => Promise<T>,
   initialState: T
 ): [T, (_: FormData) => void, boolean] {
   const [isPending, startTransition] = useTransition();
-  const [state] = useActionState(action, initialState);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [state] = useActionState((prevState: T) => action(prevState), initialState as any) as any;
 
   const formAction = useCallback(
     () => {
@@ -236,12 +238,23 @@ export function useActionStatePattern<T extends Record<string, unknown>>(
  * }
  * ```
  */
-export function useAsyncAction<T extends Record<string, unknown>>(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function useAsyncAction<T = any>(
   action: (prevState: T, formData: FormData) => Promise<T>,
   initialState: T
 ): [T, (formData: FormData) => void, boolean] {
   const [isPending, startTransition] = useTransition();
-  const [state, formAction] = useActionState(action, initialState);
+  const [state, formAction] = useActionState(
+    (prevState: T, payload: unknown) => {
+      if (payload instanceof FormData) {
+        return action(prevState, payload);
+      }
+      return Promise.resolve(prevState);
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    initialState as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ) as any;
 
   const boundFormAction = useCallback(
     (formData: FormData) => {

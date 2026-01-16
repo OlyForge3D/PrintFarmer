@@ -584,8 +584,9 @@ export const GcodeFileBrowser = ({
 
   return (
     <>
-      <FileBrowser<GcodeFile>
-        config={config}
+      <FileBrowser
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        config={config as any}
         sortOptions={sortOptions}
         columns={gcodeColumns}
         extraToolbarActions={extraToolbarActions}

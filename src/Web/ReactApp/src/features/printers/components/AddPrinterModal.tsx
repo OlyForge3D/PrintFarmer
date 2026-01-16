@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, use, Suspense, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
@@ -13,14 +13,39 @@ interface ManufacturerDto {
   name: string;
 }
 
-
 interface AddPrinterModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+/**
+ * React 19 async functions for loading catalog data
+ */
+async function fetchManufacturers(): Promise<ManufacturerDto[]> {
+  return apiClient.getManufacturers();
+}
+
+async function fetchModels(): Promise<PrinterModelDto[]> {
+  return apiClient.getModels();
+}
+
+/**
+ * Content component using React 19 use() hook for async data
+ */
+function AddPrinterModalContent({ 
+  manufacturers, 
+  models,
+  isOpen,
+  onClose,
+  onSuccess 
+}: {
+  manufacturers: ManufacturerDto[];
+  models: PrinterModelDto[];
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
     serverUrl: '',
@@ -35,55 +60,21 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     backendPort: 7125,
     frontendPort: 80,
   });
-  const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
-  const [models, setModels] = useState<PrinterModelDto[]>([]);
   const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
-  
-  // Load manufacturers on mount
-  useEffect(() => {
-    if (isOpen) {
-      loadManufacturers();
-      loadModels();
-    }
-  }, [isOpen]);
-
-  // Filter models when manufacturer changes
-  useEffect(() => {
-    if (formData.manufacturerId) {
-      setFilteredModels(models.filter(m => m.manufacturerId === formData.manufacturerId));
-    } else {
-      setFilteredModels([]);
-    }
-    // Reset model selection when manufacturer changes
-    setFormData(prev => ({ ...prev, modelId: undefined }));
-  }, [formData.manufacturerId, models]);
-
-  const loadManufacturers = async () => {
-    try {
-      const data = await apiClient.getManufacturers();
-      setManufacturers(data);
-    } catch (err) {
-      console.error('Failed to load manufacturers:', err);
-    }
-  };
-
-  const loadModels = async () => {
-    try {
-      const data = await apiClient.getModels();
-      setModels(data);
-    } catch (err) {
-      console.error('Failed to load models:', err);
-    }
-  };
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
+    // Filter models when manufacturer changes
+    if (field === 'manufacturerId' && value) {
+      const filtered = models.filter(m => m.manufacturerId === value);
+      setFilteredModels(filtered);
+    }
     // Clear validation error when user starts typing
     if (validationErrors[field]) {
       setValidationErrors(prev => {
@@ -404,5 +395,53 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             </FormField>
           </form>
     </Modal>
+  );
+}
+
+/**
+ * Wrapper component with Suspense boundary for async data loading
+ */
+export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <Suspense fallback={
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Add New Printer"
+        width="max-w-2xl"
+      >
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <LoadingIcon className="w-8 h-8 animate-spin mx-auto mb-2" />
+            <p className="text-gray-500">Loading printers...</p>
+          </div>
+        </div>
+      </Modal>
+    }>
+      <AddPrinterModalAsync isOpen={isOpen} onClose={onClose} onSuccess={onSuccess} />
+    </Suspense>
+  );
+}
+
+/**
+ * Inner component that uses the use() hook
+ */
+function AddPrinterModalAsync({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+  const [manufacturersPromise] = useState(fetchManufacturers());
+  const [modelsPromise] = useState(fetchModels());
+
+  const manufacturers = use(manufacturersPromise);
+  const models = use(modelsPromise);
+
+  return (
+    <AddPrinterModalContent 
+      manufacturers={manufacturers}
+      models={models}
+      isOpen={isOpen}
+      onClose={onClose}
+      onSuccess={onSuccess}
+    />
   );
 }

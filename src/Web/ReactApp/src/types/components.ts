@@ -49,6 +49,7 @@ export interface JobDetailsModalProps {
   onClose: () => void;
   jobId: string;
   jobDetails?: JobDetails;
+  onSave?: (job: JobDetails) => void;
 }
 
 export interface JobNotesEditorProps {

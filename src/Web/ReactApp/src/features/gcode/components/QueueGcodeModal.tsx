@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { use, Suspense, useState } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { queueService } from '@/services/queueService';
@@ -11,37 +11,47 @@ interface Props {
   onClose: (added?: boolean) => void;
 }
 
-export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
-  const [printers, setPrinters] = useState<Array<{ id: string; name: string; model: string; isAvailable: boolean; nozzleDiameter?: number; supportedMaterials?: string[] }>>([]);
+interface PrinterOption {
+  id: string;
+  name: string;
+  model: string;
+  isAvailable: boolean;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+}
+
+/**
+ * React 19 async function to fetch printer list
+ */
+async function fetchPrinters(): Promise<PrinterOption[]> {
+  const list = await queueService.getQueueOverview();
+  return list.map(p => {
+    const nozzle = (p as unknown as { nozzleDiameter?: number }).nozzleDiameter;
+    const mats = (p as unknown as { supportedMaterials?: string[] }).supportedMaterials;
+    return {
+      id: p.printerId,
+      name: p.printerName,
+      model: p.printerModel,
+      isAvailable: p.isAvailable,
+      nozzleDiameter: typeof nozzle === 'number' ? nozzle : undefined,
+      supportedMaterials: Array.isArray(mats) ? mats : undefined
+    };
+  });
+}
+
+/**
+ * Content component using React 19 use() hook for async data
+ */
+function QueueGcodeModalContent({ file, printers, isOpen, onClose }: { 
+  file: GcodeFile; 
+  printers: PrinterOption[];
+  isOpen: boolean;
+  onClose: (added?: boolean) => void;
+}) {
   const [selectedPrinter, setSelectedPrinter] = useState<string | undefined>(undefined);
   const [autoAssign, setAutoAssign] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    (async () => {
-      try {
-        const list = await queueService.getQueueOverview();
-        // Map additional metadata if available (nozzle diameter, supported materials)
-        setPrinters(list.map(p => {
-          // queueService.QueueOverview may include optional capability fields
-          const nozzle = (p as unknown as { nozzleDiameter?: number }).nozzleDiameter;
-          const mats = (p as unknown as { supportedMaterials?: string[] }).supportedMaterials;
-          return {
-            id: p.printerId,
-            name: p.printerName,
-            model: p.printerModel,
-            isAvailable: p.isAvailable,
-            nozzleDiameter: typeof nozzle === 'number' ? nozzle : undefined,
-            supportedMaterials: Array.isArray(mats) ? mats : undefined
-          };
-        }));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load printers');
-      }
-    })();
-  }, [isOpen]);
 
   const handleQueue = async () => {
     setLoading(true);
@@ -151,5 +161,36 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * React 19 wrapper with Suspense boundary for printer list loading
+ */
+export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
+  if (!isOpen) return null;
+
+  return (
+    <Suspense fallback={
+      <Modal
+        isOpen={isOpen}
+        onClose={() => onClose(false)}
+        title="Queue G-code for Printing"
+      >
+        <div className="flex items-center justify-center py-8">
+          <div className="text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-pf-accent border-t-transparent rounded-full mx-auto mb-2"></div>
+            <p className="text-pf-text-secondary">Loading printers...</p>
+          </div>
+        </div>
+      </Modal>
+    }>
+      <QueueGcodeModalContent 
+        file={file}
+        printers={use(fetchPrinters())}
+        isOpen={isOpen}
+        onClose={onClose}
+      />
+    </Suspense>
   );
 };
