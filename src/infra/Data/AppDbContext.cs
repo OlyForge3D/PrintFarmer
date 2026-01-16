@@ -54,6 +54,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 
+    // Print approvals (pending Upload+Print approvals)
+    public DbSet<Farm.Infrastructure.Domain.PrintApproval> PrintApprovals => Set<Farm.Infrastructure.Domain.PrintApproval>();
+
     // File Health & Consistency Auditing
     public DbSet<FileHealthAudit> FileHealthAudits => Set<FileHealthAudit>();
 
@@ -74,6 +77,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
+    public DbSet<Farm.Infrastructure.Domain.ApiKey> ApiKeys => Set<Farm.Infrastructure.Domain.ApiKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -138,6 +142,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithOne(t => t.Printer)
              .HasForeignKey(t => t.PrinterId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ApiKey entity mapping
+        _ = modelBuilder.Entity<Farm.Infrastructure.Domain.ApiKey>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.UserId);
+            _ = b.Property(a => a.Name).HasMaxLength(128);
+            _ = b.Property(a => a.KeyHash).IsRequired().HasMaxLength(128);
+            _ = b.Property(a => a.IsActive).HasDefaultValue(true);
+            _ = b.HasIndex(a => a.KeyHash).IsUnique();
+            _ = b.Property(a => a.CreatedAt).IsRequired();
         });
 
         // Toolhead Entity Configuration
@@ -570,6 +586,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(h => h.PrinterId);
             _ = b.HasIndex(h => h.StartedAt);
             _ = b.HasIndex(h => h.Status);
+        });
+
+        // PrintApproval entity mapping
+        _ = modelBuilder.Entity<Farm.Infrastructure.Domain.PrintApproval>(b =>
+        {
+            _ = b.HasKey(p => p.Id);
+            _ = b.Property(p => p.PrintJobId).IsRequired();
+            _ = b.Property(p => p.PrinterId);
+            _ = b.Property(p => p.RequestedBy).HasMaxLength(128);
+            _ = b.Property(p => p.CreatedAt).IsRequired();
+            _ = b.HasIndex(p => p.CreatedAt);
         });
 
         // HarvestDiscoveredFile Entity Configuration
