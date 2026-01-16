@@ -69,6 +69,9 @@ export const Model3DFileBrowser = ({
 }: Model3DFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [currentViewMode, setCurrentViewMode] = useState<'grid' | 'explorer'>(viewMode ?? 'grid');
+  
+  // For optimistic deletes, we'll track deleted file IDs
+  const [deletedFileIds, setDeletedFileIds] = useState<Set<string>>(new Set());
 
   const sortOptions = useMemo(
     () => [
@@ -164,8 +167,22 @@ export const Model3DFileBrowser = ({
       canDelete: hasPermission('model_3d', 'delete'),
       canDownload: true,
       onDelete: async (ids: string[]) => {
-        // Delete each model individually using the proper ID-based endpoint
-        await Promise.all(ids.map((id) => apiClient.deleteModel(id)));
+        // Optimistic delete: mark as deleted immediately
+        const newDeletedIds = new Set(deletedFileIds);
+        ids.forEach(id => newDeletedIds.add(id));
+        setDeletedFileIds(newDeletedIds);
+        
+        try {
+          // Delete each model individually using the proper ID-based endpoint
+          await Promise.all(ids.map((id) => apiClient.deleteModel(id)));
+          // Keep them deleted on success
+        } catch (error) {
+          // On error, remove from deleted set to show them again
+          const errorDeletedIds = new Set(newDeletedIds);
+          ids.forEach(id => errorDeletedIds.delete(id));
+          setDeletedFileIds(errorDeletedIds);
+          throw error;
+        }
       },
       onDownload: async (id: string) => {
         // TODO: Implement download for 3D models when API method is available
@@ -194,7 +211,7 @@ export const Model3DFileBrowser = ({
         onViewModeChange?.(mode);
       },
     }),
-    [fetcher, hasPermission, currentViewMode, onViewModeChange]
+    [fetcher, hasPermission, currentViewMode, onViewModeChange, deletedFileIds]
   );
 
   return (

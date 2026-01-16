@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useOptimistic, useTransition } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
@@ -17,6 +17,7 @@ export const TagAdminPage: React.FC = () => {
     const [newTagColor, setNewTagColor] = useState('#6366f1');
     const [newTagDescription, setNewTagDescription] = useState('');
     const [editingTag, setEditingTag] = useState<EditingTag | null>(null);
+    const [isPending, startTransition] = useTransition();
 
     // Fetch all tags with usage count
     const { data: tags = [], isLoading } = useQuery<TagOption[]>({
@@ -64,6 +65,13 @@ export const TagAdminPage: React.FC = () => {
         gcTime: 10 * 60 * 1000
     });
 
+    // Optimistic UI state for deleted tags
+    const [optimisticTags, addOptimisticDelete] = useOptimistic(
+        tags,
+        (state: TagOption[], deletedTagId: string) => 
+            state.filter(tag => tag.id !== deletedTagId)
+    );
+
     // Create tag mutation
     const createTagMutation = useMutation({
         mutationFn: async () => {
@@ -95,6 +103,23 @@ export const TagAdminPage: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['model-tags'] });
         }
     });
+
+    // Handle delete with optimistic UI update
+    const handleDeleteTag = (tagId: string) => {
+        startTransition(async () => {
+            // Show optimistic delete immediately
+            addOptimisticDelete(tagId);
+            
+            try {
+                // Execute mutation in background
+                await deleteTagMutation.mutateAsync(tagId);
+            } catch (error) {
+                // On error, state rolls back automatically via useOptimistic
+                const message = error instanceof Error ? error.message : 'Failed to delete tag';
+                console.error('Delete tag error:', message);
+            }
+        });
+    };
 
     const handleStartEdit = (tag: TagOption) => {
         setEditingTagId(tag.id);
@@ -304,8 +329,8 @@ export const TagAdminPage: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {tags.length > 0 ? (
-                                tags.map((tag) => (
+                            {optimisticTags.length > 0 ? (
+                                optimisticTags.map((tag) => (
                                     <SelectableRow
                                         key={tag.id}
                                         className="border-b border-pf-border"
@@ -390,20 +415,20 @@ export const TagAdminPage: React.FC = () => {
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Edit tag"
-                                                        disabled={deleteTagMutation.isPending}
+                                                        disabled={isPending}
                                                     >
                                                         <EditIcon className="w-4 h-4" />
                                                     </Button>
                                                     <Button
                                                         type="button"
-                                                        onClick={() => deleteTagMutation.mutate(tag.id)}
+                                                        onClick={() => handleDeleteTag(tag.id)}
                                                         variant="danger"
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Delete tag"
-                                                        disabled={deleteTagMutation.isPending}
+                                                        disabled={isPending}
                                                     >
-                                                        {deleteTagMutation.isPending ? (
+                                                        {isPending ? (
                                                             <LoadingIcon className="w-4 h-4" />
                                                         ) : (
                                                             <DeleteIcon className="w-4 h-4" />

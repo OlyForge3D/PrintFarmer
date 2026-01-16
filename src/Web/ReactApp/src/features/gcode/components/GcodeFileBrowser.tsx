@@ -146,6 +146,9 @@ export const GcodeFileBrowser = ({
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   
+  // Track deleted file IDs for optimistic deletes
+  const [deletedFileIds, setDeletedFileIds] = useState<Set<string>>(new Set());
+  
   // Only use local state if viewMode prop is not provided (uncontrolled mode)
   const [localViewMode, setLocalViewMode] = useState<'grid' | 'explorer'>('grid');
 
@@ -191,13 +194,27 @@ export const GcodeFileBrowser = ({
     const file = deleteConfirm.file;
     setDeleteConfirm({ isOpen: false, file: null });
     try {
-      await apiClient.deleteGcodeFile(file.id);
-      toast.success('File deleted');
+      // Optimistic delete: mark as deleted immediately
+      const newDeletedIds = new Set(deletedFileIds);
+      newDeletedIds.add(file.id);
+      setDeletedFileIds(newDeletedIds);
+      
+      try {
+        await apiClient.deleteGcodeFile(file.id);
+        toast.success('File deleted');
+      } catch (error) {
+        // On error, remove from deleted set to show it again
+        const errorDeletedIds = new Set(newDeletedIds);
+        errorDeletedIds.delete(file.id);
+        setDeletedFileIds(errorDeletedIds);
+        toast.error('Failed to delete file');
+        console.error('Delete error:', error);
+      }
     } catch (error) {
       toast.error('Failed to delete file');
       console.error('Delete error:', error);
     }
-  }, [deleteConfirm.file]);
+  }, [deleteConfirm.file, deletedFileIds]);
 
   const handleDeleteCancel = useCallback(() => {
     setDeleteConfirm({ isOpen: false, file: null });
