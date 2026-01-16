@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
-import { KeyIcon, PlusIcon, TrashIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
+import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
   createApiKey,
@@ -188,7 +188,7 @@ export function ApiKeysPage() {
               <Button
                 variant="primary"
                 onClick={() => setShowCreateForm(true)}
-                iconLeft={PlusIcon}
+                iconLeft={<PlusIcon className="w-4 h-4" />}
               >
                 Create New API Key
               </Button>
@@ -266,21 +266,21 @@ export function ApiKeysPage() {
                       variant="secondary"
                       onClick={() => handleToggle(apiKey.id)}
                       disabled={toggleMutation.isPending}
-                      icon={apiKey.isActive ? EyeOffIcon : EyeIcon}
+                      iconLeft={apiKey.isActive ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                       title={apiKey.isActive ? 'Disable' : 'Enable'}
                     />
                     <Button
                       variant="secondary"
                       onClick={() => handleRotate(apiKey.id, apiKey.name)}
                       disabled={rotateMutation.isPending}
-                      icon={RefreshIcon}
+                      iconLeft={<RefreshIcon className="w-4 h-4" />}
                       title="Rotate (generate new key)"
                     />
                     <Button
                       variant="danger"
                       onClick={() => handleDelete(apiKey.id, apiKey.name)}
                       disabled={deleteMutation.isPending}
-                      icon={TrashIcon}
+                      iconLeft={<DeleteIcon className="w-4 h-4" />}
                       title="Delete"
                     />
                   </div>

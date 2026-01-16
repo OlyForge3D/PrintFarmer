@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers;
@@ -44,10 +45,14 @@ public class PrintApprovalsControllerTests : IDisposable
     public async Task GetPendingAsync_ShouldReturnAllPendingApprovals()
     {
         // Arrange
+        // Create valid PrintJobs with proper foreign key chain
+        var printJob1 = await CreateValidPrintJobAsync();
+        var printJob2 = await CreateValidPrintJobAsync();
+
         var approval1 = new PrintApproval
         {
             Id = Guid.NewGuid(),
-            PrintJobId = Guid.NewGuid(),
+            PrintJobId = printJob1.Id,
             PrinterId = Guid.NewGuid(),
             RequestedBy = "user1",
             CreatedAt = DateTime.UtcNow
@@ -55,7 +60,7 @@ public class PrintApprovalsControllerTests : IDisposable
         var approval2 = new PrintApproval
         {
             Id = Guid.NewGuid(),
-            PrintJobId = Guid.NewGuid(),
+            PrintJobId = printJob2.Id,
             RequestedBy = "user2",
             CreatedAt = DateTime.UtcNow
         };
@@ -117,10 +122,13 @@ public class PrintApprovalsControllerTests : IDisposable
     public async Task RejectAsync_WithValidId_ShouldRemoveApprovalAndReturnNoContent()
     {
         // Arrange
+        // Create valid PrintJob with proper foreign key chain
+        var printJob = await CreateValidPrintJobAsync();
+
         var approval = new PrintApproval
         {
             Id = Guid.NewGuid(),
-            PrintJobId = Guid.NewGuid(),
+            PrintJobId = printJob.Id,
             RequestedBy = "user1",
             CreatedAt = DateTime.UtcNow
         };
@@ -152,6 +160,57 @@ public class PrintApprovalsControllerTests : IDisposable
     {
         _context?.Dispose();
         _connection?.Dispose();
+    }
+
+    /// <summary>
+    /// Helper method to create a valid PrintJob with proper foreign key chain (FolderNode → GcodeFile → PrintJob)
+    /// </summary>
+    private async Task<PrintJob> CreateValidPrintJobAsync()
+    {
+        // Create FolderNode (required for GcodeFile)
+        var folderPath = $"/test/{Guid.NewGuid()}";
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = folderPath,
+            FolderType = "gcode",
+            CreatedAt = DateTime.UtcNow
+        };
+        _context.Folders.Add(folder);
+        await _context.SaveChangesAsync();
+
+        // Create GcodeFile (required for PrintJob)
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = $"test_{Guid.NewGuid()}.gcode",
+            FileName = $"test_{Guid.NewGuid()}.gcode",
+            FolderId = folder.Id,
+            FilePath = "/tmp/test.gcode",
+            FileHash = Guid.NewGuid().ToString(),
+            FileSizeBytes = 1000,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _context.GcodeFiles.Add(gcodeFile);
+        await _context.SaveChangesAsync();
+
+        // Create PrintJob with all required fields
+        var printJob = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Test Job {Guid.NewGuid()}",
+            GcodeFileId = gcodeFile.Id,
+            Status = PrintJobStatus.Queued,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _context.PrintJobs.Add(printJob);
+        await _context.SaveChangesAsync();
+
+        return printJob;
     }
 
     // Test double for IPrintApprovalService

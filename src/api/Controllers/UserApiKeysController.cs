@@ -62,7 +62,9 @@ namespace Farm.Web.Api.Controllers
             // TODO: verify caller is same user or admin
             var key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
+            {
                 return NotFound();
+            }
 
             key.IsActive = !key.IsActive;
             await _repo.UpdateAsync(key);
@@ -77,7 +79,9 @@ namespace Farm.Web.Api.Controllers
             // TODO: verify caller is same user or admin
             var key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
+            {
                 return NotFound();
+            }
 
             await _repo.DeleteAsync(keyId);
             return NoContent();
@@ -90,7 +94,9 @@ namespace Farm.Web.Api.Controllers
             // TODO: verify caller is same user or admin
             var oldKey = await _repo.GetByIdAsync(keyId);
             if (oldKey == null || oldKey.UserId != userId)
+            {
                 return NotFound();
+            }
 
             // Generate new key
             string rawKey = GenerateKey();

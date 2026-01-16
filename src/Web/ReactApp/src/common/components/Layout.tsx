@@ -394,8 +394,9 @@ export function Layout() {
             {/* Connection status */}
             <div className="flex items-center space-x-2">
               <div 
-                className="h-2 w-2 rounded-full" 
-                style={{ backgroundColor: isConnected ? 'var(--pf-success)' : 'var(--pf-error)' }}
+                className={`h-2 w-2 rounded-full ${
+                  isConnected ? 'bg-pf-success' : 'bg-pf-error'
+                }`}
               />
               <span className="text-sm text-pf-text-tertiary">
                 {isConnected ? 'Connected' : 'Disconnected'}
@@ -536,7 +537,6 @@ export function Layout() {
                               e.preventDefault(); // Prevent native toggle
                               toggleExpand(navItem.name);
                             }}
-                            aria-expanded={isExpanded}
                             tabIndex={0}
                             role="button"
                           >
@@ -625,7 +625,6 @@ export function Layout() {
                             e.preventDefault(); // Prevent native toggle
                             toggleExpand(item.name);
                           }}
-                          aria-expanded={isExpanded}
                           tabIndex={0}
                           role="button"
                         >
