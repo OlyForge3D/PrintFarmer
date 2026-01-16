@@ -91,26 +91,37 @@ namespace Farm.Web.Api.Controllers
                         return StatusCode(500, new { message = "Uploaded file not indexed yet" });
                     }
 
+                    _logger.LogInformation("Processing OctoPrint upload with auto-print: fileId={FileId}, printerId={PrinterId}, nozzle={Nozzle}, material={Material}",
+                        gcodeFileGuid, printerId ?? Guid.Empty, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
+
+                    // Attempt to enqueue with the specified printer (or auto-assign if null)
                     var enqueueReq = new EnqueuePrintJobRequest(gcodeFileGuid, printerId, null, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
                     var job = await _printJobQueueService.EnqueueAsync(enqueueReq, HttpContext.RequestAborted);
-                    if (job is null)
+
+                    if (job is not null)
                     {
-                        return StatusCode(500, new { message = "Failed to create print job" });
+                        // Success: Job created with assigned printer
+                        _logger.LogInformation("Print job created successfully: {JobId} -> Printer {PrinterId}", job.Id, job.AssignedPrinterId);
+                        return Accepted(new { file = uploadDto, jobId = job.Id, status = "JobCreated" });
                     }
 
-                    // Create a pending approval entry so the job must be approved before scheduling
-                    var approvalService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.PrintJobs.IPrintApprovalService)) as Farm.Web.Api.Services.PrintJobs.IPrintApprovalService;
-                    var approvalId = await approvalService!.CreatePendingApprovalAsync(job.Id, printerId, User?.Identity?.Name);
-
-                    return Accepted(new { file = uploadDto, jobId = job.Id, approvalId = approvalId, status = "PendingApproval" });
+                    // No printer could be auto-assigned
+                    // Return the file upload response - user can queue it manually from the UI later
+                    _logger.LogWarning("Could not auto-assign printer. File uploaded but not queued (0 printers configured?)");
+                    return Ok(new
+                    {
+                        file = uploadDto,
+                        status = "UploadedOnly",
+                        message = "File uploaded successfully. Queue it from the dashboard to print."
+                    });
                 }
 
                 return Ok(new { file = uploadDto });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process OctoPrint upload");
-                return StatusCode(500, new { message = "Upload failed" });
+                _logger.LogError(ex, "Failed to process OctoPrint upload: {Message}", ex.Message);
+                return StatusCode(500, new { message = $"Upload failed: {ex.Message}" });
             }
         }
 

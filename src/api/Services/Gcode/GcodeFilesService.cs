@@ -523,7 +523,8 @@ namespace Farm.Web.Api.Services.Gcode
                         Name: existingFile.Name,
                         FileSize: existingFile.FileSizeBytes,
                         UploadedAt: existingFile.UpdatedAt,
-                        IsDirectory: false
+                        IsDirectory: false,
+                        Id: existingFile.Id.ToString()  // Include the existing file's ID
                     );
                 }
 
