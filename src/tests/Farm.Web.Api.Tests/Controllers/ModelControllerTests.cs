@@ -67,9 +67,9 @@ namespace Farm.Web.Api.Tests.Controllers
                 .Returns(true);
             // Mock ResolveStoragePath to resolve relative paths
             mock.Setup(x => x.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<string, string>((relativePath, basePath) => 
-                    string.IsNullOrEmpty(relativePath) 
-                        ? basePath 
+                .Returns<string, string>((relativePath, basePath) =>
+                    string.IsNullOrEmpty(relativePath)
+                        ? basePath
                         : Path.Combine(basePath, relativePath));
             // Mock GetContentTypeForFile to return appropriate MIME types
             mock.Setup(x => x.GetContentTypeForFile(It.IsAny<string>()))
