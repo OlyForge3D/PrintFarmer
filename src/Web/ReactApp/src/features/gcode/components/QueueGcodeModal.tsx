@@ -1,4 +1,4 @@
-import React, { use, Suspense, useState } from 'react';
+import React, { use, Suspense, useState, useMemo } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { queueService } from '@/services/queueService';
@@ -40,7 +40,30 @@ async function fetchPrinters(): Promise<PrinterOption[]> {
 }
 
 /**
- * Content component using React 19 use() hook for async data
+ * Inner content component using React 19 use() hook for async data
+ * This must be inside the Suspense boundary to work correctly
+ */
+function QueueGcodeModalInner({ file, printerPromise, isOpen, onClose }: { 
+  file: GcodeFile;
+  printerPromise: Promise<PrinterOption[]>;
+  isOpen: boolean;
+  onClose: (added?: boolean) => void;
+}) {
+  // Call use() here, inside the actual component render
+  const printers = use(printerPromise);
+  
+  return (
+    <QueueGcodeModalContent 
+      file={file}
+      printers={printers}
+      isOpen={isOpen}
+      onClose={onClose}
+    />
+  );
+}
+
+/**
+ * Content component with modal UI
  */
 function QueueGcodeModalContent({ file, printers, isOpen, onClose }: { 
   file: GcodeFile; 
@@ -93,6 +116,11 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
 
   if (!isOpen) return null;
 
+  // Check if there are no printers available
+  const noPrintersAvailable = printers.length === 0;
+  const availablePrinters = printers.filter(p => p.isAvailable);
+  const noAvailablePrinters = availablePrinters.length === 0;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -103,7 +131,7 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
           <Button variant="secondary" onClick={() => onClose(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleQueue} disabled={loading}>
+          <Button variant="primary" onClick={handleQueue} disabled={loading || noPrintersAvailable || noAvailablePrinters}>
             {loading ? 'Queueing…' : 'Queue for Print'}
           </Button>
         </div>
@@ -115,15 +143,31 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
           <div className="font-medium text-pf-text-primary">{file.name}</div>
         </div>
 
-        <div>
-          <Checkbox 
-            label="Auto-assign best available printer (recommended)" 
-            checked={autoAssign} 
-            onChange={(e) => setAutoAssign((e.target as HTMLInputElement).checked)} 
-          />
-        </div>
+        {noPrintersAvailable && (
+          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+            <div className="font-medium">No printers configured</div>
+            <div className="text-sm mt-1">Add at least one printer before queuing jobs.</div>
+          </div>
+        )}
 
-        {!autoAssign && (
+        {!noPrintersAvailable && noAvailablePrinters && (
+          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+            <div className="font-medium">All printers are offline</div>
+            <div className="text-sm mt-1">Please wait for at least one printer to come online.</div>
+          </div>
+        )}
+
+        {!noPrintersAvailable && availablePrinters.length > 0 && (
+          <div>
+            <Checkbox 
+              label="Auto-assign best available printer (recommended)" 
+              checked={autoAssign} 
+              onChange={(e) => setAutoAssign((e.target as HTMLInputElement).checked)} 
+            />
+          </div>
+        )}
+
+        {!noPrintersAvailable && !autoAssign && availablePrinters.length > 0 && (
           <div>
             <div className="text-sm text-pf-text-secondary mb-2">Select Printer</div>
             <div>
@@ -170,6 +214,9 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
 export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
   if (!isOpen) return null;
 
+  // Memoize the printer promise to prevent re-fetching on every render
+  const printerPromise = useMemo(() => fetchPrinters(), []);
+
   return (
     <Suspense fallback={
       <Modal
@@ -185,9 +232,9 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
         </div>
       </Modal>
     }>
-      <QueueGcodeModalContent 
+      <QueueGcodeModalInner 
         file={file}
-        printers={use(fetchPrinters())}
+        printerPromise={printerPromise}
         isOpen={isOpen}
         onClose={onClose}
       />

@@ -912,6 +912,18 @@ namespace Farm.Web.Api.Services.Gcode
             return Path.Combine(file.FilePath, file.FileName);
         }
 
+        public async Task<(string filePath, string originalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                return null;
+            }
+            // Return path AND original filename for download scenarios
+            string filePath = Path.Combine(file.FilePath, file.FileName);
+            return (filePath, file.Name);
+        }
+
         public async Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);

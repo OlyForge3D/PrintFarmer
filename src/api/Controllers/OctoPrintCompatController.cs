@@ -72,9 +72,9 @@ namespace Farm.Web.Api.Controllers
                 return BadRequest(new { message = "Uploaded file is empty" });
             }
 
-            // TODO: enforce _settings.MaxUploadSizeMb
-
             // Save to IFormFile directly using existing file upload pipeline
+            // Both "upload" and "upload and print" buttons treat the file the same way:
+            // just upload and save it. The print parameter is ignored.
             try
             {
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
@@ -82,40 +82,8 @@ namespace Farm.Web.Api.Controllers
                 var uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
                 _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
 
-                if (print)
-                {
-                    // uploadDto contains an Id string (GUID). Parse it to Guid for enqueue request.
-                    if (string.IsNullOrWhiteSpace(uploadDto.Id) || !Guid.TryParse(uploadDto.Id, out Guid gcodeFileGuid))
-                    {
-                        _logger.LogError("Uploaded file missing Id, cannot enqueue print job");
-                        return StatusCode(500, new { message = "Uploaded file not indexed yet" });
-                    }
-
-                    _logger.LogInformation("Processing OctoPrint upload with auto-print: fileId={FileId}, printerId={PrinterId}, nozzle={Nozzle}, material={Material}",
-                        gcodeFileGuid, printerId ?? Guid.Empty, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
-
-                    // Attempt to enqueue with the specified printer (or auto-assign if null)
-                    var enqueueReq = new EnqueuePrintJobRequest(gcodeFileGuid, printerId, null, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
-                    var job = await _printJobQueueService.EnqueueAsync(enqueueReq, HttpContext.RequestAborted);
-
-                    if (job is not null)
-                    {
-                        // Success: Job created with assigned printer
-                        _logger.LogInformation("Print job created successfully: {JobId} -> Printer {PrinterId}", job.Id, job.AssignedPrinterId);
-                        return Accepted(new { file = uploadDto, jobId = job.Id, status = "JobCreated" });
-                    }
-
-                    // No printer could be auto-assigned
-                    // Return the file upload response - user can queue it manually from the UI later
-                    _logger.LogWarning("Could not auto-assign printer. File uploaded but not queued (0 printers configured?)");
-                    return Ok(new
-                    {
-                        file = uploadDto,
-                        status = "UploadedOnly",
-                        message = "File uploaded successfully. Queue it from the dashboard to print."
-                    });
-                }
-
+                // Simple response: always return the file. Ignore print parameter.
+                // User can queue from the dashboard UI if desired.
                 return Ok(new { file = uploadDto });
             }
             catch (Exception ex)

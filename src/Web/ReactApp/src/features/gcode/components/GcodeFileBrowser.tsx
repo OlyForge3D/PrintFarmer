@@ -5,8 +5,9 @@ import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
 import { Button } from '@/common/components/ui';
-import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
+import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
@@ -152,6 +153,10 @@ export const GcodeFileBrowser = ({
   // Only use local state if viewMode prop is not provided (uncontrolled mode)
   const [localViewMode, setLocalViewMode] = useState<'grid' | 'explorer'>('grid');
 
+  // Queue modal state
+  const [queueFileToAdd, setQueueFileToAdd] = useState<GcodeFile | null>(null);
+  const [showQueueModal, setShowQueueModal] = useState(false);
+
   const selection = selectedFileIds ?? localSelection;
 
   const handleSelectionChange = useCallback(
@@ -229,6 +234,18 @@ export const GcodeFileBrowser = ({
 
       return (
         <>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setQueueFileToAdd(gcodeFile);
+              setShowQueueModal(true);
+            }}
+            title="Queue for printing"
+          >
+            <PlayIcon className="h-4 w-4" />
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -619,6 +636,16 @@ export const GcodeFileBrowser = ({
         harvestId={harvestId}
         printerId={printerId}
       />
+      {queueFileToAdd && (
+        <QueueGcodeModal
+          file={queueFileToAdd}
+          isOpen={showQueueModal}
+          onClose={() => {
+            setShowQueueModal(false);
+            setQueueFileToAdd(null);
+          }}
+        />
+      )}
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}
         title="Delete File"

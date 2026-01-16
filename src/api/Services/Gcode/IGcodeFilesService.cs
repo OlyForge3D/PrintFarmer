@@ -177,6 +177,15 @@ namespace Farm.Web.Api.Services.Gcode
         Task<string?> GetFilePathAsync(Guid id, CancellationToken ct);
 
         /// <summary>
+        /// Gets both the file path and original filename for a G-code file by its ID.
+        /// Useful for downloads where we need the original filename in Content-Disposition header.
+        /// </summary>
+        /// <param name="id">G-code file ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>Tuple of (filePath, originalFileName) if found, otherwise null.</returns>
+        Task<(string filePath, string originalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
         /// Gets the thumbnail path for a G-code file by its ID.
         /// </summary>
         /// <param name="id">Unique identifier of the file.</param>

@@ -670,14 +670,17 @@ public class GcodeFilesController(
         {
             logger.LogInformation($"Attempting to download GCode file {id}");
 
-            // Get file path from service
-            string? filePath = await gcodeFilesService.GetFilePathAsync(id, HttpContext.RequestAborted);
+            // Get file path and original filename from service
+            var fileInfo = await gcodeFilesService.GetFilePathAndNameAsync(id, HttpContext.RequestAborted);
 
-            if (filePath == null)
+            if (fileInfo == null)
             {
                 logger.LogWarning($"GCode file {id} not found in database");
                 return NotFound(new { message = "File not found in database", fileId = id });
             }
+
+            string filePath = fileInfo.Value.filePath;
+            string originalFileName = fileInfo.Value.originalFileName;
 
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
             string fullPath = ResolveGcodePath(filePath);
@@ -691,12 +694,12 @@ public class GcodeFilesController(
                 return NotFound(new { message = "File not found or unsafe path", fileId = id });
             }
 
-            // Get appropriate content type and filename from consolidated service
+            // Get appropriate content type from consolidated service
             string fileExtension = Path.GetExtension(fullPath);
             string contentType = storedFileOperationsService.GetContentTypeForFile(fileExtension);
-            string fileName = Path.GetFileName(filePath);
 
-            return PhysicalFile(fullPath, contentType, fileName);
+            // Return file with original filename for download
+            return PhysicalFile(fullPath, contentType, originalFileName);
         }
         catch (Exception ex)
         {

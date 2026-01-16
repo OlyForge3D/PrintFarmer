@@ -279,7 +279,7 @@ public class Model3DFilesController(
                 {
                     // File was successfully converted - set up to return STL
                     Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-                    fileName = dto?.FileName ?? Path.GetFileName(fullPath);
+                    fileName = dto?.Name ?? dto?.FileName ?? Path.GetFileName(fullPath);
                     fileName = Path.ChangeExtension(fileName, ".stl");
                     fileExtension = ".stl";
                     fileData = stlBytes;
@@ -302,7 +302,7 @@ public class Model3DFilesController(
         if (fileName == null)
         {
             Model3DDto? modelDto = await _modelService.GetModelAsync(id, CancellationToken.None);
-            fileName = modelDto?.FileName ?? Path.GetFileName(fullPath);
+            fileName = modelDto?.Name ?? modelDto?.FileName ?? Path.GetFileName(fullPath);
         }
 
         // Use consolidated service for content type resolution
