@@ -84,10 +84,10 @@ namespace Farm.Web.Api.Controllers
 
                 if (print)
                 {
-                    // uploadDto contains a GcodeFileId string (GUID). Parse it to Guid for enqueue request.
-                    if (string.IsNullOrWhiteSpace(uploadDto.GcodeFileId) || !Guid.TryParse(uploadDto.GcodeFileId, out Guid gcodeFileGuid))
+                    // uploadDto contains an Id string (GUID). Parse it to Guid for enqueue request.
+                    if (string.IsNullOrWhiteSpace(uploadDto.Id) || !Guid.TryParse(uploadDto.Id, out Guid gcodeFileGuid))
                     {
-                        _logger.LogError("Uploaded file missing GcodeFileId, cannot enqueue print job");
+                        _logger.LogError("Uploaded file missing Id, cannot enqueue print job");
                         return StatusCode(500, new { message = "Uploaded file not indexed yet" });
                     }
 
