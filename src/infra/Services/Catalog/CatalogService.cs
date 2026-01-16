@@ -53,7 +53,7 @@ public class CatalogService : ICatalogService
         }
     }
 
-    public async Task<ManufacturerDto> CreateManufacturerAsync(string name, CancellationToken ct)
+    public async Task<ManufacturerDto> CreateManufacturerAsync(string name, string? url, string? description, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -65,18 +65,18 @@ public class CatalogService : ICatalogService
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
         // Check if manufacturer already exists - return it without creating
-        IReadOnlyList<(Guid Id, string Name)> manufacturerRows = await _repo.GetManufacturersAsync(ct);
-        (Guid Id, string Name) existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
+        IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)> manufacturerRows = await _repo.GetManufacturersAsync(ct);
+        (Guid Id, string Name, string? Url, string? Description) existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
 
         if (existing.Id != Guid.Empty)
         {
             _logger.LogInformation($"Manufacturer '{normalized}' already exists with ID {existing.Id}, returning existing manufacturer");
-            return new ManufacturerDto(existing.Id, existing.Name);
+            return new ManufacturerDto(existing.Id, existing.Name, existing.Url, existing.Description);
         }
 
         // Manufacturer doesn't exist, create it
-        Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = normalized };
-        await _repo.AddManufacturerAsync(mfg.Id, mfg.Name, ct);
+        Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = normalized, Url = url, Description = description };
+        await _repo.AddManufacturerAsync(mfg.Id, mfg.Name, mfg.Url, mfg.Description, ct);
 
         try
         {
@@ -88,11 +88,11 @@ public class CatalogService : ICatalogService
             // Race condition: another thread created the manufacturer between our check and insert
             // Fetch the existing manufacturer and return it
             _logger.LogInformation($"Race condition detected for manufacturer '{normalized}', fetching existing");
-            (Guid Id, string Name) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
+            (Guid Id, string Name, string? Url, string? Description) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
             if (found.Id != Guid.Empty)
             {
                 _logger.LogInformation($"Found existing manufacturer '{normalized}' with ID {found.Id} after race condition");
-                return new ManufacturerDto(found.Id, found.Name);
+                return new ManufacturerDto(found.Id, found.Name, found.Url, found.Description);
             }
 
             throw new InvalidOperationException(
@@ -102,13 +102,13 @@ public class CatalogService : ICatalogService
         _cacheProvider.InvalidateManufacturers();
         _cacheProvider.InvalidateModels();
 
-        return new ManufacturerDto(mfg.Id, mfg.Name);
+        return new ManufacturerDto(mfg.Id, mfg.Name, mfg.Url, mfg.Description);
     }
 
     public async Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
-        (Guid Id, string Name)? m = await _repo.GetManufacturerByIdAsync(id, ct);
-        return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name);
+        (Guid Id, string Name, string? Url, string? Description)? m = await _repo.GetManufacturerByIdAsync(id, ct);
+        return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name, m.Value.Url, m.Value.Description);
     }
 
     public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)

@@ -51,7 +51,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         IDbContextFactory<AppDbContext> dbFactory = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
-            .Select(m => new ManufacturerDto(m.Id, m.Name)).ToListAsync(ct);
+            .Select(m => new ManufacturerDto(m.Id, m.Name, m.Url, m.Description)).ToListAsync(ct);
         string etag = ComputeWeakEtag(list.Select(m => m.Id.ToString("N") + ":" + m.Name));
         _ = _cache.Set(ManufacturersKey, (list, etag), _options.ListTtl);
         return (list, etag);

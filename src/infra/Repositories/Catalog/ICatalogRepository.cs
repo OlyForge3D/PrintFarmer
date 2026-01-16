@@ -9,9 +9,9 @@ namespace Farm.Infrastructure.Repositories.Catalog;
 
 public interface ICatalogRepository
 {
-    Task<IReadOnlyList<(Guid Id, string Name)>> GetManufacturersAsync(CancellationToken ct = default);
-    Task<(Guid Id, string Name)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default);
-    Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default);
+    Task<(Guid Id, string Name, string? Url, string? Description)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default);
+    Task AddManufacturerAsync(Guid id, string name, string? url, string? description, CancellationToken ct = default);
     Task<bool> ManufacturerExistsAsync(Guid id, CancellationToken ct = default);
     Task<Guid?> GetUnknownManufacturerIdAsync(CancellationToken ct = default);
 

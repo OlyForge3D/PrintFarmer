@@ -22,9 +22,9 @@ public class CatalogServiceAdapter : ICatalogService
         return _coreCatalogService.GetManufacturersAsync(ct);
     }
 
-    public Task<ManufacturerDto> CreateManufacturerAsync(string name, CancellationToken ct)
+    public Task<ManufacturerDto> CreateManufacturerAsync(string name, string? url, string? description, CancellationToken ct)
     {
-        return _coreCatalogService.CreateManufacturerAsync(name, ct);
+        return _coreCatalogService.CreateManufacturerAsync(name, url, description, ct);
     }
 
     public Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct)

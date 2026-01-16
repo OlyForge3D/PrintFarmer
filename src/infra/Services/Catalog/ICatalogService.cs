@@ -12,8 +12,8 @@ public interface ICatalogService
     /// <summary>Gets all manufacturers with optional ETag for caching.</summary>
     Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct);
 
-    /// <summary>Creates a new manufacturer with normalized name.</summary>
-    Task<ManufacturerDto> CreateManufacturerAsync(string name, CancellationToken ct);
+    /// <summary>Creates a new manufacturer with normalized name and optional metadata.</summary>
+    Task<ManufacturerDto> CreateManufacturerAsync(string name, string? url, string? description, CancellationToken ct);
 
     /// <summary>Gets a manufacturer by ID.</summary>
     Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct);

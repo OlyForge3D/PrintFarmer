@@ -88,7 +88,7 @@ public class CatalogController(
             return BadRequest("Name is required");
         }
         // Normalize via shared helper for consistent rule across API & seeding
-        ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, ct);
+        ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, request.Url, request.Description, ct);
         // The service handles normalization and cache invalidation; include normalized header only if different
         string normalized = dto.Name;
         if (!string.Equals(request.Name, normalized, StringComparison.Ordinal))

@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Services.Catalog;
 public interface ICatalogService
 {
     Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct);
-    Task<ManufacturerDto> CreateManufacturerAsync(string name, CancellationToken ct);
+    Task<ManufacturerDto> CreateManufacturerAsync(string name, string? url, string? description, CancellationToken ct);
     Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct);
 
     Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct);

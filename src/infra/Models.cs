@@ -536,7 +536,7 @@ public record PrinterSpoolInfoDto(
 /// <summary>
 /// Printer manufacturer catalog entry.
 /// </summary>
-public record ManufacturerDto(Guid Id, string Name);
+public record ManufacturerDto(Guid Id, string Name, string? Url = null, string? Description = null);
 /// <summary>
 /// Printer model catalog entry including optional build volume and defaults.
 /// </summary>

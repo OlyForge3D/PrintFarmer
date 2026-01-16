@@ -155,7 +155,7 @@ public class ImportProcessorService : IImportProcessorService
             {
                 // Add new manufacturer
                 manufacturerId = Guid.NewGuid();
-                await _catalogRepo.AddManufacturerAsync(manufacturerId, name, ct);
+                await _catalogRepo.AddManufacturerAsync(manufacturerId, name, null, null, ct);
             }
             else
             {

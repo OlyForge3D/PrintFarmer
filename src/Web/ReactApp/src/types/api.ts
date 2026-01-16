@@ -370,6 +370,8 @@ export interface UpdatePrinterDto {
 export interface ManufacturerDto {
   id: string;
   name: string;
+  url?: string;
+  description?: string;
 }
 
 export interface PrinterModelDto {

@@ -22,21 +22,21 @@ namespace Farm.Infrastructure.Repositories.Catalog
             _db = db;
         }
 
-        public async Task<IReadOnlyList<(Guid Id, string Name)>> GetManufacturersAsync(CancellationToken ct = default)
+        public async Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default)
         {
-            var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name }).ToListAsync(ct);
-            return rows.Select(r => (r.Id, r.Name)).ToList();
+            var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name, m.Url, m.Description }).ToListAsync(ct);
+            return rows.Select(r => (r.Id, r.Name, r.Url, r.Description)).ToList();
         }
 
-        public async Task<(Guid Id, string Name)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
+        public async Task<(Guid Id, string Name, string? Url, string? Description)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
         {
             Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            return m is null ? null : (m.Id, m.Name);
+            return m is null ? null : (m.Id, m.Name, m.Url, m.Description);
         }
 
-        public async Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default)
+        public async Task AddManufacturerAsync(Guid id, string name, string? url, string? description, CancellationToken ct = default)
         {
-            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name });
+            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name, Url = url, Description = description });
             await _db.SaveChangesAsync(ct);
         }
 

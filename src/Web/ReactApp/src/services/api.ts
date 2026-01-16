@@ -623,10 +623,10 @@ export class ApiClient {
     return response.data;
   }
 
-  async createManufacturer(name: string): Promise<ManufacturerDto> {
+  async createManufacturer(name: string, url?: string, description?: string): Promise<ManufacturerDto> {
     const response = await this.client.post<ManufacturerDto>(
       "/catalog/manufacturers",
-      { name }
+      { name, url, description }
     );
     return response.data;
   }

@@ -4,6 +4,7 @@ import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, Plu
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/features/models3d/components/EditModelModal';
+import { AddManufacturerModal, type AddManufacturerData } from '@/features/catalog/components/AddManufacturerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { assetService } from '@/services/assetService';
 import { Card } from '@/common/components/ui/Card';
@@ -17,15 +18,16 @@ export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
   const [models, setModels] = useState<PrinterModelDto[]>([]);
   const [selectedManufacturer, setSelectedManufacturer] = useState<ManufacturerDto | null>(null);
-  const [newManufacturer, setNewManufacturer] = useState('');
   const [editingManufacturer, setEditingManufacturer] = useState<{ id: string; name: string } | null>(null);
   const [editingModel, setEditingModel] = useState<{ id: string; name: string } | null>(null);
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
+  const [addManufacturerModalOpen, setAddManufacturerModalOpen] = useState(false);
   const [modelToEdit, setModelToEdit] = useState<PrinterModelDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'manufacturer' | 'model'; id: string; name: string } | null>(null);
+  const [isAddingManufacturer, setIsAddingManufacturer] = useState(false);
   
   // Optimistic state for deletions
   const [, startTransition] = useTransition();
@@ -47,9 +49,7 @@ export function CatalogPage() {
     {
       key: 'n',
       handler: () => {
-        // Focus on the manufacturer input field
-        const input = document.querySelector('[placeholder="Manufacturer name"]') as HTMLInputElement;
-        input?.focus();
+        setAddManufacturerModalOpen(true);
       },
       description: 'Add new manufacturer'
     },
@@ -112,16 +112,18 @@ export function CatalogPage() {
     return assetService.getCoverImageUrl(manufacturer.name, modelId);
   };
 
-  const addManufacturer = async () => {
-    if (!newManufacturer.trim()) return;
-
+  const addManufacturer = async (data: AddManufacturerData) => {
     try {
-      const response = await apiClient.createManufacturer(newManufacturer.trim());
+      setIsAddingManufacturer(true);
+      const response = await apiClient.createManufacturer(data.name, data.url, data.description);
       setManufacturers([...manufacturers, response]);
-      setNewManufacturer('');
+      setAddManufacturerModalOpen(false);
+      setError(null);
     } catch (err) {
       setError('Failed to add manufacturer');
-      console.error('Error adding manufacturer:', err);
+      throw err;
+    } finally {
+      setIsAddingManufacturer(false);
     }
   };
 
@@ -242,30 +244,21 @@ export function CatalogPage() {
 
   // Master panel - Manufacturers list
   const masterPanel = (
-    <Card>
+    <Card className="h-full flex flex-col">
       <Card.Header>
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center gap-4">
           <h2 className="text-xl font-semibold">Manufacturers</h2>
-          <div className="flex gap-2">
-            <Input
-              value={newManufacturer}
-              onChange={(e) => setNewManufacturer(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && addManufacturer()}
-              placeholder="Manufacturer name"
-              className="text-sm"
-            />
-            <Button
-              onClick={addManufacturer}
-              disabled={!newManufacturer.trim()}
-              size="sm"
-            >
-              <PlusIcon className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button
+            onClick={() => setAddManufacturerModalOpen(true)}
+            size="sm"
+            title="Add new manufacturer"
+          >
+            <PlusIcon className="h-4 w-4" />
+          </Button>
         </div>
       </Card.Header>
-      <Card.Body>
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+      <Card.Body className="flex-1 overflow-hidden flex flex-col">
+        <div className="space-y-2 overflow-y-auto scrollbar-gutter-stable flex-1">
           {optimisticManufacturers.map((manufacturer) => (
             <div
               key={manufacturer.id}
@@ -355,9 +348,9 @@ export function CatalogPage() {
 
   // Detail panel - Models list
   const detailPanel = (
-    <Card>
+    <Card className="h-full flex flex-col">
       <Card.Header>
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center gap-4">
           <h2 className="text-xl font-semibold">
             Models {selectedManufacturer && `— ${selectedManufacturer.name}`}
           </h2>
@@ -372,8 +365,8 @@ export function CatalogPage() {
           )}
         </div>
       </Card.Header>
-      <Card.Body>
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+      <Card.Body className="flex-1 overflow-hidden flex flex-col">
+        <div className="space-y-2 overflow-y-auto scrollbar-gutter-stable flex-1">
           {selectedManufacturer ? (
             getFilteredModels().map((model) => (
               <div key={model.id} className="space-y-2">
@@ -491,6 +484,13 @@ export function CatalogPage() {
         detailTitle={selectedManufacturer?.name}
         masterWidth="w-80"
         breakpoint="lg"
+      />
+
+      <AddManufacturerModal
+        isOpen={addManufacturerModalOpen}
+        onClose={() => setAddManufacturerModalOpen(false)}
+        onSubmit={addManufacturer}
+        isLoading={isAddingManufacturer}
       />
 
       <EditModelModal
