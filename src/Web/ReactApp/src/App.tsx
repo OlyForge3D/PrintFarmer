@@ -27,6 +27,7 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
@@ -118,6 +119,7 @@ function AuthenticatedAppRoutes() {
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        <Route path="profile/api-keys" element={<ApiKeysPage />} />
         <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />

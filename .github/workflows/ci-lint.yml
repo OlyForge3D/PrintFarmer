@@ -35,4 +35,8 @@ jobs:
       - name: Check for top-level compose 'version:' keys
         run: |
           chmod +x scripts/lint/check-compose-version.sh
-          scripts/lint/check-compose-version.sh
+          scripts/lint/check-compose-version.sh \
+            scripts/docker/compose-templates/ \
+            scripts/docker/database-templates/ \
+            scripts/docker/configs/ \
+            .dive-ci.yml
