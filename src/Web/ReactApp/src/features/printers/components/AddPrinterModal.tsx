@@ -1,17 +1,13 @@
-import React, { useState, use, Suspense, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
-import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
+import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-
-interface ManufacturerDto {
-  id: string;
-  name: string;
-}
+import { useManufacturers, useModels } from '@/common/hooks/useApi';
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -20,31 +16,24 @@ interface AddPrinterModalProps {
 }
 
 /**
- * React 19 async functions for loading catalog data
- */
-async function fetchManufacturers(): Promise<ManufacturerDto[]> {
-  return apiClient.getManufacturers();
-}
-
-async function fetchModels(): Promise<PrinterModelDto[]> {
-  return apiClient.getModels();
-}
-
-/**
- * Content component using React 19 use() hook for async data
+ * Content component for the Add Printer modal
  */
 function AddPrinterModalContent({ 
   manufacturers, 
   models,
   isOpen,
   onClose,
-  onSuccess 
+  onSuccess,
+  isLoadingData,
+  error: dataError
 }: {
   manufacturers: ManufacturerDto[];
   models: PrinterModelDto[];
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  isLoadingData: boolean;
+  error: Error | null;
 }) {
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
@@ -64,6 +53,9 @@ function AddPrinterModalContent({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+
+  // Show error if manufacturers or models failed to load
+  const displayError = error || (dataError?.message)
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
@@ -399,13 +391,20 @@ function AddPrinterModalContent({
 }
 
 /**
- * Wrapper component with Suspense boundary for async data loading
+ * Wrapper component that uses React Query hooks for data loading
  */
 export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+  const { data: manufacturers = [], isLoading: loadingMfg, error: mfgError } = useManufacturers();
+  const { data: models = [], isLoading: loadingModels, error: modelsError } = useModels();
+
+  const isLoadingData = loadingMfg || loadingModels;
+  const dataError = (mfgError || modelsError) as Error | null;
+
   if (!isOpen) return null;
 
-  return (
-    <Suspense fallback={
+  // Show loading state
+  if (isLoadingData) {
+    return (
       <Modal
         isOpen={isOpen}
         onClose={onClose}
@@ -419,21 +418,31 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
           </div>
         </div>
       </Modal>
-    }>
-      <AddPrinterModalAsync isOpen={isOpen} onClose={onClose} onSuccess={onSuccess} />
-    </Suspense>
-  );
-}
+    );
+  }
 
-/**
- * Inner component that uses the use() hook
- */
-function AddPrinterModalAsync({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
-  const [manufacturersPromise] = useState(fetchManufacturers());
-  const [modelsPromise] = useState(fetchModels());
-
-  const manufacturers = use(manufacturersPromise);
-  const models = use(modelsPromise);
+  // Show error state
+  if (dataError) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Add New Printer"
+        width="max-w-2xl"
+      >
+        <div className="p-4">
+          <Alert type="error" title="Failed to load printer data">
+            <p>{dataError.message || 'Unable to load manufacturers and models'}</p>
+          </Alert>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={onClose} className="bg-gray-600 hover:bg-gray-700">
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <AddPrinterModalContent 
@@ -442,6 +451,8 @@ function AddPrinterModalAsync({ isOpen, onClose, onSuccess }: AddPrinterModalPro
       isOpen={isOpen}
       onClose={onClose}
       onSuccess={onSuccess}
+      isLoadingData={isLoadingData}
+      error={dataError}
     />
   );
 }
