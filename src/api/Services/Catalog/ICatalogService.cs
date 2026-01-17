@@ -20,5 +20,8 @@ public interface ICatalogService
     Task<PrinterModelDto> CreateModelAsync(CreateModelRequest req, CancellationToken ct);
     Task<PrinterModelDto?> UpdateModelAsync(Guid id, UpdateModelRequest req, CancellationToken ct);
     Task DeleteModelAsync(Guid id, CancellationToken ct);
+
+    Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct);
+    Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct);
 }
 

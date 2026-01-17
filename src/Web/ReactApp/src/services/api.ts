@@ -35,10 +35,12 @@ import {
   ResolveHostnameRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
   TempTargets,
   UpdateFilamentTypeRequest,
+  UpdateModelAliasesRequest,
   UpdateModelRequest,
   UpdatePrinterDto,
   UserDto,
@@ -681,6 +683,26 @@ export class ApiClient {
   // Delete a model by id
   async deleteModel(id: string): Promise<void> {
     await this.client.delete(`/catalog/printer-models/${id}`);
+  }
+
+  // Get slicer model aliases for a printer model
+  async getModelAliases(modelId: string): Promise<SlicerModelAliasDto[]> {
+    const response = await this.client.get<SlicerModelAliasDto[]>(
+      `/catalog/printer-models/${modelId}/aliases`
+    );
+    return response.data;
+  }
+
+  // Update slicer model aliases for a printer model
+  async updateModelAliases(
+    modelId: string,
+    request: UpdateModelAliasesRequest
+  ): Promise<SlicerModelAliasDto[]> {
+    const response = await this.client.put<SlicerModelAliasDto[]>(
+      `/catalog/printer-models/${modelId}/aliases`,
+      request
+    );
+    return response.data;
   }
 
   // Get default capabilities for a printer model

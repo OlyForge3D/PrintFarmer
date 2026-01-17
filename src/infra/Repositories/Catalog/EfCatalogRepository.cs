@@ -180,6 +180,54 @@ namespace Farm.Infrastructure.Repositories.Catalog
                 .AsNoTracking()
                 .FirstOrDefaultAsync(m => m.Name == name && m.ManufacturerId == manufacturerId, ct);
         }
+
+        public async Task<List<Domain.PrinterModelAlias>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
+        {
+            return await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .AsNoTracking()
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default)
+        {
+            // Remove all existing aliases for this model
+            var existingAliases = await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .ToListAsync(ct);
+            _db.PrinterModelAliases.RemoveRange(existingAliases);
+
+            // Add new OrcaSlicer aliases
+            foreach (var name in orcaSlicerNames ?? new List<string>())
+            {
+                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterModelId = modelId,
+                    SlicerModelName = name,
+                    SlicerType = "OrcaSlicer",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            // Add new PrusaSlicer aliases
+            foreach (var name in prusaSlicerNames ?? new List<string>())
+            {
+                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterModelId = modelId,
+                    SlicerModelName = name,
+                    SlicerType = "PrusaSlicer",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            // Return the updated list
+            return await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .ToListAsync(ct);
+        }
     }
 }
 

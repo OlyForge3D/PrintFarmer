@@ -6,6 +6,7 @@ import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
+import { ModelAliasEditor } from '@/features/catalog/components/ModelAliasEditor';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
@@ -415,6 +416,23 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
             </div>
           </div>
         </div>
+
+        {/* Slicer Model Aliases */}
+        {!isAddMode && model && (
+          <div className="border-t pt-5">
+            <h4 className="text-lg font-medium text-pf-text-primary mb-4">Slicer Model Aliases</h4>
+            <p className="text-sm text-pf-text-secondary mb-4">
+              Configure alternative model names as they appear in different slicers. This helps automatically match gcode files
+              to the correct printer model.
+            </p>
+            <ModelAliasEditor
+              modelId={model.id}
+              onSuccess={() => {
+                queryClient.invalidateQueries({ queryKey: ['printer-models'] });
+              }}
+            />
+          </div>
+        )}
       </form>
     </Modal>
   );

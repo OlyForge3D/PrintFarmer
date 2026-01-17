@@ -76,4 +76,32 @@ public class CatalogServiceAdapter : ICatalogService
     {
         return _coreCatalogService.DeleteModelAsync(id, ct);
     }
+
+    public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
+    {
+        // Verify model exists
+        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        if (model == null)
+        {
+            throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
+        }
+
+        // Get aliases from the database
+        var aliases = await _coreCatalogService.GetModelAliasesAsync(modelId, ct);
+        return aliases;
+    }
+
+    public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
+    {
+        // Verify model exists
+        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        if (model == null)
+        {
+            throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
+        }
+
+        // Update aliases
+        var aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
+        return aliases;
+    }
 }

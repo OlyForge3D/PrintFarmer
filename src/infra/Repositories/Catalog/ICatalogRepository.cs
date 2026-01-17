@@ -27,4 +27,6 @@ public interface ICatalogRepository
     Task RemoveModelAsync(Guid id, CancellationToken ct = default);
     Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default);
     Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default);
+    Task<List<Domain.PrinterModelAlias>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default);
+    Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default);
 }

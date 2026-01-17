@@ -53,6 +53,12 @@ public interface ICatalogService
     /// <summary>Deletes a printer model.</summary>
     Task DeleteModelAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Gets all slicer model name aliases (OrcaSlicer, PrusaSlicer) for a printer model.</summary>
+    Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct);
+
+    /// <summary>Updates slicer model name aliases for a printer model.</summary>
+    Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct);
+
     /// <summary>Finds a manufacturer by name. Returns null if not found.</summary>
     Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct);
 

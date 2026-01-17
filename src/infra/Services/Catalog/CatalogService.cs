@@ -417,4 +417,35 @@ public class CatalogService : ICatalogService
 
         return (unknownMfgId.Value, unknownModelId.Value);
     }
+
+    /// <summary>Gets all slicer model name aliases for a printer model.</summary>
+    public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
+    {
+        try
+        {
+            var aliases = await _repo.GetModelAliasesAsync(modelId, ct);
+            return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[CatalogService] GetModelAliasesAsync failed for modelId {modelId}: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>Updates slicer model name aliases for a printer model.</summary>
+    public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
+    {
+        try
+        {
+            var aliases = await _repo.UpdateModelAliasesAsync(modelId, orcaSlicerNames ?? new List<string>(), prusaSlicerNames ?? new List<string>(), ct);
+            await _repo.SaveChangesAsync(ct);
+            return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[CatalogService] UpdateModelAliasesAsync failed for modelId {modelId}: {ex.Message}");
+            throw;
+        }
+    }
 }

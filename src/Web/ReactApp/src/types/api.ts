@@ -374,6 +374,18 @@ export interface ManufacturerDto {
   description?: string;
 }
 
+export interface SlicerModelAliasDto {
+  id: string;
+  printerModelId: string;
+  slicerModelName: string;
+  slicerType: string;
+}
+
+export interface UpdateModelAliasesRequest {
+  orcaSlicerNames: string[];
+  prusaSlicerNames: string[];
+}
+
 export interface PrinterModelDto {
   id: string;
   name: string;
