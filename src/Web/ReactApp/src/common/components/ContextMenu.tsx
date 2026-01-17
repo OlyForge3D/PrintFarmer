@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useEffectEvent } from 'react';
 import { Button } from '@/common/components/ui/Button';
 
 export interface ContextMenuItemAction {
@@ -30,14 +30,22 @@ interface ContextMenuProps {
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
+  // React 19: useEffectEvent for outside click handler without dependency on onClose
+  const handleMouseDown = useEffectEvent((e: MouseEvent) => {
+    if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      onClose();
+    }
+  });
 
+  // React 19: useEffectEvent for escape key handler
+  const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+    }
+  });
+
+  // Close menu on outside click - React 19: Simplified with useEffectEvent
+  useEffect(() => {
     // Small delay to avoid immediate closing after open
     const timeoutId = setTimeout(() => {
       document.addEventListener('mousedown', handleMouseDown);
@@ -47,19 +55,13 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       clearTimeout(timeoutId);
       document.removeEventListener('mousedown', handleMouseDown);
     };
-  }, [onClose]);
+  }, [handleMouseDown]);
 
-  // Close menu on Escape key
+  // Close menu on Escape key - React 19: Simplified with useEffectEvent
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [handleKeyDown]);
 
   // Adjust position to avoid off-screen rendering
   const menuWidth = 200; // Estimated menu width

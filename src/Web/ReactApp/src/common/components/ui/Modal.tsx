@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useEffectEvent } from 'react';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 /* eslint-disable local/pf-no-raw-html-controls */
 import clsx from 'clsx';
@@ -49,14 +49,12 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   className,
 }) => {
-  const handleEscape = useCallback(
-    (e: KeyboardEvent) => {
-      if (closeOnEscape && e.key === 'Escape') {
-        onClose();
-      }
-    },
-    [closeOnEscape, onClose]
-  );
+  // React 19: useEffectEvent to handle escape key without dependency on onClose
+  const handleEscape = useEffectEvent((e: KeyboardEvent) => {
+    if (closeOnEscape && e.key === 'Escape') {
+      onClose();
+    }
+  });
 
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -67,6 +65,7 @@ export const Modal: React.FC<ModalProps> = ({
     [closeOnBackdrop, onClose]
   );
 
+  // React 19: Simplified effect - useEffectEvent removes need for complex dependencies
   useEffect(() => {
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useEffectEvent } from 'react';
 import { CubeIcon, FileIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
@@ -64,21 +64,22 @@ export function FilesPage() {
     }
   }, [location.search]);
 
-  // Keyboard navigation: 't' to cycle tabs
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 't' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
-        e.preventDefault();
-        const tabIds: Array<'models' | 'gcode' | 'harvest'> = ['models', 'gcode', 'harvest'];
-        const currentIndex = tabIds.indexOf(activeTab);
-        const nextIndex = (currentIndex + 1) % tabIds.length;
-        handleTabChange(tabIds[nextIndex]);
-      }
-    };
+  // React 19: useEffectEvent to handle keyboard input without dependency issues
+  const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 't' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
+      e.preventDefault();
+      const tabIds: Array<'models' | 'gcode' | 'harvest'> = ['models', 'gcode', 'harvest'];
+      const currentIndex = tabIds.indexOf(activeTab);
+      const nextIndex = (currentIndex + 1) % tabIds.length;
+      handleTabChange(tabIds[nextIndex]);
+    }
+  });
 
+  // Keyboard navigation: 't' to cycle tabs - React 19: Simplified with useEffectEvent
+  useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, handleTabChange]);
+  }, [handleKeyDown]);
 
   const currentTab = TABS.find(t => t.id === activeTab)!;
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { 
   FilterIcon, 
@@ -64,6 +64,7 @@ export function SpoolsPage() {
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
+  const [isPending, startTransition] = useTransition();
   const [filters, setFilters] = useState<FilterState>({
     material: '',
     vendor: '',
@@ -263,19 +264,21 @@ export function SpoolsPage() {
   // Removed gradient hack – replaced by custom ColorFamilySelect component.
 
   const loadSpools = async () => {
-    try {
-      setLoading(true);
-      setSpoolmanError(null);
-      const data = await apiClient.getSpools();
-      const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
-      setSpools(list);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setSpoolmanError(`Failed to load spools: ${message}`);
-      setSpools([]);
-    } finally {
-      setLoading(false);
-    }
+    // React 19: Use startTransition for async data loading
+    startTransition(async () => {
+      try {
+        setSpoolmanError(null);
+        const data = await apiClient.getSpools();
+        const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
+        setSpools(list);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setSpoolmanError(`Failed to load spools: ${message}`);
+        setSpools([]);
+      } finally {
+        setLoading(false);
+      }
+    });
   };
 
   useEffect(() => {

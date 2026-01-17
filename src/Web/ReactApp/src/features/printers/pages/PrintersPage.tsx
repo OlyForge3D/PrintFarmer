@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useOptimistic, useTransition } from 'react';
 import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
@@ -50,6 +50,15 @@ export function PrintersPage() {
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
+  
+  // React 19: useTransition for async delete operations
+  const [isPending, startTransition] = useTransition();
+  
+  // React 19: useOptimistic for optimistic printer deletion
+  const [optimisticPrinters, addOptimisticDelete] = useOptimistic<Printer[], string>(
+    displayPrinters,
+    (state, deletedPrinterId) => state.filter(p => p.id !== deletedPrinterId)
+  );
   
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -105,9 +114,9 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
-  // Filter printers for the current user (for now show all printers since userId isn't on Printer)
+  // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
-    let filtered = displayPrinters || [];
+    let filtered = optimisticPrinters || [];
     // State filter
     if (stateFilter !== 'all') {
       filtered = filtered.filter(p => {
@@ -124,7 +133,7 @@ export function PrintersPage() {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
     return filtered;
-  }, [displayPrinters, stateFilter, backendFilter]);
+  }, [optimisticPrinters, stateFilter, backendFilter]);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -165,16 +174,26 @@ export function PrintersPage() {
   };
 
   const handleDeleteConfirm = async () => {
-    try {
-      await Promise.all(deleteConfirmation.printers.map(printer => 
-        deletePrinterMutation.mutateAsync(printer.id)
-      ));
-      setDeleteConfirmation({ isOpen: false, printers: [] });
-    } catch (error) {
-      if (window.PrintFarmerDebug?.printers) {
-        console.error('Failed to delete printers:', error);
+    // React 19: Use startTransition for async operations
+    startTransition(async () => {
+      try {
+        // React 19: Optimistic delete - remove each printer immediately
+        for (const printer of deleteConfirmation.printers) {
+          addOptimisticDelete(printer.id);
+        }
+        
+        // Execute deletions in background
+        await Promise.all(deleteConfirmation.printers.map(printer => 
+          deletePrinterMutation.mutateAsync(printer.id)
+        ));
+        setDeleteConfirmation({ isOpen: false, printers: [] });
+      } catch (error) {
+        // State rolls back automatically via useOptimistic on error
+        if (window.PrintFarmerDebug?.printers) {
+          console.error('Failed to delete printers:', error);
+        }
       }
-    }
+    });
   };
 
   const handleDeleteCancel = () => {

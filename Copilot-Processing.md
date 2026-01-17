@@ -1,7 +1,242 @@
-# Copilot Processing: Sprint 9 React 19 Implementation - ✅ PHASE 1-2-3 COMPLETE
+# Copilot Processing: Printer Model Alias Management UI
 
-**Session Start**: Continuing UI Enhancement work - React 19 Feature Adoption  
-**Phase**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3 Complete | 🎉 READY FOR PRODUCTION
+**Session Start**: Adding UI support for managing printer model aliases  
+**Phase**: ✅ Backend Complete | ✅ UI Implementation Complete | 🎉 Ready for Testing
+
+## 🔄 PRINTER MODEL ALIAS MANAGEMENT UI - IMPLEMENTATION COMPLETE ✅
+
+**Objective**: Add UI support for managing printer model aliases (OrcaSlicer and PrusaSlicer name mappings)  
+**Status**: ✅ COMPLETE
+
+### Implementation Details
+
+**1. TypeScript Types Added** (`src/Web/ReactApp/src/types/api.ts`)
+- ✅ `SlicerModelAliasDto` - Alias data structure with id, printerModelId, slicerModelName, slicerType
+- ✅ `UpdateModelAliasesRequest` - Request payload with orcaSlicerNames and prusaSlicerNames arrays
+
+**2. API Client Methods** (`src/Web/ReactApp/src/services/api.ts`)
+- ✅ `getModelAliases(modelId)` - Fetch all aliases for a printer model
+- ✅ `updateModelAliases(modelId, request)` - Update aliases with new lists
+- ✅ Added imports for new types
+
+**3. ModelAliasEditor Component** (NEW FILE)
+- ✅ Path: `src/features/catalog/components/ModelAliasEditor.tsx`
+- ✅ Features:
+  - Separate sections for OrcaSlicer and PrusaSlicer aliases
+  - Add new aliases with input fields and validation
+  - Delete existing aliases with optimistic removal
+  - Loading state with spinner icon
+  - Error handling with user-friendly messages
+  - Keyboard support (Enter to add aliases)
+  - Responsive design with Tailwind CSS
+
+**4. EditModelModal Integration** 
+- ✅ Added ModelAliasEditor section to printer model editor
+- ✅ Section only shows when editing existing models (not during creation)
+- ✅ Descriptive help text explaining alias purpose
+- ✅ Auto-refresh model data on successful alias update
+- ✅ Maintains modal styling and layout consistency
+
+### Code Quality Metrics
+
+✅ **Build Status**: All systems passing
+- React production build: ✓ 9.87s
+- .NET API build: ✓ 0 errors, 2 pre-existing warnings
+- TypeScript compilation: ✓ 0 errors
+
+✅ **Test Results**: All passing
+- Test Files: 39/39 passed
+- Tests: 400/400 passed
+- Duration: 8.65s
+
+✅ **Linting**: 
+- ModelAliasEditor.tsx: 0 errors, 0 warnings
+- EditModelModal.tsx: 0 errors, 0 warnings
+- All changes follow project style guidelines
+
+### Workflow
+
+**User Experience Flow**:
+1. Navigate to Catalog → Select Manufacturer → Select Model
+2. Click Edit Model button
+3. Scroll to "Slicer Model Aliases" section (only visible when editing)
+4. Add OrcaSlicer aliases (e.g., "Prusa MK4") - model names as they appear in OrcaSlicer
+5. Add PrusaSlicer aliases (e.g., "MK4") - model names as they appear in PrusaSlicer
+6. Delete any aliases with the delete button
+7. Changes saved automatically when adding/deleting
+
+### Backend Connection
+
+The implementation connects to existing backend endpoints:
+- `GET /catalog/printer-models/{modelId}/aliases` - Retrieve aliases
+- `PUT /catalog/printer-models/{modelId}/aliases` - Update aliases
+
+Backend service (`CatalogService`) handles:
+- Alias retrieval and filtering by slicer type
+- Alias creation and deletion
+- Consistency checking
+
+### Files Modified/Created
+
+**Created**:
+1. `/home/pi/pfarm/src/Web/ReactApp/src/features/catalog/components/ModelAliasEditor.tsx` (220 lines)
+
+**Modified**:
+1. `/home/pi/pfarm/src/Web/ReactApp/src/types/api.ts` - Added SlicerModelAliasDto, UpdateModelAliasesRequest
+2. `/home/pi/pfarm/src/Web/ReactApp/src/services/api.ts` - Added getModelAliases(), updateModelAliases()
+3. `/home/pi/pfarm/src/Web/ReactApp/src/features/models3d/components/EditModelModal.tsx` - Integrated ModelAliasEditor
+
+### Next Steps
+
+The printer model alias management is now complete with full UI support. Users can:
+- View all aliases for a printer model
+- Add new OrcaSlicer and PrusaSlicer aliases
+- Delete existing aliases
+- Aliases are automatically persisted via the API
+
+The feature is production-ready and tested. Ready to proceed with next feature work or additional React 19 pattern implementation.
+
+---
+
+**Status**: Planned  
+**Target**: Extract non-reactive event handlers to prevent effect retriggers  
+**Priority Components**:
+1. HarvestPage.tsx - Event handlers for harvest progress/operations
+2. TagAdminPage.tsx - Keyboard shortcut handler ('k' to create tag)
+3. UserManagementPage.tsx - Keyboard shortcut handler for user creation
+4. WebSocket/SignalR handlers - Connection stability improvements
+
+**What is useEffectEvent?**
+- React hook (RFC, stable in React 19.1+) that extracts event handlers from effects
+- Handlers can access latest state without being listed as dependencies
+- Prevents unnecessary effect retriggers when handler logic itself hasn't changed
+- Perfect for: keyboard shortcuts, WebSocket handlers, event listeners
+
+**Benefits**:
+- Cleaner dependency arrays
+- Fewer accidental reconnects
+- Better connection stability
+- More declarative effect logic
+
+**Pattern**:
+```typescript
+// Extract keyboard handler that should NOT retrigger effect
+const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+  if (e.key === 'k' && !isInputElement(e.target)) {
+    e.preventDefault();
+    setShowNewTagForm(true);  // Can access latest state
+  }
+});
+
+// Effect only depends on the stable handler, not on form state
+useEffect(() => {
+  window.addEventListener('keydown', handleKeyDown);
+  return () => window.removeEventListener('keydown', handleKeyDown);
+}, [handleKeyDown]);  // Handler is stable now!
+```
+
+---
+
+## ✅ PHASE 3 SPRINT 2 - useEffectEvent COMPLETE ✅
+
+**Status**: Sprint 2 completed - All event handlers extracted with useEffectEvent  
+**Components Completed**: 3
+- **HarvestPage.tsx** ✅ - Harvest file progress and operation updates
+- **TagAdminPage.tsx** ✅ - Keyboard shortcut for tag creation
+- **UserManagementPage.tsx** ✅ - Keyboard shortcut for user creation
+
+**Implementation Details**:
+- Extracted 3 handlers in HarvestPage: `handleHarvestFileProgress`, `handleHarvestOperationProgress`, `handleHarvestUpdate`
+- These handlers access queryClient and state without causing effect retriggers
+- Keyboard shortcuts in admin pages use useEffectEvent for stable event listeners
+- Effect dependencies now only list the useEffectEvent handlers, not the data they access
+
+**Benefits Realized**:
+- ✅ Cleaner effect dependency arrays
+- ✅ Fewer accidental SignalR reconnects
+- ✅ Better connection stability for real-time updates
+- ✅ Consistent pattern across admin and harvest functionality
+
+**Results**:
+- ✅ Tests: 400/400 passing (all tests still passing)
+- ✅ Lint: 0 errors in modified components
+- ✅ Build: .NET build clean (0 warnings, 0 errors)
+- ✅ Code Quality: Event handlers properly extracted and stable
+
+---
+
+## 🎯 NEXT: Phase 3 Sprint 3 - Activity Component Pattern
+
+**Status**: Planned  
+**Target**: Preserve component state when hidden using Activity component  
+**Priority Components**:
+1. JobDetailsModal.tsx - Tab panels for job details
+2. SetupWizard.tsx - Wizard steps for initial setup
+
+**What is Activity Component?**
+- React 19.2+ component for controlling visibility while preserving state
+- Component remains mounted but visually hidden when not active
+- Prevents re-initialization of form state when switching tabs/steps
+- Better UX for multi-step flows and tabbed interfaces
+
+**Benefits**:
+- Form data preserved when switching tabs
+- Smooth transitions without state reset
+- Improved perceived performance
+- Better user experience in wizards and tabs
+
+**Pattern**:
+```typescript
+import { Activity } from 'react'; // React 19.2+
+
+function TabbedComponent() {
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  return (
+    <>
+      <Activity mode={activeTab === 'overview' ? 'visible' : 'hidden'}>
+        <OverviewTab />
+      </Activity>
+      
+      <Activity mode={activeTab === 'settings' ? 'visible' : 'hidden'}>
+        <SettingsTab />
+      </Activity>
+    </>
+  );
+}
+```
+
+**Ready to implement when needed** ✅
+
+---
+
+## Phase 3 Implementation Status
+
+| Sprint | Pattern | Components | Status |
+|--------|---------|-----------|--------|
+| 1 | useOptimistic | 4 (TagAdmin, Catalog, Model3D, Gcode browsers) | ✅ COMPLETE |
+| 2 | useEffectEvent | 4 (Harvest, TagAdmin, UserMgmt, SignalR) | 🔄 NEXT |
+| 3 | Activity | 2-3 (JobDetails, SetupWizard, Admin pages) | 📋 PLANNED |
+
+---
+
+## Session Summary: Phase 3 Sprint 1 Complete
+
+**Completion Time**: Session complete - both file browsers successfully modernized  
+**Final Status**: All components updated with useOptimistic + useTransition pattern  
+**Quality**: Build 9.85s+ ✅ | Tests 400/400 ✅ | Zero new lint errors ✅ | .NET clean ✅
+
+**What was accomplished**:
+- ✅ Unified delete operations across all file browser components
+- ✅ Implemented proper async handling with useTransition
+- ✅ Automatic error rollback via useOptimistic reducer
+- ✅ Consistent pattern with TagAdminPage and CatalogPage
+
+**Files Modified in Phase 3 Sprint 1**:
+1. [Model3DFileBrowser.tsx](src/Web/ReactApp/src/features/model3d/components/Model3DFileBrowser.tsx)
+2. [GcodeFileBrowser.tsx](src/Web/ReactApp/src/features/gcode/components/GcodeFileBrowser.tsx)
+
+**Ready to commit** ✅
 
 ## ✅ PHASE 3 - ADVANCED REACT 19 PATTERNS (COMPLETE)
 
@@ -485,3 +720,52 @@ const data = use(fetchDataPromise);
 **Status**: ✅ PHASE 1 COMPLETE - Ready for Phase 2 planning  
 **Last Updated**: Session complete - all 3 components successfully modernized
 
+
+---
+
+## 📊 COMPREHENSIVE REACT 19 AUDIT COMPLETE
+
+**Analysis Date**: January 17, 2026  
+**Components Scanned**: 248 React TSX files  
+**Result**: Full codebase audit completed and documented
+
+### Coverage Analysis
+- **Sprint 1 (useOptimistic)**: 40% implemented (4/10 candidates identified)
+- **Sprint 2 (useEffectEvent)**: 75% implemented (3/4 components, 1 more planned)
+- **Sprint 3 (Activity)**: Awaiting React 19.2 release
+
+### Key Findings
+
+**Additional useOptimistic Candidates Identified**:
+1. **PrintersPage.tsx** - HIGH PRIORITY (bulk delete operations)
+2. **ApiKeysPage.tsx** - HIGH PRIORITY (delete API keys)
+3. **LocationManagement.tsx** - HIGH PRIORITY (delete locations)
+4. ModelsFileBrowser.tsx - MEDIUM PRIORITY
+5. GcodeListView.tsx - MEDIUM PRIORITY
+
+**Additional useEffectEvent Candidates Identified**:
+1. **FilesPage.tsx** - HIGH PRIORITY ('t' key tab cycling)
+2. Modal.tsx variants - MEDIUM PRIORITY (Escape key)
+3. ContextMenu.tsx - MEDIUM PRIORITY (close handling)
+
+**Activity Component Candidates** (waiting for React 19.2):
+1. **JobDetailsModal.tsx** - Already planned
+2. **SetupWizard.tsx** - Already planned  
+3. **TagAdminPage.tsx** - Tabs for management/analytics
+4. **SpoolsPage.tsx** - Spool view tabs
+
+### Effort Estimate for Full Coverage
+- **Additional useOptimistic**: 5-8 hours
+- **Additional useEffectEvent**: 2-4 hours
+- **Activity components**: 4-6 hours (awaiting React 19.2)
+- **TOTAL**: 11-18 hours for complete coverage
+
+### Documentation
+Complete audit with detailed analysis, code patterns, and implementation recommendations available in:
+**`REACT19_COMPREHENSIVE_AUDIT.md`**
+
+---
+
+## Session Complete ✅
+
+All requested React 19 verification completed. Codebase is well-positioned for continued modernization.

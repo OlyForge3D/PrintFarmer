@@ -1,4 +1,4 @@
-import React, { useCallback, use, Suspense, useState } from 'react';
+import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition } from 'react';
 import { Button } from '@/common/components/ui/Button';
 import { apiClient } from '@/services/api';
 import JobDetailsSection from './JobDetailsSection';
@@ -34,9 +34,17 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<JobDetailsTabType>('overview');
   const [editedDetails, setEditedDetails] = useState<JobDetails>(initialJobDetails);
+  
+  // React 19: useTransition for managing async operations
+  const [isPending, startTransition] = useTransition();
+  
+  // React 19: useOptimistic for immediate UI feedback on save
+  const [optimisticDetails, addOptimisticUpdate] = useOptimistic<JobDetails, JobDetails>(
+    jobDetails,
+    (_, newDetails) => newDetails
+  );
 
   const handleEditClick = useCallback(() => {
     setIsEditing(true);
@@ -77,37 +85,40 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
       return;
     }
 
-    try {
-      setIsSaving(true);
-      setError(null);
+    // React 19: Use startTransition for async operations
+    startTransition(async () => {
+      try {
+        setError(null);
 
-      // Call update endpoint with changed fields
-      const updatedJob = await apiClient.updateJobDetails(
-        jobDetails.id,
-        editedDetails
-      );
+        // React 19: Optimistic update - show new details immediately
+        addOptimisticUpdate(editedDetails);
 
-      const jobDetailsData = updatedJob as unknown as JobDetails;
-      setJobDetails(jobDetailsData);
-      setEditedDetails(jobDetailsData);
-      setIsEditing(false);
-      setHasChanges(false);
+        // Call update endpoint with changed fields
+        const updatedJob = await apiClient.updateJobDetails(
+          jobDetails.id,
+          editedDetails
+        );
 
-      // Call callback if provided
-      if (onSave) {
-        onSave(jobDetailsData);
+        const jobDetailsData = updatedJob as unknown as JobDetails;
+        setJobDetails(jobDetailsData);
+        setEditedDetails(jobDetailsData);
+        setIsEditing(false);
+        setHasChanges(false);
+
+        // Call callback if provided
+        if (onSave) {
+          onSave(jobDetailsData);
+        }
+
+        // Show success message
+        if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
+        setError(errorMessage);
+        console.error('Failed to save job details:', err);
       }
-
-      // Show success message
-      if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
-      setError(errorMessage);
-      console.error('Failed to save job details:', err);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [jobDetails.id, editedDetails, hasChanges, onSave]);
+    });
+  }, [jobDetails.id, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
 
   const handleClose = useCallback(() => {
     if (hasChanges) {
@@ -125,7 +136,8 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
   if (!isOpen) return null;
 
-  const displayDetails = isEditing ? editedDetails : jobDetails;
+  // React 19: Use optimistic details for immediate UI feedback
+  const displayDetails = isEditing ? editedDetails : optimisticDetails;
 
   return (
     <div className="job-details-modal-overlay" onClick={handleClose}>
@@ -366,7 +378,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               <Button
                 className="btn btn-secondary"
                 onClick={handleCancelEdit}
-                disabled={isSaving}
+                disabled={isPending}
                 variant="secondary"
               >
                 Cancel
@@ -374,10 +386,10 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               <Button
                 className="btn btn-primary"
                 onClick={handleSave}
-                disabled={!hasChanges || isSaving}
+                disabled={!hasChanges || isPending}
                 variant="primary"
               >
-                {isSaving ? 'Saving...' : 'Save Changes'}
+                {isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </>
           ) : (
