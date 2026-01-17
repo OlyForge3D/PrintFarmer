@@ -1,20 +1,4 @@
-import axios from 'axios';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
-
-const api = axios.create({
-  baseURL: getApiBaseUrl(),
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-// Add auth token interceptor
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth-token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import { apiClient } from '@/services/api';
 
 export interface ApiKeyDto {
   id: string;
@@ -39,25 +23,25 @@ export interface ToggleApiKeyResponse {
 }
 
 export async function listApiKeys(userId: string): Promise<ApiKeyDto[]> {
-  const response = await api.get(`/users/${userId}/apikeys`);
+  const response = await apiClient.get(`/users/${userId}/apikeys`);
   return response.data;
 }
 
 export async function createApiKey(userId: string, request: CreateApiKeyRequest): Promise<CreateApiKeyResponse> {
-  const response = await api.post(`/users/${userId}/apikeys`, request);
+  const response = await apiClient.post(`/users/${userId}/apikeys`, request);
   return response.data;
 }
 
 export async function toggleApiKey(userId: string, keyId: string): Promise<ToggleApiKeyResponse> {
-  const response = await api.patch(`/users/${userId}/apikeys/${keyId}/toggle`);
+  const response = await apiClient.patch(`/users/${userId}/apikeys/${keyId}/toggle`);
   return response.data;
 }
 
 export async function deleteApiKey(userId: string, keyId: string): Promise<void> {
-  await api.delete(`/users/${userId}/apikeys/${keyId}`);
+  await apiClient.delete(`/users/${userId}/apikeys/${keyId}`);
 }
 
 export async function rotateApiKey(userId: string, keyId: string): Promise<CreateApiKeyResponse> {
-  const response = await api.post(`/users/${userId}/apikeys/${keyId}/rotate`);
+  const response = await apiClient.post(`/users/${userId}/apikeys/${keyId}/rotate`);
   return response.data;
 }

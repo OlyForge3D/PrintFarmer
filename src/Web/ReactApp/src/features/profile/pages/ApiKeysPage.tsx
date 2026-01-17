@@ -34,7 +34,7 @@ export function ApiKeysPage() {
   });
 
   // React 19: useTransition for async delete operations
-  const [isPending, startTransition] = useTransition();
+  const [,startTransition] = useTransition();
   
   // React 19: useOptimistic for optimistic key deletion
   const [optimisticKeys, addOptimisticDelete] = useOptimistic<ApiKeyDto[], string>(

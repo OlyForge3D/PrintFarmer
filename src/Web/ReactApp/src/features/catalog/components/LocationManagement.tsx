@@ -22,7 +22,7 @@ export const LocationManagement: React.FC = () => {
   });
   
   // React 19: useTransition for async delete operations
-  const [isPending, startTransition] = useTransition();
+  const [,startTransition] = useTransition();
   
   // React 19: useOptimistic for optimistic location deletion
   const [optimisticLocations, addOptimisticDelete] = useOptimistic<Location[], string>(

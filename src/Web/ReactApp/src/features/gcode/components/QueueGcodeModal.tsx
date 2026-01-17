@@ -212,10 +212,10 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
  * React 19 wrapper with Suspense boundary for printer list loading
  */
 export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
-  if (!isOpen) return null;
-
   // Memoize the printer promise to prevent re-fetching on every render
   const printerPromise = useMemo(() => fetchPrinters(), []);
+
+  if (!isOpen) return null;
 
   return (
     <Suspense fallback={

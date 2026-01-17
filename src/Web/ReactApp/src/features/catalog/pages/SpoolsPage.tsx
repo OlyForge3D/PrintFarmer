@@ -1,4 +1,4 @@
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useTransition, useCallback } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { 
   FilterIcon, 
@@ -64,7 +64,7 @@ export function SpoolsPage() {
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
-  const [isPending, startTransition] = useTransition();
+  const [,startTransition] = useTransition();
   const [filters, setFilters] = useState<FilterState>({
     material: '',
     vendor: '',
@@ -263,7 +263,7 @@ export function SpoolsPage() {
   };
   // Removed gradient hack – replaced by custom ColorFamilySelect component.
 
-  const loadSpools = async () => {
+  const loadSpools = useCallback(async () => {
     // React 19: Use startTransition for async data loading
     startTransition(async () => {
       try {
@@ -279,7 +279,7 @@ export function SpoolsPage() {
         setLoading(false);
       }
     });
-  };
+  }, [startTransition]);
 
   useEffect(() => {
     const init = async () => {
@@ -297,7 +297,7 @@ export function SpoolsPage() {
       await loadSpools();
     };
     init();
-  }, []);
+  }, [loadSpools]);
 
   const getFilteredSpools = (): SpoolmanSpoolDto[] => spools.filter(spool => {
     if (filters.material && !spool.material?.toLowerCase().includes(filters.material.toLowerCase())) return false;

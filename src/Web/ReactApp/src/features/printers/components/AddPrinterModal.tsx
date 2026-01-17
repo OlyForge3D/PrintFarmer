@@ -23,17 +23,13 @@ function AddPrinterModalContent({
   models,
   isOpen,
   onClose,
-  onSuccess,
-  isLoadingData,
-  error: dataError
+  onSuccess
 }: {
   manufacturers: ManufacturerDto[];
   models: PrinterModelDto[];
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  isLoadingData: boolean;
-  error: Error | null;
 }) {
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
@@ -53,9 +49,6 @@ function AddPrinterModalContent({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
-
-  // Show error if manufacturers or models failed to load
-  const displayError = error || (dataError?.message)
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
