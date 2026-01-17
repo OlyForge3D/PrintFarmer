@@ -147,11 +147,14 @@ function App() {
 
   // Initialize asset service on app startup
   useEffect(() => {
-    assetService.initialize().catch(err => {
-      logger.warn('Failed to initialize asset service', {
-        error: err instanceof Error ? err.message : String(err)
+    const initPromise = assetService?.initialize?.();
+    if (initPromise) {
+      initPromise.catch(err => {
+        logger.warn('Failed to initialize asset service', {
+          error: err instanceof Error ? err.message : String(err)
+        });
       });
-    });
+    }
   }, [logger]);
 
   // Eagerly establish SignalR connections on app startup for faster realtime updates
