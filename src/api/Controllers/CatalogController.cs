@@ -88,7 +88,7 @@ public class CatalogController(
             return BadRequest("Name is required");
         }
         // Normalize via shared helper for consistent rule across API & seeding
-        ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, ct);
+        ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, request.Url, request.Description, ct);
         // The service handles normalization and cache invalidation; include normalized header only if different
         string normalized = dto.Name;
         if (!string.Equals(request.Name, normalized, StringComparison.Ordinal))
@@ -211,6 +211,65 @@ public class CatalogController(
         {
             _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteModelAsync failed: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete model" });
+        }
+    }
+
+    /// <summary>
+    /// Gets all slicer model name aliases (OrcaSlicer, PrusaSlicer names) for a printer model.
+    /// </summary>
+    /// <param name="modelId">The printer model ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>List of slicer name aliases for the model</returns>
+    /// <response code="200">Returns the list of aliases</response>
+    /// <response code="404">Model not found</response>
+    [HttpGet("printer-models/{modelId:guid}/aliases")]
+    [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<IEnumerable<SlicerModelAliasDto>>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
+    {
+        try
+        {
+            var aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
+            return Ok(aliases);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Model not found" });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetModelAliasesAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve model aliases" });
+        }
+    }
+
+    /// <summary>
+    /// Updates slicer model name aliases for a printer model.
+    /// </summary>
+    /// <param name="modelId">The printer model ID</param>
+    /// <param name="request">List of slicer aliases to set</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Updated list of aliases</returns>
+    /// <response code="200">Returns the updated aliases</response>
+    /// <response code="404">Model not found</response>
+    [HttpPut("printer-models/{modelId:guid}/aliases")]
+    [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<IEnumerable<SlicerModelAliasDto>>> UpdateModelAliasesAsync(Guid modelId, [FromBody] UpdateModelAliasesRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var aliases = await _catalogService.UpdateModelAliasesAsync(modelId, request.OrcaSlicerNames ?? new List<string>(), request.PrusaSlicerNames ?? new List<string>(), ct);
+            return Ok(aliases);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Model not found" });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateModelAliasesAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update model aliases" });
         }
     }
 }

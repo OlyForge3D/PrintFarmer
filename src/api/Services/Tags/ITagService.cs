@@ -11,17 +11,17 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Get all available tags
         /// </summary>
-        Task<IReadOnlyList<Model3DTagDto>> GetAllTagsAsync(CancellationToken ct);
+        Task<IReadOnlyList<TagDto>> GetAllTagsAsync(CancellationToken ct);
 
         /// <summary>
         /// Get a tag by ID
         /// </summary>
-        Task<Model3DTagDto?> GetTagByIdAsync(Guid tagId, CancellationToken ct);
+        Task<TagDto?> GetTagByIdAsync(Guid tagId, CancellationToken ct);
 
         /// <summary>
         /// Create a new tag
         /// </summary>
-        Task<Model3DTagDto> CreateTagAsync(CreateModel3DTagDto dto, CancellationToken ct);
+        Task<TagDto> CreateTagAsync(CreateTagDto dto, CancellationToken ct);
 
         /// <summary>
         /// Delete a tag
@@ -29,27 +29,52 @@ namespace Farm.Web.Api.Services.Tags
         Task DeleteTagAsync(Guid tagId, CancellationToken ct);
 
         /// <summary>
-        /// Assign tags to a model (replaces existing tags)
+        /// Assign a tag to an object (polymorphic - supports any object type)
         /// </summary>
-        Task AssignTagsToModelAsync(Guid modelId, IEnumerable<Guid> tagIds, CancellationToken ct);
+        /// <param name="objectId">The ID of the object being tagged</param>
+        /// <param name="tagId">The ID of the tag to assign</param>
+        /// <param name="objectType">The type of object being tagged (e.g., "Model3D", "GcodeFile")</param>
+        /// <param name="ct">Cancellation token</param>
+        Task AssignTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct);
 
         /// <summary>
-        /// Remove a specific tag from a model
+        /// Remove a tag from an object (polymorphic - supports any object type)
         /// </summary>
-        Task RemoveTagFromModelAsync(Guid modelId, Guid tagId, CancellationToken ct);
+        /// <param name="objectId">The ID of the object to remove tag from</param>
+        /// <param name="tagId">The ID of the tag to remove</param>
+        /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile")</param>
+        /// <param name="ct">Cancellation token</param>
+        Task RemoveTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct);
 
         /// <summary>
-        /// Get all tags assigned to a model
+        /// Get all tags assigned to an object (polymorphic)
         /// </summary>
-        Task<IReadOnlyList<Model3DTagDto>> GetModelTagsAsync(Guid modelId, CancellationToken ct);
+        /// <param name="objectId">The ID of the object</param>
+        /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of tags assigned to the object</returns>
+        Task<IReadOnlyList<TagDto>> GetObjectTagsAsync(Guid objectId, string objectType, CancellationToken ct);
 
         /// <summary>
-        /// Bulk assign same tags to multiple models
+        /// Assign tags to an object (replaces existing tags - polymorphic)
         /// </summary>
-        Task BulkAssignTagsAsync(IEnumerable<Guid> modelIds, IEnumerable<Guid> tagIds, CancellationToken ct);
+        /// <param name="objectId">The ID of the object</param>
+        /// <param name="tagIds">The tags to assign</param>
+        /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile")</param>
+        /// <param name="ct">Cancellation token</param>
+        Task AssignTagsAsync(Guid objectId, IEnumerable<Guid> tagIds, string objectType, CancellationToken ct);
 
         /// <summary>
-        /// Search for tags by name (Phase 3D)
+        /// Bulk assign same tags to multiple objects (polymorphic)
+        /// </summary>
+        /// <param name="objectIds">The IDs of objects to tag</param>
+        /// <param name="tagIds">The tags to assign</param>
+        /// <param name="objectType">The type of objects (e.g., "Model3D", "GcodeFile")</param>
+        /// <param name="ct">Cancellation token</param>
+        Task BulkAssignTagsAsync(IEnumerable<Guid> objectIds, IEnumerable<Guid> tagIds, string objectType, CancellationToken ct);
+
+        /// <summary>
+        /// Search for tags by name
         /// </summary>
         /// <param name="query">Search query string</param>
         /// <param name="ct">Cancellation token</param>
@@ -57,7 +82,7 @@ namespace Farm.Web.Api.Services.Tags
         Task<IReadOnlyList<TagSuggestionDto>> SearchTagsAsync(string query, CancellationToken ct);
 
         /// <summary>
-        /// Get most popular tags by usage (Phase 3D)
+        /// Get most popular tags by usage
         /// </summary>
         /// <param name="count">Number of tags to return</param>
         /// <param name="ct">Cancellation token</param>
@@ -65,14 +90,14 @@ namespace Farm.Web.Api.Services.Tags
         Task<IReadOnlyList<TagSuggestionDto>> GetPopularTagsAsync(int count, CancellationToken ct);
 
         /// <summary>
-        /// Get tag usage statistics for analytics (Phase 3D)
+        /// Get tag usage statistics for analytics
         /// </summary>
         /// <param name="ct">Cancellation token</param>
         /// <returns>Analytics data with tag usage statistics</returns>
         Task<TagAnalyticsDto> GetAnalyticsAsync(CancellationToken ct);
 
         /// <summary>
-        /// Merge two tags (consolidate duplicates) (Phase 3D)
+        /// Merge two tags (consolidate duplicates)
         /// </summary>
         /// <param name="sourceTagId">Tag to merge from</param>
         /// <param name="targetTagId">Tag to merge into</param>
@@ -80,21 +105,23 @@ namespace Farm.Web.Api.Services.Tags
         Task MergeTagsAsync(Guid sourceTagId, Guid targetTagId, CancellationToken ct);
 
         /// <summary>
-        /// Filter models by tags (include or exclude) (Phase 3D)
+        /// Filter objects by tags (polymorphic)
         /// </summary>
+        /// <param name="objectType">The type of objects to filter (e.g., "Model3D", "GcodeFile")</param>
         /// <param name="includeTags">Tags to include (ANY match)</param>
         /// <param name="excludeTags">Tags to exclude</param>
         /// <param name="requireAllTags">If true, require ALL tags (AND); if false, ANY tag (OR)</param>
         /// <param name="ct">Cancellation token</param>
-        /// <returns>List of matching model IDs</returns>
-        Task<IReadOnlyList<Guid>> FilterModelsByTagsAsync(
+        /// <returns>List of matching object IDs</returns>
+        Task<IReadOnlyList<Guid>> FilterObjectsByTagsAsync(
+            string objectType,
             IEnumerable<Guid>? includeTags,
             IEnumerable<Guid>? excludeTags,
             bool requireAllTags,
             CancellationToken ct);
 
         /// <summary>
-        /// Get tag names by partial match for autocomplete (Phase 3D)
+        /// Get tag names by partial match for autocomplete
         /// </summary>
         /// <param name="partialName">Partial tag name to match</param>
         /// <param name="limit">Maximum number of suggestions</param>
@@ -106,56 +133,46 @@ namespace Farm.Web.Api.Services.Tags
             CancellationToken ct);
 
         /// <summary>
-        /// Gets models that have all specified tags (require all).
+        /// Gets objects that have all specified tags (polymorphic)
         /// </summary>
-        /// <param name="tagIds">Collection of tag identifiers that models must have</param>
+        /// <param name="objectType">The type of objects to search (e.g., "Model3D")</param>
+        /// <param name="tagIds">Collection of tag identifiers that objects must have</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Collection of model IDs that have all specified tags</returns>
-        Task<IReadOnlyCollection<Guid>> GetModelsWithAllTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+        /// <returns>Collection of object IDs that have all specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetObjectsWithAllTagsAsync(string objectType, IEnumerable<Guid> tagIds, CancellationToken ct);
 
         /// <summary>
-        /// Gets models that have any of the specified tags (require any).
+        /// Gets objects that have any of the specified tags (polymorphic)
         /// </summary>
-        /// <param name="tagIds">Collection of tag identifiers - models matching any will be returned</param>
+        /// <param name="objectType">The type of objects to search</param>
+        /// <param name="tagIds">Collection of tag identifiers - objects matching any will be returned</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Collection of model IDs that have any of the specified tags</returns>
-        Task<IReadOnlyCollection<Guid>> GetModelsWithAnyTagAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+        /// <returns>Collection of object IDs that have any of the specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetObjectsWithAnyTagAsync(string objectType, IEnumerable<Guid> tagIds, CancellationToken ct);
 
         /// <summary>
-        /// Gets models that exclude specific tags.
+        /// Gets objects that exclude specific tags (polymorphic)
         /// </summary>
+        /// <param name="objectType">The type of objects to search</param>
         /// <param name="tagIds">Collection of tag identifiers to exclude</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Collection of model IDs that do NOT have any of the specified tags</returns>
-        Task<IReadOnlyCollection<Guid>> GetModelsExcludingTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+        /// <returns>Collection of object IDs that do NOT have any of the specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetObjectsExcludingTagsAsync(string objectType, IEnumerable<Guid> tagIds, CancellationToken ct);
 
         /// <summary>
-        /// Complex filtering with include/exclude rules.
+        /// Complex filtering with include/exclude rules (polymorphic)
         /// </summary>
-        /// <param name="includeAllTagIds">Models must have ALL of these tags (required)</param>
-        /// <param name="includeAnyTagIds">Models must have ANY of these tags (optional - only if specified)</param>
-        /// <param name="excludeTagIds">Models must NOT have any of these tags</param>
+        /// <param name="objectType">The type of objects to search</param>
+        /// <param name="includeAllTagIds">Objects must have ALL of these tags (required)</param>
+        /// <param name="includeAnyTagIds">Objects must have ANY of these tags (optional - only if specified)</param>
+        /// <param name="excludeTagIds">Objects must NOT have any of these tags</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Collection of model IDs matching the complex filter criteria</returns>
-        Task<IReadOnlyCollection<Guid>> GetModelsWithComplexFilterAsync(
+        /// <returns>Collection of object IDs matching the complex filter criteria</returns>
+        Task<IReadOnlyCollection<Guid>> GetObjectsWithComplexFilterAsync(
+            string objectType,
             IEnumerable<Guid> includeAllTagIds,
             IEnumerable<Guid> includeAnyTagIds,
             IEnumerable<Guid> excludeTagIds,
             CancellationToken ct);
-
-        /// <summary>
-        /// Add a tag to a gcode file
-        /// </summary>
-        Task AddTagToGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct);
-
-        /// <summary>
-        /// Remove a tag from a gcode file
-        /// </summary>
-        Task RemoveTagFromGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct);
-
-        /// <summary>
-        /// Get all tags assigned to a gcode file
-        /// </summary>
-        Task<IReadOnlyList<Model3DTagDto>> GetGcodeFileTagsAsync(Guid gcodeFileId, CancellationToken ct);
     }
 }

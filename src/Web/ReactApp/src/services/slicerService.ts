@@ -173,26 +173,54 @@ class SlicerService {
   }
 
   // Model management
-  async uploadModel(file: File): Promise<{ id: string; url: string }> {
+  async uploadModel(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<{ id: string; url: string }> {
     const formData = new FormData();
     formData.append('modelFile', file);
 
     const baseUrl = this.getBaseUrl();
     const uploadUrl = `${baseUrl}/3d-models/upload`;
 
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+    // XMLHttpRequest is needed for progress tracking with fetch
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 100);
+            onProgress(progress);
+          }
+        });
       }
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response);
+          } catch {
+            reject(new Error('Failed to parse upload response'));
+          }
+        } else {
+          reject(new Error(`Model upload failed: ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        reject(new Error('Network error during upload'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        reject(new Error('Upload cancelled'));
+      });
+
+      xhr.open('POST', uploadUrl);
+      xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth-token')}`);
+      xhr.send(formData);
     });
-
-    if (!response.ok) {
-      throw new Error(`Model upload failed: ${response.statusText}`);
-    }
-
-    return response.json();
   }
 
   async listModels(): Promise<SlicedModelSummary[]> {

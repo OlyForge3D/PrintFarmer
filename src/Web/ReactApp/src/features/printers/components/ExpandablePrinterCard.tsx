@@ -37,7 +37,6 @@ function getBackendIcon(backend: PrinterBackend | number | string) {
 }
 import { useState, useRef, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { renderUnknown } from '@/common/utils/renderUnknown';
@@ -197,17 +196,6 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
   const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart' | 'disable-motors') => {
     try {
       let result;
-      // disable-motors requires a raw fetch call as it's not in apiClient
-      if (action === 'disable-motors') {
-        const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/disable-motors`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!response.ok) {
-          console.error(`Failed to disable motors:`, response.statusText);
-        }
-        return;
-      }
       switch (action) {
         case 'pause':
           result = await apiClient.pausePrint(printer.id);
@@ -220,6 +208,9 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
           break;
         case 'firmware-restart':
           result = await apiClient.firmwareRestart(printer.id);
+          break;
+        case 'disable-motors':
+          result = await apiClient.disableMotors(printer.id);
           break;
       }
       

@@ -1,9 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TimingTab from '../TimingTab';
-import { printQueueService } from '../../../../services/printQueueService';
+import { apiClient } from '../../../../services/api';
 
-vi.mock('../../../../services/printQueueService');
+vi.mock('../../../../services/api');
 
 describe('TimingTab', () => {
   beforeEach(() => {
@@ -11,8 +11,8 @@ describe('TimingTab', () => {
   });
 
   it('should render timing tab with date range selectors', () => {
-    vi.mocked(printQueueService.getTimelineAsync).mockResolvedValue([]);
-    vi.mocked(printQueueService.getDurationAnalyticsAsync).mockResolvedValue({
+    vi.mocked(apiClient.getAnalyticsTimeline).mockResolvedValue([]);
+    vi.mocked(apiClient.getAnalyticsDurationAnalytics).mockResolvedValue({
       totalJobs: 0,
       averageEstimatedSeconds: 0,
       averageActualSeconds: 0,
@@ -31,8 +31,8 @@ describe('TimingTab', () => {
   });
 
   it('should have proper accessibility labels on date inputs', () => {
-    vi.mocked(printQueueService.getTimelineAsync).mockResolvedValue([]);
-    vi.mocked(printQueueService.getDurationAnalyticsAsync).mockResolvedValue({
+    vi.mocked(apiClient.getAnalyticsTimeline).mockResolvedValue([]);
+    vi.mocked(apiClient.getAnalyticsDurationAnalytics).mockResolvedValue({
       totalJobs: 0,
       averageEstimatedSeconds: 0,
       averageActualSeconds: 0,
@@ -67,8 +67,8 @@ describe('TimingTab', () => {
       },
     ];
 
-    vi.mocked(printQueueService.getTimelineAsync).mockResolvedValue(mockTimeline);
-    vi.mocked(printQueueService.getDurationAnalyticsAsync).mockResolvedValue({
+    vi.mocked(apiClient.getAnalyticsTimeline).mockResolvedValue(mockTimeline);
+    vi.mocked(apiClient.getAnalyticsDurationAnalytics).mockResolvedValue({
       totalJobs: 1,
       averageEstimatedSeconds: 1200,
       averageActualSeconds: 1000,
@@ -82,13 +82,13 @@ describe('TimingTab', () => {
     render(<TimingTab />);
 
     await waitFor(() => {
-      expect(printQueueService.getTimelineAsync).toHaveBeenCalled();
+      expect(apiClient.getAnalyticsTimeline).toHaveBeenCalled();
     });
   });
 
   it('should display error message on failed data fetch', async () => {
     const errorMessage = 'Failed to load timeline data';
-    vi.mocked(printQueueService.getTimelineAsync).mockRejectedValue(new Error(errorMessage));
+    vi.mocked(apiClient.getAnalyticsTimeline).mockRejectedValue(new Error(errorMessage));
 
     render(<TimingTab />);
 
@@ -98,8 +98,8 @@ describe('TimingTab', () => {
   });
 
   it('should have region role for semantic accessibility', () => {
-    vi.mocked(printQueueService.getTimelineAsync).mockResolvedValue([]);
-    vi.mocked(printQueueService.getDurationAnalyticsAsync).mockResolvedValue({
+    vi.mocked(apiClient.getAnalyticsTimeline).mockResolvedValue([]);
+    vi.mocked(apiClient.getAnalyticsDurationAnalytics).mockResolvedValue({
       totalJobs: 0,
       averageEstimatedSeconds: 0,
       averageActualSeconds: 0,
@@ -117,8 +117,8 @@ describe('TimingTab', () => {
   });
 
   it('should focus on date input when clicked', () => {
-    vi.mocked(printQueueService.getTimelineAsync).mockResolvedValue([]);
-    vi.mocked(printQueueService.getDurationAnalyticsAsync).mockResolvedValue({
+    vi.mocked(apiClient.getAnalyticsTimeline).mockResolvedValue([]);
+    vi.mocked(apiClient.getAnalyticsDurationAnalytics).mockResolvedValue({
       totalJobs: 0,
       averageEstimatedSeconds: 0,
       averageActualSeconds: 0,

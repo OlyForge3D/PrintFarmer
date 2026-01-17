@@ -90,7 +90,7 @@ describe("QueueJobsTable Component", () => {
 
     render(<QueueJobsTable jobs={[]} {...mockHandlers} />);
 
-    expect(screen.getByText("No jobs in queue")).toBeInTheDocument();
+    expect(screen.getByText("No Print Jobs Queued")).toBeInTheDocument();
   });
 
   it("should render loading state", () => {

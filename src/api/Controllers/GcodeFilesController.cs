@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Contracts.FileManagement;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
@@ -12,6 +14,8 @@ using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
@@ -35,11 +39,20 @@ public class GcodeFilesController(
     Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
     Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
     IStoragePathService storagePathService,
-    ITagService tagService
+    IStoredFileOperationsService storedFileOperationsService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
     private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.AllowedExtensions;
+
+    /// <summary>
+    /// Resolves a GCode file path to an absolute path.
+    /// </summary>
+    private string ResolveGcodePath(string? relativePath)
+    {
+        string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
+        return storedFileOperationsService.ResolveStoragePath(relativePath, gcodeRoot);
+    }
 
     /// <summary>
     /// Computes a hash for an existing G-code file for deduplication/comparison (sha256 default; supports sha1).
@@ -101,25 +114,27 @@ public class GcodeFilesController(
     }
 
     /// <summary>
-    /// Returns a non-recursive listing of the given virtual path within the G-code library folder.
+    /// Returns a listing of G-code files.
+    /// When path is null or empty, returns all files across all directories (paginated).
+    /// When path is specified, returns only files in that specific directory (non-recursive).
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
     public async Task<ActionResult<GcodeFileListResponse>> ListAsync(
-    [FromQuery] string? path = "/",
+    [FromQuery] string? path = null,
     [FromQuery] string? sortBy = "name",
     [FromQuery] string? sortOrder = "asc",
     [FromQuery] string? search = null,
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 100,
-    [FromQuery] Guid? harvestId = null, // now used to filter files by harvest session
-    [FromQuery] Guid? printerId = null  // presently unused
+    [FromQuery] Guid? harvestId = null,
+    [FromQuery] Guid? printerId = null
     )
     {
         try
         {
-            GcodeFileListResponse response = await gcodeFilesService.ListAsync(
-                path, sortBy, sortOrder, search, page, pageSize, harvestId, printerId, HttpContext.RequestAborted);
+            GcodeFileListResponse response = await gcodeFilesService.QueryAsync(
+                path, sortBy, sortOrder, search, page, pageSize, null, null, printerId, HttpContext.RequestAborted);
             return Ok(response);
         }
         catch (DirectoryNotFoundException ex)
@@ -134,34 +149,73 @@ public class GcodeFilesController(
     }
 
     /// <summary>
-    /// Returns a hierarchical listing of G-code files and directories with IDs for efficient lookups.
-    /// This endpoint is used by the ExplorerFileBrowser component for tree-based navigation.
+    /// New efficient query endpoint that pushes all filtering, sorting, and pagination to the database.
+    /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
+    /// Intended to replace the base GET endpoint once frontend migration is complete.
     /// </summary>
-    [HttpGet("hierarchy")]
+    /// <param name="path">Virtual directory path. Null/empty returns all files. Non-null returns files in that directory only.</param>
+    /// <param name="sortBy">Sort field: 'name', 'size', or 'date'.</param>
+    /// <param name="sortOrder">Sort order: 'asc' or 'desc'.</param>
+    /// <param name="search">Optional search term for file names.</param>
+    /// <param name="page">Page number (1-based).</param>
+    /// <param name="pageSize">Page size (1-500).</param>
+    /// <param name="tagIds">Optional array of tag IDs for filtering (AND logic).</param>
+    /// <param name="printerModelId">Optional filter by printer model ID.</param>
+    /// <param name="printerId">Optional filter by source printer ID.</param>
+    /// <returns>Paginated response containing files with metadata.</returns>
+    [HttpGet("query")]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
-    public async Task<ActionResult<GcodeFileListResponse>> ListHierarchyAsync(
-        [FromQuery] string? path = "/",
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<GcodeFileListResponse>> QueryAsync(
+        [FromQuery] string? path = null,
         [FromQuery] string? sortBy = "name",
         [FromQuery] string? sortOrder = "asc",
         [FromQuery] string? search = null,
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 100
+        [FromQuery] int pageSize = 100,
+        [FromQuery] Guid[]? tagIds = null,
+        [FromQuery] Guid? printerModelId = null,
+        [FromQuery] Guid? printerId = null
     )
     {
         try
         {
-            GcodeFileListResponse response = await gcodeFilesService.ListFilesWithHierarchyAsync(
-                path, sortBy, sortOrder, search, page, pageSize, HttpContext.RequestAborted);
+            GcodeFileListResponse response = await gcodeFilesService.QueryAsync(
+                path,
+                sortBy,
+                sortOrder,
+                search,
+                page,
+                pageSize,
+                tagIds,
+                printerModelId,
+                printerId,
+                HttpContext.RequestAborted);
             return Ok(response);
-        }
-        catch (DirectoryNotFoundException ex)
-        {
-            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error listing G-code hierarchy (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
-            return Problem($"Failed to retrieve files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
+            logger.LogError($"Error querying G-code files (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            return Problem($"Failed to query files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Lists all G-code folders recursively for building a folder tree structure.
+    /// </summary>
+    [HttpGet("folders")]
+    [ProducesResponseType(typeof(List<GcodeFileEntryDto>), 200)]
+    public async Task<ActionResult<List<GcodeFileEntryDto>>> ListAllFoldersAsync()
+    {
+        try
+        {
+            var folders = await gcodeFilesService.ListAllFoldersAsync(HttpContext.RequestAborted);
+            return Ok(folders);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Error listing G-code folders: {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            return Problem($"Failed to retrieve folders: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
 
@@ -481,6 +535,32 @@ public class GcodeFilesController(
     }
 
     /// <summary>
+    /// Delete a single gcode file by ID
+    /// </summary>
+    /// <param name="id">Gcode file ID</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteGcodeFileAsync(Guid id)
+    {
+        try
+        {
+            bool success = await gcodeFilesService.DeleteFilesAsync(new[] { id }, HttpContext.RequestAborted);
+            if (!success)
+            {
+                return NotFound(new { message = "File not found", fileId = id });
+            }
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Error deleting G-code file {id}: {ex.Message}");
+            return Problem("Failed to delete file", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Delete G-code files by file IDs
     /// </summary>
     /// <param name="request">Request with list of file IDs (GUIDs) to delete</param>
@@ -488,7 +568,7 @@ public class GcodeFilesController(
     [HttpDelete]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult> DeleteAsync([FromBody] DeleteFilesRequest request)
+    public async Task<ActionResult> DeleteGcodeFilesAsync([FromBody] DeleteFilesRequest request)
     {
         if (request?.FileIds == null || request.FileIds.Count == 0)
         {
@@ -577,6 +657,119 @@ public class GcodeFilesController(
     }
 
     /// <summary>
+    /// Downloads a GCode file by ID.
+    /// </summary>
+    /// <param name="id">GCode file ID</param>
+    /// <returns>GCode file</returns>
+    [HttpGet("file/{id:guid}")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetGcodeFileAsync(Guid id)
+    {
+        try
+        {
+            logger.LogInformation($"Attempting to download GCode file {id}");
+
+            // Get file path and original filename from service
+            var fileInfo = await gcodeFilesService.GetFilePathAndNameAsync(id, HttpContext.RequestAborted);
+
+            if (fileInfo == null)
+            {
+                logger.LogWarning($"GCode file {id} not found in database");
+                return NotFound(new { message = "File not found in database", fileId = id });
+            }
+
+            string filePath = fileInfo.Value.filePath;
+            string originalFileName = fileInfo.Value.originalFileName;
+
+            string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
+            string fullPath = ResolveGcodePath(filePath);
+
+            logger.LogInformation($"GCode file {id} resolved path: {fullPath}");
+
+            // Validate file safety and existence using consolidated service
+            if (!storedFileOperationsService.FileExistsAndIsSafe(fullPath, gcodeRoot))
+            {
+                logger.LogWarning($"GCode file {id} is unsafe or does not exist: {fullPath}");
+                return NotFound(new { message = "File not found or unsafe path", fileId = id });
+            }
+
+            // Get appropriate content type from consolidated service
+            string fileExtension = Path.GetExtension(fullPath);
+            string contentType = storedFileOperationsService.GetContentTypeForFile(fileExtension);
+
+            // Return file with original filename for download
+            return PhysicalFile(fullPath, contentType, originalFileName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Error retrieving GCode file {id}: {ex.Message}");
+            return Problem("Failed to retrieve file", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Get GCode file thumbnail image by ID.
+    /// </summary>
+    /// <param name="id">GCode file ID</param>
+    /// <returns>Thumbnail image</returns>
+    [HttpGet("thumbnail/{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetGcodeThumbnailAsync(Guid id)
+    {
+        try
+        {
+            logger.LogInformation($"[Thumbnail] Retrieving thumbnail for GCode file {id}");
+
+            string? thumbnailPath = await gcodeFilesService.GetThumbnailPathAsync(id, HttpContext.RequestAborted);
+
+            if (thumbnailPath == null)
+            {
+                logger.LogWarning($"[Thumbnail] GCode file {id} not found or no thumbnail available");
+                return NotFound("Thumbnail not available");
+            }
+
+            string absolutePath = ResolveGcodePath(thumbnailPath);
+            string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
+
+            logger.LogInformation($"[Thumbnail] Resolved absolute path: {absolutePath}");
+
+            bool fileExists = System.IO.File.Exists(absolutePath);
+            logger.LogInformation($"[Thumbnail] File exists at '{absolutePath}': {fileExists}");
+
+            if (!fileExists)
+            {
+                logger.LogWarning($"[Thumbnail] Thumbnail file not found at {absolutePath} for GCode file {id}");
+                return NotFound("Thumbnail file not found on disk");
+            }
+
+            if (!fileManagementService.IsSafePath(absolutePath, gcodeRoot))
+            {
+                logger.LogWarning($"[Thumbnail] Unsafe path detected for thumbnail: {absolutePath}");
+                return NotFound("Invalid thumbnail path");
+            }
+
+            string contentType = System.IO.Path.GetExtension(absolutePath).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".jpg" => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                _ => "image/png"
+            };
+
+            logger.LogInformation($"[Thumbnail] Returning thumbnail for GCode file {id} with content type {contentType}");
+            return PhysicalFile(absolutePath, contentType);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"[Thumbnail] Error retrieving thumbnail for GCode file {id}: {ex.Message}");
+            return Problem("Failed to retrieve thumbnail", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Upload a new G-code file into the virtual library (non-recursive). Optional path query designates target directory.
     /// </summary>
     /// <param name="path">Optional virtual directory path (defaults to root '/').</param>
@@ -622,36 +815,6 @@ public class GcodeFilesController(
         {
             logger.LogError($"Error uploading G-code file (path={path}): {ex.Message}");
             return Problem("Failed to upload file", statusCode: 500);
-        }
-    }
-
-    /// <summary>
-    /// Upload multiple G-code files in a single multipart request. Each file is validated independently.
-    /// </summary>
-    /// <param name="path">Target virtual directory (default root '/').</param>
-    /// <param name="files">Multipart form field 'files' (one or more).</param>
-    [HttpPost("upload-multiple")]
-    [RequestSizeLimit(500_000_000)] // 500 MB aggregate limit
-    [ProducesResponseType(typeof(MultiUploadResponse), 201)]
-    [ProducesResponseType(400)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Same safety guarantees as single upload; each filename sanitized and rooted under validated directory.")]
-    public async Task<ActionResult<MultiUploadResponse>> UploadMultipleFilesAsync([FromQuery] string? path = "/", [FromForm(Name = "files")] IFormFileCollection? files = null)
-    {
-        if (files == null || files.Count == 0)
-        {
-            return BadRequest("At least one file is required");
-        }
-
-        try
-        {
-            MultiUploadResponse response = await gcodeFilesService.UploadMultipleFilesAsync(
-                path, files, uploadSettings, quotaService, HttpContext.RequestAborted);
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(path ?? "/")}", response);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Bulk upload failure (path={path}): {ex.Message}");
-            return Problem("Failed to upload files", statusCode: 500);
         }
     }
 
@@ -945,98 +1108,7 @@ public class GcodeFilesController(
         }
     }
 
-    // ================================================================================
-    // Tagging endpoints for Gcode Files
-    // ================================================================================
 
-    /// <summary>
-    /// Add a tag to a gcode file
-    /// </summary>
-    /// <param name="gcodeFileId">Gcode file ID</param>
-    /// <param name="tagId">Tag ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
-    [HttpPost("{gcodeFileId:guid}/tags/{tagId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> AddTagToGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct = default)
-    {
-        try
-        {
-            logger.LogInformation($"AddTagToGcodeFileAsync called: gcodeFileId={gcodeFileId}, tagId={tagId}");
-            await tagService.AddTagToGcodeFileAsync(gcodeFileId, tagId, ct);
-            logger.LogInformation($"Successfully added tag {tagId} to gcode file {gcodeFileId}");
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            logger.LogWarning($"Gcode file or tag not found: {ex.Message}");
-            return NotFound(new { error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Failed to add tag {tagId} to gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to add tag to gcode file" });
-        }
-    }
-
-    /// <summary>
-    /// Remove a tag from a gcode file
-    /// </summary>
-    /// <param name="gcodeFileId">Gcode file ID</param>
-    /// <param name="tagId">Tag ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
-    [HttpDelete("{gcodeFileId:guid}/tags/{tagId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> RemoveTagFromGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct = default)
-    {
-        try
-        {
-            logger.LogInformation($"RemoveTagFromGcodeFileAsync called: gcodeFileId={gcodeFileId}, tagId={tagId}");
-            await tagService.RemoveTagFromGcodeFileAsync(gcodeFileId, tagId, ct);
-            logger.LogInformation($"Successfully removed tag {tagId} from gcode file {gcodeFileId}");
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            logger.LogWarning($"Tag not found on gcode file: {ex.Message}");
-            return NotFound(new { error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Failed to remove tag {tagId} from gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to remove tag from gcode file" });
-        }
-    }
-
-    /// <summary>
-    /// Get all tags for a gcode file
-    /// </summary>
-    /// <param name="gcodeFileId">Gcode file ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>List of tags</returns>
-    [HttpGet("{gcodeFileId:guid}/tags")]
-    [ProducesResponseType(typeof(IReadOnlyList<object>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> GetGcodeFileTagsAsync(Guid gcodeFileId, CancellationToken ct = default)
-    {
-        try
-        {
-            logger.LogInformation($"GetGcodeFileTagsAsync called: gcodeFileId={gcodeFileId}");
-            IReadOnlyList<object> tags = await tagService.GetGcodeFileTagsAsync(gcodeFileId, ct);
-            logger.LogInformation($"Retrieved {tags.Count} tags for gcode file {gcodeFileId}");
-            return Ok(tags);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Failed to get tags for gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tags" });
-        }
-    }
 }
 
 
@@ -1062,18 +1134,18 @@ public record GcodeUploadSettingsResponse(
 public record GcodeFileEntryDto(
     [property: JsonPropertyName("path")] string Path,
     [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size")] long Size,
-    [property: JsonPropertyName("modifiedAt")] DateTime ModifiedAt,
+    [property: JsonPropertyName("fileSize")] long FileSize,
+    [property: JsonPropertyName("uploadedAt")] DateTime UploadedAt,
     [property: JsonPropertyName("isDirectory")] bool IsDirectory,
     [property: JsonPropertyName("name")] string? Name = null,  // Original filename for display
-    [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null,
-    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
-    [property: JsonPropertyName("gcodeFileId")] string? GcodeFileId = null,  // Include file ID for efficient lookups (GUID as string)
+    [property: JsonPropertyName("thumbnailUrl")] string? ThumbnailUrl = null,
+    [property: JsonPropertyName("id")] string? Id = null,  // Include file ID for efficient lookups (GUID as string)
+    [property: JsonPropertyName("fileType")] string? FileType = null,  // File extension: gcode, bgcode
     [property: JsonPropertyName("directoryId")] string? DirectoryId = null,   // Include directory ID for efficient directory lookups (virtual path)
     [property: JsonPropertyName("targetModelName")] string? TargetModelName = null,  // Printer model this gcode was sliced for
     [property: JsonPropertyName("requiredMaterial")] string? RequiredMaterial = null,  // Required filament type (e.g., "PLA", "PETG")
-                                                                                       // Extracted metadata from G-code
-    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,
+    [property: JsonPropertyName("tags")] IReadOnlyList<TagDto>? Tags = null,  // Tags assigned to this gcode file
+    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,  // Slicer used (PrusaSlicer, OrcaSlicer, etc.)
     [property: JsonPropertyName("extractedSlicerVersion")] string? ExtractedSlicerVersion = null,
     [property: JsonPropertyName("extractedPrintTime")] double? ExtractedPrintTime = null,  // Minutes
     [property: JsonPropertyName("extractedFilamentLength")] double? ExtractedFilamentLength = null,  // Millimeters
@@ -1100,7 +1172,14 @@ public record GcodeFileListResponse(
     [property: JsonPropertyName("page")] int Page,
     [property: JsonPropertyName("pageSize")] int PageSize,
     [property: JsonPropertyName("totalPages")] int TotalPages,
-    [property: JsonPropertyName("totalItems")] int TotalItems
+    [property: JsonPropertyName("totalItems")] int TotalItems,
+    [property: JsonPropertyName("availablePrinterModels")] IReadOnlyList<PrinterModelSummary>? AvailablePrinterModels = null
+);
+
+/// <summary>Summary of printer model info for filtering.</summary>
+public record PrinterModelSummary(
+    [property: JsonPropertyName("id")] Guid? Id,
+    [property: JsonPropertyName("name")] string Name
 );
 
 /// <summary>Response for multi-file upload endpoint.</summary>

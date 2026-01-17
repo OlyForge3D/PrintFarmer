@@ -5,7 +5,7 @@ import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
-import { printQueueService } from "@/services/printQueueService";
+import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
 import type { QueueHistoryTabProps } from "@/types/components";
 
@@ -53,7 +53,7 @@ export default function QueueHistoryTab({
       setLoading(true);
       setError(null);
       
-      const response = await printQueueService.getQueueHistoryAsync(pageSize, currentPage * pageSize, sortBy);
+      const response = await apiClient.getAnalyticsQueueHistory(pageSize, currentPage * pageSize, sortBy);
       
       // Convert API response to HistoryJob format
       const historyJobs: HistoryJob[] = (response?.entries || []).map((job) => ({
@@ -199,9 +199,17 @@ export default function QueueHistoryTab({
           <div className="text-pf-text-secondary">Loading history...</div>
         </div>
       ) : filteredJobs.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-pf-text-secondary text-lg">
-            No jobs found with the selected filters
+        <div className="flex flex-col justify-center items-center py-16 bg-pf-bg-1 border border-pf-border rounded-lg">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-full bg-pf-bg-2 flex items-center justify-center">
+              <span className="text-3xl">📜</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-pf-text-primary mb-2">No Job History</h3>
+              <p className="text-pf-text-secondary max-w-md">
+                Completed and failed jobs will appear here. Start by queueing and printing a job.
+              </p>
+            </div>
           </div>
         </div>
       ) : (

@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -9,6 +10,12 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Tags("Slicer Progress")]
 public class SlicingProgressController : ControllerBase
 {
+    private readonly IStoredFileOperationsService _fileOperations;
+
+    public SlicingProgressController(IStoredFileOperationsService fileOperations)
+    {
+        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+    }
     [HttpGet("progress/{jobId}")]
     public async Task GetProgressAsync([FromRoute] string jobId)
     {
@@ -40,7 +47,7 @@ public class SlicingProgressController : ControllerBase
                 status = job.Status.ToString(),
                 progress = job.Progress,
                 message = job.Message,
-                gcodeUrl = string.IsNullOrWhiteSpace(job.GcodeFilePath) ? null : $"/api/slicer/jobs/{job.JobId}/gcode"
+                gcodeUrl = string.IsNullOrWhiteSpace(job.GcodeFilePath) ? null : _fileOperations.BuildSlicerJobGcodeUrl(Guid.Parse(job.JobId))
             });
             await HttpContext.Response.WriteAsync($"data: {payload}\n\n");
             await HttpContext.Response.Body.FlushAsync();

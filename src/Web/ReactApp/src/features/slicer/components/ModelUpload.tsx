@@ -1,6 +1,5 @@
-import axios from 'axios';
+import { apiClient } from '@/services/api';
 import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 
 const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
@@ -19,24 +18,12 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
   const uploadFile = useCallback(async (file: File) => {
     try {
       setProgress(0);
-      const form = new FormData();
-      form.append('file', file, file.name);
-      const token = localStorage.getItem('auth-token');
-      const headers: Record<string, string> = { 'Content-Type': 'multipart/form-data' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const resp = await axios.post(`${getApiBaseUrl()}/models`, form, {
-        headers,
-        onUploadProgress: (evt) => {
-          if (evt.total) {
-            setProgress(Math.round((evt.loaded / evt.total) * 100));
-          }
+      const data = await apiClient.uploadModel(file, (evt) => {
+        if (evt.total) {
+          setProgress(Math.round((evt.loaded / evt.total) * 100));
         }
       });
-
-      const data = resp.data;
-      if (onUploaded && data?.id) onUploaded(data.id);
+      if (onUploaded && (data as unknown as { id?: string })?.id) onUploaded(((data as unknown as { id?: string })?.id) || '');
       setProgress(null);
       setError(null);
     } catch (err: unknown) {

@@ -12,8 +12,8 @@ public interface ICatalogService
     /// <summary>Gets all manufacturers with optional ETag for caching.</summary>
     Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct);
 
-    /// <summary>Creates a new manufacturer with normalized name.</summary>
-    Task<ManufacturerDto> CreateManufacturerAsync(string name, CancellationToken ct);
+    /// <summary>Creates a new manufacturer with normalized name and optional metadata.</summary>
+    Task<ManufacturerDto> CreateManufacturerAsync(string name, string? url, string? description, CancellationToken ct);
 
     /// <summary>Gets a manufacturer by ID.</summary>
     Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct);
@@ -52,6 +52,12 @@ public interface ICatalogService
 
     /// <summary>Deletes a printer model.</summary>
     Task DeleteModelAsync(Guid id, CancellationToken ct);
+
+    /// <summary>Gets all slicer model name aliases (OrcaSlicer, PrusaSlicer) for a printer model.</summary>
+    Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct);
+
+    /// <summary>Updates slicer model name aliases for a printer model.</summary>
+    Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct);
 
     /// <summary>Finds a manufacturer by name. Returns null if not found.</summary>
     Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct);

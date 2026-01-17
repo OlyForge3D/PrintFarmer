@@ -370,6 +370,20 @@ export interface UpdatePrinterDto {
 export interface ManufacturerDto {
   id: string;
   name: string;
+  url?: string;
+  description?: string;
+}
+
+export interface SlicerModelAliasDto {
+  id: string;
+  printerModelId: string;
+  slicerModelName: string;
+  slicerType: string;
+}
+
+export interface UpdateModelAliasesRequest {
+  orcaSlicerNames: string[];
+  prusaSlicerNames: string[];
 }
 
 export interface PrinterModelDto {
@@ -749,16 +763,16 @@ export interface StartBulkHarvestRequest {
 
 // Lightweight file browser entry for hierarchical navigation
 export interface GcodeFile {
-  id: string;
+  id: string; // Unique ID for the gcode file
   path: string;
   fileName: string; // GUID-based filename for internal storage
-  name?: string; // Original filename uploaded by user (for display)
-  fileSize: number;
-  uploadedAt: Date;
+  name: string; // Original filename uploaded by user (for display)
+  fileSize: number; // File size in bytes
+  uploadedAt: Date; // Upload timestamp
   isDirectory: boolean;
-  harvestOperationId?: string;
-  thumbnailUrl?: string;
+  thumbnailUrl?: string; // URL to thumbnail image
   tags?: Array<{ id: string; name: string; color?: string; description?: string }>; // Tags applied to this gcode file
+  requiredMaterial?: string; // Material required for the print
   // Extracted metadata from G-code
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;
@@ -768,6 +782,9 @@ export interface GcodeFile {
   extractedMaterial?: string;
   extractedPrinterModel?: string;
   extractedPrinterModelName?: string; // Raw extracted printer model name (fallback if resolution failed)
+  extractedLayerHeight?: number;
+  extractedInfill?: number;
+  extractedPerimeters?: number;
   extractedHotendTemp?: number;
   extractedBedTemp?: number;
 }
@@ -789,6 +806,7 @@ export interface GetGcodeFilesResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+  availablePrinterModels?: Array<{ id: string | null; name: string }>;
 }
 
 // 3D Model file entry (hierarchical browser)
@@ -798,7 +816,7 @@ export interface Model3DFile {
   size: number;
   modifiedAt: Date;
   isDirectory: boolean;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
 }
 
 export interface Model3DListResponse {
@@ -809,6 +827,16 @@ export interface Model3DListResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+}
+
+export interface Model3DUploadResultDto {
+  id: string;
+  name: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedAt: string;
+  url: string;
 }
 
 // G-code library runtime settings
@@ -1159,4 +1187,191 @@ export interface FileHealthDetailDto {
     status: FileHealthStatus;
     details?: string;
   }>;
+}
+
+// GCode Upload Progress - emitted via SignalR during multi-file uploads
+export interface GcodeUploadFailureSummary {
+  fileName: string;
+  error: string;
+}
+
+export interface GcodeUploadProgressDto {
+  sessionId: string;
+  totalFiles: number;
+  processedCount: number;
+  currentFileName?: string | null;
+  successfulFiles?: string[] | null;
+  failedFiles?: GcodeUploadFailureSummary[] | null;
+  errorMessage?: string | null;
+}
+
+// ============= PRINT QUEUE TYPES =============
+
+export interface QueuedPrintJobDto {
+  id: string;
+  name: string;
+  gcodeFileId: string;
+  assignedPrinterId?: string;
+  status: string;
+  priority: number;
+  queuePosition: number;
+  requiredNozzleDiameter?: number;
+  requiredMaterialType?: string;
+  requiredCapabilities?: string[];
+  estimatedPrintTimeSeconds?: number;
+  estimatedFilamentUsageGrams?: number;
+  actualStartTimeUtc?: string;
+  actualEndTimeUtc?: string;
+  actualPrintTimeSeconds?: number;
+  actualFilamentUsageGrams?: number;
+  failureReason?: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  queuedAtUtc: string;
+}
+
+export interface QueueGcodeFileMetaDto {
+  id: string;
+  fileName: string;
+  fileSizeBytes: number;
+  materialType?: string;
+  nozzleDiameter?: number;
+  estimatedPrintTimeSeconds?: number;
+  estimatedFilamentUsageGrams?: number;
+  createdAtUtc: string;
+}
+
+export interface QueuePrinterMetaDto {
+  id: string;
+  name: string;
+  modelName: string;
+  status: string;
+  isOnline: boolean;
+}
+
+export interface QueuedPrintJobWithFileMetaDto {
+  id: string;
+  job: QueuedPrintJobDto;
+  fileMetadata?: QueueGcodeFileMetaDto;
+  printerMetadata?: QueuePrinterMetaDto;
+}
+
+export interface QueueStatsDto {
+  totalQueued: number;
+  totalPrinting: number;
+  totalPaused: number;
+  averageWaitTimeMinutes: number;
+  byModel: Record<string, QueuePrinterModelStatsDto>;
+}
+
+export interface QueuePrinterModelStatsDto {
+  modelName: string;
+  totalQueued: number;
+  currentlyPrinting: number;
+  oldestQueuedAtUtc?: string;
+  averageQueueWaitMinutes: number;
+}
+
+export interface QueueHistoryPageDto {
+  entries: QueueHistoryEntryDto[];
+  totalCount: number;
+  currentPage: number;
+  pageSize: number;
+}
+
+export interface QueueHistoryEntryDto {
+  id: string;
+  jobName: string;
+  printerName: string;
+  status: string;
+  completionPercentage: number;
+  startedAtUtc: string;
+  completedAtUtc?: string;
+  actualPrintTimeSeconds: number;
+  failureReason?: string;
+}
+
+export interface TimelineEventDto {
+  jobId: string;
+  jobName: string;
+  printerName: string;
+  state: string;
+  enteredAtUtc: string;
+  exitedAtUtc?: string;
+  durationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface StateTransitionDto {
+  fromState: string;
+  toState: string;
+  transitionedAtUtc: string;
+  durationInStateSeconds?: number;
+  notes?: string;
+}
+
+export interface JobStateHistoryDto {
+  jobId: string;
+  jobName: string;
+  transitions: StateTransitionDto[];
+  totalDurationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface DurationStatsDto {
+  printerId: string;
+  printerName: string;
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  accuracyPercent?: number;
+  variancePercent?: number;
+  minActualSeconds?: number;
+  maxActualSeconds?: number;
+}
+
+export interface DurationAnalyticsDto {
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  overallAccuracyPercent?: number;
+  overallVariancePercent?: number;
+  byPrinter: Record<string, DurationStatsDto>;
+  topPerformers: DurationStatsDto[];
+  needsAttention: DurationStatsDto[];
+}
+
+export interface EnqueueQueueJobRequest {
+  gcodeFileId: string;
+  priority?: number;
+  assignedPrinterId?: string;
+  requiredNozzleDiameter?: number;
+  requiredMaterialType?: string;
+}
+
+export interface UpdateQueueJobRequest {
+  priority?: number;
+  assignedPrinterId?: string;
+  status?: string;
+  failureReason?: string;
+}
+
+export interface BulkCancelQueueJobsRequest {
+  jobIds: string[];
+}
+
+export interface QueueBulkOperationResultDto {
+  totalRequested: number;
+  successfulCount: number;
+  failedCount: number;
+  failures: QueueOperationFailureDto[];
+  completedAtUtc: string;
+}
+
+export interface QueueOperationFailureDto {
+  itemId: string;
+  errorMessage: string;
+  errorCode?: string;
 }

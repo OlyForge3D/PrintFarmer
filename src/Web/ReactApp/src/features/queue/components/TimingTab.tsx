@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Alert } from '@/common/components/ui/Alert';
-import { printQueueService, TimelineEventDto, DurationAnalyticsDto } from '@/services/printQueueService';
+import { apiClient } from '@/services/api';
+import type { TimelineEventDto, DurationAnalyticsDto } from '@/types/api';
 import { JobTimeline } from './timing/JobTimeline';
 import { DurationComparison } from './timing/DurationComparison';
 import { CompletionPrediction } from './timing/CompletionPrediction';
@@ -21,7 +22,7 @@ export default function TimingTab() {
       setLoading(true);
 
       // Fetch timeline events
-      const timeline = await printQueueService.getTimelineAsync(
+      const timeline = await apiClient.getAnalyticsTimeline(
         dateRange.from,
         dateRange.to,
         undefined,
@@ -31,7 +32,7 @@ export default function TimingTab() {
       setTimelineEvents(timeline);
 
       // Fetch duration analytics
-      const analytics = await printQueueService.getDurationAnalyticsAsync(
+      const analytics = await apiClient.getAnalyticsDurationAnalytics(
         undefined,
         dateRange.from,
         dateRange.to

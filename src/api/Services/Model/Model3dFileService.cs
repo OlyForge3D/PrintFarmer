@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
@@ -92,23 +93,57 @@ namespace Farm.Web.Api.Services.Model
         }
 
         /// <summary>
-        /// Lists 3D models with virtual folder hierarchy, pagination, sorting, and search capabilities.
+        /// Lists all 3D model folders recursively for building a folder tree structure.
         /// </summary>
-        /// <param name="path">Virtual directory path (e.g., "/MyModels/Characters"). Defaults to root "/"</param>
-        /// <param name="sortBy">Field to sort by: "name", "size", "date". Defaults to "name"</param>
-        /// <param name="sortOrder">Sort direction: "asc" or "desc". Defaults to "asc"</param>
-        /// <param name="search">Optional search term for filtering model names (case-insensitive)</param>
-        /// <param name="page">Page number (1-based). Min: 1</param>
-        /// <param name="pageSize">Items per page. Min: 1, Max: 500</param>
-        /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Response containing paginated models, folders, and pagination metadata</returns>
-        /// <remarks>
-        /// Uses virtual folder architecture where folders exist only in database.
-        /// Supports breadcrumb navigation with parent path tracking.
-        /// Returns both subdirectories and models in the specified path.
-        /// </remarks>
-        public async Task<Model3DListResponse> ListModelsWithHierarchyAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, CancellationToken ct)
+        public async Task<List<Model3DEntryDto>> ListAllFoldersAsync(CancellationToken ct)
         {
+            // Get all folders from the folder management service
+            var allFolderPaths = await _folderManagementService.GetAllFolderPathsRecursiveAsync("models", "/", ct);
+
+            var folderEntries = new List<Model3DEntryDto>();
+
+            // Always include root folder
+            folderEntries.Add(new Model3DEntryDto(
+                Path: "/",
+                FileName: "/",
+                FileSize: 0,
+                UploadedAt: DateTime.UtcNow,
+                IsDirectory: true,
+                DirectoryId: "/"
+            ));
+
+            // Add all subfolders
+            foreach (var folderPath in allFolderPaths.OrderBy(p => p))
+            {
+                var folderName = folderPath.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? folderPath;
+                folderEntries.Add(new Model3DEntryDto(
+                    Path: folderPath,
+                    FileName: folderName,
+                    FileSize: 0,
+                    UploadedAt: DateTime.UtcNow,
+                    IsDirectory: true,
+                    DirectoryId: folderPath
+                ));
+            }
+
+            return folderEntries;
+        }
+
+        /// <summary>
+        /// Queries models with comprehensive filtering, sorting, and pagination.
+        /// All operations are performed at the database level for maximum efficiency.
+        /// </summary>
+        public async Task<Model3DListResponse> QueryAsync(
+            string? path,
+            string? sortBy,
+            string? sortOrder,
+            string? search,
+            int page,
+            int pageSize,
+            Guid[]? tagIds,
+            CancellationToken ct)
+        {
+            // Validate and clamp pagination parameters
             if (page < 1)
             {
                 page = 1;
@@ -124,126 +159,42 @@ namespace Farm.Web.Api.Services.Model
                 pageSize = 500;
             }
 
-            // Parse virtual path to directory
-            string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
-            if (!vPath.StartsWith('/'))
+            // Call the efficient repository method that does everything at the database level
+            var (models, totalCount) = await _unitOfWork.Model3dFiles.QueryModelsAsync(
+                path,
+                search,
+                tagIds,
+                sortBy,
+                sortOrder,
+                page,
+                pageSize,
+                ct);
+
+            // Build model entries using existing MapToEntryDto
+            var entries = new List<Model3DEntryDto>();
+            long totalSize = 0;
+
+            foreach (var model in models)
             {
-                vPath = "/" + vPath;
+                // Use existing MapToEntryDto helper for consistency
+                entries.Add(MapToEntryDto(model, model.FileName));
+                totalSize += model.FileSizeBytes;
             }
 
-            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Where(s => s != "." && s != "..")
-                .ToArray();
-            string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
-            string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+            // Calculate total pages
+            int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
-            // Get all files and subdirectories from database for this directory (pure DB approach)
-            List<Model3D> dbFiles = await _unitOfWork.Model3dFiles.ListValidByDirectoryAsync(requestedDir, ct);
-            List<string> subdirectories = await _unitOfWork.Model3dFiles.ListSubdirectoriesAsync(requestedDir, ct);
-
-            // Build directory entries
-            List<Model3DEntryDto> entries = new();
-
-            foreach (string subdir in subdirectories)
-            {
-                if (subdir.StartsWith('.'))
-                {
-                    continue;
-                }
-
-                if (!IsMatch(subdir, search))
-                {
-                    continue;
-                }
-
-                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
-                entries.Add(new Model3DEntryDto(
-                    Path: childVirtual,
-                    FileName: subdir,
-                    Size: 0,
-                    ModifiedAt: DateTime.UtcNow,
-                    IsDirectory: true,
-                    DirectoryId: childVirtual  // Directory ID is its own virtual path (FileDirectory value)
-                ));
-            }
-
-            // Add files from database
-            foreach (var file in dbFiles)
-            {
-                if (!IsMatch(file.FileName, search))
-                {
-                    continue;
-                }
-
-                string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
-                entries.Add(MapToEntryDto(file, childVirtual));
-            }
-
-            // Sorting
-            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
-            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
-            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
-
-            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-
-            int totalFiles = entries.Count(e => !e.IsDirectory);
-            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
-            int skip = (page - 1) * pageSize;
-            IReadOnlyList<Model3DEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<Model3DEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
-            int totalItems = entries.Count;
-            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
-
-            return new Model3DListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
+            return new Model3DListResponse(
+                Files: entries,
+                TotalFiles: totalCount,
+                TotalSize: totalSize,
+                Page: page,
+                PageSize: pageSize,
+                TotalPages: totalPages,
+                TotalItems: totalCount);
         }
 
         #region Helper Methods
-
-        /// <summary>
-        /// Combines parent virtual path with child name to create full virtual path.
-        /// </summary>
-        /// <param name="parentPath">Parent directory path or null for root</param>
-        /// <param name="name">Child folder or file name</param>
-        /// <returns>Combined virtual path (e.g., "/parent/child")</returns>
-        private static string CombineVirtual(string? parentPath, string name)
-        {
-            if (string.IsNullOrEmpty(parentPath) || parentPath == "/")
-            {
-                return "/" + name;
-            }
-            return UrlNormalizer.CombineUrl(parentPath, name);
-        }
-
-        /// <summary>
-        /// Checks if a name matches the search term (case-insensitive substring match).
-        /// </summary>
-        /// <param name="name">Name to check against search term</param>
-        /// <param name="search">Search term, or null to match all</param>
-        /// <returns>True if name matches search criteria, false otherwise</returns>
-        private static bool IsMatch(string name, string? search)
-        {
-            if (string.IsNullOrWhiteSpace(search))
-            {
-                return true;
-            }
-            return name.Contains(search, StringComparison.OrdinalIgnoreCase);
-        }
 
         /// <summary>
         /// Retrieves a specific 3D model by its unique identifier.
@@ -253,7 +204,7 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Model DTO with file details, or null if not found</returns>
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
             if (model == null)
             {
                 return null;
@@ -317,17 +268,22 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
-                // Construct full path using helper
-                string fullModelPath = _fileOperations.GetFullFilePath(model);
+                // Construct full physical path: all models are stored in _modelsPath regardless of virtual path
+                string fullModelPath = Path.Combine(_modelsPath, model.FileName);
                 if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
                 {
                     System.IO.File.Delete(fullModelPath);
                 }
 
-                string? fullThumbnailPath = _fileOperations.GetFullThumbnailPath(model);
-                if (fullThumbnailPath != null && System.IO.File.Exists(fullThumbnailPath))
+                // Thumbnail is stored in same directory
+                string? thumbnailFileName = model.ThumbnailFileName;
+                if (thumbnailFileName != null)
                 {
-                    System.IO.File.Delete(fullThumbnailPath);
+                    string fullThumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
+                    if (_fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath) && System.IO.File.Exists(fullThumbnailPath))
+                    {
+                        System.IO.File.Delete(fullThumbnailPath);
+                    }
                 }
 
                 await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
@@ -490,7 +446,7 @@ namespace Farm.Web.Api.Services.Model
                             FileSize = existingModel.FileSizeBytes,
                             FileType = _fileManagementService.GetModelFileFormatString(existingModel.FileFormat),
                             UploadedAt = existingModel.UploadedAt,
-                            Url = $"/api/3d-models/{existingModel.Id}/file"
+                            Url = _fileOperations.BuildModel3DFileUrl(existingModel.Id, existingModel.FileFormat)
                         };
                     }
 
@@ -541,7 +497,7 @@ namespace Farm.Web.Api.Services.Model
                     Name = originalName,  // Store user-provided filename for display
                     FileName = fileName,  // Store GUID-based filename (e.g., "abc123.stl")
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
-                    FilePath = _modelsPath,  // Store the models storage directory path (matching GcodeFile pattern)
+                    FilePath = "/",  // Store virtual root path (matching GcodeFile pattern for uploaded files)
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
@@ -599,7 +555,7 @@ namespace Farm.Web.Api.Services.Model
                     FileSize = modelFile.Length,
                     FileType = fileExtension.TrimStart('.'),
                     UploadedAt = model.UploadedAt,
-                    Url = $"/api/3d-models/{modelId}/file"
+                    Url = _fileOperations.BuildModel3DFileUrl(modelId, model.FileFormat)
                 };
             }
             catch
@@ -770,11 +726,12 @@ namespace Farm.Web.Api.Services.Model
         /// </remarks>
         private Model3DDto MapToDto(Model3D model)
         {
-            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
-                model,
-                "/api/3d-models/download",
-                _storagePathService.GetModelUploadDirectory()
-            );
+            string? thumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id);
+
+            // Map tags from the eagerly-loaded Tags collection
+            var tags = model.Tags
+                ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                .ToArray() ?? Array.Empty<TagDto>();
 
             return new Model3DDto
             {
@@ -784,8 +741,9 @@ namespace Farm.Web.Api.Services.Model
                 FileSize = model.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
-                Url = $"/api/3d-models/{model.Id}/file",
-                ThumbnailPath = thumbnailUrl
+                Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
+                ThumbnailUrl = thumbnailUrl,
+                Tags = tags
             };
         }
 
@@ -801,20 +759,18 @@ namespace Farm.Web.Api.Services.Model
         /// </remarks>
         private Model3DEntryDto MapToEntryDto(Model3D file, string virtualPath)
         {
-            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
-                file,
-                "/api/3d-models/download",
-                _storagePathService.GetModelUploadDirectory()
-            );
+            string? thumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(file.Id);
 
             return new Model3DEntryDto(
                 Path: virtualPath,
                 FileName: file.FileName,
-                Size: file.FileSizeBytes,
-                ModifiedAt: file.UploadedAt,
+                Name: file.Name,  // Include original filename for display
+                FileSize: file.FileSizeBytes,
+                UploadedAt: file.UploadedAt,
                 IsDirectory: false,
-                ThumbnailPath: thumbnailUrl,
-                ModelId: file.Id.ToString()
+                ThumbnailUrl: thumbnailUrl,
+                Id: file.Id.ToString(),
+                FileType: _fileManagementService.GetModelFileFormatString(file.FileFormat)
             );
         }
 

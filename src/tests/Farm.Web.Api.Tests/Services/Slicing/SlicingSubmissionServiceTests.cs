@@ -10,6 +10,7 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -30,6 +31,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
     private readonly Mock<IHostEnvironment> _mockEnvironment;
     private readonly Mock<IUnifiedLoggingService> _mockLogger;
+    private readonly Mock<IStoredFileOperationsService> _mockFileOperations;
     private readonly SlicingSubmissionService _service;
     private readonly List<string> _tempFiles = new();
 
@@ -42,15 +44,22 @@ public class SlicingSubmissionServiceTests : IDisposable
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
         _mockEnvironment = new Mock<IHostEnvironment>();
         _mockLogger = new Mock<IUnifiedLoggingService>();
+        _mockFileOperations = new Mock<IStoredFileOperationsService>();
 
         _mockEnvironment.Setup(e => e.EnvironmentName).Returns("Production");
+
+        // Setup the file operations mock to return URLs when requested
+        _mockFileOperations
+            .Setup(f => f.BuildSlicerJobGcodeUrl(It.IsAny<Guid>()))
+            .Returns((Guid jobId) => $"/api/slicer/jobs/{jobId}/gcode");
 
         _service = new SlicingSubmissionService(
             _mockUnitOfWork.Object,
             _mockFileStorage.Object,
             _mockOrchestrator.Object,
             _mockEnvironment.Object,
-            _mockLogger.Object);
+            _mockLogger.Object,
+            _mockFileOperations.Object);
     }
 
     public void Dispose()
@@ -72,7 +81,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(null!, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object)
+            new SlicingSubmissionService(null!, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
         );
         Assert.Equal("unitOfWork", ex.ParamName);
     }
@@ -82,7 +91,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
         );
         Assert.Equal("fileStorage", ex.ParamName);
     }
@@ -92,7 +101,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _mockLogger.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _mockLogger.Object, _mockFileOperations.Object)
         );
         Assert.Equal("orchestrator", ex.ParamName);
     }

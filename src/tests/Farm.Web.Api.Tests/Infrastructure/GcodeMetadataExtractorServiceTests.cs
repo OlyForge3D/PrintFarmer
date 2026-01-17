@@ -431,11 +431,11 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_ProcessesFirstAndLast500Lines()
     {
-        // Metadata is processed from first 200 and last 1000 lines
-        // Create file with > 2200 lines so metadata at line 501 won't be in first 200 or last 1000
+        // Metadata is processed from first 200 and last 2000 lines (increased for PrusaSlicer PNG thumbnails)
+        // Create file with > 2200 lines so metadata at line 501 will be in the last 2000 lines
         var lines = new List<string>();
         lines.AddRange(Enumerable.Range(0, 500).Select(i => $"G1 X{i} Y{i}"));
-        lines.Add("; filament_type = PLA"); // Line 501 - not in first 200, not in last 1000
+        lines.Add("; filament_type = PLA"); // Line 501 - now IN the last 2000 lines
         lines.AddRange(Enumerable.Range(0, 1700).Select(i => $"G1 X{i}"));  // Total > 2200 lines
 
         string gcodeContent = string.Join("\n", lines);
@@ -443,7 +443,7 @@ G28
         var result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
-        result.Material.Should().BeNull(); // Metadata at line 501 is not in first 200 or last 1000 lines
+        result.Material.Should().Be("PLA"); // Metadata at line 501 is now in the last 2000 lines (changed from 1000)
     }
 
     [Fact]

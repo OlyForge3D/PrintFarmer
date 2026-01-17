@@ -32,11 +32,11 @@ public class TagsControllerTests
     public async Task GetAllTagsAsync_WithTags_ReturnsOkWithTags()
     {
         // Arrange
-        var tags = new List<Model3DTagDto>
+        var tags = new List<TagDto>
         {
-            new Model3DTagDto { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000" },
-            new Model3DTagDto { Id = Guid.NewGuid(), Name = "Miniature", Color = "#00FF00" }
-        } as IReadOnlyList<Model3DTagDto>;
+            new TagDto { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000" },
+            new TagDto { Id = Guid.NewGuid(), Name = "Miniature", Color = "#00FF00" }
+        } as IReadOnlyList<TagDto>;
 
         _tagServiceMock
             .Setup(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()))
@@ -55,7 +55,7 @@ public class TagsControllerTests
     public async Task GetAllTagsAsync_WithNoTags_ReturnsOkWithEmptyList()
     {
         // Arrange
-        IReadOnlyList<Model3DTagDto> emptyTags = new List<Model3DTagDto>();
+        IReadOnlyList<TagDto> emptyTags = new List<TagDto>();
         _tagServiceMock
             .Setup(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(emptyTags);
@@ -65,7 +65,7 @@ public class TagsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedTags = Assert.IsAssignableFrom<IReadOnlyList<Model3DTagDto>>(okResult.Value);
+        var returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagDto>>(okResult.Value);
         Assert.Empty(returnedTags);
     }
 

@@ -1,4 +1,5 @@
-import { Button, FormField, Select, Input } from "@/common/components/ui";
+import { RefreshIcon, ClearFiltersIcon, ChevronDownIcon, ChevronUpIcon } from "@/common/components/icons/MdiIcons";
+import { Button, Select, Input } from "@/common/components/ui";
 import { useState, useCallback } from "react";
 
 export interface TableFiltersBarProps {
@@ -36,6 +37,7 @@ export function TableFiltersBar({
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   const handleStatusChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -74,67 +76,93 @@ export function TableFiltersBar({
   }, [onStatusChange, onMaterialChange, onModelChange]);
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 mb-4">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-        {/* Status Filter */}
-        <FormField label="Status">
-          <Select
-            value={selectedStatus || ""}
-            onChange={handleStatusChange}
-          >
-            <option value="">All Statuses</option>
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
+      {/* Header with Collapse/Expand Toggle */}
+      <Button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between p-4 bg-pf-bg-2 hover:bg-pf-bg-1 transition-colors"
+        type="button"
+        variant="subtle"
+      >
+        <h3 className="font-semibold text-pf-text-primary flex-1 text-left">FILTERS</h3>
+        {isExpanded ? (
+          <ChevronUpIcon className="w-5 h-5 text-pf-text-secondary" />
+        ) : (
+          <ChevronDownIcon className="w-5 h-5 text-pf-text-secondary" />
+        )}
+      </Button>
 
-        {/* Model Filter */}
-        <FormField label="Printer Model">
-          <Input
-            type="text"
-            value={selectedModel || ""}
-            onChange={handleModelChange}
-            placeholder="Search by model..."
-          />
-        </FormField>
+      {/* Collapsible Filter Content */}
+      {isExpanded && (
+        <div className="p-4 space-y-4 border-t border-pf-border">
+          {/* Status Filter */}
+          <div className="flex items-center justify-between gap-4">
+            <label className="text-sm font-medium text-pf-text-primary w-32">Status</label>
+            <Select
+              value={selectedStatus || ""}
+              onChange={handleStatusChange}
+              className="flex-1"
+            >
+              <option value="">All Statuses</option>
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
 
-        {/* Material Filter */}
-        <FormField label="Material">
-          <Select
-            value={selectedMaterial || ""}
-            onChange={handleMaterialChange}
-          >
-            <option value="">All Materials</option>
-            {MATERIAL_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+          {/* Model Filter */}
+          <div className="flex items-center justify-between gap-4">
+            <label className="text-sm font-medium text-pf-text-primary w-32">Printer Model</label>
+            <Input
+              type="text"
+              value={selectedModel || ""}
+              onChange={handleModelChange}
+              placeholder="Search by model..."
+              className="flex-1"
+            />
+          </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          <Button
-            onClick={onRefresh}
-            disabled={isLoading}
-            variant="secondary"
-            className="flex-1"
-          >
-            {isLoading ? "Loading..." : "Refresh"}
-          </Button>
-          <Button
-            onClick={handleClearFilters}
-            variant="secondary"
-            className="flex-1"
-          >
-            Clear
-          </Button>
+          {/* Material Filter */}
+          <div className="flex items-center justify-between gap-4">
+            <label className="text-sm font-medium text-pf-text-primary w-32">Material</label>
+            <Select
+              value={selectedMaterial || ""}
+              onChange={handleMaterialChange}
+              className="flex-1"
+            >
+              <option value="">All Materials</option>
+              {MATERIAL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 pt-2 border-t border-pf-border">
+            <Button
+              onClick={onRefresh}
+              disabled={isLoading}
+              variant="secondary"
+              className="flex-1"
+              iconCenter={<RefreshIcon />}
+              title="Refresh data"
+            >
+            </Button>
+            <Button
+              onClick={handleClearFilters}
+              variant="secondary"
+              className="flex-1"
+              iconCenter={<ClearFiltersIcon />}
+              title="Reset all filters"
+            >
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

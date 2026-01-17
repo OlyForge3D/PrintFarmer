@@ -183,7 +183,7 @@ namespace Farm.Web.Api.Tests
             OkObjectResult? ok = res as OkObjectResult;
             List<SlicerService>? list = ok!.Value as List<SlicerService>;
             _ = list.Should().NotBeNull();
-            _ = list!.Count.Should().BeGreaterOrEqualTo(1);
+            _ = list!.Count.Should().BeGreaterThanOrEqualTo(1);
         }
 
         [Fact]

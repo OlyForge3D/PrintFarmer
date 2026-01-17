@@ -108,7 +108,7 @@ public class CatalogControllerTests
         var request = new CreateManufacturerRequest(Name: "Prusa");
         var created = new ManufacturerDto(Id: Guid.NewGuid(), Name: "Prusa");
         _catalogServiceMock
-            .Setup(s => s.CreateManufacturerAsync("Prusa", It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateManufacturerAsync("Prusa", null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
 
         // Act

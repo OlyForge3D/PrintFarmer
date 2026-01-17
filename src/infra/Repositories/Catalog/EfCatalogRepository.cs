@@ -22,21 +22,21 @@ namespace Farm.Infrastructure.Repositories.Catalog
             _db = db;
         }
 
-        public async Task<IReadOnlyList<(Guid Id, string Name)>> GetManufacturersAsync(CancellationToken ct = default)
+        public async Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default)
         {
-            var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name }).ToListAsync(ct);
-            return rows.Select(r => (r.Id, r.Name)).ToList();
+            var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name, m.Url, m.Description }).ToListAsync(ct);
+            return rows.Select(r => (r.Id, r.Name, r.Url, r.Description)).ToList();
         }
 
-        public async Task<(Guid Id, string Name)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
+        public async Task<(Guid Id, string Name, string? Url, string? Description)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
         {
             Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            return m is null ? null : (m.Id, m.Name);
+            return m is null ? null : (m.Id, m.Name, m.Url, m.Description);
         }
 
-        public async Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default)
+        public async Task AddManufacturerAsync(Guid id, string name, string? url, string? description, CancellationToken ct = default)
         {
-            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name });
+            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name, Url = url, Description = description });
             await _db.SaveChangesAsync(ct);
         }
 
@@ -179,6 +179,54 @@ namespace Farm.Infrastructure.Repositories.Catalog
             return await _db.PrinterModels
                 .AsNoTracking()
                 .FirstOrDefaultAsync(m => m.Name == name && m.ManufacturerId == manufacturerId, ct);
+        }
+
+        public async Task<List<Domain.PrinterModelAlias>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
+        {
+            return await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .AsNoTracking()
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default)
+        {
+            // Remove all existing aliases for this model
+            var existingAliases = await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .ToListAsync(ct);
+            _db.PrinterModelAliases.RemoveRange(existingAliases);
+
+            // Add new OrcaSlicer aliases
+            foreach (var name in orcaSlicerNames ?? new List<string>())
+            {
+                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterModelId = modelId,
+                    SlicerModelName = name,
+                    SlicerType = "OrcaSlicer",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            // Add new PrusaSlicer aliases
+            foreach (var name in prusaSlicerNames ?? new List<string>())
+            {
+                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterModelId = modelId,
+                    SlicerModelName = name,
+                    SlicerType = "PrusaSlicer",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            // Return the updated list
+            return await _db.PrinterModelAliases
+                .Where(a => a.PrinterModelId == modelId)
+                .ToListAsync(ct);
         }
     }
 }

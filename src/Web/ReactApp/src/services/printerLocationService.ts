@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import { apiClient } from '@/services/api';
 
 export interface Printer {
   id: string;
@@ -8,92 +8,53 @@ export interface Printer {
   locationId?: string;
 }
 
-class PrinterLocationService {
-  private api: AxiosInstance;
-
-  constructor() {
-    // Use the same API base URL pattern as the main ApiClient
-    const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    const apiBaseUrl = (() => {
-      if (!rawBase || rawBase.trim() === '') return '/api';
-      const trimmed = rawBase.replace(/\/$/, ''); // drop trailing slash
-      if (/\/(api)(\/|$)/.test(trimmed)) return trimmed;
-      return `${trimmed}/api`;
-    })();
-
-    this.api = axios.create({
-      baseURL: apiBaseUrl,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    // Add auth token if available
-    this.api.interceptors.request.use((config) => {
-      const token = localStorage.getItem('auth-token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      return config;
-    });
-  }
-
+/**
+ * Printer location service - delegated to apiClient singleton
+ * apiClient handles authentication, correlation IDs, and error handling automatically
+ */
+export const printerLocationService = {
   /**
    * Get all printers (used for drag and drop assignment)
    */
   async getAllPrinters(): Promise<Printer[]> {
-    interface ServerPrinterDto {
-      id: string;
-      name: string;
-      backend: number;
-      backendUrl?: string;
-      frontendUrl?: string;
-      originalServerUrl?: string;
-      location?: { id?: string } | null;
-    }
-
-    const response = await this.api.get<ServerPrinterDto[]>('/printers');
-    const raw = Array.isArray(response.data) ? response.data : [];
+    const raw = await apiClient.getAllPrinterLocations();
+    const typedRaw = Array.isArray(raw) ? raw : [];
     // Normalize server-side DTO (Location object) to frontend shape (locationId)
-    return raw.map((r) => ({
-      id: r.id,
-      name: r.name,
-      backend: r.backend,
+    return typedRaw.map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      name: r.name as string,
+      backend: r.backend as number,
       // prefer backendUrl, then frontendUrl, then originalServerUrl
-      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
-      locationId: r.location ? r.location.id : undefined,
+      serverUrl: (r.backendUrl || r.frontendUrl || r.originalServerUrl || '') as string,
+      locationId: ((r.location as Record<string, unknown> | undefined)?.id as string | undefined),
     }));
-  }
+  },
 
   /**
    * Assign a printer to a location
    */
   async assignPrinterToLocation(printerId: string, locationId: string): Promise<Printer> {
-    const resp = await this.api.post<ServerPrinterDto>(`/printers/${printerId}/location`, { locationId });
-    const r = resp.data;
+    const r = (await apiClient.assignPrinterToLocation(printerId, locationId)) as unknown as Record<string, unknown>;
     return {
-      id: r.id,
-      name: r.name,
-      backend: r.backend,
-      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
-      locationId: r.location ? r.location.id : undefined,
+      id: (r.id as string) || '',
+      name: (r.name as string) || '',
+      backend: (r.backend as number) || 0,
+      serverUrl: ((r.backendUrl as string) || (r.frontendUrl as string) || (r.originalServerUrl as string) || ''),
+      locationId: ((r.location as Record<string, unknown> | undefined)?.id as string | undefined),
     };
-  }
+  },
 
   /**
    * Remove a printer from its location (unassign)
    */
   async unassignPrinterFromLocation(printerId: string): Promise<Printer> {
-    const resp = await this.api.delete<ServerPrinterDto>(`/printers/${printerId}/location`);
-    const r = resp.data;
+    const r = (await apiClient.removePrinterFromLocation(printerId)) as unknown as Record<string, unknown>;
     return {
-      id: r.id,
-      name: r.name,
-      backend: r.backend,
-      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
-      locationId: r.location ? r.location.id : undefined,
+      id: (r.id as string) || '',
+      name: (r.name as string) || '',
+      backend: (r.backend as number) || 0,
+      serverUrl: ((r.backendUrl as string) || (r.frontendUrl as string) || (r.originalServerUrl as string) || ''),
+      locationId: ((r.location as Record<string, unknown> | undefined)?.id as string | undefined),
     };
-  }
-}
-
-export const printerLocationService = new PrinterLocationService();
+  },
+};

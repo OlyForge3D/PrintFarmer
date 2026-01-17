@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type ViewMode = 'grid' | 'list' | 'explorer';
+export type ViewMode = 'grid' | 'explorer';
 
 const DEFAULT_VIEW_MODE: ViewMode = 'explorer';
 
@@ -16,8 +16,13 @@ export function useViewModePreference(storageKey: string = 'printfarmer-models-v
   // Load preference from localStorage on mount
   useEffect(() => {
     const savedViewMode = localStorage.getItem(storageKey);
-    if (savedViewMode === 'grid' || savedViewMode === 'list' || savedViewMode === 'explorer') {
+    // Convert 'list' to 'grid' for backwards compatibility
+    if (savedViewMode === 'grid' || savedViewMode === 'explorer') {
       setViewModeState(savedViewMode);
+    } else if (savedViewMode === 'list') {
+      // Migrate old 'list' view mode to 'grid'
+      setViewModeState('grid');
+      localStorage.setItem(storageKey, 'grid');
     }
     setIsLoaded(true);
   }, [storageKey]);

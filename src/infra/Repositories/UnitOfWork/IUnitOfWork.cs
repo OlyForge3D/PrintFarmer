@@ -69,16 +69,9 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
 
         /// <summary>
         /// Repository for tag persistence and retrieval (generic tags).
-        /// Coordinated with tag mapping operations via shared DbContext.
+        /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
         /// </summary>
         ITagRepository Tags { get; }
-
-        /// <summary>
-        /// Repository for polymorphic tag mappings across all object types.
-        /// Supports tagging gcode files, models, printers, etc.
-        /// Coordinated with tag operations via shared DbContext.
-        /// </summary>
-        ITagMappingRepository TagMappings { get; }
 
         /// <summary>
         /// Persists all changes made to entities tracked by any repository in this Unit of Work.

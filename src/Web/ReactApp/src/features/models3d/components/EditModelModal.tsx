@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { CheckIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/common/hooks/useApi';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
+import { ModelAliasEditor } from '@/features/catalog/components/ModelAliasEditor';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
@@ -34,15 +35,8 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const createMutation = useMutation({
     mutationFn: async (data: UpdateModelRequest) => {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to create model: ${response.statusText}`);
-      }
-      return response.json();
+      const modelData = data as unknown as Omit<PrinterModelDto, 'id'>;
+      return apiClient.createModel(modelData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printer-models'] });
@@ -59,15 +53,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateModelRequest }) => {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to update model: ${response.statusText}`);
-      }
-      return response;
+      return apiClient.updateModel(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printer-models'] });
@@ -430,6 +416,23 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
             </div>
           </div>
         </div>
+
+        {/* Slicer Model Aliases */}
+        {!isAddMode && model && (
+          <div className="border-t pt-5">
+            <h4 className="text-lg font-medium text-pf-text-primary mb-4">Slicer Model Aliases</h4>
+            <p className="text-sm text-pf-text-secondary mb-4">
+              Configure alternative model names as they appear in different slicers. This helps automatically match gcode files
+              to the correct printer model.
+            </p>
+            <ModelAliasEditor
+              modelId={model.id}
+              onSuccess={() => {
+                queryClient.invalidateQueries({ queryKey: ['printer-models'] });
+              }}
+            />
+          </div>
+        )}
       </form>
     </Modal>
   );

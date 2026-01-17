@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useOptimistic, useTransition } from 'react';
 import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
@@ -50,6 +50,15 @@ export function PrintersPage() {
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
+  
+  // React 19: useTransition for async delete operations
+  const [,startTransition] = useTransition();
+  
+  // React 19: useOptimistic for optimistic printer deletion
+  const [optimisticPrinters, addOptimisticDelete] = useOptimistic<Printer[], string>(
+    displayPrinters,
+    (state, deletedPrinterId) => state.filter(p => p.id !== deletedPrinterId)
+  );
   
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -105,9 +114,9 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
-  // Filter printers for the current user (for now show all printers since userId isn't on Printer)
+  // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
-    let filtered = displayPrinters || [];
+    let filtered = optimisticPrinters || [];
     // State filter
     if (stateFilter !== 'all') {
       filtered = filtered.filter(p => {
@@ -124,7 +133,35 @@ export function PrintersPage() {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
     return filtered;
-  }, [displayPrinters, stateFilter, backendFilter]);
+  }, [optimisticPrinters, stateFilter, backendFilter]);
+
+  // Keyboard shortcuts for printer management
+  useKeyboardShortcuts([
+    {
+      key: 'n',
+      handler: () => {
+        // Open add printer dialog
+        const addButton = document.querySelector('[data-testid="add-printer-button"]') as HTMLButtonElement;
+        addButton?.click();
+      },
+      description: 'Add new printer'
+    },
+    {
+      key: 'd',
+      handler: () => setShowDiscovery(true),
+      description: 'Discover printers on network'
+    },
+    {
+      key: 'v',
+      handler: () => {
+        const modes: ViewMode[] = ['collapsed', 'compact', 'expandable', 'table'];
+        const currentIdx = modes.indexOf(viewMode);
+        const nextMode = modes[(currentIdx + 1) % modes.length];
+        setViewMode(nextMode);
+      },
+      description: 'Cycle view mode'
+    }
+  ]);
 
 
 
@@ -137,16 +174,26 @@ export function PrintersPage() {
   };
 
   const handleDeleteConfirm = async () => {
-    try {
-      await Promise.all(deleteConfirmation.printers.map(printer => 
-        deletePrinterMutation.mutateAsync(printer.id)
-      ));
-      setDeleteConfirmation({ isOpen: false, printers: [] });
-    } catch (error) {
-      if (window.PrintFarmerDebug?.printers) {
-        console.error('Failed to delete printers:', error);
+    // React 19: Use startTransition for async operations
+    startTransition(async () => {
+      try {
+        // React 19: Optimistic delete - remove each printer immediately
+        for (const printer of deleteConfirmation.printers) {
+          addOptimisticDelete(printer.id);
+        }
+        
+        // Execute deletions in background
+        await Promise.all(deleteConfirmation.printers.map(printer => 
+          deletePrinterMutation.mutateAsync(printer.id)
+        ));
+        setDeleteConfirmation({ isOpen: false, printers: [] });
+      } catch (error) {
+        // State rolls back automatically via useOptimistic on error
+        if (window.PrintFarmerDebug?.printers) {
+          console.error('Failed to delete printers:', error);
+        }
       }
-    }
+    });
   };
 
   const handleDeleteCancel = () => {
@@ -167,29 +214,16 @@ export function PrintersPage() {
         console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
       }
       
-      const results = await Promise.all(printers.map(async (printer) => {
+      await Promise.all(printers.map(async (printer) => {
         if (window.PrintFarmerDebug?.printers) {
           console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
         }
-        const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify(inMaintenance)
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.text();
-          if (window.PrintFarmerDebug?.printers) {
-            console.error(`Failed to update maintenance for ${printer.id}:`, response.status, errorData);
-          }
-          throw new Error(`HTTP ${response.status}: ${errorData}`);
-        }
-        
-        return response.json();
+        await apiClient.setPrinterMaintenance(printer.id, { inMaintenance });
       }));
       
+      
       if (window.PrintFarmerDebug?.printers) {
-        console.log('Maintenance status updated successfully:', results);
+        console.log('Maintenance status updated successfully');
         console.log('Refetching printer queries...');
       }
       await queryClient.refetchQueries({ queryKey: ['printers'] });

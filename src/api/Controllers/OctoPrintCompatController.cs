@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace Farm.Web.Api.Controllers
 {
     [ApiController]
-    [Route("api/octoprint")]
+    [Route("api")]
     public class OctoPrintCompatController : ControllerBase
     {
         private readonly ILogger<OctoPrintCompatController> _logger;
@@ -72,9 +72,9 @@ namespace Farm.Web.Api.Controllers
                 return BadRequest(new { message = "Uploaded file is empty" });
             }
 
-            // TODO: enforce _settings.MaxUploadSizeMb
-
             // Save to IFormFile directly using existing file upload pipeline
+            // Both "upload" and "upload and print" buttons treat the file the same way:
+            // just upload and save it. The print parameter is ignored.
             try
             {
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
@@ -82,41 +82,32 @@ namespace Farm.Web.Api.Controllers
                 var uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
                 _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
 
-                if (print)
-                {
-                    // uploadDto contains a GcodeFileId string (GUID). Parse it to Guid for enqueue request.
-                    if (string.IsNullOrWhiteSpace(uploadDto.GcodeFileId) || !Guid.TryParse(uploadDto.GcodeFileId, out Guid gcodeFileGuid))
-                    {
-                        _logger.LogError("Uploaded file missing GcodeFileId, cannot enqueue print job");
-                        return StatusCode(500, new { message = "Uploaded file not indexed yet" });
-                    }
-
-                    var enqueueReq = new EnqueuePrintJobRequest(gcodeFileGuid, printerId, null, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
-                    var job = await _printJobQueueService.EnqueueAsync(enqueueReq, HttpContext.RequestAborted);
-                    if (job is null)
-                    {
-                        return StatusCode(500, new { message = "Failed to create print job" });
-                    }
-
-                    // Create a pending approval entry so the job must be approved before scheduling
-                    var approvalService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.PrintJobs.IPrintApprovalService)) as Farm.Web.Api.Services.PrintJobs.IPrintApprovalService;
-                    var approvalId = await approvalService!.CreatePendingApprovalAsync(job.Id, printerId, User?.Identity?.Name);
-
-                    return Accepted(new { file = uploadDto, jobId = job.Id, approvalId = approvalId, status = "PendingApproval" });
-                }
-
+                // Simple response: always return the file. Ignore print parameter.
+                // User can queue from the dashboard UI if desired.
                 return Ok(new { file = uploadDto });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process OctoPrint upload");
-                return StatusCode(500, new { message = "Upload failed" });
+                _logger.LogError(ex, "Failed to process OctoPrint upload: {Message}", ex.Message);
+                return StatusCode(500, new { message = $"Upload failed: {ex.Message}" });
             }
         }
 
         /// <summary>
         /// OctoPrint API: Get version information
         /// Slicers use this to verify OctoPrint compatibility
+        /// 
+        /// ⚠️ CRITICAL: The response format MUST match OctoPrint/fdm-monster exactly!
+        /// Slicers validate the 'text' field for the keyword "OctoPrint" to detect
+        /// the print host type. If this field contains anything else, slicers will
+        /// reject the connection with "Mismatched type of print host" error.
+        /// 
+        /// The exact values are:
+        /// - api: "0.1" (OctoPrint API version)
+        /// - server: "1.9.0" (server version - must match what OctoPrint returns)
+        /// - text: "OctoPrint 1.9.3" (MUST contain "OctoPrint" keyword for slicer validation)
+        /// 
+        /// Do not modify these values without verifying slicer compatibility!
         /// </summary>
         [HttpGet("version")]
         [AllowAnonymous]
@@ -125,8 +116,8 @@ namespace Farm.Web.Api.Controllers
             return Ok(new
             {
                 api = "0.1",
-                server = "1.9.3", // Mimics OctoPrint 1.9.3 for slicer compatibility
-                text = "PrintFarmer OctoPrint-Compatible API"
+                server = "1.9.0",
+                text = "OctoPrint 1.9.3"
             });
         }
 

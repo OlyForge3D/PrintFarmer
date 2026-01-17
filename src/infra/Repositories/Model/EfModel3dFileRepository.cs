@@ -37,14 +37,17 @@ namespace Farm.Infrastructure.Repositories.Model
         {
             return await _db.Models3D
                 .Where(m => m.Id == id && m.IsValid)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
+                .Include(m => m.Tags)
                 .FirstOrDefaultAsync(ct);
         }
 
         public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
         {
-            return await _db.Models3D.Where(m => m.IsValid).OrderByDescending(m => m.UploadedAt).ToListAsync(ct);
+            return await _db.Models3D
+                .Where(m => m.IsValid)
+                .Include(m => m.Tags)
+                .OrderByDescending(m => m.UploadedAt)
+                .ToListAsync(ct);
         }
 
         public async Task<List<Model3D>> ListValidByDirectoryAsync(string directory, CancellationToken ct)
@@ -66,6 +69,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 return await _db.Models3D
                     .Where(m => m.IsValid && ((m.Folder != null && m.Folder.Path == directory) || m.Folder == null))
+                    .Include(m => m.Tags)
                     .OrderByDescending(m => m.UploadedAt)
                     .ToListAsync(ct);
             }
@@ -73,6 +77,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 return await _db.Models3D
                     .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
+                    .Include(m => m.Tags)
                     .OrderByDescending(m => m.UploadedAt)
                     .ToListAsync(ct);
             }
@@ -163,13 +168,83 @@ namespace Farm.Infrastructure.Repositories.Model
             return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);
         }
 
+        public async Task<(List<Model3D> models, int totalCount)> QueryModelsAsync(
+            string? path,
+            string? search,
+            Guid[]? tagIds,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize,
+            CancellationToken ct)
+        {
+            // Start with base query - only valid models
+            IQueryable<Model3D> query = _db.Models3D.Where(m => m.IsValid);
+
+            // Always include tags for all queries
+            query = query.Include(m => m.Tags);
+
+            // Apply path filter
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                // Normalize path: remove trailing slashes, ensure leading slash
+                string normalizedPath = path.TrimEnd('/');
+                if (!normalizedPath.StartsWith('/'))
+                {
+                    normalizedPath = '/' + normalizedPath;
+                }
+
+                // Join with FolderNode and filter by path
+                query = query.Where(m => m.Folder != null && m.Folder.Path == normalizedPath);
+            }
+            // If path is null/empty, include ALL files (no filter)
+
+            // Apply search filter at database level
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                query = query.Where(m => m.FileName.Contains(search));
+            }
+
+            // Apply tag filtering at database level (AND logic - must have all tags)
+            if (tagIds?.Length > 0)
+            {
+                // For each tag, ensure the model has it
+                foreach (Guid tagId in tagIds)
+                {
+                    query = query.Where(m => m.Tags.Any(t => t.Id == tagId));
+                }
+            }
+
+            // Get total count BEFORE pagination (for UI to show "X of Y")
+            int totalCount = await query.CountAsync(ct);
+
+            // Apply sorting at database level
+            query = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+            {
+                ("size", "desc") => query.OrderByDescending(m => m.FileSizeBytes),
+                ("size", _) => query.OrderBy(m => m.FileSizeBytes),
+                ("date", "desc") => query.OrderByDescending(m => m.UploadedAt),
+                ("date", _) => query.OrderBy(m => m.UploadedAt),
+                ("name", "desc") => query.OrderByDescending(m => m.FileName),
+                _ => query.OrderBy(m => m.FileName) // Default: name ascending
+            };
+
+            // Apply pagination at database level with Skip/Take
+            int skip = (page - 1) * pageSize;
+            List<Model3D> models = await query
+                .Skip(skip)
+                .Take(pageSize)
+                .ToListAsync(ct);
+
+            return (models, totalCount);
+        }
+
         public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
         {
             // Load all valid models with includes first (required for SQLite compatibility with case-insensitive Contains)
             List<Model3D> allModels = await _db.Models3D
                 .Where(m => m.IsValid)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
+                .Include(m => m.Tags)
                 .ToListAsync(ct);
 
             // Apply client-side filtering for text search and tags
@@ -189,7 +264,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 foreach (Guid tagId in tagIds)
                 {
-                    queryable = queryable.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                    queryable = queryable.Where(m => m.Tags.Any(t => t.Id == tagId));
                 }
             }
 

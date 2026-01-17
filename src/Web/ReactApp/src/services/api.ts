@@ -23,7 +23,6 @@ import {
   LoginRequest,
   ManufacturerDto,
   MoveRequest,
-  MultiUploadResponse,
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
@@ -36,10 +35,12 @@ import {
   ResolveHostnameRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
   TempTargets,
   UpdateFilamentTypeRequest,
+  UpdateModelAliasesRequest,
   UpdateModelRequest,
   UpdatePrinterDto,
   UserDto,
@@ -120,9 +121,6 @@ export class ApiClient {
     this.client = axios.create({
       baseURL: apiBaseUrl,
       timeout: 30000,
-      headers: {
-        "Content-Type": "application/json",
-      },
     });
 
     // Request interceptor for authentication and correlationId
@@ -133,6 +131,13 @@ export class ApiClient {
       }
       // Add correlationId header to every request
       config.headers["X-Correlation-Id"] = ApiClient.generateCorrelationId();
+
+      // Set Content-Type for non-FormData requests
+      // FormData has its own Content-Type with boundary, so we let the browser/axios handle it
+      if (!(config.data instanceof FormData)) {
+        config.headers["Content-Type"] = "application/json";
+      }
+
       return config;
     });
 
@@ -403,6 +408,13 @@ export class ApiClient {
     window.URL.revokeObjectURL(urlObj);
   }
 
+  /**
+   * Upload a printer import file (starts the import process)
+   */
+  async uploadPrinterImport(formData: FormData): Promise<void> {
+    await this.client.post("/printers/import", formData);
+  }
+
   async createPrinter(printer: CreatePrinterDto): Promise<Printer> {
     const response = await this.client.post<Printer>("/printers", printer);
     return response.data;
@@ -545,6 +557,13 @@ export class ApiClient {
     return response.data;
   }
 
+  async disableMotors(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/disable-motors`
+    );
+    return response.data;
+  }
+
   // ============ Printer History API methods ============
 
   async getPrinterHistory(
@@ -606,10 +625,10 @@ export class ApiClient {
     return response.data;
   }
 
-  async createManufacturer(name: string): Promise<ManufacturerDto> {
+  async createManufacturer(name: string, url?: string, description?: string): Promise<ManufacturerDto> {
     const response = await this.client.post<ManufacturerDto>(
       "/catalog/manufacturers",
-      { name }
+      { name, url, description }
     );
     return response.data;
   }
@@ -664,6 +683,26 @@ export class ApiClient {
   // Delete a model by id
   async deleteModel(id: string): Promise<void> {
     await this.client.delete(`/catalog/printer-models/${id}`);
+  }
+
+  // Get slicer model aliases for a printer model
+  async getModelAliases(modelId: string): Promise<SlicerModelAliasDto[]> {
+    const response = await this.client.get<SlicerModelAliasDto[]>(
+      `/catalog/printer-models/${modelId}/aliases`
+    );
+    return response.data;
+  }
+
+  // Update slicer model aliases for a printer model
+  async updateModelAliases(
+    modelId: string,
+    request: UpdateModelAliasesRequest
+  ): Promise<SlicerModelAliasDto[]> {
+    const response = await this.client.put<SlicerModelAliasDto[]>(
+      `/catalog/printer-models/${modelId}/aliases`,
+      request
+    );
+    return response.data;
   }
 
   // Get default capabilities for a printer model
@@ -792,6 +831,14 @@ export class ApiClient {
     await this.client.delete(`/gcode-files/${id}`);
   }
 
+  async createGcodeDirectory(path: string): Promise<{ success: boolean; message?: string }> {
+    const response = await this.client.post<{ success: boolean; message?: string }>(
+      `/gcode-files/folder`,
+      { path }
+    );
+    return response.data;
+  }
+
   async queryGcodeLibrary(
     search?: string,
     material?: string,
@@ -804,7 +851,7 @@ export class ApiClient {
     if (nozzleDiameter) params.nozzleDiameter = nozzleDiameter;
     if (targetPrinterId) params.targetPrinterId = targetPrinterId;
 
-    const response = await this.client.get<GcodeLibraryFile[]>("/gcode-library", {
+    const response = await this.client.get<GcodeLibraryFile[]>("/gcode-files-library", {
       params,
     });
     return response.data;
@@ -1001,13 +1048,66 @@ export class ApiClient {
   async getGcodeFilesWithFilter(
     request: Record<string, unknown>
   ): Promise<GetGcodeFilesResponse> {
-    // Filter out undefined values to avoid sending them as query parameters
+    // Filter out undefined values and viewMode (viewMode is for frontend routing, not API)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { viewMode, ...apiRequest } = request;
     const params = Object.fromEntries(
-      Object.entries(request).filter(([, value]) => value !== undefined && value !== null)
+      Object.entries(apiRequest).filter(([, value]) => value !== undefined)
     );
+    
+    // Debug logging
+    if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
+      console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
+    }
+    
     const response = await this.client.get<GetGcodeFilesResponse>(
       "/gcode-files",
       { params }
+    );
+    return response.data;
+  }
+
+  async getGcodeFilesQuery(
+    request: Record<string, unknown>
+  ): Promise<GetGcodeFilesResponse> {
+    // New efficient endpoint with database-level filtering
+    // Filter out undefined values and viewMode (viewMode is for frontend routing, not API)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { viewMode, ...apiRequest } = request;
+    const params = Object.fromEntries(
+      Object.entries(apiRequest).filter(([, value]) => value !== undefined)
+    );
+    
+    // Debug logging
+    if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
+      console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
+    }
+    
+    const response = await this.client.get<GetGcodeFilesResponse>(
+      "/gcode-files/query",
+      { params }
+    );
+    return response.data;
+  }
+
+  async getGcodeFilesFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
+    const response = await this.client.get<Array<{ path: string; fileName: string; isDirectory: boolean }>>(
+      "/gcode-files/folders"
+    );
+    return response.data;
+  }
+
+  async get3DModelsQuery(
+    request: Record<string, unknown>
+  ): Promise<unknown> {
+    // Query endpoint for 3D models with filtering, pagination, and sorting
+    // Backend uses POST for consistency with other complex queries
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { viewMode, ...apiRequest } = request;
+
+    const response = await this.client.post(
+      "/3d-models/query",
+      apiRequest
     );
     return response.data;
   }
@@ -1016,47 +1116,154 @@ export class ApiClient {
     await this.client.delete("/gcode-files", { data: { fileIds } });
   }
 
-  async downloadGcodeFile(filePath: string): Promise<void> {
+  async deleteModel3dFile(id: string): Promise<void> {
+    await this.client.delete(`/3d-models/${id}`);
+  }
+
+  async deleteModel3dFiles(modelIds: string[]): Promise<void> {
+    await this.client.delete("/3d-models", { data: { modelIds } });
+  }
+
+  async downloadGcodeFile(filePath: string, originalName?: string): Promise<void> {
     const response = await this.client.get(`/gcode-files/download`, {
       params: { path: filePath },
       responseType: "blob",
     });
 
-    // Create a download link
+    // Create a download link using original filename if available
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", filePath.split("/").pop() || "file.gcode");
+    const fileName = originalName || filePath.split("/").pop() || "file.gcode";
+    link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
   }
 
-  async uploadGcodeLibraryFile(file: File, virtualPath = "/"): Promise<void> {
+  async uploadGcodeLibraryFile(
+    file: File,
+    virtualPath = "/",
+    onProgress?: (fileName: string, progress: number) => void
+  ): Promise<GcodeLibraryFile> {
     const form = new FormData();
     form.append("file", file);
-    await this.client.post(`/gcode-files/upload`, form, {
-      params: { path: virtualPath },
-      headers: { "Content-Type": "multipart/form-data" },
+    
+    // Create a new XMLHttpRequest to track progress
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      if (onProgress) {
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            onProgress(file.name, percentComplete);
+          }
+        });
+      }
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText) as GcodeLibraryFile;
+            if (onProgress) {
+              onProgress(file.name, 100);
+            }
+            resolve(response);
+          } catch {
+            reject(new Error("Failed to parse upload response"));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener("error", () => {
+        reject(new Error("Upload request failed"));
+      });
+
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Upload was cancelled"));
+      });
+
+      // Build URL with params
+      const params = new URLSearchParams({ path: virtualPath });
+      xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
+
+      // Set auth header if available
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.send(form);
     });
   }
 
-  async uploadMultipleGcodeLibraryFiles(
-    files: File[],
-    virtualPath = "/"
-  ): Promise<MultiUploadResponse> {
+  /**
+   * Upload a single 3D model file.
+   * Supports progress tracking via XMLHttpRequest upload event.
+   */
+  async uploadModel3dFile(
+    file: File,
+    virtualPath = "/",
+    onProgress?: (fileName: string, progress: number) => void
+  ): Promise<import("@/types/api").Model3DUploadResultDto> {
     const form = new FormData();
-    files.forEach((f) => form.append("files", f));
-    const resp = await this.client.post<MultiUploadResponse>(
-      `/gcode-files/upload-multiple`,
-      form,
-      {
-        params: { path: virtualPath },
-        headers: { "Content-Type": "multipart/form-data" },
+    form.append("file", file);
+    
+    // Create a new XMLHttpRequest to track progress
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      if (onProgress) {
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            onProgress(file.name, percentComplete);
+          }
+        });
       }
-    );
-    return resp.data as MultiUploadResponse;
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText) as import("@/types/api").Model3DUploadResultDto;
+            if (onProgress) {
+              onProgress(file.name, 100);
+            }
+            resolve(response);
+          } catch {
+            reject(new Error("Failed to parse upload response"));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener("error", () => {
+        reject(new Error("Upload request failed"));
+      });
+
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Upload was cancelled"));
+      });
+
+      // Build URL with params
+      const params = new URLSearchParams({ path: virtualPath });
+      xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
+
+      // Set auth header if available
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.send(form);
+    });
   }
 
   async getGcodeUploadSettings(): Promise<
@@ -1083,37 +1290,40 @@ export class ApiClient {
     return resp.data as { path: string; isDirectory: boolean };
   }
 
+  async moveGcodeFiles(
+    fileIds: string[],
+    targetFolderPath: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const resp = await this.client.post("/gcode-files/move", {
+      modelIds: fileIds,
+      targetDirectoryId: targetFolderPath,
+    });
+    return resp.data as { success: boolean; message?: string };
+  }
+
   // ============ 3D Model methods ============
 
-  async listModelsHierarchical(
-    path: string = "/",
-    sortBy: string = "name",
-    sortOrder: string = "asc",
-    search?: string,
-    page: number = 1,
-    pageSize: number = 50
-  ): Promise<import("@/types/api").Model3DListResponse> {
-    const params: Record<string, string | number | undefined> = {
-      path,
-      sortBy,
-      sortOrder,
-      page,
-      pageSize,
-    };
-    if (search) params.search = search;
-
-    const response = await this.client.get<import("@/types/api").Model3DListResponse>(
-      "/3d-models/hierarchy",
-      { params }
+  async listModelsFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
+    const response = await this.client.get<Array<{ path: string; fileName: string; isDirectory: boolean }>>(
+      "/3d-models/folders"
     );
     return response.data;
   }
 
-  async deleteModels(modelPaths: string[]): Promise<void> {
-    await this.client.delete("/3d-models", { data: { modelPaths } });
+  async moveModel3dFiles(
+    fileIds: string[],
+    targetFolderPath: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const resp = await this.client.post("/3d-models/move", {
+      modelIds: fileIds,
+      targetDirectoryId: targetFolderPath,
+    });
+    return resp.data as { success: boolean; message?: string };
   }
 
   // ============ Job Queue methods ============
+  // NOTE: This is the simpler job queue API for basic queue management.
+  // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
   async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {
     const params = printerId ? { printerId } : {};
@@ -1367,6 +1577,917 @@ export class ApiClient {
     const response = await this.client.get<
       import("@/types/api").FileHealthDetailDto
     >(`/fileconsistency/gcode/${id}/health`);
+    return response.data;
+  }
+
+  // ============ Location API methods ============
+  async getAllLocations(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/locations');
+    return response.data;
+  }
+
+  async getLocationById(id: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get(`/locations/${id}`);
+    return response.data;
+  }
+
+  async createLocation(request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/locations', request);
+    return response.data;
+  }
+
+  async updateLocation(id: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/locations/${id}`, request);
+    return response.data;
+  }
+
+  async deleteLocation(id: string): Promise<void> {
+    await this.client.delete(`/locations/${id}`);
+  }
+
+  // ============ Printer Location API methods ============
+  async getAllPrinterLocations(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/printers');
+    return response.data || [];
+  }
+
+  async assignPrinterToLocation(printerId: string, locationId: string): Promise<Record<string, unknown>> {
+    const response = await this.client.post(`/printers/${printerId}/location`, { locationId });
+    return response.data;
+  }
+
+  async removePrinterFromLocation(printerId: string): Promise<Record<string, unknown>> {
+    const response = await this.client.post(`/printers/${printerId}/location/remove`, {});
+    return response.data;
+  }
+
+  // ============ Tag API methods ============
+  async listTags(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/tags');
+    return response.data || [];
+  }
+
+  async searchTags(query: string): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/tags/search', {
+      params: { q: query }
+    });
+    return response.data || [];
+  }
+
+  async getPopularTags(count: number = 10): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/tags/popular', {
+      params: { count: count * 2 }
+    });
+    return response.data || [];
+  }
+
+  async getTagAnalytics(): Promise<Record<string, unknown> | null> {
+    const response = await this.client.get('/tags/analytics');
+    return response.data || null;
+  }
+
+  async createTag(name: string, color?: string, description?: string): Promise<Record<string, unknown> | null> {
+    const response = await this.client.post('/tags', {
+      name,
+      color,
+      description,
+    });
+    return response.data || null;
+  }
+
+  async deleteTag(tagId: string): Promise<void> {
+    await this.client.delete(`/tags/${tagId}`);
+  }
+
+  async getTagById(tagId: string): Promise<Record<string, unknown> | null> {
+    const response = await this.client.get(`/tags/${tagId}`);
+    return response.data || null;
+  }
+
+  async assignTagToObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<void> {
+    await this.client.post(`/tags/${objectId}/${tagId}/assign`, null, {
+      params: { objectType }
+    });
+  }
+
+  async removeTagFromObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<void> {
+    await this.client.delete(`/tags/${objectId}/${tagId}/remove`, {
+      params: { objectType }
+    });
+  }
+
+  async getObjectTags(objectId: string, objectType: 'Model3D' | 'GcodeFile'): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get(`/tags/object/${objectId}`, {
+      params: { objectType }
+    });
+    return response.data || [];
+  }
+
+  async getGcodeFileTags(gcodeFileId: string): Promise<Record<string, unknown>[]> {
+    return this.getObjectTags(gcodeFileId, 'GcodeFile');
+  }
+
+  async filterModelsWithAllTags(tagIds: string[]): Promise<string[]> {
+    const response = await this.client.get('/tags/models/filter/all-tags', {
+      params: { tags: tagIds.join(',') }
+    });
+    return response.data || [];
+  }
+
+  async filterModelsWithAnyTag(tagIds: string[]): Promise<string[]> {
+    const response = await this.client.get('/tags/models/filter/any-tags', {
+      params: { tags: tagIds.join(',') }
+    });
+    return response.data || [];
+  }
+
+  async filterModelsComplex(
+    includeAllTagIds?: string[],
+    includeAnyTagIds?: string[],
+    excludeTagIds?: string[]
+  ): Promise<string[]> {
+    const params: Record<string, string> = {};
+    if (includeAllTagIds && includeAllTagIds.length > 0) {
+      params.includeAll = includeAllTagIds.join(',');
+    }
+    if (includeAnyTagIds && includeAnyTagIds.length > 0) {
+      params.includeAny = includeAnyTagIds.join(',');
+    }
+    if (excludeTagIds && excludeTagIds.length > 0) {
+      params.exclude = excludeTagIds.join(',');
+    }
+    const response = await this.client.get('/tags/models/filter', { params });
+    return response.data || [];
+  }
+
+  // ============ Job Scheduling API methods ============
+  async scheduleJob(jobId: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const req = request as { scheduledStartTime: Date; timeZone?: string; recurrencePattern?: string; recurrenceEndDate?: Date };
+    const response = await this.client.post(`/jobscheduling/${jobId}/schedule`, {
+      scheduledStartTime: req.scheduledStartTime.toISOString(),
+      timeZone: req.timeZone || 'UTC',
+      recurrencePattern: req.recurrencePattern || null,
+      recurrenceEndDate: req.recurrenceEndDate?.toISOString() || null,
+    });
+    return response.data;
+  }
+
+  async rescheduleJob(jobId: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const req = request as { newScheduledTime: Date; timeZone?: string };
+    const response = await this.client.put(`/jobscheduling/${jobId}/reschedule`, {
+      newScheduledTime: req.newScheduledTime.toISOString(),
+      timeZone: req.timeZone || 'UTC',
+    });
+    return response.data;
+  }
+
+  async cancelScheduling(jobId: string): Promise<void> {
+    await this.client.delete(`/jobscheduling/${jobId}/schedule`);
+  }
+
+  async pauseScheduling(jobId: string): Promise<void> {
+    await this.client.post(`/jobscheduling/${jobId}/pause`);
+  }
+
+  async resumeScheduling(jobId: string): Promise<void> {
+    await this.client.post(`/jobscheduling/${jobId}/resume`);
+  }
+
+  async getScheduledJob(jobId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const response = await this.client.get(`/jobscheduling/${jobId}`);
+      return response.data;
+    } catch (error: unknown) {
+      if ((error as Record<string, unknown>).statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getScheduledJobs(dateFrom?: Date, dateTo?: Date): Promise<Record<string, unknown>[]> {
+    const params = new URLSearchParams();
+    if (dateFrom) {
+      params.append('dateFrom', dateFrom.toISOString());
+    }
+    if (dateTo) {
+      params.append('dateTo', dateTo.toISOString());
+    }
+    const response = await this.client.get(`/jobscheduling/scheduled?${params.toString()}`);
+    return response.data || [];
+  }
+
+  async getExecutionHistory(jobId: string): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get(`/jobscheduling/${jobId}/executions`);
+    return response.data || [];
+  }
+
+  async getAvailableTimeZones(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/jobscheduling/timezones');
+    return response.data || [];
+  }
+
+  // ============ Prediction API methods ============
+  async getPrediction(jobId: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get(`/predictions/jobs/${jobId}/completion`);
+    return response.data;
+  }
+
+  async getStatistics(jobId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const response = await this.client.get(`/predictions/jobs/${jobId}/statistics`);
+      return response.data;
+    } catch (error: unknown) {
+      if ((error as Record<string, unknown>).statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getMaterialStats(
+    material?: string,
+    printerId?: string,
+    minSampleSize?: number
+  ): Promise<Record<string, unknown>> {
+    const params: Record<string, string> = {};
+    if (material) params.material = material;
+    if (printerId) params.printerId = printerId;
+    if (minSampleSize) params.minSampleSize = minSampleSize.toString();
+    const response = await this.client.get('/predictions/stats/by-material', { params });
+    return response.data || {};
+  }
+
+  async getModelStats(modelId: string, material?: string): Promise<Record<string, unknown> | null> {
+    try {
+      const params: Record<string, string> = {};
+      if (material) params.material = material;
+      const response = await this.client.get(`/predictions/stats/model/${modelId}`, { params });
+      return response.data;
+    } catch (error: unknown) {
+      if ((error as Record<string, unknown>).statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async recordCompletion(jobId: string, request: Record<string, unknown>): Promise<void> {
+    await this.client.post(`/predictions/jobs/${jobId}/completion-record`, request);
+  }
+
+  // ============ System Logs API methods ============
+  /**
+   * Get system logs with optional filtering by parameters
+   */
+  async getSystemLogs(params: Record<string, string>): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/systemlogs', { params });
+    return response.data || [];
+  }
+
+  /**
+   * Get system logs with advanced query string search
+   */
+  async getSystemLogsQuery(query: string): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get(`/systemlogs?query=${encodeURIComponent(query)}`);
+    return response.data || [];
+  }
+
+  /**
+   * Export system logs as JSON blob with optional filtering
+   */
+  async exportSystemLogs(params: Record<string, string>): Promise<Blob> {
+    const response = await this.client.get('/systemlogs/export', {
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  // ============ File Upload API methods ============
+  /**
+   * Upload a 3D model file with progress tracking
+   */
+  async uploadModel(
+    file: File,
+    onProgress?: (progressEvent: { loaded: number; total?: number }) => void
+  ): Promise<Record<string, unknown>> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    
+    const response = await this.client.post('/models', form, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: onProgress
+    });
+    return response.data;
+  }
+
+  /**
+   * Get list of all 3D models
+   */
+  async getModels3D(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/models');
+    return response.data || [];
+  }
+
+  // ============ User Management API methods ============
+  /**
+   * Get all users
+   */
+  async getUsers(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/users');
+    return response.data || [];
+  }
+
+  /**
+   * Get all roles
+   */
+  async getRoles(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/users/roles');
+    return response.data || [];
+  }
+
+  /**
+   * Check username and email availability
+   */
+  async checkUserAvailability(
+    username?: string,
+    email?: string
+  ): Promise<{ usernameExists?: boolean; emailExists?: boolean }> {
+    const params = new URLSearchParams();
+    if (username) params.append('username', username);
+    if (email) params.append('email', email);
+    const response = await this.client.get(`/users/availability?${params.toString()}`);
+    return response.data || {};
+  }
+
+  /**
+   * Create a new user
+   */
+  async createUser(userData: {
+    username: string;
+    email: string;
+    password: string;
+    firstName?: string;
+    lastName?: string;
+    roleIds?: string[];
+    accessibleAreas?: string[];
+  }): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/users', userData);
+    return response.data;
+  }
+
+  /**
+   * Update a user
+   */
+  async updateUser(userId: string, updates: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/users/${userId}`, updates);
+    return response.data;
+  }
+
+  // ============ Setup & Initialization API methods ============
+
+  /**
+   * Get setup status
+   */
+  async getSetupStatus(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/setup/status');
+    return response.data;
+  }
+
+  /**
+   * Create initial admin account
+   */
+  async createInitialAdmin(adminData: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/setup/initial-admin', adminData);
+    return response.data;
+  }
+
+  // ============ Spoolman Integration API methods ============
+
+  /**
+   * Test Spoolman connection
+   */
+  async testSpoolmanConnection(): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/spoolman/test');
+    return response.data;
+  }
+
+  /**
+   * Get Spoolman health status
+   */
+  async getSpoolmanHealth(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/spoolman/health');
+    return response.data;
+  }
+
+  /**
+   * Get Spoolman configuration
+   */
+  async getSpoolmanConfig(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/spoolman/config');
+    return response.data;
+  }
+
+  /**
+   * Save Spoolman configuration
+   */
+  async saveSpoolmanConfig(config: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/spoolman/config', config);
+    return response.data;
+  }
+
+  /**
+   * Get spools from Spoolman
+   */
+  async getSpools(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/spoolman/spools');
+    return response.data;
+  }
+
+  // ============ Settings API methods ============
+
+  /**
+   * Get password policy settings
+   */
+  async getPasswordPolicy(): Promise<Response> {
+    return this.client.get('/settings/security/password-policy');
+  }
+
+  // ============ Diagnostics API methods ============
+
+  /**
+   * Get diagnostics summary
+   */
+  async getDiagnosticsSummary(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/diagnostics/summary');
+    return response.data;
+  }
+
+  // ============ Filament Types API methods ============
+
+  /**
+   * Get filament type presets
+   */
+  async getFilamentTypePresets(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/filament-types/presets');
+    return response.data;
+  }
+
+  // ============ Printer Maintenance API methods ============
+
+  /**
+   * Get printer maintenance logs
+   */
+  async getPrinterMaintenance(printerId: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get(`/printers/${printerId}/maintenance`);
+    return response.data;
+  }
+
+  /**
+   * Update printer maintenance
+   */
+  async updatePrinterMaintenance(printerId: string, maintenance: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/printers/${printerId}/maintenance`, maintenance);
+    return response.data;
+  }
+
+  // ============ Models 3D File Operations ============
+
+  /**
+   * Get 3D models list (for TagAdmin)
+   */
+  async get3DModelsList(): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/3d-models');
+    return response.data;
+  }
+
+  // ============ G-code File Operations ============
+
+  /**
+   * Get gcode folder structure
+   */
+  async getGcodeFolderStructure(params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/gcode-files/folder', { params });
+    return response.data;
+  }
+
+  // ============ Catalog API methods ============
+
+  /**
+   * Get printer models from catalog
+   */
+  async getCatalogPrinterModels(manufacturerId?: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get('/catalog/printer-models', {
+      params: manufacturerId ? { manufacturerId } : {}
+    });
+    return response.data;
+  }
+
+  /**
+   * Get printer model details from catalog
+   */
+  async getCatalogPrinterModel(id: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get(`/catalog/printer-models/${id}`);
+    return response.data;
+  }
+
+  // ============ Tags API methods ============
+
+  /**
+   * Get all tags
+   */
+  async getTags(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/tags');
+    return response.data || [];
+  }
+
+  /**
+   * Create a new tag
+   */
+  async createNewTag(tagData: { name: string; color?: string; description?: string }): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/tags', tagData);
+    return response.data;
+  }
+
+  /**
+   * Delete a tag by ID
+   */
+  async deleteTagById(id: string): Promise<void> {
+    await this.client.delete(`/tags/${id}`);
+  }
+
+  /**
+   * Bulk assign tags to models
+   */
+  async bulkAssignTags(modelIds: string[], tagIds: string[]): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/tags/bulk-assign', {
+      modelIds,
+      tagIds
+    });
+    return response.data;
+  }
+
+  // ============ Printers Import/Export API methods ============
+
+  /**
+   * Import printers from file
+   */
+  async importPrinters(printers: Record<string, unknown>[]): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/printers/import', printers);
+    return response.data;
+  }
+
+  /**
+   * Set printer maintenance
+   */
+  async setPrinterMaintenance(printerId: string, maintenanceData: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/printers/${printerId}/maintenance`, maintenanceData);
+    return response.data;
+  }
+
+  // ============ 3D Models API methods ============
+
+  /**
+   * Get all 3D models
+   */
+  async get3DModels(): Promise<Record<string, unknown>[]> {
+    const response = await this.client.get('/3d-models');
+    return response.data || [];
+  }
+
+  /**
+   * Update 3D model
+   */
+  async update3DModel(id: string, modelData: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/3d-models/${id}`, modelData);
+    return response.data;
+  }
+
+  /**
+   * Delete 3D model
+   */
+  async delete3DModel(id: string): Promise<void> {
+    await this.client.delete(`/3d-models/${id}`);
+  }
+
+  // ============ Slicer API methods ============
+
+  /**
+   * Get slicer job status
+   */
+  async getSlicerJobStatus(jobId: string): Promise<Record<string, unknown>> {
+    const response = await this.client.get(`/slicer/jobs/${encodeURIComponent(jobId)}/status`);
+    return response.data;
+  }
+
+  // ============ Generic API methods ============
+
+  /**
+   * Generic POST request for any endpoint (useful for various commands)
+   */
+  async genericPost(path: string, data?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.post(path, data);
+    return response.data;
+  }
+
+  /**
+   * Generic GET request for any endpoint
+   */
+  async genericGet(path: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.get(path, { params });
+    return response.data;
+  }
+
+  /**
+   * Generic PUT request for any endpoint
+   */
+  async genericPut(path: string, data?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await this.client.put(path, data);
+    return response.data;
+  }
+
+  /**
+   * Generic DELETE request for any endpoint
+   */
+  async genericDelete(path: string): Promise<void> {
+    await this.client.delete(path);
+  }
+
+  // ============ Missing Methods (Placeholder Implementations) ============
+
+  /**
+   * Update password policy settings
+   */
+  async updatePasswordPolicy(policy: Record<string, unknown>): Promise<Response> {
+    return this.client.put('/settings/security/password-policy', policy);
+  }
+
+  /**
+   * Get 3D model details by ID
+   */
+  async getModel3DDetails(modelId?: string): Promise<Record<string, unknown>> {
+    if (!modelId) return {};
+    const response = await this.client.get(`/3d-models/${modelId}`);
+    return response.data as Record<string, unknown>;
+  }
+
+  /**
+   * Update 3D model
+   */
+  async updateModel3D(modelId?: string, updates?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!modelId) return {};
+    const response = await this.client.put(`/3d-models/${modelId}`, updates);
+    return response.data as Record<string, unknown>;
+  }
+
+  /**
+   * Assign tag to 3D model
+   */
+  async assignTagToModel(modelId?: string, tagId?: string): Promise<void> {
+    if (!modelId || !tagId) return;
+    await this.client.post(`/3d-models/${modelId}/tags/${tagId}`, {});
+  }
+
+  /**
+   * Remove tag from 3D model
+   */
+  async removeTagFromModel(modelId?: string, tagId?: string): Promise<void> {
+    if (!modelId || !tagId) return;
+    await this.client.delete(`/3d-models/${modelId}/tags/${tagId}`);
+  }
+
+  // ============ Job Queue Analytics methods (advanced dashboard) ============
+  // NOTE: These are read-only analytics methods for the Print Queue Dashboard.
+  // For basic queue management (queue, cancel, delete jobs), use Job Queue methods above.
+  // Endpoint: /api/job-queue-analytics (renamed from /api/printQueue for clarity)
+
+  /**
+   * Get all queued and printing jobs with optional filtering (analytics view)
+   */
+  async getAnalyticsQueueJobs(
+    filterStatus?: string,
+    filterModel?: string,
+    filterMaterial?: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (filterStatus) params.append("filterStatus", filterStatus);
+    if (filterModel) params.append("filterModel", filterModel);
+    if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("limit", limit.toString());
+    params.append("offset", offset.toString());
+
+    const response = await this.client.get(`/job-queue-analytics?${params.toString()}`);
+    return response.data;
+  }
+
+  /**
+   * Get print jobs for a specific printer (analytics view)
+   */
+  async getAnalyticsPrinterQueue(
+    printerId: string,
+    limit: number = 50
+  ): Promise<unknown[]> {
+    const response = await this.client.get(`/job-queue-analytics/printer/${printerId}`, {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  /**
+   * Get queue statistics (analytics)
+   */
+  async getAnalyticsQueueStats(): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/stats`);
+    return response.data;
+  }
+
+  /**
+   * Get queue statistics by model (analytics)
+   */
+  async getAnalyticsQueueModelStats(): Promise<unknown[]> {
+    const response = await this.client.get(`/job-queue-analytics/stats/models`);
+    return response.data;
+  }
+
+  /**
+   * Get queue history with pagination (analytics)
+   */
+  async getAnalyticsQueueHistory(
+    limit: number = 50,
+    offset: number = 0,
+    sortBy: string = "completedAtUtc"
+  ): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/history`, {
+      params: { limit, offset, sortBy },
+    });
+    return response.data;
+  }
+
+  /**
+   * Enqueue a new print job
+   */
+  async enqueueJob(request: unknown): Promise<unknown> {
+    const response = await this.client.post(`/job-queue`, request);
+    return response.data;
+  }
+
+  /**
+   * Update a print job
+   */
+  async updateJob(jobId: string, request: unknown): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}`,
+      request
+    );
+    return response.data;
+  }
+
+  /**
+   * Update job priority
+   */
+  async updateJobPriority(jobId: string, newPriority: number): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}/priority`,
+      { newPriority }
+    );
+    return response.data;
+  }
+
+  /**
+   * Pause a print job
+   */
+  async pauseJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/pause`
+    );
+    return response.data;
+  }
+
+  /**
+   * Resume a print job
+   */
+  async resumeJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/resume`
+    );
+    return response.data;
+  }
+
+  /**
+   * Cancel a print job
+   */
+  async cancelPrintQueueJob(jobId: string): Promise<void> {
+    await this.client.delete(`/job-queue/${jobId}`);
+  }
+
+  /**
+   * Rerun a completed job (add it back to queue)
+   */
+  async rerunJob(jobId: string): Promise<unknown> {
+    const response = await this.client.post(
+      `/job-queue/${jobId}/rerun`
+    );
+    return response.data;
+  }
+
+  /**
+   * Bulk cancel multiple print jobs
+   */
+  async bulkCancelJobs(request: unknown): Promise<unknown> {
+    const response = await this.client.post(`/job-queue/bulk/cancel`, request);
+    return response.data;
+  }
+
+  /**
+   * Seed history from printer APIs
+   */
+  async seedHistory(printerIds?: string[], daysBack: number = 30): Promise<void> {
+    await this.client.post(`/job-queue/history/seed`, {
+      printerIds,
+      daysBack,
+    });
+  }
+
+  /**
+   * Get detailed information about a specific job (analytics)
+   */
+  async getAnalyticsJobDetails(jobId: string): Promise<unknown> {
+    const response = await this.client.get(`/job-queue-analytics/jobs/${jobId}`);
+    return response.data;
+  }
+
+  /**
+   * Update job details (name, priority, notes, tags, material, nozzle)
+   */
+  async updateJobDetails(jobId: string, updates: unknown): Promise<unknown> {
+    const response = await this.client.put(
+      `/job-queue/${jobId}`,
+      updates
+    );
+    return response.data;
+  }
+
+  /**
+   * Update job notes only
+   */
+  async updateJobNotes(jobId: string, notes: string): Promise<void> {
+    await this.client.put(`/job-queue/${jobId}/notes`, {
+      notes: notes || null,
+    });
+  }
+
+  /**
+   * Get timeline events with optional filtering (analytics)
+   */
+  async getAnalyticsTimeline(
+    dateFrom?: Date,
+    dateTo?: Date,
+    printerId?: string,
+    filterStatus?: string,
+    limit: number = 100
+  ): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+    if (dateTo) params.append("dateTo", dateTo.toISOString());
+    if (printerId) params.append("printerId", printerId);
+    if (filterStatus) params.append("filterStatus", filterStatus);
+    params.append("limit", limit.toString());
+
+    const response = await this.client.get(`/job-queue-analytics/timeline?${params.toString()}`);
+    return response.data;
+  }
+
+  /**
+   * Get state history for a specific job (analytics)
+   */
+  async getAnalyticsJobStateHistory(jobId: string): Promise<unknown> {
+    const response = await this.client.get(
+      `/job-queue-analytics/jobs/${jobId}/state-history`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get duration analytics with optional filtering (analytics)
+   */
+  async getAnalyticsDurationAnalytics(
+    printerId?: string,
+    dateFrom?: Date,
+    dateTo?: Date
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (printerId) params.append("printerId", printerId);
+    if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+    if (dateTo) params.append("dateTo", dateTo.toISOString());
+
+    const response = await this.client.get(
+      `/job-queue-analytics/duration-analytics?${params.toString()}`
+    );
     return response.data;
   }
 }

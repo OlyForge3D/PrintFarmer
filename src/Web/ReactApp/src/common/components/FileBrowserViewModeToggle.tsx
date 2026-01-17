@@ -1,8 +1,8 @@
 import React from 'react';
-import { mdiViewAgenda, mdiViewGrid, mdiViewList } from '@mdi/js';
+import { mdiViewAgenda, mdiViewGrid } from '@mdi/js';
 import { Button } from '@/common/components/ui';
 
-export type FileBrowserViewMode = 'explorer' | 'grid' | 'list';
+export type FileBrowserViewMode = 'explorer' | 'grid';
 
 interface FileBrowserViewModeToggleProps {
   viewMode: FileBrowserViewMode;
@@ -28,7 +28,6 @@ export const FileBrowserViewModeToggle: React.FC<FileBrowserViewModeToggleProps>
   const modes: Array<{ mode: FileBrowserViewMode; icon: string; title: string }> = [
     { mode: 'explorer', icon: mdiViewAgenda, title: 'Explorer view' },
     { mode: 'grid', icon: mdiViewGrid, title: 'Grid view' },
-    { mode: 'list', icon: mdiViewList, title: 'List view' },
   ];
 
   return (

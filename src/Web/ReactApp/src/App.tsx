@@ -13,9 +13,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-
 // Services
+import { apiClient } from '@/services/api';
 import { assetService } from '@/services/assetService';
 import { printerSignalRService } from '@/services/printer-signalr';
 
@@ -148,11 +147,14 @@ function App() {
 
   // Initialize asset service on app startup
   useEffect(() => {
-    assetService.initialize().catch(err => {
-      logger.warn('Failed to initialize asset service', {
-        error: err instanceof Error ? err.message : String(err)
+    const initPromise = assetService?.initialize?.();
+    if (initPromise) {
+      initPromise.catch(err => {
+        logger.warn('Failed to initialize asset service', {
+          error: err instanceof Error ? err.message : String(err)
+        });
       });
-    });
+    }
   }, [logger]);
 
   // Eagerly establish SignalR connections on app startup for faster realtime updates
@@ -172,23 +174,14 @@ function App() {
   useEffect(() => {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
+      setCheckingSetup(true);
       try {
-        const response = await fetch(`${getApiBaseUrl()}/setup/status`, {
-          headers: getAuthHeaders()
+        const data = await apiClient.getSetupStatus();
+        setSetupComplete(!data.needsSetup);
+        logger.info('Setup status retrieved', {
+          needsSetup: data.needsSetup,
+          setupComplete: !data.needsSetup
         });
-        if (response.ok) {
-          const data = await response.json();
-          setSetupComplete(!data.needsSetup);
-          logger.info('Setup status retrieved', {
-            needsSetup: data.needsSetup,
-            setupComplete: !data.needsSetup
-          });
-        } else {
-          setSetupComplete(false);
-          logger.warn('Setup status check failed - assuming setup needed', {
-            status: response.status
-          });
-        }
       } catch (error) {
         logger.error('Error checking setup status', {
           error: error instanceof Error ? error.message : String(error)
@@ -222,7 +215,13 @@ function App() {
             <QueryClientProvider client={queryClient}>
               <SlicerUIProvider>
                 <SetupWizard onComplete={handleSetupComplete} />
-                <Toaster position="top-right" richColors />
+              <Toaster 
+                position="top-right" 
+                duration={3000}
+                visibleToasts={2}
+                theme="system"
+                gap={8}
+              />
               </SlicerUIProvider>
             </QueryClientProvider>
           </AuthProvider>
@@ -259,7 +258,13 @@ function App() {
                 <AuthenticatedAppRoutes />
               </Router>
               <ReactQueryDevtools initialIsOpen={false} />
-              <Toaster position="top-right" richColors />
+              <Toaster 
+                position="top-right" 
+                duration={3000}
+                visibleToasts={2}
+                theme="system"
+                gap={8}
+              />
             </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>

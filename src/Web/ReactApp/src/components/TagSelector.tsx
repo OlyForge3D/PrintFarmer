@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/services/api';
 import { Button, Input } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import { XMarkIcon } from '@heroicons/react/24/solid';
+import { XMarkIcon, PlusIcon } from '@heroicons/react/24/solid';
 
 interface TagOption {
   id: string;
@@ -33,23 +33,37 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   placeholder = 'Search tags...'
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const queryClient = useQueryClient();
+
+  // Create new tag mutation
+  const createTagMutation = useMutation({
+    mutationFn: async (tagName: string) => {
+      return await apiClient.createTag(
+        tagName,
+        '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
+        ''
+      );
+    },
+    onSuccess: (newTag) => {
+      queryClient.invalidateQueries({ queryKey: ['all-tags'] });
+      if (newTag) handleAddTag(newTag as unknown as TagOption);
+      setSearchTerm('');
+    }
+  });
 
   // Fetch all available tags
   const { data: allTags = [], isLoading: isLoadingTags } = useQuery<TagOption[]>({
     queryKey: ['all-tags'],
     queryFn: async () => {
-      const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {
-        headers: getAuthHeaders()
-      });
-      if (!response.ok) throw new Error('Failed to fetch tags');
-      return response.json();
+      const result = await apiClient.listTags();
+      return (result as unknown as TagOption[]) || [];
     },
     staleTime: 5 * 60 * 1000
   });
 
   // Filter tags based on search
-  const filteredTags = allTags.filter(
-    tag =>
+  const filteredTags = (Array.isArray(allTags) ? allTags : []).filter(
+    (tag: TagOption) =>
       tag.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
       !selectedTags.some(st => st.id === tag.id)
   );
@@ -86,9 +100,8 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
               title={`Remove ${tag.name} tag`}
               variant="subtle"
               size="sm"
-            >
-              <XMarkIcon className="w-4 h-4" />
-            </Button>
+              iconCenter={<XMarkIcon className="w-4 h-4" />}
+            />
           </div>
         ))}
       </div>
@@ -148,9 +161,17 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="p-3 text-sm text-pf-text-tertiary text-center">
-                No tags match your search
-              </div>
+              <Button
+                onClick={() => createTagMutation.mutate(searchTerm)}
+                disabled={createTagMutation.isPending}
+                className="w-full text-left px-3 py-2 hover:bg-pf-bg-2 transition-colors flex items-center gap-2"
+                variant="subtle"
+                iconLeft={<PlusIcon className="w-4 h-4 text-pf-accent" />}
+              >
+                <span className="text-sm text-pf-text-primary">
+                  {createTagMutation.isPending ? 'Creating...' : `Create tag "${searchTerm}"`}
+                </span>
+              </Button>
             )}
           </div>
         )}

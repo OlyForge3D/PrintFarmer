@@ -16,7 +16,7 @@ describe("TableFiltersBar Component", () => {
     expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Printer Model")).toBeInTheDocument();
     expect(screen.getByText("Material")).toBeInTheDocument();
-    expect(screen.getByText("Refresh")).toBeInTheDocument();
+    expect(screen.getByTitle("Refresh data")).toBeInTheDocument();
   });
 
   it("should call onStatusChange when status filter changes", () => {
@@ -81,7 +81,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const refreshButton = screen.getByText("Refresh");
+    const refreshButton = screen.getByTitle("Refresh data");
     fireEvent.click(refreshButton);
 
     expect(onRefresh).toHaveBeenCalled();
@@ -100,8 +100,8 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    // Click clear button
-    const clearButton = screen.getByText("Clear");
+    // Click clear button (Reset all filters)
+    const clearButton = screen.getByTitle("Reset all filters");
     fireEvent.click(clearButton);
 
     // Verify all handlers were called with null
@@ -120,7 +120,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} isLoading={true} />);
 
-    const refreshButton = screen.getByRole("button", { name: /Loading/i });
+    const refreshButton = screen.getByTitle("Refresh data") as HTMLButtonElement;
     expect(refreshButton).toBeDisabled();
   });
 

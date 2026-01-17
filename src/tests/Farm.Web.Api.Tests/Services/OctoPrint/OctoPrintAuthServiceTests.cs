@@ -45,7 +45,7 @@ public class OctoPrintAuthServiceTests
         using var ctx = CreateInMemoryContext();
         var settings = Options.Create(new OctoPrintSettings { RequireApiKey = true });
         var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
-        var inMemory = new Dictionary<string, string> { ["OctoPrint:GlobalApiKey"] = "supersecret" };
+        var inMemory = new Dictionary<string, string?> { ["OctoPrint:GlobalApiKey"] = "supersecret" };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
         var svc = new OctoPrintAuthService(settings, new NullLogger<OctoPrintAuthService>(), repo, config);
 

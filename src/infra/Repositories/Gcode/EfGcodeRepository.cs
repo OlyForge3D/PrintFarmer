@@ -25,6 +25,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             List<GcodeFile> allFiles = await _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.PrinterModel)
+                .Include(g => g.Tags)
                 .ToListAsync(ct);
 
             // Apply client-side filtering for case-insensitive search
@@ -62,6 +63,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             return _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.PrinterModel)
+                .Include(g => g.Tags)
                 .FirstOrDefaultAsync(g => g.Id == id, ct);
         }
 
@@ -93,16 +95,119 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
         public async Task<List<GcodeFile>> ListByDirectoryPrefixAsync(string directoryPrefix, CancellationToken ct)
         {
+            // If prefix is null/empty, return ALL files (for grid view "show all files" mode)
             if (string.IsNullOrWhiteSpace(directoryPrefix))
             {
-                return new List<GcodeFile>();
+                return await _db.GcodeFiles.ToListAsync(ct);
             }
+
             // Query all files where FilePath starts with the directory prefix
             // Normalize the path separator for consistent matching
             string normalizedPrefix = directoryPrefix.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             return await _db.GcodeFiles
                 .Where(g => g.FilePath.StartsWith(normalizedPrefix))
                 .ToListAsync(ct);
+        }
+
+        public async Task<(List<GcodeFile> files, int totalCount)> QueryFilesAsync(
+            string? path,
+            string? search,
+            Guid[]? tagIds,
+            Guid? printerModelId,
+            Guid? printerId,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize,
+            CancellationToken ct)
+        {
+            // Build base query for filtering (without includes to avoid query complexity)
+            IQueryable<GcodeFile> filterQuery = _db.GcodeFiles;
+
+            // Apply path filter
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                // Normalize path: remove trailing slashes, ensure leading slash
+                string normalizedPath = path.TrimEnd('/');
+                if (!normalizedPath.StartsWith('/'))
+                {
+                    normalizedPath = '/' + normalizedPath;
+                }
+
+                // Join with FolderNode and filter by path
+                filterQuery = filterQuery.Where(f => f.Folder != null && f.Folder.Path == normalizedPath);
+            }
+            // If path is null/empty, include ALL files (no filter)
+
+            // Apply search filter at database level
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                filterQuery = filterQuery.Where(g => g.FileName.Contains(search));
+            }
+
+            // Apply tag filtering at database level (AND logic - must have all tags)
+            if (tagIds?.Length > 0)
+            {
+                // For each tag, ensure the gcode file has it
+                foreach (Guid tagId in tagIds)
+                {
+                    filterQuery = filterQuery.Where(g => g.Tags.Any(t => t.Id == tagId));
+                }
+            }
+
+            // Apply printer model filter at database level
+            if (printerModelId.HasValue)
+            {
+                filterQuery = filterQuery.Where(g => g.PrinterModelId == printerModelId.Value);
+            }
+
+            // Apply printerId filter at database level
+            if (printerId.HasValue)
+            {
+                filterQuery = filterQuery.Where(g => g.SourcePrinterId == printerId.Value);
+            }
+
+            // Get total count BEFORE pagination
+            int totalCount = await filterQuery.CountAsync(ct);
+
+            // Apply sorting at database level
+            var sortedQuery = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+            {
+                ("size", "desc") => filterQuery.OrderByDescending(g => g.FileSizeBytes),
+                ("size", _) => filterQuery.OrderBy(g => g.FileSizeBytes),
+                ("date", "desc") => filterQuery.OrderByDescending(g => g.UploadedAt),
+                ("date", _) => filterQuery.OrderBy(g => g.UploadedAt),
+                ("name", "desc") => filterQuery.OrderByDescending(g => g.FileName),
+                _ => filterQuery.OrderBy(g => g.FileName) // Default: name ascending
+            };
+
+            // Apply pagination
+            int skip = (page - 1) * pageSize;
+
+            // Get the IDs and order info of files that match the filters and pagination
+            var paginatedFiles = await sortedQuery
+                .Skip(skip)
+                .Take(pageSize)
+                .Select(g => new { g.Id, g.FileName, g.UploadedAt, g.FileSizeBytes })
+                .ToListAsync(ct);
+
+            // Extract IDs in order
+            var fileIds = paginatedFiles.Select(x => x.Id).ToList();
+
+            // Now load the full files WITH includes using the IDs
+            var filesByIdDict = await _db.GcodeFiles
+                .AsNoTracking()
+                .Where(g => fileIds.Contains(g.Id))
+                .Include(g => g.Tags)  // Use skip-navigation instead of TagMappings
+                .Include(g => g.PrinterModel)
+                .ToDictionaryAsync(g => g.Id, ct);
+
+            // Reconstruct list in original sort order
+            var files = fileIds
+                .Select(id => filesByIdDict[id])
+                .ToList();
+
+            return (files, totalCount);
         }
 
         public async Task<List<string>> ListSubdirectoriesAsync(string parentDirectory, CancellationToken ct)

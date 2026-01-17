@@ -72,6 +72,29 @@ namespace Farm.Infrastructure.Repositories.Model
         Task<int> CountValidAsync(CancellationToken ct);
 
         /// <summary>
+        /// Queries models with comprehensive filtering, sorting, and pagination (all at database level).
+        /// This is the efficient query method that matches the pattern used in GcodeFilesService.
+        /// </summary>
+        /// <param name="path">Optional directory path filter (e.g., "/models/mechanical"); null for all directories</param>
+        /// <param name="search">Optional search query applied to file name (case-insensitive)</param>
+        /// <param name="tagIds">Optional array of tag IDs for filtering (AND logic - model must have all tags)</param>
+        /// <param name="sortBy">Sort field: "name", "size", or "date" (default: "name")</param>
+        /// <param name="sortOrder">Sort order: "asc" or "desc" (default: "asc")</param>
+        /// <param name="page">Page number (1-based)</param>
+        /// <param name="pageSize">Number of items per page</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tuple of (models list, total count) for the query before pagination</returns>
+        Task<(List<Model3D> models, int totalCount)> QueryModelsAsync(
+            string? path,
+            string? search,
+            Guid[]? tagIds,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize,
+            CancellationToken ct);
+
+        /// <summary>
         /// Searches for models using full-text search and/or tag filtering.
         /// Supports pagination and flexible sorting.
         /// </summary>

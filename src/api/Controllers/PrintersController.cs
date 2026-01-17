@@ -800,7 +800,7 @@ public class PrintersController(
         {
             string name = dto.NewManufacturerName!.Trim();
             // ICatalogRepository does not expose GetManufacturerByName; create via CatalogService
-            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
+            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, null, null, ct);
             manufacturerId = created.Id;
         }
 

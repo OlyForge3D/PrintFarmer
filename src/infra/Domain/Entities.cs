@@ -170,6 +170,8 @@ public class Manufacturer
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string? Description { get; set; }
     public ICollection<PrinterModel> Models { get; } = new List<PrinterModel>();
     public bool IsActive { get; set; } = true;
 }
@@ -292,7 +294,7 @@ public abstract class StoredFile
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
-    public string? Tags { get; set; } // JSON array of tags
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>(); // Skip-navigation collection for modern EF Core
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     // File health status (populated by FileConsistencyAuditService)
@@ -303,6 +305,12 @@ public abstract class StoredFile
 
 public class GcodeFile : StoredFile
 {
+    /// <summary>
+    /// File extension/type derived from FileName (e.g., "gcode", "bgcode").
+    /// Computed property - not stored in database.
+    /// </summary>
+    public string FileType => System.IO.Path.GetExtension(FileName).TrimStart('.').ToLowerInvariant();
+
     public GcodeSource Source { get; set; }
     public Guid? SourcePrinterId { get; set; } // Printer it was harvested from
     public Printer? SourcePrinter { get; set; }
@@ -328,9 +336,6 @@ public class GcodeFile : StoredFile
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
-
-    // Navigation property for tags (via generic TagMapping)
-    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
 }
 
 public enum GcodeSource
@@ -431,9 +436,6 @@ public class Model3D : StoredFile
     public string? ValidationErrors { get; set; } // JSON array of validation issues
     public Guid? UploadedByUserId { get; set; }
     public User? UploadedByUser { get; set; }
-
-    // Navigation property for tags
-    public ICollection<Model3DTagMapping> TagMappings { get; set; } = new List<Model3DTagMapping>();
 }
 
 public enum ModelFileFormat
@@ -966,38 +968,7 @@ public class PasswordPolicyEntity
 }
 
 /// <summary>
-/// Tag for organizing and categorizing 3D models
-/// </summary>
-public class Model3DTag
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty; // e.g., "functional", "decorative", "tools"
-    public string? Color { get; set; } // Optional hex color for UI display (e.g., "#FF5733")
-    public string? Description { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-
-    // Navigation
-    public ICollection<Model3DTagMapping> TagMappings { get; set; } = new List<Model3DTagMapping>();
-}
-
-/// <summary>
-/// Join table for many-to-many relationship between Model3D and Model3DTag
-/// </summary>
-public class Model3DTagMapping
-{
-    public Guid Id { get; set; }
-    public Guid Model3DId { get; set; }
-    public Guid TagId { get; set; }
-    public DateTime TaggedAt { get; set; }
-
-    // Navigation properties
-    public Model3D? Model3D { get; set; }
-    public Model3DTag? Tag { get; set; }
-}
-
-/// <summary>/// Generic tag that can be applied to any taggable object (Model3D, GcodeFile, Printer, etc.)
-/// For backward compatibility, Model3DTag is maintained but shares the same tag pool as generic tags.
+/// Generic tag that can be applied to any taggable object (Model3D, GcodeFile, Printer, etc.)
 /// </summary>
 public class Tag
 {
@@ -1007,25 +978,6 @@ public class Tag
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-
-    // Navigation
-    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
-}
-
-/// <summary>
-/// Polymorphic join table for many-to-many relationship between any taggable object and Tag.
-/// The ObjectType discriminator determines what type of object is being tagged (Model3D, GcodeFile, etc.)
-/// </summary>
-public class TagMapping
-{
-    public Guid Id { get; set; }
-    public Guid TagId { get; set; }
-    public string ObjectType { get; set; } = string.Empty; // "Model3D", "GcodeFile", "Printer", etc.
-    public Guid ObjectId { get; set; } // FK to the actual object (could be Model3DId, GcodeFileId, PrinterId, etc.)
-    public DateTime TaggedAt { get; set; }
-
-    // Navigation property
-    public Tag? Tag { get; set; }
 }
 
 /// <summary>/// Queue item for G-code harvest operations. Decouples the API request from the background processing.

@@ -72,6 +72,33 @@ namespace Farm.Infrastructure.Repositories.Gcode
         Task<List<GcodeFile>> ListByDirectoryPrefixAsync(string directoryPrefix, CancellationToken ct);
 
         /// <summary>
+        /// Retrieves G-code files with comprehensive database-level filtering, sorting, and pagination.
+        /// Handles both "all files" queries (path=null) and directory-specific queries (path provided).
+        /// </summary>
+        /// <param name="path">Virtual directory path. Null/empty returns all files. Non-null returns files in that directory only.</param>
+        /// <param name="search">Optional search term for file names</param>
+        /// <param name="tagIds">Optional array of tag IDs for filtering (AND logic - file must have all tags)</param>
+        /// <param name="printerModelId">Optional filter by printer model ID</param>
+        /// <param name="printerId">Optional filter by source printer ID</param>
+        /// <param name="sortBy">Sort field: "name", "size", or "date"</param>
+        /// <param name="sortOrder">Sort direction: "asc" or "desc"</param>
+        /// <param name="page">Page number (1-based)</param>
+        /// <param name="pageSize">Number of items per page</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tuple of (files for current page, total count of all matching files)</returns>
+        Task<(List<GcodeFile> files, int totalCount)> QueryFilesAsync(
+            string? path,
+            string? search,
+            Guid[]? tagIds,
+            Guid? printerModelId,
+            Guid? printerId,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize,
+            CancellationToken ct);
+
+        /// <summary>
         /// Retrieves all unique subdirectories under a given parent directory.
         /// Returns only direct children (one level down from parent).
         /// Used for hierarchical UI directory browsing.

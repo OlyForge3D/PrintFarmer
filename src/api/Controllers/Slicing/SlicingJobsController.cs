@@ -12,12 +12,14 @@ public class SlicingJobsController(
     IUnifiedLoggingService logger,
     Infrastructure.Temp.ITempPathProvider tempPathProvider,
     ISlicerOrchestrator orchestrator,
-    IFileManagementService fileManagementService) : ControllerBase
+    IFileManagementService fileManagementService,
+    IStoredFileOperationsService fileOperations) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Infrastructure.Temp.ITempPathProvider _tempPathProvider = tempPathProvider;
     private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
     // Ensure temp directory exists during construction - field exists only for side effect
 #pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
@@ -64,7 +66,7 @@ public class SlicingJobsController(
         {
             JobId = j.JobId,
             // Prefer plural form in emitted URLs
-            GcodeUrl = j.Status == SlicingJobStatus.Completed ? $"/api/slicer/jobs/{j.JobId}/gcode" : string.Empty,
+            GcodeUrl = j.Status == SlicingJobStatus.Completed ? _fileOperations.BuildSlicerJobGcodeUrl(Guid.Parse(j.JobId)) : string.Empty,
             PrintTime = j.EstimatedPrintTime ?? 0,
             FilamentUsed = j.EstimatedFilamentUsed ?? 0,
             LayerCount = j.LayerCount ?? 0,
