@@ -384,12 +384,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "VC4_300 IDEX", "RatRig V-Core 4 IDEX 300" },
                 { "VC4_400 IDEX", "RatRig V-Core 4 IDEX 400" },
                 { "VC4_500 IDEX", "RatRig V-Core 4 IDEX 500" },
-                                
-                // Other manufacturers
-                { "SaladFork 120", "SaladFork 120" },
-                { "SaladFork 180", "SaladFork 180" },
-                { "Micron 120", "Micron 120" },
-                { "Micron 180", "Micron 180" },
             };
 
             // Seed OrcaSlicer aliases
