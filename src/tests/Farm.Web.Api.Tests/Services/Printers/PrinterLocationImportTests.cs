@@ -28,6 +28,7 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 public class PrinterLocationImportTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
+    private AsyncServiceScope _scope;
     private IPrintersService _printersService;
     private ILocationService _locationService;
     private AppDbContext _dbContext;
@@ -42,10 +43,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var scope = _factory.Services.CreateAsyncScope();
-        _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
-        _locationService = scope.ServiceProvider.GetRequiredService<ILocationService>();
+        _scope = _factory.Services.CreateAsyncScope();
+        _dbContext = _scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _printersService = _scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        _locationService = _scope.ServiceProvider.GetRequiredService<ILocationService>();
 
         // Create test locations - use unique IDs to avoid conflicts
         _testLocation1 = new Location
@@ -91,7 +92,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        _dbContext?.Dispose();
+        await _scope.DisposeAsync();
         _factory?.Dispose();
     }
 
