@@ -315,12 +315,6 @@ public class CatalogService : ICatalogService
             return true;
         }
 
-        if (ex.InnerException?.GetType().FullName?.Contains("MySqlException", StringComparison.OrdinalIgnoreCase) == true &&
-            ex.InnerException?.GetType().GetProperty("Number")?.GetValue(ex.InnerException) is int num && num == 1062)
-        {
-            return true;
-        }
-
         string msg = ex.InnerException?.Message ?? ex.Message;
         if (!string.IsNullOrEmpty(msg) && (msg.Contains("NameLowered", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("IX_Manufacturers_NameLowered", StringComparison.OrdinalIgnoreCase)))

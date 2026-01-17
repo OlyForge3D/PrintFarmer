@@ -18,7 +18,7 @@ namespace Farm.Infrastructure.Settings
 
         [SettingDisplay(Name = "Database Provider", Description = "Type of database provider.", InputType = SettingInputType.Select)]
         [Required]
-        [RegularExpression("SqlServer|Postgres|MySql|Sqlite")]
+        [RegularExpression("SqlServer|Postgres|Sqlite")]
         [JsonPropertyName("provider")]
         public string Provider { get; set; } = "Sqlite";
 

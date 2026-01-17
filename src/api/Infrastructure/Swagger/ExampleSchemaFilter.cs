@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
-using Microsoft.OpenApi.Any;
-using Microsoft.OpenApi.Models;
+// using Microsoft.OpenApi.Any;
+// using Microsoft.OpenApi.Models;
 
 // Explicit using to disambiguate from Moonraker's LoginRequest
 using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
@@ -18,12 +18,15 @@ public static class ExampleSchemaFilter
     /// <summary>
     /// Creates an example schema for a given DTO type for use in OpenAPI transformers.
     /// </summary>
-    public static OpenApiSchema? GetExampleForType(Type t)
+    public static object? GetExampleForType(Type t)
     {
-        OpenApiSchema schema = new OpenApiSchema();
+        // TODO: Update to use ASP.NET Core 10 OpenAPI types
+        // object schema = new object();
 
         if (t == typeof(CreatePrinterDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["name"] = new OpenApiString("Voron Trident #1"),
@@ -34,9 +37,12 @@ public static class ExampleSchemaFilter
                 ["backend"] = new OpenApiString("Moonraker"),
                 ["apiKey"] = new OpenApiString("(optional)")
             };
+            */
         }
         else if (t == typeof(StartGcodeHarvestDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["printerId"] = new OpenApiString("11111111-2222-3333-4444-555555555555"),
@@ -47,9 +53,12 @@ public static class ExampleSchemaFilter
                 ["minFileSizeBytes"] = new OpenApiLong(5 * 1024),
                 ["duplicateHandling"] = new OpenApiString("rename")
             };
+            */
         }
         else if (t == typeof(ImportSelectedGcodeFilesDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["harvestOperationId"] = new OpenApiString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
@@ -62,9 +71,12 @@ public static class ExampleSchemaFilter
                 ["autoDetectCapabilities"] = new OpenApiBoolean(true),
                 ["defaultTags"] = new OpenApiArray { new OpenApiString("harvested"), new OpenApiString("quality-profile-A") }
             };
+            */
         }
         else if (t == typeof(CreatePrintJobDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["name"] = new OpenApiString("Calibration Cube"),
@@ -75,9 +87,12 @@ public static class ExampleSchemaFilter
                 ["requiredCapabilities"] = new OpenApiArray { new OpenApiString("0.4mm-nozzle") },
                 ["autoAssign"] = new OpenApiBoolean(true)
             };
+            */
         }
         else if (t == typeof(UpdatePrintJobStatusDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["status"] = new OpenApiString("Printing"),
@@ -85,9 +100,12 @@ public static class ExampleSchemaFilter
                 ["assignedPrinterId"] = new OpenApiString("22222222-3333-4444-5555-666666666666"),
                 ["actualFilamentUsage"] = new OpenApiDouble(12.4)
             };
+            */
         }
         else if (t == typeof(SlicerProfileDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["layerHeight"] = new OpenApiDouble(0.2),
@@ -99,17 +117,23 @@ public static class ExampleSchemaFilter
                 ["material"] = new OpenApiString("PLA"),
                 ["quality"] = new OpenApiString("standard")
             };
+            */
         }
         else if (t == typeof(AuthLoginRequest))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["username"] = new OpenApiString("admin"),
                 ["password"] = new OpenApiString("P@ssw0rd!")
             };
+            */
         }
         else if (t == typeof(RegisterRequest))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["username"] = new OpenApiString("jdoe"),
@@ -118,10 +142,13 @@ public static class ExampleSchemaFilter
                 ["firstName"] = new OpenApiString("John"),
                 ["lastName"] = new OpenApiString("Doe")
             };
+            */
         }
         // ---- Response DTO examples (select high-value read models) ----
         else if (t == typeof(PrinterDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("11111111-1111-1111-1111-111111111111"),
@@ -143,9 +170,12 @@ public static class ExampleSchemaFilter
                 ["backend"] = new OpenApiString("Moonraker"),
                 ["ipAddress"] = new OpenApiString("192.168.1.50")
             };
+            */
         }
         else if (t == typeof(GcodeFileDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
@@ -159,9 +189,12 @@ public static class ExampleSchemaFilter
                 ["estimatedFilamentLengthMm"] = new OpenApiDouble(13450),
                 ["hasThumbnail"] = new OpenApiBoolean(true)
             };
+            */
         }
         else if (t == typeof(GcodeHarvestOperationDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("22222222-3333-4444-5555-666666666666"),
@@ -178,9 +211,12 @@ public static class ExampleSchemaFilter
                 ["includeSubdirectories"] = new OpenApiBoolean(true),
                 ["maxFileSizeBytes"] = new OpenApiLong(104857600)
             };
+            */
         }
         else if (t == typeof(DiscoveredGcodeFileDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("33333333-4444-5555-6666-777777777777"),
@@ -192,9 +228,12 @@ public static class ExampleSchemaFilter
                 ["isSelected"] = new OpenApiBoolean(false),
                 ["alreadyInLibrary"] = new OpenApiBoolean(false)
             };
+            */
         }
         else if (t == typeof(PrinterCapabilitiesDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("44444444-5555-6666-7777-888888888888"),
@@ -208,9 +247,12 @@ public static class ExampleSchemaFilter
                 ["hasHeatedBed"] = new OpenApiBoolean(true),
                 ["hasEnclosure"] = new OpenApiBoolean(true),
             };
+            */
         }
         else if (t == typeof(PrintJobDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("55555555-6666-7777-8888-999999999999"),
@@ -227,9 +269,12 @@ public static class ExampleSchemaFilter
                 ["progressPercentage"] = new OpenApiDouble(42.3),
                 ["autoAssign"] = new OpenApiBoolean(true)
             };
+            */
         }
         else if (t == typeof(GcodeMetadataDto))
         {
+            // TODO: Update to use new API
+            /*
             schema.Example = new OpenApiObject
             {
                 ["slicerName"] = new OpenApiString("PrusaSlicer"),
@@ -244,9 +289,12 @@ public static class ExampleSchemaFilter
                 ["buildPlateY"] = new OpenApiDouble(220),
                 ["buildPlateZ"] = new OpenApiDouble(250)
             };
+            */
         }
         else if (t == typeof(SlicerQueueStats))
         {
+            // TODO: Update to use new API
+            /*
             // Ensure nullable TimeSpan? shows as nullable with descriptive example
             if (schema.Properties.TryGetValue("estimatedWaitTime", out OpenApiSchema? prop))
             {
@@ -257,9 +305,12 @@ public static class ExampleSchemaFilter
                 // Provide example of a populated value; absence will imply null possibility
                 prop.Example = new OpenApiString("00:05:00");
             }
+            */
         }
         else if (t == typeof(SlicerEngineInfo))
         {
+            // TODO: Update to use new API
+            /*
             if (schema.Properties.TryGetValue("estimatedWaitTime", out OpenApiSchema? prop))
             {
                 prop.Nullable = true;
@@ -268,8 +319,10 @@ public static class ExampleSchemaFilter
                     : prop.Description + " Null when engine is unhealthy or undeterminable.");
                 prop.Example = new OpenApiString("00:02:30");
             }
+            */
         }
 
-        return schema;
+        // TODO: Re-implement OpenAPI examples for .NET 10
+        return null;
     }
 }

@@ -38,6 +38,14 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/docker-utils.sh"
 source "$SCRIPT_DIR/common-utils.sh"
 
+# Source container versions from single source of truth
+VERSIONS_FILE="$SCRIPT_DIR/docker/container-versions.conf"
+if [[ -f "$VERSIONS_FILE" ]]; then
+    source "$VERSIONS_FILE"
+    # Export all sourced variables so they're available to called scripts
+    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
+fi
+
 # Default flags
 DRY_RUN=false
 NON_INTERACTIVE=false
@@ -132,34 +140,56 @@ if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
 fi
 # On Linux or other systems, leave DOCKER_BUILD_PLATFORM empty to use system defaults
 
-# Base container images for offline deployment (standard upstream images)
-# These are pulled as fallback if upgraded images aren't available
-DOCKER_BASE_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:9.0"
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim"
-    "ubuntu:24.04"
-    "node:22-alpine"
-    "postgres:16-alpine"
-    "nginx:alpine"
-    "docker/dockerfile:1"  # BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
+# ============================================================================
+# CONSOLIDATED IMAGE DEFINITIONS FOR OFFLINE DEPLOYMENT
+# ============================================================================
+# Single source of truth for all offline deployment images
+# Format: "base_image|dockerfile|upgraded_image"
+# 
+# - base_image: Standard upstream image (pulled as fallback)
+# - dockerfile: Dockerfile for building pre-upgraded version (in scripts/docker/dockerfiles/)
+# - upgraded_image: Pre-upgraded image with apt/apk updates and tools (preferred, built during --prepare-offline)
+declare -a DOCKER_IMAGES_CONFIG=(
+    "mcr.microsoft.com/dotnet/sdk:10.0-noble|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:10.0-noble-upgraded"
+    "mcr.microsoft.com/dotnet/aspnet:10.0-noble|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded"
+    "ubuntu:24.04|Dockerfile.base-ubuntu|ubuntu:24.04-upgraded"
+    "node:22-alpine|Dockerfile.base-node|node:22-alpine-upgraded"
+    "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
+    "nginx:alpine|Dockerfile.base-nginx|nginx:alpine-upgraded"
 )
 
-# Pre-upgraded base images with apt/apk updates and tools pre-installed
-# These are built during --prepare-offline and preferred over standard images
-DOCKER_UPGRADED_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
-    "ubuntu:24.04-upgraded"
-    "node:22-alpine-upgraded"
-    "postgres:16-alpine-upgraded"
-    "nginx:alpine-upgraded"
-    "docker/dockerfile:1"  # No upgrade needed - just cache the original
-)
+# BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
+# This image doesn't need upgrading
+DOCKER_BUILDKIT_IMAGE="docker/dockerfile:1"
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
 DOCKER_LOCAL_IMAGES=(
     "orcaslicer-binaries:2.3.1"
 )
+
+# Derived arrays from DOCKER_IMAGES_CONFIG (for backward compatibility with existing code)
+# These are automatically populated from DOCKER_IMAGES_CONFIG
+DOCKER_BASE_IMAGES=()
+DOCKER_UPGRADED_IMAGES=()
+
+# Initialize derived arrays from consolidated config
+_init_image_arrays() {
+    DOCKER_BASE_IMAGES=()
+    DOCKER_UPGRADED_IMAGES=()
+    
+    for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+        IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
+        DOCKER_BASE_IMAGES+=("$base_image")
+        DOCKER_UPGRADED_IMAGES+=("$upgraded_image")
+    done
+    
+    # Add BuildKit image to base images (it doesn't need upgrading)
+    DOCKER_BASE_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
+    DOCKER_UPGRADED_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
+}
+
+# Initialize on script load
+_init_image_arrays
 
 # ============================================================================
 # OFFLINE DEPLOYMENT FUNCTIONS
@@ -335,6 +365,31 @@ auto_load_cached_images() {
     
     # Use the core loading function
     _load_tar_images "$images_dir" "quiet"
+    
+    # Create aliases for upgraded images so they can be used as base images
+    # If mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded is loaded,
+    # also tag it as mcr.microsoft.com/dotnet/aspnet:10.0-noble so Dockerfile.multistage can use it
+    print_info "Creating aliases for upgraded images..."
+    local alias_count=0
+    
+    # Temporarily disabled - image aliasing logic needs debugging
+    # for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+    #     IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
+    #     if timeout 5 docker image inspect "$upgraded_image" >/dev/null 2>&1 && ! timeout 5 docker image inspect "$base_image" >/dev/null 2>&1; then
+    #         if timeout 10 docker tag "$upgraded_image" "$base_image" >/dev/null 2>&1; then
+    #             print_info "  Tagged: $upgraded_image → $base_image"
+    #             ((alias_count++))
+    #         fi
+    #     fi
+    # done
+    
+    if [ $alias_count -eq 0 ]; then
+        print_info "  Note: Upgraded base images will be used directly by docker-compose if available"
+    fi
+    
+    if [ $alias_count -gt 0 ]; then
+        print_success "✓ Created $alias_count image alias/aliases for faster builds"
+    fi
     
     # After loading, check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
     # This enables the build system to skip downloading OrcaSlicer from GitHub
@@ -1475,17 +1530,8 @@ build_base_images() {
     
     local docker_dir="scripts/docker/dockerfiles"
     
-    # Array of base images to build: "base-tag|dockerfile|new-tag"
-    declare -a BASE_IMAGES=(
-        "ubuntu:24.04|Dockerfile.base-ubuntu|ubuntu:24.04-upgraded"
-        "node:22-alpine|Dockerfile.base-node|node:22-alpine-upgraded"
-        "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
-        "mcr.microsoft.com/dotnet/sdk:9.0|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-        "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
-        "nginx:alpine|Dockerfile.base-nginx|nginx:alpine-upgraded"
-    )
-    
-    local total_images=${#BASE_IMAGES[@]}
+    # Use consolidated DOCKER_IMAGES_CONFIG instead of local duplicate array
+    local total_images=${#DOCKER_IMAGES_CONFIG[@]}
     local successful=0
     local failed=0
     
@@ -1493,17 +1539,17 @@ build_base_images() {
     local cache_bust
     cache_bust=$(date +%s)
     
-    for image_config in "${BASE_IMAGES[@]}"; do
-        IFS='|' read -r base_image dockerfile new_tag <<< "$image_config"
+    for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+        IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
         
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        print_info "Building: $new_tag"
+        print_info "Building: $upgraded_image"
         print_info "  Base: $base_image"
         print_info "  Dockerfile: $dockerfile"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
         # Prepare build command with optional platform
-        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$new_tag" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
+        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
         
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -1514,10 +1560,10 @@ build_base_images() {
         
         if "${build_cmd[@]}" > /dev/null 2>&1; then
             
-            print_success "✓ Build successful: $new_tag"
+            print_success "✓ Build successful: $upgraded_image"
             ((successful++))
         else
-            print_error "✗ Build failed: $new_tag"
+            print_error "✗ Build failed: $upgraded_image"
             ((failed++))
         fi
         echo

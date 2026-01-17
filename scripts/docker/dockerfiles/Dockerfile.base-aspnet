@@ -1,9 +1,9 @@
 # Dockerfile for pre-caching upgraded .NET Aspnet base image with tools
-# Usage: docker build -f dockerfiles/Dockerfile.base-aspnet -t mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded .
-# Then: docker save -o aspnet-9.0-bookworm-slim-upgraded.tar mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded
+# Usage: docker build -f dockerfiles/Dockerfile.base-aspnet -t mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded .
+# Then: docker save -o aspnet-10.0-noble-upgraded.tar mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded
 # This image is used as base for api-runtime, slicer-base, and printer-discovery stages
 
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
 
 # Cache-busting argument: change this to force fresh apt updates
 # Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Update, upgrade, and install all required runtime tools in one layer
 # API runtime needs: curl, iputils-ping, iproute2, net-tools, dnsutils
-# Slicer runtime needs: curl, wget, ca-certificates, libgtk-3-0, libgl1-mesa-glx, 
+# Slicer runtime needs: curl, wget, ca-certificates, libgtk-3-0, libglx0 (replaces libgl1-mesa-glx in Ubuntu 24.04), 
 #                       libglib2.0-0, libstdc++6, libopengl0, xvfb, fuse, 
 #                       squashfs-tools, file, p7zip-full
 RUN echo "Cache bust: ${CACHE_BUST}" && \
@@ -23,8 +23,8 @@ RUN echo "Cache bust: ${CACHE_BUST}" && \
     apt-get install -y --no-install-recommends \
         # Network tools (for API and diagnostics)
         curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
-        # OrcaSlicer runtime dependencies
-        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        # OrcaSlicer runtime dependencies (libglx0 replaces libgl1-mesa-glx in Ubuntu 24.04 Noble)
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
         # AppImage extraction and virtual display
         xvfb fuse squashfs-tools file p7zip-full && \
     apt-get clean && \
@@ -32,8 +32,9 @@ RUN echo "Cache bust: ${CACHE_BUST}" && \
 
 # Pre-create common user (appuser with UID/GID 1000)
 # This user is used by api-runtime and slicer-base stages
-RUN groupadd --gid 1000 appuser && \
-    useradd --uid 1000 --gid appuser --create-home appuser
+# Group/user may already exist in some base images, so ignore errors and continue
+RUN groupadd --gid 1000 appuser 2>/dev/null || true && \
+    useradd --uid 1000 --gid appuser --create-home appuser 2>/dev/null || true
 
 # Set a label to identify this as a pre-cached image
 LABEL prebuild="true" \

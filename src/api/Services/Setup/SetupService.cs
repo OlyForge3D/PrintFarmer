@@ -185,7 +185,7 @@ public class SetupService : ISetupService
     public SetupConfigurationOptions GetConfigurationOptions()
     {
         return new SetupConfigurationOptions(
-            DatabaseProviders: new[] { "SQLite", "SQL Server", "PostgreSQL", "MySQL" },
+            DatabaseProviders: new[] { "SQLite", "SQL Server", "PostgreSQL" },
             DefaultNetworkRanges: new[] { "192.168.1.0/24", "192.168.0.0/24", "10.0.0.0/24" },
             RecommendedPorts: new Dictionary<string, int>
             {

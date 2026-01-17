@@ -69,10 +69,6 @@ public static class ServiceCollectionExtensions
             {
                 _ = options.UseNpgsql(connectionString);
             }
-            else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-            }
             else
             {
                 _ = options.UseSqlite(connectionString);
@@ -90,10 +86,6 @@ public static class ServiceCollectionExtensions
         else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
         {
             _ = optionsBuilder.UseNpgsql(connectionString);
-        }
-        else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
-        {
-            _ = optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
         }
         else
         {

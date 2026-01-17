@@ -622,7 +622,6 @@ public class SetupServiceTests
     {
         // Act
         var options = _service.GetConfigurationOptions();
-
         // Assert
         Assert.NotNull(options);
         Assert.NotNull(options.DatabaseProviders);
@@ -630,7 +629,6 @@ public class SetupServiceTests
         Assert.Contains("SQLite", options.DatabaseProviders);
         Assert.Contains("SQL Server", options.DatabaseProviders);
         Assert.Contains("PostgreSQL", options.DatabaseProviders);
-        Assert.Contains("MySQL", options.DatabaseProviders);
     }
 
     [Fact]

@@ -1,6 +1,8 @@
 <Project>
 
   <PropertyGroup>
+    <!-- Disable Central Package Management - using per-project version management -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AnalysisMode>All</AnalysisMode>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>

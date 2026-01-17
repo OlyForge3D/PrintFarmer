@@ -91,10 +91,6 @@ public static class ModelBuilderExtensions
         {
             ConfigureSqlServerOptimizations(modelBuilder);
         }
-        else if (provider.Contains("mysql", StringComparison.OrdinalIgnoreCase))
-        {
-            ConfigureMySqlOptimizations(modelBuilder);
-        }
     }
 
     private static void ConfigureSqliteOptimizations(ModelBuilder modelBuilder)
@@ -118,11 +114,5 @@ public static class ModelBuilderExtensions
             _ = entity.HasIndex(p => p.Backend)
                 .HasDatabaseName("IX_Printers_Backend_Covering");
         });
-    }
-
-    private static void ConfigureMySqlOptimizations(ModelBuilder modelBuilder)
-    {
-        // MySQL-specific optimizations
-        // MySQL has good indexing capabilities
     }
 }

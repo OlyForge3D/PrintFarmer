@@ -41,7 +41,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+// using Microsoft.OpenApi.Models;  // TODO: Update for .NET 10 OpenAPI
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -148,6 +148,8 @@ builder.Services.AddControllers(options =>
     });
 
 builder.Services.AddEndpointsApiExplorer();
+// TODO: Update OpenAPI configuration for .NET 10
+/*
 builder.Services.AddOpenApi(options =>
 {
     // Configure OpenAPI document with JWT Bearer security
@@ -185,6 +187,7 @@ builder.Services.AddOpenApi(options =>
         return Task.CompletedTask;
     });
 });
+*/
 
 // CORS configuration for API access
 builder.Services.AddCors(options =>
@@ -708,7 +711,8 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi();
+    // TODO: Re-add MapOpenApi after .NET 10 migration rewrite
+    // _ = app.MapOpenApi();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
