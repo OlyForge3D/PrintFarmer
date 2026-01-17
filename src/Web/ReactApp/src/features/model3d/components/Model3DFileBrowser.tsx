@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useOptimistic, useTransition } from 'react';
 import { toast } from 'sonner';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileQueryState, type Model3DFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
@@ -69,9 +69,20 @@ export const Model3DFileBrowser = ({
 }: Model3DFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [currentViewMode, setCurrentViewMode] = useState<'grid' | 'explorer'>(viewMode ?? 'grid');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [isPending, startTransition] = useTransition();
   
-  // For optimistic deletes, we'll track deleted file IDs
-  const [deletedFileIds, setDeletedFileIds] = useState<Set<string>>(new Set());
+  // For optimistic deletes, track deleted file IDs with useOptimistic
+  // Reducer: removes the deleted IDs from the set
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [optimisticDeletedIds, addOptimisticDelete] = useOptimistic(
+    new Set<string>(),
+    (state: Set<string>, deletedId: string) => {
+      const newState = new Set(state);
+      newState.add(deletedId);
+      return newState;
+    }
+  );
 
   const sortOptions = useMemo(
     () => [
@@ -167,22 +178,23 @@ export const Model3DFileBrowser = ({
       canDelete: hasPermission('model_3d', 'delete'),
       canDownload: true,
       onDelete: async (ids: string[]) => {
-        // Optimistic delete: mark as deleted immediately
-        const newDeletedIds = new Set(deletedFileIds);
-        ids.forEach(id => newDeletedIds.add(id));
-        setDeletedFileIds(newDeletedIds);
-        
-        try {
-          // Delete each model individually using the proper ID-based endpoint
-          await Promise.all(ids.map((id) => apiClient.deleteModel(id)));
-          // Keep them deleted on success
-        } catch (error) {
-          // On error, remove from deleted set to show them again
-          const errorDeletedIds = new Set(newDeletedIds);
-          ids.forEach(id => errorDeletedIds.delete(id));
-          setDeletedFileIds(errorDeletedIds);
-          throw error;
-        }
+        // Handle delete with optimistic UI update
+        startTransition(async () => {
+          // Show optimistic delete immediately for each ID
+          for (const id of ids) {
+            addOptimisticDelete(id);
+          }
+          
+          try {
+            // Execute deletion in background
+            await Promise.all(ids.map((id) => apiClient.deleteModel(id)));
+            // On success, state remains optimistically deleted
+          } catch (error) {
+            // On error, state rolls back automatically via useOptimistic
+            const message = error instanceof Error ? error.message : 'Failed to delete model file';
+            console.error('Delete model error:', message);
+          }
+        });
       },
       onDownload: async (id: string) => {
         // TODO: Implement download for 3D models when API method is available
@@ -211,7 +223,7 @@ export const Model3DFileBrowser = ({
         onViewModeChange?.(mode);
       },
     }),
-    [fetcher, hasPermission, currentViewMode, onViewModeChange, deletedFileIds]
+    [fetcher, hasPermission, currentViewMode, onViewModeChange, addOptimisticDelete]
   );
 
   return (

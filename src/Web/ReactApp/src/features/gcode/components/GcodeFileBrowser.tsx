@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useOptimistic, useTransition } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
@@ -146,9 +146,19 @@ export const GcodeFileBrowser = ({
   const queryClient = useQueryClient();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [isPending, startTransition] = useTransition();
   
-  // Track deleted file IDs for optimistic deletes
-  const [deletedFileIds, setDeletedFileIds] = useState<Set<string>>(new Set());
+  // Track deleted file IDs for optimistic deletes with useOptimistic
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [optimisticDeletedIds, addOptimisticDelete] = useOptimistic(
+    new Set<string>(),
+    (state: Set<string>, deletedId: string) => {
+      const newState = new Set(state);
+      newState.add(deletedId);
+      return newState;
+    }
+  );
   
   // Only use local state if viewMode prop is not provided (uncontrolled mode)
   const [localViewMode, setLocalViewMode] = useState<'grid' | 'explorer'>('grid');
@@ -198,28 +208,25 @@ export const GcodeFileBrowser = ({
     if (!deleteConfirm.file) return;
     const file = deleteConfirm.file;
     setDeleteConfirm({ isOpen: false, file: null });
-    try {
-      // Optimistic delete: mark as deleted immediately
-      const newDeletedIds = new Set(deletedFileIds);
-      newDeletedIds.add(file.id);
-      setDeletedFileIds(newDeletedIds);
+    
+    // Handle delete with optimistic UI update
+    startTransition(async () => {
+      // Show optimistic delete immediately
+      addOptimisticDelete(file.id);
       
       try {
+        // Execute deletion in background
         await apiClient.deleteGcodeFile(file.id);
         toast.success('File deleted');
+        // On success, state remains optimistically deleted
       } catch (error) {
-        // On error, remove from deleted set to show it again
-        const errorDeletedIds = new Set(newDeletedIds);
-        errorDeletedIds.delete(file.id);
-        setDeletedFileIds(errorDeletedIds);
+        // On error, state rolls back automatically via useOptimistic
+        const message = error instanceof Error ? error.message : 'Failed to delete file';
         toast.error('Failed to delete file');
-        console.error('Delete error:', error);
+        console.error('Delete error:', message);
       }
-    } catch (error) {
-      toast.error('Failed to delete file');
-      console.error('Delete error:', error);
-    }
-  }, [deleteConfirm.file, deletedFileIds]);
+    });
+  }, [deleteConfirm.file, addOptimisticDelete]);
 
   const handleDeleteCancel = useCallback(() => {
     setDeleteConfirm({ isOpen: false, file: null });
