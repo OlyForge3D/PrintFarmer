@@ -46,6 +46,9 @@ if [[ -f "$VERSIONS_FILE" ]]; then
     export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
 fi
 
+# Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
+DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
+
 # Default flags
 DRY_RUN=false
 NON_INTERACTIVE=false
@@ -149,13 +152,16 @@ fi
 # - base_image: Standard upstream image (pulled as fallback)
 # - dockerfile: Dockerfile for building pre-upgraded version (in scripts/docker/dockerfiles/)
 # - upgraded_image: Pre-upgraded image with apt/apk updates and tools (preferred, built during --prepare-offline)
+#
+# Note: SDK_TAG and ASPNET_TAG are sourced from container-versions.conf
+# Update that file to change .NET versions for future migrations
 declare -a DOCKER_IMAGES_CONFIG=(
-    "mcr.microsoft.com/dotnet/sdk:10.0-noble|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:10.0-noble-upgraded"
-    "mcr.microsoft.com/dotnet/aspnet:10.0-noble|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded"
-    "ubuntu:24.04|Dockerfile.base-ubuntu|ubuntu:24.04-upgraded"
-    "node:22-alpine|Dockerfile.base-node|node:22-alpine-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}-upgraded"
+    "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}-upgraded"
+    "ubuntu:${UBUNTU_TAG:-24.04}|Dockerfile.base-ubuntu|ubuntu:${UBUNTU_TAG:-24.04}-upgraded"
+    "node:${NODE_TAG:-22-alpine}|Dockerfile.base-node|node:${NODE_TAG:-22-alpine}-upgraded"
     "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
-    "nginx:alpine|Dockerfile.base-nginx|nginx:alpine-upgraded"
+    "nginx:${NGINX_TAG:-alpine}|Dockerfile.base-nginx|nginx:${NGINX_TAG:-alpine}-upgraded"
 )
 
 # BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
@@ -367,8 +373,8 @@ auto_load_cached_images() {
     _load_tar_images "$images_dir" "quiet"
     
     # Create aliases for upgraded images so they can be used as base images
-    # If mcr.microsoft.com/dotnet/aspnet:10.0-noble-upgraded is loaded,
-    # also tag it as mcr.microsoft.com/dotnet/aspnet:10.0-noble so Dockerfile.multistage can use it
+    # If upgraded images are loaded (e.g., aspnet:${ASPNET_TAG}-upgraded),
+    # also tag them as the base image (e.g., aspnet:${ASPNET_TAG}) so Dockerfile.multistage can use them
     print_info "Creating aliases for upgraded images..."
     local alias_count=0
     
@@ -1141,8 +1147,8 @@ pull_base_images() {
     print_header "📥 Pulling Base Container Images"
     
     print_info "Pulling essential images for PrintFarmer core services:"
-    print_info "  - .NET SDK 9.0 (multi-stage builds during deployment)"
-    print_info "  - .NET ASP.NET 9.0 (API runtime)"
+    print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
+    print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
     print_info "  - Node.js 22 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
     print_info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
@@ -2750,12 +2756,13 @@ check_dotnet_sdk() {
         DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
         print_success ".NET SDK found: $DOTNET_VERSION"
         
-        # Check if version meets minimum requirement (9.0)
-        if [[ "$DOTNET_VERSION" =~ ^9\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
+        # Check if version meets minimum requirement (uses DOTNET_MAJOR_VERSION from config)
+        local major_ver="${DOTNET_MAJOR_VERSION%%.*}"  # Extract just the major number (e.g., "10")
+        if [[ "$DOTNET_VERSION" =~ ^${major_ver}\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
             print_success ".NET SDK version is compatible"
         else
             print_warning ".NET SDK version $DOTNET_VERSION detected"
-            print_warning "PrintFarmer requires .NET 9.0 or later"
+            print_warning "PrintFarmer requires .NET $DOTNET_MAJOR_VERSION or later"
             print_info "Docker builds will still work, but local development may have issues"
         fi
     else
@@ -2808,8 +2815,8 @@ install_dotnet_sdk() {
     chmod +x "$install_script"
     print_success "Installation script downloaded"
     
-    # Install .NET SDK 9.0 (required version)
-    print_info "Installing .NET SDK 9.0..."
+    # Install .NET SDK (required version from container-versions.conf)
+    print_info "Installing .NET SDK $DOTNET_MAJOR_VERSION..."
     print_info "This may take a few minutes..."
     
     if [ "$OS" = "windows" ]; then
@@ -2821,8 +2828,8 @@ install_dotnet_sdk() {
     fi
     
     # Run installation script
-    if ./"$install_script" --channel 9.0 --install-dir "$HOME/.dotnet"; then
-        print_success ".NET SDK 9.0 installed successfully"
+    if ./"$install_script" --channel "$DOTNET_MAJOR_VERSION" --install-dir "$HOME/.dotnet"; then
+        print_success ".NET SDK $DOTNET_MAJOR_VERSION installed successfully"
         
         # Add to PATH for current session
         export PATH="$HOME/.dotnet:$PATH"
@@ -4006,13 +4013,14 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
-# Docker Base Image Tags (override Dockerfile defaults for normal deployments)
+# Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
+# If not set by config file, these defaults are used
 # Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
-SDK_TAG=9.0
-ASPNET_TAG=9.0-noble
-NODE_TAG=22-alpine
-NGINX_TAG=alpine
-UBUNTU_TAG=24.04
+SDK_TAG=${SDK_TAG:-10.0-noble}
+ASPNET_TAG=${ASPNET_TAG:-10.0-noble}
+NODE_TAG=${NODE_TAG:-22-alpine}
+NGINX_TAG=${NGINX_TAG:-alpine}
+UBUNTU_TAG=${UBUNTU_TAG:-24.04}
 
 # Standalone Service Image Tags (override compose template defaults for normal deployments)
 NGINX_IMAGE=nginx:alpine
@@ -6445,7 +6453,8 @@ main() {
         fi
 
         # Minimal set of images used in compose; expand as needed
-        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim" "node:22-alpine")
+        # Uses ASPNET_TAG from container-versions.conf for consistency
+        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG}" "node:22-alpine")
         for img in "${images[@]}"; do
             print_info "Pulling $img ($platform_arg)"
             if docker pull $platform_arg "$img"; then
