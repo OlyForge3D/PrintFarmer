@@ -53,7 +53,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
 
             // Parse the main model file
             XmlDocument mainModelXml = new XmlDocument();
-            using (var modelStream = mainModelEntry.Open())
+            using (var modelStream = await mainModelEntry.OpenAsync(cancellationToken))
             {
                 await Task.Run(() => mainModelXml.Load(modelStream), cancellationToken);
             }
@@ -109,7 +109,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
 
                 // Parse the referenced object file
                 XmlDocument refXmlDoc = new XmlDocument();
-                using (var refStream = refEntry.Open())
+                using (var refStream = await refEntry.OpenAsync(cancellationToken))
                 {
                     await Task.Run(() => refXmlDoc.Load(refStream), cancellationToken);
                 }

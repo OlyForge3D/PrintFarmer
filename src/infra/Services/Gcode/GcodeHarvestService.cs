@@ -574,7 +574,7 @@ public class GcodeHarvestService(
         int linesRead = 0;
         int maxLines = 500;
 
-        while (linesRead < maxLines && !reader.EndOfStream)
+        while (linesRead < maxLines)
         {
             string? line = await reader.ReadLineAsync(ct);
             if (line == null)

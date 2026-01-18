@@ -19,7 +19,9 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork;
 /// </summary>
 public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
 {
+#pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+#pragma warning restore CA2213
     private IGcodeRepository? _gcodeRepository;
     private IHarvestRepository? _harvestRepository;
     private IPrintersRepository? _printersRepository;
@@ -86,8 +88,8 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
     }
 
     /// <summary>
-    /// Disposes the Unit of Work and its shared DbContext synchronously.
-    /// Note: DbContext is injected via dependency injection and should be managed by DI container.
+    /// Disposes the Unit of Work.
+    /// Note: DbContext is injected and managed by DI container, not disposed here.
     /// </summary>
     public void Dispose()
     {
@@ -95,8 +97,8 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
     }
 
     /// <summary>
-    /// Asynchronously disposes the Unit of Work and its shared DbContext.
-    /// Note: DbContext is injected via dependency injection and should be managed by DI container.
+    /// Asynchronously disposes the Unit of Work.
+    /// Note: DbContext is injected and managed by DI container, not disposed here.
     /// </summary>
     public async ValueTask DisposeAsync()
     {

@@ -22,7 +22,7 @@ public interface IUnifiedLoggingService
     void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null);
 }
 
-public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger, IPrintFarmerTelemetryService telemetry) : IUnifiedLoggingService, IDisposable
+public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger) : IUnifiedLoggingService, IDisposable
 {
     private readonly ILogger<UnifiedLoggingService> _logger = logger;
     private readonly ActivitySource _activitySource = new ActivitySource("PrintFarmer.Logging");

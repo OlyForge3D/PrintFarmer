@@ -51,14 +51,11 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="unitOfWork">Unit of Work for database operations</param>
 /// <param name="backendFactory">Factory for creating backend clients</param>
 /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
-/// <param name="circuitBreaker">Circuit breaker for fault tolerance</param>
 /// <param name="catalogService">Service for manufacturer/model lookups</param>
 /// <param name="httpClientFactory">Factory for HTTP clients</param>
 /// <param name="logger">Logging service for diagnostics</param>
-/// <param name="mapper">AutoMapper for DTO transformations</param>
 /// <param name="broadcaster">SignalR broadcaster for real-time updates</param>
 /// <param name="coordinator">Coordinator for parallel status queries</param>
-/// <param name="fallbackService">Fallback service for offline status</param>
 /// <param name="statusClientFactory">Factory for backend-specific status clients</param>
 /// <param name="statusCache">Cache reader for SignalR-updated status</param>
 /// <param name="locationService">Service for location management</param>
@@ -67,14 +64,11 @@ public class PrintersService(
     IUnitOfWork unitOfWork,
     IBackendClientFactory backendFactory,
     IBackendCapabilityFactory capabilityFactory,
-    ICircuitBreakerService circuitBreaker,
     Catalog.ICatalogService catalogService,
     IHttpClientFactory httpClientFactory,
     Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger,
-    AutoMapper.IMapper mapper,
     IPrinterStatusBroadcaster broadcaster,
     IMultiPrinterStatusCoordinator coordinator,
-    IPrinterStatusFallbackService fallbackService,
     IPrinterStatusClientFactory statusClientFactory,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService) : IPrintersService
