@@ -170,7 +170,8 @@ public class SystemLogLoggerProvider : ILoggerProvider
         {
             _logQueue.Dispose();
             _cts.Dispose();
-            _processingTask?.Dispose();
+            // Tasks don't need explicit disposal in modern .NET
+            // Disposing incomplete tasks throws InvalidOperationException in .NET 10+
         }
     }
 }
