@@ -27,9 +27,8 @@ namespace Farm.Web.Api.Services.FolderManagement
     /// Initializes a new instance of the FolderManagementService with required dependencies.
     /// </remarks>
     /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
-    /// <param name="logger">Unified logging service for operation tracking and debugging</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
-    public class FolderManagementService(IUnitOfWork unitOfWork, IUnifiedLoggingService logger) : IFolderManagementService
+    public class FolderManagementService(IUnitOfWork unitOfWork) : IFolderManagementService
     {
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 

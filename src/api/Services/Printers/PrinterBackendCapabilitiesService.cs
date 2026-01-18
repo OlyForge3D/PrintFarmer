@@ -12,8 +12,7 @@ namespace Farm.Web.Api.Services.Printers;
 /// </summary>
 public class PrinterBackendCapabilitiesService(
     IPrintersRepository repo,
-    IBackendCapabilityFactory capabilityFactory,
-    IUnifiedLoggingService logger) : IPrinterBackendCapabilitiesService
+    IBackendCapabilityFactory capabilityFactory) : IPrinterBackendCapabilitiesService
 {
     private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));

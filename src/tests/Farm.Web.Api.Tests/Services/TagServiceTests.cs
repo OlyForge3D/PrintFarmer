@@ -12,19 +12,16 @@ namespace Farm.Web.Api.Tests.Services;
 public class TagServiceTests
 {
     private readonly Mock<ITagRepository> _tagRepository;
-    private readonly Mock<IUnitOfWork> _unitOfWork;
     private readonly Mock<IUnifiedLoggingService> _logger;
     private readonly TagService _service;
 
     public TagServiceTests()
     {
         _tagRepository = new Mock<ITagRepository>();
-        _unitOfWork = new Mock<IUnitOfWork>();
         _logger = new Mock<IUnifiedLoggingService>();
 
         _service = new TagService(
             _tagRepository.Object,
-            _unitOfWork.Object,
             _logger.Object);
     }
 

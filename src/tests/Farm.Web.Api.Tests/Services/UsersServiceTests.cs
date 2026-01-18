@@ -20,7 +20,6 @@ public class UsersServiceTests
     private readonly Mock<IUsersRepository> _usersRepositoryMock;
     private readonly Mock<IAuthenticationService> _authenticationServiceMock;
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly IUsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
 
@@ -29,8 +28,7 @@ public class UsersServiceTests
         _usersRepositoryMock = new Mock<IUsersRepository>(MockBehavior.Strict);
         _authenticationServiceMock = new Mock<IAuthenticationService>(MockBehavior.Strict);
         _passwordHashingServiceMock = new Mock<IPasswordHashingService>(MockBehavior.Strict);
-        _loggerMock = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
-        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object, _loggerMock.Object);
+        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object);
     }
 
     #region GetUsersAsync Tests

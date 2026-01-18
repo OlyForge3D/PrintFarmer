@@ -599,7 +599,7 @@ namespace Farm.Web.Api.Services.Slicing
                 }
                 if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
                 {
-                    list = new List<MachineProfileListItemDto>();
+                    list = [];
                     machinesByModelId[pmid] = list;
                 }
                 list.Add(m);

@@ -29,7 +29,6 @@ namespace Farm.Web.Api.Services.Tags
     /// </remarks>
     public class TagService(
         ITagRepository tagRepository,
-        IUnitOfWork unitOfWork,
         IUnifiedLoggingService logger) : ITagService
     {
         private readonly ITagRepository _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));

@@ -804,7 +804,7 @@ public abstract class BasePreviewRenderer
         var vertexFaces = new List<int>[mesh.Vertices.Count];
         for (int i = 0; i < vertexFaces.Length; i++)
         {
-            vertexFaces[i] = new List<int>();
+            vertexFaces[i] = [];
         }
 
         for (int fi = 0; fi < mesh.Faces.Count; fi++)

@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Services.SlicerServices
     /// Database-backed implementation of ISlicerJobQueue which delegates to ISliceJobRepository/EfSliceJobRepository
     /// This provides equivalent semantics for the HTTP-based worker claim/renew/complete flow used by HttpJobPollerService.
     /// </summary>
-    public class DbSlicerJobQueue(ISliceJobRepository repo, IUnifiedLoggingService logger) : ISlicerJobQueue
+    public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
     {
         private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
 

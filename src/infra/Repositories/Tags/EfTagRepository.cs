@@ -225,7 +225,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 .Where(m => m.Tags.Any(t => t.Id == tagId))
                 .Select(m => m.Id)
                 .ToListAsync(ct),
-            _ => new List<Guid>()
+            _ => []
         };
     }
 
@@ -236,7 +236,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     {
         var tagIdList = tagIds.ToList();
         return tagIdList.Count == 0
-            ? new List<Guid>()
+            ? []
             : objectType switch
             {
                 "GcodeFile" => await _dbContext.GcodeFiles
@@ -247,7 +247,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                     .Where(m => tagIdList.All(tagId => m.Tags.Any(t => t.Id == tagId)))
                     .Select(m => m.Id)
                     .ToListAsync(ct),
-                _ => new List<Guid>()
+                _ => []
             };
     }
 
@@ -258,7 +258,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     {
         var tagIdList = tagIds.ToList();
         return tagIdList.Count == 0
-            ? new List<Guid>()
+            ? []
             : objectType switch
             {
                 "GcodeFile" => await _dbContext.GcodeFiles
@@ -269,7 +269,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                     .Where(m => m.Tags.Any(t => tagIdList.Contains(t.Id)))
                     .Select(m => m.Id)
                     .ToListAsync(ct),
-                _ => new List<Guid>()
+                _ => []
             };
     }
 
@@ -442,7 +442,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 .Where(m => m.Id == objectId)
                 .SelectMany(m => m.Tags)
                 .ToListAsync(ct),
-            _ => new List<Tag>()
+            _ => []
         };
     }
 
@@ -494,7 +494,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             "Model3D" => await _dbContext.Models3D
                 .Select(m => m.Id)
                 .ToListAsync(ct),
-            _ => new List<Guid>()
+            _ => []
         };
     }
 }

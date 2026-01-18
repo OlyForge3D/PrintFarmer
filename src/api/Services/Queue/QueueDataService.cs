@@ -86,11 +86,9 @@ namespace Farm.Web.Api.Services.Queue
     /// Initializes a new instance of the QueueDataService with required dependencies.
     /// </remarks>
     /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
-    /// <param name="logger">Unified logging service for operation tracking and debugging</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public class QueueDataService(
-        IUnitOfWork unitOfWork,
-        IUnifiedLoggingService logger) : IQueueDataService
+        IUnitOfWork unitOfWork) : IQueueDataService
     {
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 

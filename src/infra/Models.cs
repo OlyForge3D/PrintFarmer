@@ -1830,7 +1830,7 @@ public class FilamentProfileDto
     public int BedTemperature { get; set; } = 60;
     public int PrintSpeed { get; set; } = 50;
     [JsonPropertyName("compatible_printers")]
-    public IList<string> CompatiblePrinters { get; set; } = new List<string>();
+    public IList<string> CompatiblePrinters { get; set; } = [];
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
     /// <summary>
@@ -1861,7 +1861,7 @@ public class ProcessProfileDto
     public bool Supports { get; set; }
     public string? Description { get; set; }
     [JsonPropertyName("compatible_printers")]
-    public IList<string> CompatiblePrinters { get; set; } = new List<string>();
+    public IList<string> CompatiblePrinters { get; set; } = [];
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
     /// <summary>
@@ -1946,19 +1946,19 @@ public class PrinterModelProfilesDto
     /// <summary>
     /// Machine profiles for this model (multiple per model: one per nozzle size variant)
     /// </summary>
-    public IList<MachineProfileDto> MachineProfiles { get; set; } = new List<MachineProfileDto>();
+    public IList<MachineProfileDto> MachineProfiles { get; set; } = [];
 
     /// <summary>
     /// Filament profiles applicable to this model.
     /// Multiple profiles per model (e.g., PLA, PETG, ABS variants)
     /// </summary>
-    public IList<FilamentProfileDto> FilamentProfiles { get; set; } = new List<FilamentProfileDto>();
+    public IList<FilamentProfileDto> FilamentProfiles { get; set; } = [];
 
     /// <summary>
     /// Process/print profiles applicable to this model.
     /// Multiple profiles per model (e.g., draft, normal, quality variants)
     /// </summary>
-    public IList<ProcessProfileDto> ProcessProfiles { get; set; } = new List<ProcessProfileDto>();
+    public IList<ProcessProfileDto> ProcessProfiles { get; set; } = [];
 }
 
 /// <summary>
@@ -2015,16 +2015,16 @@ public class ManufacturerBundleDto
     public string Description { get; set; } = string.Empty;
 
     [JsonPropertyName("machine_model_list")]
-    public IList<ManufacturerBundleProfileEntry> MachineModelList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> MachineModelList { get; set; } = [];
 
     [JsonPropertyName("machine_list")]
-    public IList<ManufacturerBundleProfileEntry> MachineList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> MachineList { get; set; } = [];
 
     [JsonPropertyName("process_list")]
-    public IList<ManufacturerBundleProfileEntry> ProcessList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> ProcessList { get; set; } = [];
 
     [JsonPropertyName("filament_list")]
-    public IList<ManufacturerBundleProfileEntry> FilamentList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> FilamentList { get; set; } = [];
 }
 
 /// <summary>

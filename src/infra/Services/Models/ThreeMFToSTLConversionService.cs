@@ -59,7 +59,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             }
 
             // Collect component data with bounding boxes for grid layout
-            var components = new List<ComponentData>();
+            List<ComponentData> components = [];
 
             // Parse component references and convert them
             var namespaceManager = new XmlNamespaceManager(mainModelXml.NameTable);
@@ -159,8 +159,8 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             ApplyGridLayout(components, padding);
 
             // Merge all positioned components into a single mesh
-            var allVertices = new List<(float x, float y, float z)>();
-            var allTriangles = new List<(int v1, int v2, int v3)>();
+            List<(float x, float y, float z)> allVertices = [];
+            List<(int v1, int v2, int v3)> allTriangles = [];
 
             foreach (var component in components)
             {
@@ -195,8 +195,8 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
     /// </summary>
     private (List<(float x, float y, float z)> vertices, List<(int v1, int v2, int v3)> triangles) ExtractMeshData(XmlDocument xmlDoc)
     {
-        var vertices = new List<(float x, float y, float z)>();
-        var triangles = new List<(int v1, int v2, int v3)>();
+        List<(float x, float y, float z)> vertices = [];
+        List<(int v1, int v2, int v3)> triangles = [];
 
         var namespaceManager = new XmlNamespaceManager(xmlDoc.NameTable);
         namespaceManager.AddNamespace("model", "http://schemas.microsoft.com/3dmanufacturing/core/2015/02");
@@ -279,7 +279,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
             }
 
             // Apply transformation to each vertex
-            var transformed = new List<(float x, float y, float z)>();
+            List<(float x, float y, float z)> transformed = [];
             foreach (var (x, y, z) in vertices)
             {
                 // 4x3 matrix multiplication: [x' y' z'] = [x y z 1] * M^T

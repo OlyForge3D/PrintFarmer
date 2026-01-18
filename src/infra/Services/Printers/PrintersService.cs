@@ -621,7 +621,7 @@ public class PrintersService(
     public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
-        var dtos = new List<PrinterFastDto>();
+        List<PrinterFastDto> dtos = [];
 
         foreach (var p in items)
         {
@@ -699,7 +699,7 @@ public class PrintersService(
     public async Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
-        var dtos = new List<CompletePrinterDto>();
+        List<CompletePrinterDto> dtos = [];
         var cachedStatuses = _statusCache.GetAllStatuses();
 
         foreach (var p in items)
@@ -2255,10 +2255,10 @@ public class PrintersService(
     {
         ArgumentNullException.ThrowIfNull(printers);
 
-        List<PrinterDto> createdPrinters = new List<PrinterDto>();
+        List<PrinterDto> createdPrinters = [];
         Dictionary<int, string> errorResults = new Dictionary<int, string>();
         int skippedCount = 0;
-        List<dynamic> results = new List<dynamic>();
+        List<dynamic> results = [];
 
         // Process each printer sequentially to avoid DbContext concurrency issues
         for (int i = 0; i < printers.Length; i++)
@@ -2523,8 +2523,8 @@ public class PrintersService(
     /// </summary>
     private async Task<CreatePrinterDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
     {
-        List<CreatePrinterDto> printers = new List<CreatePrinterDto>();
-        List<string> errors = new List<string>();
+        List<CreatePrinterDto> printers = [];
+        List<string> errors = [];
 
         try
         {

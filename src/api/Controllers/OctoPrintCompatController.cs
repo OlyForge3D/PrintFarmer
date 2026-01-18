@@ -18,8 +18,7 @@ namespace Farm.Web.Api.Controllers
         ILogger<OctoPrintCompatController> logger,
         IOctoPrintAuthService authService,
         IOptions<OctoPrintSettings> settings,
-        IGcodeFilesService gcodeFilesService,
-        IPrintJobQueueService printJobQueueService) : ControllerBase
+        IGcodeFilesService gcodeFilesService) : ControllerBase
     {
         private readonly ILogger<OctoPrintCompatController> _logger = logger;
         private readonly IOctoPrintAuthService _authService = authService;

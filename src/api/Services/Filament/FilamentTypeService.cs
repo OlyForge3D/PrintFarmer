@@ -35,13 +35,11 @@ namespace Farm.Web.Api.Services.Filament
     /// <param name="repo">Repository for filament type data persistence and retrieval</param>
     /// <param name="startupStatus">Service for checking application startup status</param>
     /// <param name="spoolmanService">Service for integrating with Spoolman inventory system</param>
-    /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public class FilamentTypeService(
         IFilamentTypeRepository repo,
         IStartupStatus startupStatus,
-        ISpoolmanService spoolmanService,
-        IUnifiedLoggingService logger) : IFilamentTypeService
+        ISpoolmanService spoolmanService) : IFilamentTypeService
     {
         private readonly IFilamentTypeRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
         private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));

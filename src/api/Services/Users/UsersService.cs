@@ -28,13 +28,11 @@ namespace Farm.Web.Api.Services.Users
     /// <param name="users">Repository for user data persistence and retrieval</param>
     /// <param name="authService">Service for authentication operations and token management</param>
     /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
-    /// <param name="logger">Unified logging service for audit trails and operation tracking</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public class UsersService(
         IUsersRepository users,
         IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        IUnifiedLoggingService logger) : IUsersService
+        IPasswordHashingService passwordHashingService) : IUsersService
     {
         private readonly IUsersRepository _users = users ?? throw new ArgumentNullException(nameof(users));
         private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));

@@ -30,8 +30,6 @@ namespace Farm.Web.Api.Services.SignalR
     /// Allows the API to receive and cache real-time status updates from backend services.
     /// </summary>
     public sealed class PrinterStatusHubListener(
-        IHubContext<PrinterHub> hubContext,
-        Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader cache,
         IUnifiedLoggingService logger) : IPrinterStatusHubListener
     {
         private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));

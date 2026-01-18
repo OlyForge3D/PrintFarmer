@@ -36,7 +36,7 @@ public class PrintJobQueueAdapterTests
         jobQueueMock.Setup(s => s.AddJobToQueueAsync(It.IsAny<QueuePrintJobDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(returned);
 
-        var adapter = new PrintJobQueueAdapter(jobQueueMock.Object, loggerMock.Object);
+        var adapter = new PrintJobQueueAdapter(jobQueueMock.Object);
 
         var enqueueReq = new EnqueuePrintJobRequest(requestDto.GcodeFileId, null, "normal", 0.4, "PLA");
 

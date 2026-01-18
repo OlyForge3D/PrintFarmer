@@ -10,7 +10,7 @@ using Farm.Web.Api.Services.Queue;
 
 namespace Farm.Web.Api.Services.PrintJobQueue;
 
-public class PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService, IUnifiedLoggingService logger) : IPrintJobQueueService
+public class PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService) : IPrintJobQueueService
 {
     private readonly Services.Queue.IJobQueueService _jobQueueService = jobQueueService;
 

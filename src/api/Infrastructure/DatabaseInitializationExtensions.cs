@@ -98,7 +98,7 @@ public static class DatabaseInitializationExtensions
                             {
                                 using DbCommand cmd = conn.CreateCommand();
                                 cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
-                                List<string> found = new List<string>();
+                                List<string> found = [];
                                 using DbDataReader reader = await cmd.ExecuteReaderAsync();
                                 while (await reader.ReadAsync())
                                 {
@@ -163,7 +163,7 @@ public static class DatabaseInitializationExtensions
                         {
                             using DbCommand cmd = conn.CreateCommand();
                             cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
-                            List<string> tables = new List<string>();
+                            List<string> tables = [];
                             using DbDataReader reader = await cmd.ExecuteReaderAsync();
                             while (await reader.ReadAsync())
                             {
