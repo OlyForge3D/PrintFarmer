@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap script for Ubuntu (20.04/22.04/24.04)
-# Installs prerequisites to build and run PrintFarmer (dotnet 9.0.302, Node.js >=20.19, npm, git, build-essential)
+# Installs prerequisites to build and run PrintFarmer (dotnet 10.0.x, Node.js >=20.19, npm, git, build-essential)
 # Designed to be idempotent and safe to run multiple times.
 
 set -euo pipefail
@@ -31,7 +31,7 @@ done
 # Repository root for smoke-tests
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
+REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.x}
 # Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
 NODE_VERSION=${NODE_VERSION:-20}
 
@@ -138,12 +138,12 @@ if ! command -v dotnet >/dev/null 2>&1; then
   fi
 
   run_priv "apt-get update -y"
-  # Install the SDK (this will pick a matching 9.x package). We try to request the SDK meta-package.
-  if run_priv "apt-get install -y dotnet-sdk-9"; then
+  # Install the SDK (this will pick a matching 10.x package). We try to request the SDK meta-package.
+  if run_priv "apt-get install -y dotnet-sdk-10"; then
     print ".NET SDK installed from apt (dotnet --info follows)"
     dotnet --info || true
   else
-    print "apt install of dotnet-sdk-9 failed; trying manual dotnet-install.sh script"
+    print "apt install of dotnet-sdk-10 failed; trying manual dotnet-install.sh script"
     # Fallback to repo-local dotnet-install.sh if present
     if [ -f "${REPO_ROOT:-/root}/dotnet-install.sh" ]; then
       print "Using repo-local dotnet-install.sh to install ${REQ_DOTNET_VERSION}"
