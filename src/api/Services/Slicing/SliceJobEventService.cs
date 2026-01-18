@@ -42,18 +42,12 @@ public interface ISliceJobEventService
     Task NotifyJobCancelledAsync(SliceJob job, CancellationToken cancellationToken = default);
 }
 
-public class SliceJobEventService : ISliceJobEventService
+public class SliceJobEventService(
+    IHubContext<SlicerProgressHub> hubContext,
+    IUnifiedLoggingService logger) : ISliceJobEventService
 {
-    private readonly IHubContext<SlicerProgressHub> _hubContext;
-    private readonly IUnifiedLoggingService _logger;
-
-    public SliceJobEventService(
-        IHubContext<SlicerProgressHub> hubContext,
-        IUnifiedLoggingService logger)
-    {
-        _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IHubContext<SlicerProgressHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task NotifyJobQueuedAsync(SliceJob job, CancellationToken cancellationToken = default)
     {

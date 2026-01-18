@@ -8,14 +8,9 @@ namespace Farm.Infrastructure.Repositories.Workers;
 /// <summary>
 /// EF Core implementation of IWorkerRepository
 /// </summary>
-public class EfWorkerRepository : IWorkerRepository
+public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 {
-    private readonly AppDbContext _context;
-
-    public EfWorkerRepository(AppDbContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
     public async Task AddAsync(Worker worker)
     {

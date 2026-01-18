@@ -27,21 +27,12 @@ namespace Farm.Web.Api.Services.Tags
     /// Tag names are normalized to PascalCase to prevent duplicates with different casing.
     /// See TAG_NORMALIZATION_IMPLEMENTATION.md for complete details.
     /// </remarks>
-    public class TagService : ITagService
+    public class TagService(
+        ITagRepository tagRepository,
+        IUnifiedLoggingService logger) : ITagService
     {
-        private readonly ITagRepository _tagRepository;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IUnifiedLoggingService _logger;
-
-        public TagService(
-            ITagRepository tagRepository,
-            IUnitOfWork unitOfWork,
-            IUnifiedLoggingService logger)
-        {
-            _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly ITagRepository _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         /// <summary>
         /// Retrieves all tags in the system.
@@ -74,18 +65,15 @@ namespace Farm.Web.Api.Services.Tags
             try
             {
                 Tag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
-                if (tag == null)
-                {
-                    return null;
-                }
-
-                return new TagDto
-                {
-                    Id = tag.Id,
-                    Name = tag.Name,
-                    Color = tag.Color,
-                    Description = tag.Description
-                };
+                return tag == null
+                    ? null
+                    : new TagDto
+                    {
+                        Id = tag.Id,
+                        Name = tag.Name,
+                        Color = tag.Color,
+                        Description = tag.Description
+                    };
             }
             catch (Exception ex)
             {
@@ -743,12 +731,7 @@ namespace Farm.Web.Api.Services.Tags
                 }
 
                 var tagIdList = tagIds.ToList();
-                if (tagIdList.Count == 0)
-                {
-                    return [];
-                }
-
-                return await FilterObjectsByTagsAsync(objectType, tagIdList, null, requireAllTags: false, ct);
+                return tagIdList.Count == 0 ? [] : await FilterObjectsByTagsAsync(objectType, tagIdList, null, requireAllTags: false, ct);
             }
             catch (Exception ex)
             {
@@ -970,12 +953,7 @@ namespace Farm.Web.Api.Services.Tags
             IEnumerable<string> pascalWords = words.Select(word =>
             {
                 // Safety check in case word is somehow empty
-                if (string.IsNullOrEmpty(word))
-                {
-                    return "";
-                }
-
-                return char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : "");
+                return string.IsNullOrEmpty(word) ? "" : char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : "");
             });
 
             return string.Concat(pascalWords);

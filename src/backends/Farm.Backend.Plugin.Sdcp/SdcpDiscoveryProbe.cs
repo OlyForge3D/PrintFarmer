@@ -103,10 +103,6 @@ internal static class JsonElementExtensions
 {
     public static JsonElement? GetPropertyOrNull(this JsonElement element, string propertyName)
     {
-        if (element.TryGetProperty(propertyName, out JsonElement property))
-        {
-            return property;
-        }
-        return null;
+        return element.TryGetProperty(propertyName, out JsonElement property) ? property : null;
     }
 }

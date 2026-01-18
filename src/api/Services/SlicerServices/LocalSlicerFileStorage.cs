@@ -324,12 +324,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFileUrl(string key)
     {
-        if (string.IsNullOrEmpty(_options.BaseUrl))
-        {
-            return $"file://{GetFilePath(key)}";
-        }
-
-        return $"{_options.BaseUrl.TrimEnd('/')}/{key}";
+        return string.IsNullOrEmpty(_options.BaseUrl) ? $"file://{GetFilePath(key)}" : $"{_options.BaseUrl.TrimEnd('/')}/{key}";
     }
 
     private string GetFileUrlFromKeyOrUrl(string keyOrUrl)
@@ -386,11 +381,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             return "text/plain";
         }
-        if (extension.Equals(".log", StringComparison.OrdinalIgnoreCase))
-        {
-            return "text/plain";
-        }
-        return "application/octet-stream";
+        return extension.Equals(".log", StringComparison.OrdinalIgnoreCase) ? "text/plain" : "application/octet-stream";
     }
 
     private static string GenerateETag(FileInfoData fileInfo)

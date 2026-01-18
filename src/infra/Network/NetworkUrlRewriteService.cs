@@ -65,6 +65,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
             RuntimeEnvironment.WindowsNative => RewriteForWindowsNative(uri),
             RuntimeEnvironment.MacOSNative => RewriteForMacOSNative(uri),
             RuntimeEnvironment.LinuxNative => RewriteForLinuxNative(uri),
+            RuntimeEnvironment.Unknown => throw new System.NotImplementedException(),
             _ => uri.ToString()
         };
     }
@@ -122,22 +123,11 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
         }
 
         // Detect OS
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return RuntimeEnvironment.WindowsNative;
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return RuntimeEnvironment.MacOSNative;
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            return RuntimeEnvironment.LinuxNative;
-        }
-
-        return RuntimeEnvironment.Unknown;
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? RuntimeEnvironment.WindowsNative
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? RuntimeEnvironment.MacOSNative
+            : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? RuntimeEnvironment.LinuxNative : RuntimeEnvironment.Unknown;
     }
 
     private static bool IsDockerDesktop()

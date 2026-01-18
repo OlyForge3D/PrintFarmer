@@ -77,16 +77,10 @@ public interface IRetryService
     TimeSpan CalculateRetryDelay(int attemptNumber, RetryPolicy policy);
 }
 
-public class RetryService : IRetryService
+public class RetryService(AppDbContext dbContext, ILogger<RetryService> logger) : IRetryService
 {
-    private readonly AppDbContext _dbContext;
-    private readonly ILogger<RetryService> _logger;
-
-    public RetryService(AppDbContext dbContext, ILogger<RetryService> logger)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly ILogger<RetryService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task<RetryPolicy> GetRetryPolicyAsync(CancellationToken cancellationToken = default)

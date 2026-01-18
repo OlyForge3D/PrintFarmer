@@ -59,11 +59,7 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
     public async Task<IActionResult> GetAsync(Guid id)
     {
         SlicerService? svc = await _service.GetAsync(id, HttpContext?.RequestAborted ?? CancellationToken.None);
-        if (svc == null)
-        {
-            return NotFound();
-        }
-        return Ok(svc);
+        return svc == null ? NotFound() : Ok(svc);
     }
 
 
@@ -92,11 +88,7 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
     {
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         string? newApiKey = await _service.RotateApiKeyAsync(id, ct);
-        if (newApiKey == null)
-        {
-            return NotFound();
-        }
-        return Ok(new { id, apiKey = newApiKey });
+        return newApiKey == null ? NotFound() : Ok(new { id, apiKey = newApiKey });
     }
 }
 

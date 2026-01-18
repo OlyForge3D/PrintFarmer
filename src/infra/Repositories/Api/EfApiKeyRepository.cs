@@ -5,26 +5,20 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Infrastructure.Repositories.Api
+namespace Farm.Infrastructure.Repositories.Api;
+
+public class EfApiKeyRepository(AppDbContext db)
 {
-    public class EfApiKeyRepository
+    private readonly AppDbContext _db = db;
+
+    public async Task<ApiKey?> GetByKeyHashAsync(string keyHash)
     {
-        private readonly AppDbContext _db;
+        return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == keyHash && a.IsActive);
+    }
 
-        public EfApiKeyRepository(AppDbContext db)
-        {
-            _db = db;
-        }
-
-        public async Task<ApiKey?> GetByKeyHashAsync(string keyHash)
-        {
-            return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == keyHash && a.IsActive);
-        }
-
-        public async Task AddAsync(ApiKey key)
-        {
-            await _db.Set<ApiKey>().AddAsync(key);
-            await _db.SaveChangesAsync();
-        }
+    public async Task AddAsync(ApiKey key)
+    {
+        await _db.Set<ApiKey>().AddAsync(key);
+        await _db.SaveChangesAsync();
     }
 }

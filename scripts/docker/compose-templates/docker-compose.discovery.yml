@@ -22,11 +22,11 @@ services:
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: printer-discovery-runtime
       args:
-        SDK_TAG: ${SDK_TAG:-9.0}
-        ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
-        NODE_TAG: ${NODE_TAG:-22-alpine}
-        NGINX_TAG: ${NGINX_TAG:-alpine}
-        UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
     image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
     # Use bridge network for microservices deployments (host network reserved for specific scenarios)

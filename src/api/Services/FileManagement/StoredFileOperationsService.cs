@@ -6,14 +6,9 @@ namespace Farm.Web.Api.Services.FileManagement;
 /// Implementation of unified stored file operations.
 /// Consolidates common file and thumbnail path management between GCode and 3D Models.
 /// </summary>
-public class StoredFileOperationsService : IStoredFileOperationsService
+public class StoredFileOperationsService(IFileManagementService fileManagementService) : IStoredFileOperationsService
 {
-    private readonly IFileManagementService _fileManagementService;
-
-    public StoredFileOperationsService(IFileManagementService fileManagementService)
-    {
-        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    }
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
 
     /// <summary>
     /// Builds the complete file path from a StoredFile entity.
@@ -42,12 +37,7 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        if (string.IsNullOrEmpty(file.ThumbnailFileName))
-        {
-            return null;
-        }
-
-        return Path.Combine(file.FilePath, file.ThumbnailFileName);
+        return string.IsNullOrEmpty(file.ThumbnailFileName) ? null : Path.Combine(file.FilePath, file.ThumbnailFileName);
     }
 
     /// <summary>
@@ -56,12 +46,9 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     /// </summary>
     public string GenerateThumbnailFileName(Guid fileId, string thumbnailExtension)
     {
-        if (string.IsNullOrEmpty(thumbnailExtension))
-        {
-            throw new ArgumentException("Thumbnail extension cannot be null or empty", nameof(thumbnailExtension));
-        }
-
-        return $"{fileId}_thumb{thumbnailExtension}";
+        return string.IsNullOrEmpty(thumbnailExtension)
+            ? throw new ArgumentException("Thumbnail extension cannot be null or empty", nameof(thumbnailExtension))
+            : $"{fileId}_thumb{thumbnailExtension}";
     }
 
     /// <summary>
@@ -70,12 +57,9 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     /// </summary>
     public string ExtractFileNameForStorage(string fullPath)
     {
-        if (string.IsNullOrEmpty(fullPath))
-        {
-            throw new ArgumentException("Full path cannot be null or empty", nameof(fullPath));
-        }
-
-        return Path.GetFileName(fullPath);
+        return string.IsNullOrEmpty(fullPath)
+            ? throw new ArgumentException("Full path cannot be null or empty", nameof(fullPath))
+            : Path.GetFileName(fullPath);
     }
 
     /// <summary>
@@ -103,12 +87,7 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     /// </summary>
     public string BuildModel3DFileUrl(Guid modelId, ModelFileFormat format)
     {
-        if (format == ModelFileFormat.TMF) // 3MF format needs conversion
-        {
-            return $"/api/3d-models/file/{modelId}?forceStl=true";
-        }
-
-        return $"/api/3d-models/file/{modelId}";
+        return format == ModelFileFormat.TMF ? $"/api/3d-models/file/{modelId}?forceStl=true" : $"/api/3d-models/file/{modelId}";
     }
 
     /// <summary>
@@ -173,12 +152,7 @@ public class StoredFileOperationsService : IStoredFileOperationsService
     /// </summary>
     public bool FileExistsAndIsSafe(string fullPath, string storageRoot)
     {
-        if (string.IsNullOrEmpty(fullPath) || !_fileManagementService.IsSafePath(fullPath, storageRoot))
-        {
-            return false;
-        }
-
-        return File.Exists(fullPath);
+        return string.IsNullOrEmpty(fullPath) || !_fileManagementService.IsSafePath(fullPath, storageRoot) ? false : File.Exists(fullPath);
     }
 
     /// <summary>

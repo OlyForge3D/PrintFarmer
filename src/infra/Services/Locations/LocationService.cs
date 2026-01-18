@@ -352,11 +352,7 @@ public class LocationService : ILocationService
         try
         {
             // Verify location exists
-            var location = await FindByIdAsync(locationId, ct);
-            if (location == null)
-            {
-                throw new KeyNotFoundException($"Location with ID {locationId} not found");
-            }
+            var location = await FindByIdAsync(locationId, ct) ?? throw new KeyNotFoundException($"Location with ID {locationId} not found");
 
             // In a real implementation, we would update the printer entity
             // This requires access to the printer repository or context

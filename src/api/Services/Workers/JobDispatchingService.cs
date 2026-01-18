@@ -8,19 +8,13 @@ namespace Farm.Web.Api.Services.Workers;
 /// <summary>
 /// Background service for continuously dispatching queued jobs to available workers
 /// </summary>
-public class JobDispatchingService : BackgroundService
+public class JobDispatchingService(
+    IServiceProvider serviceProvider,
+    IUnifiedLoggingService logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(5);
-
-    public JobDispatchingService(
-        IServiceProvider serviceProvider,
-        IUnifiedLoggingService logger)
-    {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

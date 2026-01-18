@@ -82,12 +82,7 @@ public class LocationsController(
             }
 
             var location = await _locationService.GetLocationDetailsAsync(id, ct);
-            if (location == null)
-            {
-                return NotFound(new { message = "Location not found" });
-            }
-
-            return Ok(location);
+            return location == null ? NotFound(new { message = "Location not found" }) : Ok(location);
         }
         catch (InvalidOperationException)
         {
@@ -175,12 +170,7 @@ public class LocationsController(
             }
 
             var location = await _locationService.UpdateLocationAsync(id, request, ct);
-            if (location == null)
-            {
-                return NotFound(new { message = "Location not found" });
-            }
-
-            return Ok(location);
+            return location == null ? NotFound(new { message = "Location not found" }) : Ok(location);
         }
         catch (InvalidOperationException)
         {
@@ -216,12 +206,7 @@ public class LocationsController(
             }
 
             var success = await _locationService.DeleteLocationAsync(id, ct);
-            if (!success)
-            {
-                return NotFound(new { message = "Location not found" });
-            }
-
-            return NoContent();
+            return !success ? NotFound(new { message = "Location not found" }) : NoContent();
         }
         catch (InvalidOperationException)
         {

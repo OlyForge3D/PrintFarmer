@@ -186,14 +186,12 @@ public class JobDispatcherRetryTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             _attempts++;
-            if (_attempts < 3)
-            {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            return _attempts < 3
+                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
                 {
                     Content = new StringContent("Transient failure")
-                });
-            }
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+                })
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         }
     }
     private class FlakyHttpClientFactory : IHttpClientFactory

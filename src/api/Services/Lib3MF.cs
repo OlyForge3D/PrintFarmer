@@ -3506,14 +3506,9 @@ namespace Lib3MF
     }
 
 
-    public class CBase : IDisposable
+    public class CBase(IntPtr NewHandle) : IDisposable
     {
-        protected IntPtr Handle;
-
-        public CBase(IntPtr NewHandle)
-        {
-            Handle = NewHandle;
-        }
+        protected IntPtr Handle = NewHandle;
 
         protected virtual void Dispose(bool disposing)
         {
@@ -3561,12 +3556,8 @@ namespace Lib3MF
 
     }
 
-    public class CWriter : CBase
+    public class CWriter(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CWriter(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void WriteToFile(String AFilename)
         {
             byte[] byteFilename = Encoding.UTF8.GetBytes(AFilename + char.MinValue);
@@ -3672,12 +3663,8 @@ namespace Lib3MF
 
     }
 
-    public class CReader : CBase
+    public class CReader(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CReader(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void ReadFromFile(String AFilename)
         {
             byte[] byteFilename = Encoding.UTF8.GetBytes(AFilename + char.MinValue);
@@ -3770,12 +3757,8 @@ namespace Lib3MF
 
     }
 
-    public class CPackagePart : CBase
+    public class CPackagePart(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CPackagePart(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetPath()
         {
             UInt32 sizePath = 0;
@@ -3799,12 +3782,8 @@ namespace Lib3MF
 
     }
 
-    public class CResource : CBase
+    public class CResource(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CResource(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetResourceID()
         {
             UInt32 resultUniqueResourceID = 0;
@@ -3850,12 +3829,8 @@ namespace Lib3MF
 
     }
 
-    public class CResourceIterator : CBase
+    public class CResourceIterator(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CResourceIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public bool MoveNext()
         {
             Byte resultHasNext = 0;
@@ -3898,12 +3873,8 @@ namespace Lib3MF
 
     }
 
-    public class CSliceStackIterator : CResourceIterator
+    public class CSliceStackIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CSliceStackIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CSliceStack GetCurrentSliceStack()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3914,12 +3885,8 @@ namespace Lib3MF
 
     }
 
-    public class CObjectIterator : CResourceIterator
+    public class CObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CObjectIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CObject GetCurrentObject()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3930,12 +3897,8 @@ namespace Lib3MF
 
     }
 
-    public class CMeshObjectIterator : CResourceIterator
+    public class CMeshObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CMeshObjectIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CMeshObject GetCurrentMeshObject()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3946,12 +3909,8 @@ namespace Lib3MF
 
     }
 
-    public class CComponentsObjectIterator : CResourceIterator
+    public class CComponentsObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CComponentsObjectIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CComponentsObject GetCurrentComponentsObject()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3962,12 +3921,8 @@ namespace Lib3MF
 
     }
 
-    public class CTexture2DIterator : CResourceIterator
+    public class CTexture2DIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CTexture2DIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CTexture2D GetCurrentTexture2D()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3978,12 +3933,8 @@ namespace Lib3MF
 
     }
 
-    public class CBaseMaterialGroupIterator : CResourceIterator
+    public class CBaseMaterialGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CBaseMaterialGroupIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CBaseMaterialGroup GetCurrentBaseMaterialGroup()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -3994,12 +3945,8 @@ namespace Lib3MF
 
     }
 
-    public class CColorGroupIterator : CResourceIterator
+    public class CColorGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CColorGroupIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CColorGroup GetCurrentColorGroup()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4010,12 +3957,8 @@ namespace Lib3MF
 
     }
 
-    public class CTexture2DGroupIterator : CResourceIterator
+    public class CTexture2DGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CTexture2DGroupIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CTexture2DGroup GetCurrentTexture2DGroup()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4026,12 +3969,8 @@ namespace Lib3MF
 
     }
 
-    public class CCompositeMaterialsIterator : CResourceIterator
+    public class CCompositeMaterialsIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CCompositeMaterialsIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CCompositeMaterials GetCurrentCompositeMaterials()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4042,12 +3981,8 @@ namespace Lib3MF
 
     }
 
-    public class CMultiPropertyGroupIterator : CResourceIterator
+    public class CMultiPropertyGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CMultiPropertyGroupIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CMultiPropertyGroup GetCurrentMultiPropertyGroup()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4058,12 +3993,8 @@ namespace Lib3MF
 
     }
 
-    public class CImage3DIterator : CResourceIterator
+    public class CImage3DIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CImage3DIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImage3D GetCurrentImage3D()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4074,12 +4005,8 @@ namespace Lib3MF
 
     }
 
-    public class CFunctionIterator : CResourceIterator
+    public class CFunctionIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CFunctionIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CFunction GetCurrentFunction()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4090,12 +4017,8 @@ namespace Lib3MF
 
     }
 
-    public class CLevelSetIterator : CResourceIterator
+    public class CLevelSetIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
     {
-        public CLevelSetIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CLevelSet GetCurrentLevelSet()
         {
             IntPtr newResource = IntPtr.Zero;
@@ -4106,12 +4029,8 @@ namespace Lib3MF
 
     }
 
-    public class CMetaData : CBase
+    public class CMetaData(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CMetaData(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetNameSpace()
         {
             UInt32 sizeNameSpace = 0;
@@ -4226,12 +4145,8 @@ namespace Lib3MF
 
     }
 
-    public class CMetaDataGroup : CBase
+    public class CMetaDataGroup(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CMetaDataGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetMetaDataCount()
         {
             UInt32 resultCount = 0;
@@ -4289,12 +4204,8 @@ namespace Lib3MF
 
     }
 
-    public class CTriangleSet : CBase
+    public class CTriangleSet(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CTriangleSet(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetName(String AName)
         {
             byte[] byteName = Encoding.UTF8.GetBytes(AName + char.MinValue);
@@ -4412,12 +4323,8 @@ namespace Lib3MF
 
     }
 
-    public class CObject : CResource
+    public class CObject(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CObject(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public eObjectType GetType()
         {
             Int32 resultObjectType = 0;
@@ -4621,12 +4528,8 @@ namespace Lib3MF
 
     }
 
-    public class CMeshObject : CObject
+    public class CMeshObject(IntPtr NewHandle) : CObject(NewHandle)
     {
-        public CMeshObject(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetVertexCount()
         {
             UInt32 resultVertexCount = 0;
@@ -4897,12 +4800,8 @@ namespace Lib3MF
 
     }
 
-    public class CLevelSet : CObject
+    public class CLevelSet(IntPtr NewHandle) : CObject(NewHandle)
     {
-        public CLevelSet(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CFunction GetFunction()
         {
             IntPtr newTheFunction = IntPtr.Zero;
@@ -5040,12 +4939,8 @@ namespace Lib3MF
 
     }
 
-    public class CBeamLattice : CBase
+    public class CBeamLattice(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CBeamLattice(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public Double GetMinLength()
         {
             Double resultMinLength = 0;
@@ -5258,12 +5153,8 @@ namespace Lib3MF
 
     }
 
-    public class CFunctionReference : CBase
+    public class CFunctionReference(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CFunctionReference(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetFunctionResourceID()
         {
             UInt32 resultUniqueResourceID = 0;
@@ -5344,28 +5235,16 @@ namespace Lib3MF
 
     }
 
-    public class CVolumeDataColor : CFunctionReference
+    public class CVolumeDataColor(IntPtr NewHandle) : CFunctionReference(NewHandle)
     {
-        public CVolumeDataColor(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CMaterialMapping : CFunctionReference
+    public class CMaterialMapping(IntPtr NewHandle) : CFunctionReference(NewHandle)
     {
-        public CMaterialMapping(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CVolumeDataComposite : CBase
+    public class CVolumeDataComposite(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CVolumeDataComposite(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CBaseMaterialGroup GetBaseMaterialGroup()
         {
             IntPtr newBaseMaterialGroupInstance = IntPtr.Zero;
@@ -5418,12 +5297,8 @@ namespace Lib3MF
 
     }
 
-    public class CVolumeDataProperty : CFunctionReference
+    public class CVolumeDataProperty(IntPtr NewHandle) : CFunctionReference(NewHandle)
     {
-        public CVolumeDataProperty(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetName()
         {
             UInt32 sizePropertyName = 0;
@@ -5454,12 +5329,8 @@ namespace Lib3MF
 
     }
 
-    public class CVolumeData : CResource
+    public class CVolumeData(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CVolumeData(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CVolumeDataComposite GetComposite()
         {
             IntPtr newTheCompositeData = IntPtr.Zero;
@@ -5549,12 +5420,8 @@ namespace Lib3MF
 
     }
 
-    public class CComponent : CBase
+    public class CComponent(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CComponent(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CObject GetObjectResource()
         {
             IntPtr newObjectResource = IntPtr.Zero;
@@ -5619,12 +5486,8 @@ namespace Lib3MF
 
     }
 
-    public class CComponentsObject : CObject
+    public class CComponentsObject(IntPtr NewHandle) : CObject(NewHandle)
     {
-        public CComponentsObject(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CComponent AddComponent(CObject AObjectResource, sTransform ATransform)
         {
             IntPtr AObjectResourceHandle = IntPtr.Zero;
@@ -5658,12 +5521,8 @@ namespace Lib3MF
 
     }
 
-    public class CBeamSet : CBase
+    public class CBeamSet(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CBeamSet(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetName(String AName)
         {
             byte[] byteName = Encoding.UTF8.GetBytes(AName + char.MinValue);
@@ -5766,12 +5625,8 @@ namespace Lib3MF
 
     }
 
-    public class CBaseMaterialGroup : CResource
+    public class CBaseMaterialGroup(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CBaseMaterialGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetCount()
         {
             UInt32 resultCount = 0;
@@ -5847,12 +5702,8 @@ namespace Lib3MF
 
     }
 
-    public class CColorGroup : CResource
+    public class CColorGroup(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CColorGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetCount()
         {
             UInt32 resultCount = 0;
@@ -5906,12 +5757,8 @@ namespace Lib3MF
 
     }
 
-    public class CTexture2DGroup : CResource
+    public class CTexture2DGroup(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CTexture2DGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetCount()
         {
             UInt32 resultCount = 0;
@@ -5966,12 +5813,8 @@ namespace Lib3MF
 
     }
 
-    public class CCompositeMaterials : CResource
+    public class CCompositeMaterials(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CCompositeMaterials(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetCount()
         {
             UInt32 resultCount = 0;
@@ -6043,12 +5886,8 @@ namespace Lib3MF
 
     }
 
-    public class CMultiPropertyGroup : CResource
+    public class CMultiPropertyGroup(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CMultiPropertyGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetCount()
         {
             UInt32 resultCount = 0;
@@ -6140,12 +5979,8 @@ namespace Lib3MF
 
     }
 
-    public class CImage3D : CResource
+    public class CImage3D(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CImage3D(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetName()
         {
             UInt32 sizeName = 0;
@@ -6177,12 +6012,8 @@ namespace Lib3MF
 
     }
 
-    public class CImageStack : CImage3D
+    public class CImageStack(IntPtr NewHandle) : CImage3D(NewHandle)
     {
-        public CImageStack(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public UInt32 GetRowCount()
         {
             UInt32 resultRowCount = 0;
@@ -6270,12 +6101,8 @@ namespace Lib3MF
 
     }
 
-    public class CAttachment : CBase
+    public class CAttachment(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CAttachment(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetPath()
         {
             UInt32 sizePath = 0;
@@ -6377,12 +6204,8 @@ namespace Lib3MF
 
     }
 
-    public class CTexture2D : CResource
+    public class CTexture2D(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CTexture2D(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CAttachment GetAttachment()
         {
             IntPtr newAttachment = IntPtr.Zero;
@@ -6452,12 +6275,8 @@ namespace Lib3MF
 
     }
 
-    public class CImplicitPort : CBase
+    public class CImplicitPort(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CImplicitPort(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetIdentifier()
         {
             UInt32 sizeIdentifier = 0;
@@ -6538,12 +6357,8 @@ namespace Lib3MF
 
     }
 
-    public class CIterator : CBase
+    public class CIterator(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public bool MoveNext()
         {
             Byte resultHasNext = 0;
@@ -6570,12 +6385,8 @@ namespace Lib3MF
 
     }
 
-    public class CImplicitPortIterator : CIterator
+    public class CImplicitPortIterator(IntPtr NewHandle) : CIterator(NewHandle)
     {
-        public CImplicitPortIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetCurrent()
         {
             IntPtr newPort = IntPtr.Zero;
@@ -6586,12 +6397,8 @@ namespace Lib3MF
 
     }
 
-    public class CImplicitNode : CBase
+    public class CImplicitNode(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CImplicitNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetIdentifier()
         {
             UInt32 sizeIdentifier = 0;
@@ -6727,12 +6534,8 @@ namespace Lib3MF
 
     }
 
-    public class COneInputNode : CImplicitNode
+    public class COneInputNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public COneInputNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputA()
         {
             IntPtr newInput = IntPtr.Zero;
@@ -6751,196 +6554,100 @@ namespace Lib3MF
 
     }
 
-    public class CSinNode : COneInputNode
+    public class CSinNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CSinNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CCosNode : COneInputNode
+    public class CCosNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CCosNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CTanNode : COneInputNode
+    public class CTanNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CTanNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CArcSinNode : COneInputNode
+    public class CArcSinNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CArcSinNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CArcCosNode : COneInputNode
+    public class CArcCosNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CArcCosNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CArcTanNode : COneInputNode
+    public class CArcTanNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CArcTanNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CSinhNode : COneInputNode
+    public class CSinhNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CSinhNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CCoshNode : COneInputNode
+    public class CCoshNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CCoshNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CTanhNode : COneInputNode
+    public class CTanhNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CTanhNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CRoundNode : COneInputNode
+    public class CRoundNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CRoundNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CCeilNode : COneInputNode
+    public class CCeilNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CCeilNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CFloorNode : COneInputNode
+    public class CFloorNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CFloorNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CSignNode : COneInputNode
+    public class CSignNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CSignNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CFractNode : COneInputNode
+    public class CFractNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CFractNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CAbsNode : COneInputNode
+    public class CAbsNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CAbsNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CExpNode : COneInputNode
+    public class CExpNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CExpNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CLogNode : COneInputNode
+    public class CLogNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CLogNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CLog2Node : COneInputNode
+    public class CLog2Node(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CLog2Node(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CLog10Node : COneInputNode
+    public class CLog10Node(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CLog10Node(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CLengthNode : COneInputNode
+    public class CLengthNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CLengthNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CTransposeNode : COneInputNode
+    public class CTransposeNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CTransposeNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CInverseNode : COneInputNode
+    public class CInverseNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CInverseNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CSqrtNode : COneInputNode
+    public class CSqrtNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CSqrtNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CResourceIdNode : CImplicitNode
+    public class CResourceIdNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CResourceIdNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetResource(CResource AResource)
         {
             IntPtr AResourceHandle = IntPtr.Zero;
@@ -6970,12 +6677,8 @@ namespace Lib3MF
 
     }
 
-    public class CTwoInputNode : COneInputNode
+    public class CTwoInputNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CTwoInputNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputB()
         {
             IntPtr newB = IntPtr.Zero;
@@ -6986,116 +6689,60 @@ namespace Lib3MF
 
     }
 
-    public class CAdditionNode : CTwoInputNode
+    public class CAdditionNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CAdditionNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CSubtractionNode : CTwoInputNode
+    public class CSubtractionNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CSubtractionNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CMultiplicationNode : CTwoInputNode
+    public class CMultiplicationNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CMultiplicationNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CDivisionNode : CTwoInputNode
+    public class CDivisionNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CDivisionNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CDotNode : CTwoInputNode
+    public class CDotNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CDotNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CCrossNode : CTwoInputNode
+    public class CCrossNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CCrossNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CArcTan2Node : CTwoInputNode
+    public class CArcTan2Node(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CArcTan2Node(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CMatVecMultiplicationNode : CTwoInputNode
+    public class CMatVecMultiplicationNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CMatVecMultiplicationNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CMinNode : CTwoInputNode
+    public class CMinNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CMinNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CMaxNode : CTwoInputNode
+    public class CMaxNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CMaxNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CFmodNode : CTwoInputNode
+    public class CFmodNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CFmodNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CModNode : CTwoInputNode
+    public class CModNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CModNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CPowNode : CTwoInputNode
+    public class CPowNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
     {
-        public CPowNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CSelectNode : COneInputNode
+    public class CSelectNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CSelectNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputB()
         {
             IntPtr newB = IntPtr.Zero;
@@ -7122,12 +6769,8 @@ namespace Lib3MF
 
     }
 
-    public class CClampNode : COneInputNode
+    public class CClampNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CClampNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputMin()
         {
             IntPtr newMin = IntPtr.Zero;
@@ -7146,12 +6789,8 @@ namespace Lib3MF
 
     }
 
-    public class CComposeVectorNode : CImplicitNode
+    public class CComposeVectorNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CComposeVectorNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputX()
         {
             IntPtr newX = IntPtr.Zero;
@@ -7186,20 +6825,12 @@ namespace Lib3MF
 
     }
 
-    public class CVectorFromScalarNode : COneInputNode
+    public class CVectorFromScalarNode(IntPtr NewHandle) : COneInputNode(NewHandle)
     {
-        public CVectorFromScalarNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
     }
 
-    public class CDecomposeVectorNode : CImplicitNode
+    public class CDecomposeVectorNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CDecomposeVectorNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputA()
         {
             IntPtr newA = IntPtr.Zero;
@@ -7234,12 +6865,8 @@ namespace Lib3MF
 
     }
 
-    public class CComposeMatrixNode : CImplicitNode
+    public class CComposeMatrixNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CComposeMatrixNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputM00()
         {
             IntPtr newM00 = IntPtr.Zero;
@@ -7378,12 +7005,8 @@ namespace Lib3MF
 
     }
 
-    public class CMatrixFromRowsNode : CImplicitNode
+    public class CMatrixFromRowsNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CMatrixFromRowsNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputA()
         {
             IntPtr newRow0 = IntPtr.Zero;
@@ -7426,12 +7049,8 @@ namespace Lib3MF
 
     }
 
-    public class CMatrixFromColumnsNode : CImplicitNode
+    public class CMatrixFromColumnsNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CMatrixFromColumnsNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputA()
         {
             IntPtr newColumn0 = IntPtr.Zero;
@@ -7474,12 +7093,8 @@ namespace Lib3MF
 
     }
 
-    public class CConstantNode : CImplicitNode
+    public class CConstantNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CConstantNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetConstant(Double AValue)
         {
 
@@ -7504,12 +7119,8 @@ namespace Lib3MF
 
     }
 
-    public class CConstVecNode : CImplicitNode
+    public class CConstVecNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CConstVecNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetVector(sVector AValue)
         {
             Internal.InternalVector intValue = Internal.Lib3MFWrapper.convertStructToInternal_Vector(AValue);
@@ -7535,12 +7146,8 @@ namespace Lib3MF
 
     }
 
-    public class CConstMatNode : CImplicitNode
+    public class CConstMatNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CConstMatNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetMatrix(sMatrix4x4 AValue)
         {
             Internal.InternalMatrix4x4 intValue = Internal.Lib3MFWrapper.convertStructToInternal_Matrix4x4(AValue);
@@ -7566,12 +7173,8 @@ namespace Lib3MF
 
     }
 
-    public class CMeshNode : CImplicitNode
+    public class CMeshNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CMeshNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputMesh()
         {
             IntPtr newMesh = IntPtr.Zero;
@@ -7598,12 +7201,8 @@ namespace Lib3MF
 
     }
 
-    public class CUnsignedMeshNode : CImplicitNode
+    public class CUnsignedMeshNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CUnsignedMeshNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputMesh()
         {
             IntPtr newMesh = IntPtr.Zero;
@@ -7630,12 +7229,8 @@ namespace Lib3MF
 
     }
 
-    public class CFunctionCallNode : CImplicitNode
+    public class CFunctionCallNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
     {
-        public CFunctionCallNode(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitPort GetInputFunctionID()
         {
             IntPtr newFunction = IntPtr.Zero;
@@ -7646,12 +7241,8 @@ namespace Lib3MF
 
     }
 
-    public class CNodeIterator : CIterator
+    public class CNodeIterator(IntPtr NewHandle) : CIterator(NewHandle)
     {
-        public CNodeIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImplicitNode GetCurrent()
         {
             IntPtr newNode = IntPtr.Zero;
@@ -7662,12 +7253,8 @@ namespace Lib3MF
 
     }
 
-    public class CFunction : CResource
+    public class CFunction(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CFunction(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetDisplayName()
         {
             UInt32 sizeDisplayName = 0;
@@ -7769,12 +7356,8 @@ namespace Lib3MF
 
     }
 
-    public class CImplicitFunction : CFunction
+    public class CImplicitFunction(IntPtr NewHandle) : CFunction(NewHandle)
     {
-        public CImplicitFunction(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetIdentifier()
         {
             UInt32 sizeIdentifier = 0;
@@ -8437,12 +8020,8 @@ namespace Lib3MF
 
     }
 
-    public class CFunctionFromImage3D : CFunction
+    public class CFunctionFromImage3D(IntPtr NewHandle) : CFunction(NewHandle)
     {
-        public CFunctionFromImage3D(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CImage3D GetImage3D()
         {
             IntPtr newImage3D = IntPtr.Zero;
@@ -8528,12 +8107,8 @@ namespace Lib3MF
 
     }
 
-    public class CBuildItem : CBase
+    public class CBuildItem(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CBuildItem(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CObject GetObjectResource()
         {
             IntPtr newObjectResource = IntPtr.Zero;
@@ -8635,12 +8210,8 @@ namespace Lib3MF
 
     }
 
-    public class CBuildItemIterator : CBase
+    public class CBuildItemIterator(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CBuildItemIterator(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public bool MoveNext()
         {
             Byte resultHasNext = 0;
@@ -8683,12 +8254,8 @@ namespace Lib3MF
 
     }
 
-    public class CSlice : CBase
+    public class CSlice(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CSlice(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public void SetVertices(sPosition2D[] AVertices)
         {
             Internal.InternalPosition2D[] intdataVertices = new Internal.InternalPosition2D[AVertices.Length];
@@ -8786,12 +8353,8 @@ namespace Lib3MF
 
     }
 
-    public class CSliceStack : CResource
+    public class CSliceStack(IntPtr NewHandle) : CResource(NewHandle)
     {
-        public CSliceStack(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public Double GetBottomZ()
         {
             Double resultZBottom = 0;
@@ -8880,12 +8443,8 @@ namespace Lib3MF
 
     }
 
-    public class CConsumer : CBase
+    public class CConsumer(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CConsumer(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetConsumerID()
         {
             UInt32 sizeConsumerID = 0;
@@ -8930,12 +8489,8 @@ namespace Lib3MF
 
     }
 
-    public class CAccessRight : CBase
+    public class CAccessRight(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CAccessRight(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CConsumer GetConsumer()
         {
             IntPtr newConsumer = IntPtr.Zero;
@@ -8970,12 +8525,8 @@ namespace Lib3MF
 
     }
 
-    public class CContentEncryptionParams : CBase
+    public class CContentEncryptionParams(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CContentEncryptionParams(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public eEncryptionAlgorithm GetEncryptionAlgorithm()
         {
             Int32 resultAlgorithm = 0;
@@ -9068,12 +8619,8 @@ namespace Lib3MF
 
     }
 
-    public class CResourceData : CBase
+    public class CResourceData(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CResourceData(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CPackagePart GetPath()
         {
             IntPtr newPath = IntPtr.Zero;
@@ -9113,12 +8660,8 @@ namespace Lib3MF
 
     }
 
-    public class CResourceDataGroup : CBase
+    public class CResourceDataGroup(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CResourceDataGroup(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public String GetKeyUUID()
         {
             UInt32 sizeUUID = 0;
@@ -9177,12 +8720,8 @@ namespace Lib3MF
 
     }
 
-    public class CKeyStore : CBase
+    public class CKeyStore(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CKeyStore(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CConsumer AddConsumer(String AConsumerID, String AKeyID, String AKeyValue)
         {
             byte[] byteConsumerID = Encoding.UTF8.GetBytes(AConsumerID + char.MinValue);
@@ -9369,12 +8908,8 @@ namespace Lib3MF
 
     }
 
-    public class CModel : CBase
+    public class CModel(IntPtr NewHandle) : CBase(NewHandle)
     {
-        public CModel(IntPtr NewHandle) : base(NewHandle)
-        {
-        }
-
         public CPackagePart RootModelPart()
         {
             IntPtr newRootModelPart = IntPtr.Zero;

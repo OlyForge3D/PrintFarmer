@@ -7,14 +7,9 @@ namespace Farm.Web.Api.Services.Catalog;
 /// API adapter that implements ICatalogCacheProvider abstraction.
 /// Wraps API-specific ICatalogCache to work with Infrastructure layer.
 /// </summary>
-public class CatalogCacheAdapter : ICatalogCacheProvider
+public class CatalogCacheAdapter(ICatalogCache cache) : ICatalogCacheProvider
 {
-    private readonly ICatalogCache _cache;
-
-    public CatalogCacheAdapter(ICatalogCache cache)
-    {
-        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-    }
+    private readonly ICatalogCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
 
     public async Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
     {

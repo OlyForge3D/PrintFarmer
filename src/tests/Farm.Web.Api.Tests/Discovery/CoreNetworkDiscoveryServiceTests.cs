@@ -86,19 +86,12 @@ public class CoreNetworkDiscoveryServiceTests
             "stub"
         );
 
-    private sealed class StubProbe : INetworkDiscoveryProbe
+    private sealed class StubProbe(PrinterBackend backend, Func<string, ProbeResult?> resultFactory, string displayName) : INetworkDiscoveryProbe
     {
-        private readonly Func<string, ProbeResult?> _resultFactory;
+        private readonly Func<string, ProbeResult?> _resultFactory = resultFactory;
 
-        public StubProbe(PrinterBackend backend, Func<string, ProbeResult?> resultFactory, string displayName)
-        {
-            Backend = backend;
-            _resultFactory = resultFactory;
-            DisplayName = displayName;
-        }
-
-        public string DisplayName { get; }
-        public PrinterBackend Backend { get; }
+        public string DisplayName { get; } = displayName;
+        public PrinterBackend Backend { get; } = backend;
         public int CallCount { get; private set; }
 
         public Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)

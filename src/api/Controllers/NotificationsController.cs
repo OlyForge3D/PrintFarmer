@@ -191,24 +191,21 @@ public class NotificationsController(INotificationService notificationService) :
             var userId = GetUserIdFromClaims();
 
             var preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            if (preferences == null)
-            {
-                return NotFound(new { error = $"Preferences not found for user {userId}" });
-            }
-
-            return Ok(new NotificationPreferencesDto
-            {
-                UserId = preferences.UserId,
-                EnableEmailNotifications = preferences.EnableEmailNotifications,
-                EnablePushNotifications = preferences.EnablePushNotifications,
-                EnableInAppNotifications = preferences.EnableInAppNotifications,
-                NotifyOnCompletion = preferences.NotifyOnCompletion,
-                NotifyOnFailure = preferences.NotifyOnFailure,
-                NotifyOnStart = preferences.NotifyOnStart,
-                NotifyOnPause = preferences.NotifyOnPause,
-                Frequency = preferences.Frequency,
-                RetentionDays = preferences.RetentionDays
-            });
+            return preferences == null
+                ? NotFound(new { error = $"Preferences not found for user {userId}" })
+                : Ok(new NotificationPreferencesDto
+                {
+                    UserId = preferences.UserId,
+                    EnableEmailNotifications = preferences.EnableEmailNotifications,
+                    EnablePushNotifications = preferences.EnablePushNotifications,
+                    EnableInAppNotifications = preferences.EnableInAppNotifications,
+                    NotifyOnCompletion = preferences.NotifyOnCompletion,
+                    NotifyOnFailure = preferences.NotifyOnFailure,
+                    NotifyOnStart = preferences.NotifyOnStart,
+                    NotifyOnPause = preferences.NotifyOnPause,
+                    Frequency = preferences.Frequency,
+                    RetentionDays = preferences.RetentionDays
+                });
         }
         catch (InvalidOperationException)
         {
@@ -291,12 +288,9 @@ public class NotificationsController(INotificationService notificationService) :
                User?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value ??
                User?.FindFirst("oid")?.Value;
 
-        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
-        {
-            throw new InvalidOperationException("User ID not found or invalid in claims");
-        }
-
-        return userId;
+        return string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId)
+            ? throw new InvalidOperationException("User ID not found or invalid in claims")
+            : userId;
     }
 }
 

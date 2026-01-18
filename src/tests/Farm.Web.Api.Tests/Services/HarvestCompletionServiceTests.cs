@@ -40,16 +40,10 @@ public class HarvestCompletionServiceTests
         _service = new HarvestCompletionService(_mockServiceProvider, _loggerMock.Object);
     }
 
-    private class MockServiceProvider : IServiceProvider
+    private class MockServiceProvider(IUnitOfWork unitOfWork, IServiceScope? scope = null) : IServiceProvider
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IServiceScope? _scope;
-
-        public MockServiceProvider(IUnitOfWork unitOfWork, IServiceScope? scope = null)
-        {
-            _unitOfWork = unitOfWork;
-            _scope = scope;
-        }
+        private readonly IUnitOfWork _unitOfWork = unitOfWork;
+        private readonly IServiceScope? _scope = scope;
 
         public object? GetService(Type serviceType)
         {
@@ -58,22 +52,13 @@ public class HarvestCompletionServiceTests
                 return _unitOfWork;
             }
             // Return a mock scope factory that returns our scope
-            if (serviceType == typeof(IServiceScopeFactory))
-            {
-                return new MockServiceScopeFactory(_scope);
-            }
-            return null;
+            return serviceType == typeof(IServiceScopeFactory) ? new MockServiceScopeFactory(_scope) : null;
         }
     }
 
-    private class MockServiceScopeFactory : IServiceScopeFactory
+    private class MockServiceScopeFactory(IServiceScope? scope) : IServiceScopeFactory
     {
-        private readonly IServiceScope? _scope;
-
-        public MockServiceScopeFactory(IServiceScope? scope)
-        {
-            _scope = scope;
-        }
+        private readonly IServiceScope? _scope = scope;
 
         public IServiceScope CreateScope()
         {
@@ -259,10 +244,11 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation>());
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)); // Increased to allow startup logging
 
         // Act
         await _service.StartAsync(cts.Token);
+        await Task.Delay(100); // Give service time to start and log
         cts.Cancel();
 
         try
@@ -271,11 +257,11 @@ public class HarvestCompletionServiceTests
         }
         catch (OperationCanceledException) { }
 
-        // Assert - Service should stop without throwing
+        // Assert - Service should stop without throwing and log startup message
         _loggerMock.Verify(l => l.LogInformation(
             It.IsAny<string>(),
             It.IsAny<string?>(),
-            It.IsAny<string?>()), Times.AtLeastOnce);
+            It.IsAny<object?>()), Times.AtLeastOnce);
     }
 
     [Fact]

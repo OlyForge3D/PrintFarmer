@@ -11,28 +11,18 @@ public interface INormalizationEventLogger
 /// <summary>
 /// In-memory rate-limited normalization logger (singleton). Replace with distributed telemetry for multi-instance scaling.
 /// </summary>
-public sealed class NormalizationEventLogger : INormalizationEventLogger
+public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : INormalizationEventLogger
 {
-    private sealed class Counter
+    private sealed class Counter(int count, DateTime windowStartUtc)
     {
-        public int Count;
-        public DateTime WindowStartUtc;
-        public Counter(int count, DateTime windowStartUtc)
-        {
-            Count = count;
-            WindowStartUtc = windowStartUtc;
-        }
+        public int Count = count;
+        public DateTime WindowStartUtc = windowStartUtc;
     }
 
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly ConcurrentDictionary<string, Counter> _counters = new();
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
     private const int ThresholdPerWindow = 20;
-
-    public NormalizationEventLogger(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
 
     public void Log(string entityType, string original, string normalized, string? source = null)
     {

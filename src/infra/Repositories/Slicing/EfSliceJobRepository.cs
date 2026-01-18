@@ -12,14 +12,9 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 /// <summary>
 /// EF Core implementation of ISliceJobRepository
 /// </summary>
-public class EfSliceJobRepository : ISliceJobRepository
+public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfSliceJobRepository(AppDbContext db)
-    {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
-    }
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {

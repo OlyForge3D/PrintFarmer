@@ -108,7 +108,7 @@ public class FileConsistencyController(
             IReadOnlyList<GcodeFile> missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
             IReadOnlyList<GcodeFile> corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-            List<FileIssueDto> allIssues = new List<FileIssueDto>();
+            List<FileIssueDto> allIssues = [];
 
             // Add Model3D missing files
             allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto

@@ -23,16 +23,11 @@ public interface IDiscoverySessionManager
     bool CancelSession(string sessionId);
 }
 
-public class DiscoverySessionManager : IDiscoverySessionManager
+public class DiscoverySessionManager(ILogger<DiscoverySessionManager> logger) : IDiscoverySessionManager
 {
     private readonly Dictionary<string, CancellationTokenSource> _activeSessions = new();
-    private readonly object _sessionsLock = new();
-    private readonly ILogger<DiscoverySessionManager> _logger;
-
-    public DiscoverySessionManager(ILogger<DiscoverySessionManager> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly Lock _sessionsLock = new();
+    private readonly ILogger<DiscoverySessionManager> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public void RegisterSession(string sessionId, CancellationTokenSource cts)
     {

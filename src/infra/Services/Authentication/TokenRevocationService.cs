@@ -1,32 +1,25 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace Farm.Infrastructure.Services.Authentication;
 
 /// <summary>
 /// Service for managing JWT token revocation (force logout)
 /// </summary>
-public class TokenRevocationService : ITokenRevocationService
+public class TokenRevocationService(
+    AppDbContext context,
+    IUnifiedLoggingService logging,
+    IAuthAuditService authAuditService) : ITokenRevocationService
 {
-    private readonly AppDbContext _context;
-    private readonly IUnifiedLoggingService _logging;
-    private readonly IAuthAuditService _authAuditService;
-
-    public TokenRevocationService(
-        AppDbContext context,
-        IUnifiedLoggingService logging,
-        IAuthAuditService authAuditService)
-    {
-        _context = context;
-        _logging = logging;
-        _authAuditService = authAuditService;
-    }
+    private readonly AppDbContext _context = context;
+    private readonly IUnifiedLoggingService _logging = logging;
+    private readonly IAuthAuditService _authAuditService = authAuditService;
 
     public async Task<bool> RevokeTokenAsync(
         string token,
@@ -53,7 +46,7 @@ public class TokenRevocationService : ITokenRevocationService
             // Get token expiration from JWT
             DateTime expiration = GetTokenExpiration(token);
 
-            RevokedToken revokedToken = new RevokedToken
+            RevokedToken revokedToken = new()
             {
                 Id = Guid.NewGuid(),
                 TokenHash = tokenHash,
@@ -111,7 +104,7 @@ public class TokenRevocationService : ITokenRevocationService
 
             // Also create a time-based revocation marker for JWT tokens
             // Any JWT issued before this timestamp for this user will be considered revoked
-            RevokedToken revocationMarker = new RevokedToken
+            RevokedToken revocationMarker = new()
             {
                 Id = Guid.NewGuid(),
                 TokenHash = $"ALL_TOKENS_{userId}_{DateTime.UtcNow.Ticks}", // Special marker
@@ -225,8 +218,8 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
-            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
+            JsonWebTokenHandler handler = new();
+            JsonWebToken jwtToken = handler.ReadJsonWebToken(token);
             return jwtToken.ValidTo;
         }
         catch
@@ -240,8 +233,8 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
-            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
+            JsonWebTokenHandler handler = new();
+            JsonWebToken jwtToken = handler.ReadJsonWebToken(token);
             // Tokens are issued with ClaimTypes.NameIdentifier by AuthenticationService.
             // Also accept common JWT claim names (sub, userId) for compatibility.
             Claim? userIdClaim = jwtToken.Claims.FirstOrDefault(c =>
@@ -267,8 +260,8 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
-            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
+            JsonWebTokenHandler handler = new();
+            JsonWebToken jwtToken = handler.ReadJsonWebToken(token);
             return jwtToken.ValidFrom;
         }
         catch

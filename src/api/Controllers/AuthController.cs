@@ -35,12 +35,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
         AuthenticationResult result = await _authService.AuthenticateAsync(request.UsernameOrEmail, request.Password);
 
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-
-        return Unauthorized(result);
+        return result.Success ? Ok(result) : Unauthorized(result);
     }
 
     [HttpPost("register")]
@@ -86,12 +81,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             ));
         }
 
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-
-        return BadRequest(result);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("logout")]
@@ -255,20 +245,17 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 HttpContext.Connection.RemoteIpAddress?.ToString()
             );
 
-            if (success)
-            {
-                return Ok(new ResetPasswordResponse
+            return success
+                ? Ok(new ResetPasswordResponse
                 {
                     Success = true,
                     Message = "Password has been reset successfully"
+                })
+                : BadRequest(new ResetPasswordResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired password reset token"
                 });
-            }
-
-            return BadRequest(new ResetPasswordResponse
-            {
-                Success = false,
-                Message = "Invalid or expired password reset token"
-            });
         }
         catch (Exception ex)
         {
@@ -298,12 +285,9 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         {
             bool success = await _authService.ConfirmEmailAsync(request.Token);
 
-            if (success)
-            {
-                return Ok(new ConfirmEmailResponse(true, "Email address confirmed successfully. You can now log in."));
-            }
-
-            return BadRequest(new ConfirmEmailResponse(false, "Invalid or expired email confirmation token"));
+            return success
+                ? Ok(new ConfirmEmailResponse(true, "Email address confirmed successfully. You can now log in."))
+                : BadRequest(new ConfirmEmailResponse(false, "Invalid or expired email confirmation token"));
         }
         catch (Exception ex)
         {
@@ -348,12 +332,9 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
             bool success = await _authService.SendEmailConfirmationAsync(user);
 
-            if (success)
-            {
-                return Ok(new ResendConfirmationResponse(true, "Confirmation email has been sent"));
-            }
-
-            return BadRequest(new ResendConfirmationResponse(false, "Failed to send confirmation email. Please try again later."));
+            return success
+                ? Ok(new ResendConfirmationResponse(true, "Confirmation email has been sent"))
+                : BadRequest(new ResendConfirmationResponse(false, "Failed to send confirmation email. Please try again later."));
         }
         catch (Exception ex)
         {

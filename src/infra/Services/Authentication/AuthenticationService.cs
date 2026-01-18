@@ -1,5 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
@@ -8,6 +7,7 @@ using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Infrastructure.Services.Authentication;
@@ -186,20 +186,25 @@ public class AuthenticationService(
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(permissions.Select(p => new Claim("permission", $"{p.Resource}:{p.Action}")));
-        JwtSecurityToken token = new(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: creds);
-        return new JwtSecurityTokenHandler().WriteToken(token);
+
+        SecurityTokenDescriptor tokenDescriptor = new()
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = DateTime.UtcNow.AddDays(7),
+            Issuer = _configuration["Jwt:Issuer"],
+            Audience = _configuration["Jwt:Audience"],
+            SigningCredentials = creds
+        };
+
+        JsonWebTokenHandler handler = new();
+        return handler.CreateToken(tokenDescriptor);
     }
 
     public async Task<bool> ValidateTokenAsync(string token)
     {
         try
         {
-            JwtSecurityTokenHandler handler = new();
+            JsonWebTokenHandler handler = new();
             string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
@@ -219,8 +224,8 @@ public class AuthenticationService(
                 ClockSkew = TimeSpan.Zero
             };
 #pragma warning restore S6781
-            _ = await handler.ValidateTokenAsync(token, parms);
-            return true;
+            TokenValidationResult result = await handler.ValidateTokenAsync(token, parms);
+            return result.IsValid;
         }
         catch (SecurityTokenException)
         {
@@ -236,7 +241,7 @@ public class AuthenticationService(
     {
         try
         {
-            JwtSecurityTokenHandler handler = new();
+            JsonWebTokenHandler handler = new();
             string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
@@ -257,11 +262,9 @@ public class AuthenticationService(
             };
 #pragma warning restore S6781
             TokenValidationResult result = await handler.ValidateTokenAsync(token, parms);
-            if (!result.IsValid || result.SecurityToken is not JwtSecurityToken jwt || jwt.ValidTo < DateTime.UtcNow)
-            {
-                return null;
-            }
-            return result.ClaimsIdentity != null ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
+            return !result.IsValid || result.SecurityToken is not JsonWebToken jwt || jwt.ValidTo < DateTime.UtcNow
+                ? null
+                : result.ClaimsIdentity != null ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
         }
         catch (SecurityTokenException)
         {
@@ -472,7 +475,7 @@ public class AuthenticationService(
                 .Replace("=", "");
 
             // Create password reset token entity
-            PasswordResetToken resetToken = new PasswordResetToken
+            PasswordResetToken resetToken = new()
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,

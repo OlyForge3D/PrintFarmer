@@ -10,14 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Harvest;
 
-public class EfHarvestRepository : IHarvestRepository
+public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfHarvestRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     // GcodeHarvestOperation operations
     public async Task<GcodeHarvestOperation?> GetOperationByIdAsync(Guid operationId, CancellationToken ct = default)

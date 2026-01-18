@@ -8,14 +8,9 @@ namespace Farm.Web.Api.Services.Catalog;
 /// Converts request DTOs to domain parameters for the core service.
 /// This keeps the API layer thin and the core logic reusable.
 /// </summary>
-public class CatalogServiceAdapter : ICatalogService
+public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalogService coreCatalogService) : ICatalogService
 {
-    private readonly Farm.Infrastructure.Services.Catalog.ICatalogService _coreCatalogService;
-
-    public CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalogService coreCatalogService)
-    {
-        _coreCatalogService = coreCatalogService ?? throw new ArgumentNullException(nameof(coreCatalogService));
-    }
+    private readonly Farm.Infrastructure.Services.Catalog.ICatalogService _coreCatalogService = coreCatalogService ?? throw new ArgumentNullException(nameof(coreCatalogService));
 
     public Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
     {

@@ -27,14 +27,9 @@ public interface I3MfToStlConversionService
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMfToStlConversionService : I3MfToStlConversionService
+public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3MfToStlConversionService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public ThreeMfToStlConversionService(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <inheritdoc/>
     public async Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default)
@@ -58,13 +53,13 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
 
             // Parse the main model file
             XmlDocument mainModelXml = new XmlDocument();
-            using (var modelStream = mainModelEntry.Open())
+            using (var modelStream = await mainModelEntry.OpenAsync(cancellationToken))
             {
                 await Task.Run(() => mainModelXml.Load(modelStream), cancellationToken);
             }
 
             // Collect component data with bounding boxes for grid layout
-            var components = new List<ComponentData>();
+            List<ComponentData> components = [];
 
             // Parse component references and convert them
             var namespaceManager = new XmlNamespaceManager(mainModelXml.NameTable);
@@ -114,7 +109,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
 
                 // Parse the referenced object file
                 XmlDocument refXmlDoc = new XmlDocument();
-                using (var refStream = refEntry.Open())
+                using (var refStream = await refEntry.OpenAsync(cancellationToken))
                 {
                     await Task.Run(() => refXmlDoc.Load(refStream), cancellationToken);
                 }
@@ -164,8 +159,8 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             ApplyGridLayout(components, padding);
 
             // Merge all positioned components into a single mesh
-            var allVertices = new List<(float x, float y, float z)>();
-            var allTriangles = new List<(int v1, int v2, int v3)>();
+            List<(float x, float y, float z)> allVertices = [];
+            List<(int v1, int v2, int v3)> allTriangles = [];
 
             foreach (var component in components)
             {
@@ -200,8 +195,8 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     /// </summary>
     private (List<(float x, float y, float z)> vertices, List<(int v1, int v2, int v3)> triangles) ExtractMeshData(XmlDocument xmlDoc)
     {
-        var vertices = new List<(float x, float y, float z)>();
-        var triangles = new List<(int v1, int v2, int v3)>();
+        List<(float x, float y, float z)> vertices = [];
+        List<(int v1, int v2, int v3)> triangles = [];
 
         var namespaceManager = new XmlNamespaceManager(xmlDoc.NameTable);
         namespaceManager.AddNamespace("model", "http://schemas.microsoft.com/3dmanufacturing/core/2015/02");
@@ -284,7 +279,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             }
 
             // Apply transformation to each vertex
-            var transformed = new List<(float x, float y, float z)>();
+            List<(float x, float y, float z)> transformed = [];
             foreach (var (x, y, z) in vertices)
             {
                 // 4x3 matrix multiplication: [x' y' z'] = [x y z 1] * M^T

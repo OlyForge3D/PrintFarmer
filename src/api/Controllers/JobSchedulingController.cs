@@ -134,12 +134,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     public async Task<ActionResult<ScheduledJobDto>> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var result = await _schedulingService.GetScheduledJobAsync(jobId, cancellationToken);
-        if (result == null)
-        {
-            return NotFound(new { error = $"No scheduling found for job '{jobId}'" });
-        }
-
-        return Ok(result);
+        return result == null ? NotFound(new { error = $"No scheduling found for job '{jobId}'" }) : Ok(result);
     }
 
     /// <summary>
@@ -213,7 +208,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
 /// </summary>
 public class ScheduleJobRequest
 {
-    public DateTime ScheduledStartTime { get; set; }
+    public required DateTime ScheduledStartTime { get; set; }
     public string? TimeZone { get; set; }
     public string? RecurrencePattern { get; set; }
     public DateTime? RecurrenceEndDate { get; set; }
@@ -224,6 +219,6 @@ public class ScheduleJobRequest
 /// </summary>
 public class RescheduleJobRequest
 {
-    public DateTime NewScheduledTime { get; set; }
+    public required DateTime NewScheduledTime { get; set; }
     public string? TimeZone { get; set; }
 }

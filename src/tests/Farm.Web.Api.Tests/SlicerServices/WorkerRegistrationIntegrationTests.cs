@@ -17,16 +17,10 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Integration tests for slicer worker registration with the central registry
 /// </summary>
 [Trait("Category", "Integration")]
-public class WorkerRegistrationIntegrationTests : IAsyncLifetime
+public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly ITestOutputHelper _output;
-
-    public WorkerRegistrationIntegrationTests(ITestOutputHelper output)
-    {
-        _factory = new CustomWebApplicationFactory();
-        _output = output ?? throw new ArgumentNullException(nameof(output));
-    }
+    private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
+    private readonly ITestOutputHelper _output = output ?? throw new ArgumentNullException(nameof(output));
 
     public async Task InitializeAsync()
     {

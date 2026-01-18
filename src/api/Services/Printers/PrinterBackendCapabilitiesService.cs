@@ -10,31 +10,17 @@ namespace Farm.Web.Api.Services.Printers;
 /// Implementation of IPrinterBackendCapabilitiesService.
 /// Converts backend plugin capability flags into user-friendly DTOs for the UI.
 /// </summary>
-public class PrinterBackendCapabilitiesService : IPrinterBackendCapabilitiesService
+public class PrinterBackendCapabilitiesService(
+    IPrintersRepository repo,
+    IBackendCapabilityFactory capabilityFactory) : IPrinterBackendCapabilitiesService
 {
-    private readonly IPrintersRepository _repo;
-    private readonly IBackendCapabilityFactory _capabilityFactory;
-    private readonly IUnifiedLoggingService _logger;
-
-    public PrinterBackendCapabilitiesService(
-        IPrintersRepository repo,
-        IBackendCapabilityFactory capabilityFactory,
-        IUnifiedLoggingService logger)
-    {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+    private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
         var printer = await _repo.FindByIdAsync(printerId, ct);
-        if (printer == null)
-        {
-            return null;
-        }
-
-        return CreateCapabilitiesDto(printer);
+        return printer == null ? null : CreateCapabilitiesDto(printer);
     }
 
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetAllAsync(CancellationToken ct)

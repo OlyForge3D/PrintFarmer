@@ -276,12 +276,7 @@ public sealed class RenderOptions
         float absZ = Math.Abs(viewDirection.Z);
 
         // Threshold: if the view is pointing mostly in Z direction (> 0.9), use -Y as up
-        if (absZ > 0.9f)
-        {
-            return -Vector3.UnitY;
-        }
-
-        return Vector3.UnitZ;
+        return absZ > 0.9f ? -Vector3.UnitY : Vector3.UnitZ;
     }
 
     /// <summary>
@@ -301,7 +296,7 @@ public sealed class Mesh
 
 public sealed class Face
 {
-    public int[] Indices { get; set; } = Array.Empty<int>();
+    public int[] Indices { get; set; } = [];
     public int FaceIndex { get; set; }
     public int IndexCount => Indices?.Length ?? 0;
 }
@@ -310,13 +305,14 @@ public sealed class NormalizedMesh
 {
     public List<Vector3> Vertices { get; } = new();
     public List<Face> Faces { get; } = new();
-    public float[] Ao { get; set; } = Array.Empty<float>();
+    public float[] Ao { get; set; } = [];
 
     public List<Vector3> Normals { get; } = new();
 }
 
 #pragma warning disable CA1051
 #pragma warning disable CA1815
+#pragma warning disable S1104 // Struct fields used for performance in rendering pipeline
 public struct Triangle
 {
     public Vector4 V0;
@@ -342,13 +338,16 @@ public struct Triangle
 
     public float D0, D1, D2; // depth in [0,1]
 }
+#pragma warning restore S1104
 
+#pragma warning disable S1104 // Struct fields used for performance in rendering pipeline
 public struct ClipVertex
 {
     public Vector4 C;   // clip-space position
     public Vector3 N;   // view-space normal
     public float Ao;
 }
+#pragma warning restore S1104
 
 #pragma warning restore CA1051
 #pragma warning restore CA1815

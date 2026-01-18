@@ -60,12 +60,7 @@ public class PredictionController(PredictionService predictionService) : Control
         try
         {
             var stats = await predictionService.GetJobStatisticsAsync(jobId, cancellationToken);
-            if (stats == null)
-            {
-                return NotFound($"Statistics for job {jobId} not found");
-            }
-
-            return Ok(stats);
+            return stats == null ? NotFound($"Statistics for job {jobId} not found") : Ok(stats);
         }
         catch (Exception ex)
         {
@@ -123,12 +118,7 @@ public class PredictionController(PredictionService predictionService) : Control
                 minSampleSize: 3,
                 cancellationToken: cancellationToken);
 
-            if (stats == null)
-            {
-                return NotFound($"Insufficient data for model {modelId}");
-            }
-
-            return Ok(stats);
+            return stats == null ? NotFound($"Insufficient data for model {modelId}") : Ok(stats);
         }
         catch (Exception ex)
         {
@@ -185,10 +175,10 @@ public class PredictionController(PredictionService predictionService) : Control
 public class RecordCompletionRequest
 {
     /// <summary>Actual duration of the print in milliseconds</summary>
-    public long ActualDurationMs { get; set; }
+    public required long ActualDurationMs { get; set; }
 
     /// <summary>Whether the job completed successfully</summary>
-    public bool IsSuccess { get; set; } = true;
+    public bool IsSuccess { get; set; } = true;  // Has default value, not required
 
     /// <summary>Reason for failure if not successful</summary>
     public string? FailureReason { get; set; }

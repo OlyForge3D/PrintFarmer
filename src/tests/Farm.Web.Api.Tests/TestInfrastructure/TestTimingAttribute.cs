@@ -9,14 +9,12 @@ namespace Farm.Web.Api.Tests;
 /// unless PF_TIMING=0. Safe to apply broadly (sub-millisecond overhead typically).
 /// CSV Header: TimestampUtc,DurationMs,Category,Class,Method
 /// </summary>
-public sealed class TestTimingAttribute : BeforeAfterTestAttribute
+public sealed class TestTimingAttribute(string category = "DbHeavy") : BeforeAfterTestAttribute
 {
-    private readonly string _category;
+    private readonly string _category = category;
 
     [ThreadStatic]
     private static Stopwatch? _sw;
-
-    public TestTimingAttribute(string category = "DbHeavy") => _category = category;
 
     public override void Before(MethodInfo methodUnderTest)
     {
@@ -59,7 +57,7 @@ public sealed class TestTimingAttribute : BeforeAfterTestAttribute
 /// </summary>
 internal static class TestTimingLog
 {
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     private static readonly string _logPath = Path.Combine(AppContext.BaseDirectory, "test-timings.csv");
     private static volatile bool _initialized;
 

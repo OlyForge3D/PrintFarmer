@@ -5,7 +5,8 @@ using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 public record CreateModelRequest(
-    [BindRequired] // NOSONAR S6964: Binding is explicit; Guid must be supplied
+    [property: System.Text.Json.Serialization.JsonRequired]
+    [BindRequired]
     Guid ManufacturerId,
     [Required, MinLength(1)]
     string Name,

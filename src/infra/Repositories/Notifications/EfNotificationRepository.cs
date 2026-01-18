@@ -68,73 +68,49 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
 
     public async Task MarkAsReadAsync(string id, CancellationToken cancellationToken = default)
     {
-        var notification = await context.Notifications.FirstOrDefaultAsync(
-            n => n.Id == id, cancellationToken);
-
-        if (notification != null)
-        {
-            notification.IsRead = true;
-            notification.ReadAt = DateTime.UtcNow;
-            context.Notifications.Update(notification);
-            await context.SaveChangesAsync(cancellationToken);
-        }
+        // EF Core 10: Use ExecuteUpdateAsync for efficient single-statement update
+        await context.Notifications
+            .Where(n => n.Id == id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(n => n.IsRead, true)
+                .SetProperty(n => n.ReadAt, DateTime.UtcNow), cancellationToken);
     }
 
     public async Task MarkMultipleAsReadAsync(IEnumerable<string> ids, CancellationToken cancellationToken = default)
     {
-        var notifications = await context.Notifications
-            .Where(n => ids.Contains(n.Id))
-            .ToListAsync(cancellationToken);
-
-        var now = DateTime.UtcNow;
-        foreach (var notification in notifications)
-        {
-            notification.IsRead = true;
-            notification.ReadAt = now;
-        }
-
-        context.Notifications.UpdateRange(notifications);
-        await context.SaveChangesAsync(cancellationToken);
+        // EF Core 10: Use ExecuteUpdateAsync for efficient bulk update without loading entities
+        var idList = ids.ToList();
+        await context.Notifications
+            .Where(n => idList.Contains(n.Id))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(n => n.IsRead, true)
+                .SetProperty(n => n.ReadAt, DateTime.UtcNow), cancellationToken);
     }
 
     public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
-        var notification = await context.Notifications.FirstOrDefaultAsync(
-            n => n.Id == id, cancellationToken);
-
-        if (notification != null)
-        {
-            context.Notifications.Remove(notification);
-            await context.SaveChangesAsync(cancellationToken);
-        }
+        // EF Core 10: Use ExecuteDeleteAsync for efficient single-statement delete
+        await context.Notifications
+            .Where(n => n.Id == id)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task DeleteExpiredAsync(Guid userId, CancellationToken cancellationToken = default)
     {
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
         var now = DateTime.UtcNow;
-        var expired = await context.Notifications
+        await context.Notifications
             .Where(n => n.UserId == userId && n.ExpiresAt != null && n.ExpiresAt <= now)
-            .ToListAsync(cancellationToken);
-
-        if (expired.Count > 0)
-        {
-            context.Notifications.RemoveRange(expired);
-            await context.SaveChangesAsync(cancellationToken);
-        }
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task DeleteOldAsync(int retentionDays, CancellationToken cancellationToken = default)
     {
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
         var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-        var old = await context.Notifications
+        await context.Notifications
             .Where(n => n.CreatedAt < cutoffDate)
-            .ToListAsync(cancellationToken);
-
-        if (old.Count > 0)
-        {
-            context.Notifications.RemoveRange(old);
-            await context.SaveChangesAsync(cancellationToken);
-        }
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default)

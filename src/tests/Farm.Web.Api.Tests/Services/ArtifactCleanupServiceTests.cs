@@ -17,14 +17,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Services;
 
-public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFactory>
+public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public ArtifactCleanupServiceTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact]
     public async Task ScanAndCleanupAsync_DryRunMode_OnlyLogsWithoutDeleting()

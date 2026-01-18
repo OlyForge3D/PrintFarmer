@@ -65,12 +65,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <returns>Normalized URL without trailing slash</returns>
     private static string NormalizeBaseUrl(string baseUrl)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl));
-        }
-
-        return baseUrl.TrimEnd('/');
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl))
+            : baseUrl.TrimEnd('/');
     }
 
     /// <summary>
@@ -536,7 +533,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", apiKey);
 
         // OctoPrint supports limit and start query parameters for pagination
-        var queryParams = new List<string>();
+        List<string> queryParams = [];
         if (limit.HasValue)
         {
             queryParams.Add($"limit={limit.Value}");
@@ -1640,12 +1637,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             var url = $"{baseUrl.TrimEnd('/')}/api/files/local/{Uri.EscapeDataString(filePath)}";
             var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            return await response.Content.ReadAsByteArrayAsync(ct);
+            return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
         }
         catch
         {
@@ -1670,7 +1662,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
             if (!response.IsSuccessStatusCode)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             string jsonContent = await response.Content.ReadAsStringAsync();
@@ -1688,7 +1680,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         catch (Exception ex)
         {
             LogError("Get file list failed", ex);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 

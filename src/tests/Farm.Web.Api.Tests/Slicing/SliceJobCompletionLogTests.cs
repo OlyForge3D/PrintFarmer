@@ -24,10 +24,9 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests inline log text handling in slice job completion endpoint.
 /// </summary>
-public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-    public SliceJobCompletionLogTests(CustomWebApplicationFactory factory) => _factory = factory;
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact(DisplayName = "Completion endpoint persists log text as artifact when provided")]
     public async Task Completion_Persists_Log_Text_As_Artifact()
@@ -96,23 +95,16 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         _ = artifacts.Should().Contain(a => a.Kind == "log" && a.Id == response.LogArtifactId);
     }
 
-    private sealed class TestFormFile : IFormFile
+    private sealed class TestFormFile(byte[] data, string fileName, string contentType) : IFormFile
     {
-        private readonly byte[] _data;
-        public TestFormFile(byte[] data, string fileName, string contentType)
-        {
-            _data = data;
-            FileName = fileName;
-            ContentType = contentType;
-            Name = "file";
-            Length = data.Length;
-        }
-        public string ContentType { get; }
+        private readonly byte[] _data = data;
+
+        public string ContentType { get; } = contentType;
         public string ContentDisposition { get; set; } = string.Empty;
         public IHeaderDictionary Headers { get; } = new HeaderDictionary();
-        public long Length { get; }
-        public string Name { get; }
-        public string FileName { get; }
+        public long Length { get; } = data.Length;
+        public string Name { get; } = "file";
+        public string FileName { get; } = fileName;
         public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
         public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {

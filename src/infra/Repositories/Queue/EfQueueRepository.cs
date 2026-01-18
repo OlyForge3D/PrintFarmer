@@ -30,16 +30,14 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// QueueDataService, and other queue-related operations. Methods include proper error handling
 /// and support for cancellation tokens throughout for responsive async operations.
 /// </remarks>
-public class EfQueueRepository : IQueueRepository
+/// <remarks>
+/// Initializes a new instance of the EfQueueRepository with the provided DbContext.
+/// </remarks>
+/// <param name="db">Entity Framework DbContext for database access</param>
+/// <exception cref="ArgumentNullException">Thrown when DbContext is null</exception>
+public class EfQueueRepository(AppDbContext db) : IQueueRepository
 {
-    private readonly AppDbContext _db;
-
-    /// <summary>
-    /// Initializes a new instance of the EfQueueRepository with the provided DbContext.
-    /// </summary>
-    /// <param name="db">Entity Framework DbContext for database access</param>
-    /// <exception cref="ArgumentNullException">Thrown when DbContext is null</exception>
-    public EfQueueRepository(AppDbContext db) => _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <summary>
     /// Retrieves all print jobs from the database.

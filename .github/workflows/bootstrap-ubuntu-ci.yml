@@ -22,5 +22,5 @@ jobs:
           chmod +x scripts/bootstrap-ubuntu.sh
           sudo bash ./scripts/bootstrap-ubuntu.sh --verify
         env:
-          DOTNET_VERSION: '9.0.302'
+          DOTNET_VERSION: '10.0.x'
           NODE_VERSION: '18'

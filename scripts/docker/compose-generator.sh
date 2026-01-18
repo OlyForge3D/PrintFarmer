@@ -12,6 +12,14 @@ CONFIGS_DIR="$DOCKER_DIR/configs"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
 
+# Source container versions from single source of truth
+VERSIONS_FILE="$DOCKER_DIR/container-versions.conf"
+if [[ -f "$VERSIONS_FILE" ]]; then
+    source "$VERSIONS_FILE"
+    # Export all sourced variables so envsubst can use them
+    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
+fi
+
 # Ensure required compose templates exist (monolithic and microservices)
 required_templates=(
     "$TEMPLATES_DIR/docker-compose.yml"
@@ -567,6 +575,13 @@ generate_compose() {
     if ! cp "$base_template" "$compose_file"; then
         log_error "Failed to copy base template"
         return 1
+    fi
+    
+    # Populate container version variables using envsubst
+    # This ensures the single source of truth (container-versions.conf) is used
+    if command -v envsubst >/dev/null 2>&1; then
+        log_info "Populating container image versions from container-versions.conf..."
+        envsubst < "$compose_file" > "${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
     fi
     
     # Inject health check anchors from common compose file

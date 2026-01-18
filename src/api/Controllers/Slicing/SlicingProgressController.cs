@@ -8,14 +8,10 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Progress")]
-public class SlicingProgressController : ControllerBase
+public class SlicingProgressController(IStoredFileOperationsService fileOperations) : ControllerBase
 {
-    private readonly IStoredFileOperationsService _fileOperations;
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
-    public SlicingProgressController(IStoredFileOperationsService fileOperations)
-    {
-        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-    }
     [HttpGet("progress/{jobId}")]
     public async Task GetProgressAsync([FromRoute] string jobId)
     {

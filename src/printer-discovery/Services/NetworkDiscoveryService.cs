@@ -199,16 +199,10 @@ public interface IApiClient
     Task<HashSet<string>> GetRegisteredPrinterUrlsAsync(CancellationToken cancellationToken = default);
 }
 
-public class ApiClient : IApiClient
+public class ApiClient(HttpClient httpClient, ILogger<ApiClient> logger) : IApiClient
 {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<ApiClient> _logger;
-
-    public ApiClient(HttpClient httpClient, ILogger<ApiClient> logger)
-    {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly ILogger<ApiClient> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task RegisterDiscoveredPrinterAsync(DiscoveredPrinterDto printer, CancellationToken cancellationToken = default)
     {

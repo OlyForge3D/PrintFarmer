@@ -16,14 +16,9 @@ namespace Farm.Web.Api.Data.Repositories
         Task<IEnumerable<PrintApproval>> ListPendingAsync();
     }
 
-    public class EfPrintApprovalRepository : IPrintApprovalRepository
+    public class EfPrintApprovalRepository(AppDbContext db) : IPrintApprovalRepository
     {
-        private readonly AppDbContext _db;
-
-        public EfPrintApprovalRepository(AppDbContext db)
-        {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
-        }
+        private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
         public async Task AddAsync(PrintApproval approval)
         {

@@ -13,12 +13,16 @@ namespace Farm.Infrastructure.Services.Catalog;
 /// Core catalog service with pure business logic.
 /// Delegates caching to ICatalogCacheProvider abstraction.
 /// </summary>
-public class CatalogService : ICatalogService
+public class CatalogService(
+    ICatalogRepository repo,
+    INormalizationEventLogger normLogger,
+    ICatalogCacheProvider cacheProvider,
+    IUnifiedLoggingService logger) : ICatalogService
 {
-    private readonly ICatalogRepository _repo;
-    private readonly INormalizationEventLogger _normLogger;
-    private readonly ICatalogCacheProvider _cacheProvider;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly ICatalogRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+    private readonly INormalizationEventLogger _normLogger = normLogger ?? throw new ArgumentNullException(nameof(normLogger));
+    private readonly ICatalogCacheProvider _cacheProvider = cacheProvider ?? throw new ArgumentNullException(nameof(cacheProvider));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Cache for unknown catalog IDs to avoid repeated database queries
     private Guid? _cachedUnknownMfgId;
@@ -27,18 +31,6 @@ public class CatalogService : ICatalogService
     // Cache for name-based lookups to avoid repeated database queries during bulk operations
     private Dictionary<string, ManufacturerDto?>? _manufacturerNameCache;
     private Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>? _modelNameCache;
-
-    public CatalogService(
-        ICatalogRepository repo,
-        INormalizationEventLogger normLogger,
-        ICatalogCacheProvider cacheProvider,
-        IUnifiedLoggingService logger)
-    {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _normLogger = normLogger ?? throw new ArgumentNullException(nameof(normLogger));
-        _cacheProvider = cacheProvider ?? throw new ArgumentNullException(nameof(cacheProvider));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     public async Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
     {
@@ -279,11 +271,7 @@ public class CatalogService : ICatalogService
 
     public async Task DeleteModelAsync(Guid id, CancellationToken ct)
     {
-        PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
-        if (model is null)
-        {
-            throw new KeyNotFoundException($"Model with id '{id}' not found");
-        }
+        PrinterModel? model = await _repo.GetModelEntityAsync(id, ct) ?? throw new KeyNotFoundException($"Model with id '{id}' not found");
 
         Guid manufacturerId = model.ManufacturerId;
         await _repo.RemoveModelAsync(id, ct);
@@ -315,20 +303,9 @@ public class CatalogService : ICatalogService
             return true;
         }
 
-        if (ex.InnerException?.GetType().FullName?.Contains("MySqlException", StringComparison.OrdinalIgnoreCase) == true &&
-            ex.InnerException?.GetType().GetProperty("Number")?.GetValue(ex.InnerException) is int num && num == 1062)
-        {
-            return true;
-        }
-
         string msg = ex.InnerException?.Message ?? ex.Message;
-        if (!string.IsNullOrEmpty(msg) && (msg.Contains("NameLowered", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("IX_Manufacturers_NameLowered", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return false;
+        return !string.IsNullOrEmpty(msg) && (msg.Contains("NameLowered", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("IX_Manufacturers_NameLowered", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Finds a manufacturer by name with caching. Returns null if not found.</summary>

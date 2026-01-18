@@ -305,7 +305,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
 
             if (printersToCheck == 0)
             {
-                printers = new List<Printer>();
+                printers = [];
             }
             else
             {

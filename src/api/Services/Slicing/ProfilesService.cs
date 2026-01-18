@@ -42,57 +42,43 @@ namespace Farm.Web.Api.Services.Slicing
     /// and proper logging. External worker communication uses HttpClient with
     /// error handling for offline scenarios.
     /// </remarks>
-    public class ProfilesService : IProfilesService
+    /// <remarks>
+    /// Initializes a new instance of the ProfilesService with required dependencies.
+    /// </remarks>
+    /// <param name="repo">Repository for SlicerProfile CRUD operations</param>
+    /// <param name="logger">Unified logging service for diagnostic and error logs</param>
+    /// <param name="processProfileRepo">Repository for process profile operations</param>
+    /// <param name="machineProfileRepo">Repository for machine profile operations</param>
+    /// <param name="filamentProfileRepo">Repository for filament profile operations</param>
+    /// <param name="unitOfWork">Unit of work for coordinating database transactions</param>
+    /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
+    /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
+    /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
+    /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
+    /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
+    public class ProfilesService(
+        IProfilesRepository repo,
+        IUnifiedLoggingService logger,
+        IProcessProfileRepository processProfileRepo,
+        IMachineProfileRepository machineProfileRepo,
+        IFilamentProfileRepository filamentProfileRepo,
+        IUnitOfWork unitOfWork,
+        IWorkerRepository workerRepository,
+        ICatalogService catalogService,
+        IProfileParsingService parsingService,
+        IHubContext<SlicerHub> slicerHubContext) : IProfilesService
     {
-        private readonly IProfilesRepository _repo;
-        private readonly IUnifiedLoggingService _logger;
-        private readonly IHubContext<SlicerHub> _slicerHubContext;
+        private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly IHubContext<SlicerHub> _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
 
-        private readonly IProcessProfileRepository _processProfileRepo;
-        private readonly IMachineProfileRepository _machineProfileRepo;
-        private readonly IFilamentProfileRepository _filamentProfileRepo;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IWorkerRepository _workerRepository;
-        private readonly ICatalogService _catalogService;
-        private readonly IProfileParsingService _parsingService;
-
-        /// <summary>
-        /// Initializes a new instance of the ProfilesService with required dependencies.
-        /// </summary>
-        /// <param name="repo">Repository for SlicerProfile CRUD operations</param>
-        /// <param name="logger">Unified logging service for diagnostic and error logs</param>
-        /// <param name="processProfileRepo">Repository for process profile operations</param>
-        /// <param name="machineProfileRepo">Repository for machine profile operations</param>
-        /// <param name="filamentProfileRepo">Repository for filament profile operations</param>
-        /// <param name="unitOfWork">Unit of work for coordinating database transactions</param>
-        /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
-        /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
-        /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
-        /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
-        /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
-        public ProfilesService(
-            IProfilesRepository repo,
-            IUnifiedLoggingService logger,
-            IProcessProfileRepository processProfileRepo,
-            IMachineProfileRepository machineProfileRepo,
-            IFilamentProfileRepository filamentProfileRepo,
-            IUnitOfWork unitOfWork,
-            IWorkerRepository workerRepository,
-            ICatalogService catalogService,
-            IProfileParsingService parsingService,
-            IHubContext<SlicerHub> slicerHubContext)
-        {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
-            _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
-            _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
-            _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
-            _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
-            _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
-        }
+        private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
+        private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
+        private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+        private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+        private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
 
         /// <summary>
         /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -613,7 +599,7 @@ namespace Farm.Web.Api.Services.Slicing
                 }
                 if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
                 {
-                    list = new List<MachineProfileListItemDto>();
+                    list = [];
                     machinesByModelId[pmid] = list;
                 }
                 list.Add(m);
@@ -1890,12 +1876,9 @@ namespace Farm.Web.Api.Services.Slicing
 
                 string versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
                 using JsonDocument versionDoc = JsonDocument.Parse(versionJson);
-                if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String)
-                {
-                    return versionElem.GetString();
-                }
-
-                return null;
+                return versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String
+                    ? versionElem.GetString()
+                    : null;
             }
             catch
             {

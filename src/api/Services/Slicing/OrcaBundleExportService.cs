@@ -79,7 +79,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
             .Where(m => filterIds == null || filterIds.Count == 0 || filterIds.Contains(m.Id))
             .ToList();
 
-        List<Dictionary<string, object>> presets = new List<Dictionary<string, object>>();
+        List<Dictionary<string, object>> presets = [];
 
         foreach (var modelDto in models)
         {
@@ -114,7 +114,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
 
     private async Task<List<Dictionary<string, object>>> ExportProcessPresetsAsync()
     {
-        List<Dictionary<string, object>> presets = new List<Dictionary<string, object>>();
+        List<Dictionary<string, object>> presets = [];
 
         // Get all public process profiles
         var profiles = await _processRepo.GetPublicAsync();

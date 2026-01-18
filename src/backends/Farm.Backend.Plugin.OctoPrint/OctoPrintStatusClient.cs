@@ -114,9 +114,8 @@ namespace Farm.Backend.Plugin.OctoPrint
                     ct);
 
                 // Build PrinterDto from typed objects
-                if (printerState != null)
-                {
-                    return new PrinterDto(
+                return printerState != null
+                    ? new PrinterDto(
                         Id: printer.Id,
                         Name: printer.Name,
                         Notes: printer.Notes,
@@ -144,12 +143,8 @@ namespace Farm.Backend.Plugin.OctoPrint
                         FrontendPort: printer.FrontendPort,
                         SpoolInfo: null,
                         BackendUrl: printer.BackendUrl,
-                        FrontendUrl: printer.FrontendUrl);
-                }
-                else
-                {
-                    throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
-                }
+                        FrontendUrl: printer.FrontendUrl)
+                    : throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
             }
             catch (Exception ex)
             {

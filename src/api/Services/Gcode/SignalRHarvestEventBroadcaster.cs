@@ -11,14 +11,9 @@ namespace Farm.Web.Api.Services.Gcode;
 /// SignalR implementation of harvest event broadcaster.
 /// Broadcasts harvest events to all connected clients using SignalR hubs.
 /// </summary>
-public class SignalRHarvestEventBroadcaster : IHarvestEventBroadcaster
+public class SignalRHarvestEventBroadcaster(IHubContext<HarvestHub> hubContext) : IHarvestEventBroadcaster
 {
-    private readonly IHubContext<HarvestHub> _hubContext;
-
-    public SignalRHarvestEventBroadcaster(IHubContext<HarvestHub> hubContext)
-    {
-        _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-    }
+    private readonly IHubContext<HarvestHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
 
     /// <summary>
     /// Broadcasts a generic event to all clients in a harvest operation group via SignalR.

@@ -495,12 +495,7 @@ public class JobQueueAnalyticsController(
 
             var job = await _printQueueService.GetJobByIdAsync(jobId, cancellationToken);
 
-            if (job == null)
-            {
-                return NotFound(new { error = $"Job '{jobId}' not found" });
-            }
-
-            return Ok(job);
+            return job == null ? NotFound(new { error = $"Job '{jobId}' not found" }) : Ok(job);
         }
         catch (Exception ex)
         {

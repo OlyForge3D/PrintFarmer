@@ -182,11 +182,7 @@ public class SignalRSlicerProgressNotifier(
     {
         lock (_lockObject)
         {
-            if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? subscribers))
-            {
-                return [.. subscribers];
-            }
-            return [];
+            return _jobSubscriptions.TryGetValue(jobId, out HashSet<string>? subscribers) ? [.. subscribers] : [];
         }
     }
 

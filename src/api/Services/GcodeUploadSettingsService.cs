@@ -4,7 +4,7 @@ namespace Farm.Web.Api.Services;
 
 public interface IGcodeUploadSettings
 {
-    IReadOnlyCollection<string> AllowedExtensions { get; }
+    IReadOnlyCollection<string> GetAllowedExtensions();
     void UpdateAllowedExtensions(IEnumerable<string> extensions);
 }
 
@@ -24,7 +24,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
         }
     }
 
-    public IReadOnlyCollection<string> AllowedExtensions => _extensions.Keys.ToArray();
+    public IReadOnlyCollection<string> GetAllowedExtensions() => _extensions.Keys.ToArray();
 
     public void UpdateAllowedExtensions(IEnumerable<string> extensions)
     {

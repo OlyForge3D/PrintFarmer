@@ -19,7 +19,7 @@ This guide walks through creating a new dedicated engine worker (e.g., Cura, Sup
 ## Required Artifacts
 | Artifact | Purpose |
 |----------|---------|
-| `<engine>-worker.csproj` | Worker project file (.NET 9, ASP.NET Core minimal host) |
+| `<engine>-worker.csproj` | Worker project file (.NET 10, ASP.NET Core minimal host) |
 | `Program.cs` | Host builder, DI wiring, hosted services registration |
 | `Services/<Engine>SlicingPipelineService.cs` | Orchestrates job lifecycle (download → run → upload) |
 | `Services/QueueConsumerService.cs` | Dequeues Redis jobs, invokes pipeline |
@@ -97,7 +97,7 @@ RUN chmod +x /opt/engine/Engine.AppImage \
 # Final stage
 FROM base AS final
 WORKDIR /app
-COPY ./bin/Release/net9.0/publish/ .
+COPY ./bin/Release/net10.0/publish/ .
 ENV ASPNETCORE_URLS=http://+:8080
 USER sliceruser
 ENTRYPOINT ["dotnet", "Farm.Worker.Engine.dll"]

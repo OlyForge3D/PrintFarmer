@@ -8,14 +8,9 @@ namespace Farm.Infrastructure.Repositories.Authentication;
 /// Entity Framework implementation of IAuthAuditLogRepository
 /// Uses IDbContextFactory for better testability and multi-operation scenarios
 /// </summary>
-public class EfAuthAuditLogRepository : IAuthAuditLogRepository
+public class EfAuthAuditLogRepository(IDbContextFactory<AppDbContext> dbContextFactory) : IAuthAuditLogRepository
 {
-    private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
-
-    public EfAuthAuditLogRepository(IDbContextFactory<AppDbContext> dbContextFactory)
-    {
-        _dbContextFactory = dbContextFactory;
-    }
+    private readonly IDbContextFactory<AppDbContext> _dbContextFactory = dbContextFactory;
 
     public async Task AddAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
     {
@@ -85,12 +80,9 @@ public class EfAuthAuditLogRepository : IAuthAuditLogRepository
     {
         using var context = _dbContextFactory.CreateDbContext();
         // Try to parse the event type as enum
-        if (!Enum.TryParse<AuthEventType>(eventType, out var parsedEventType))
-        {
-            return new List<AuthAuditLog>();
-        }
-
-        return await context.AuthAuditLogs
+        return !Enum.TryParse<AuthEventType>(eventType, out var parsedEventType)
+            ? new List<AuthAuditLog>()
+            : await context.AuthAuditLogs
             .AsNoTracking()
             .Where(x => x.EventType == parsedEventType)
             .OrderByDescending(x => x.Timestamp)
@@ -127,11 +119,8 @@ public class EfAuthAuditLogRepository : IAuthAuditLogRepository
             .ToListAsync(cancellationToken);
 
         // Apply client-side filtering for username/email search
-        if (!string.IsNullOrEmpty(usernameOrEmail))
-        {
-            return allLogs.Count(x => x.Metadata != null && x.Metadata.Contains(usernameOrEmail, StringComparison.Ordinal));
-        }
-
-        return allLogs.Count;
+        return !string.IsNullOrEmpty(usernameOrEmail)
+            ? allLogs.Count(x => x.Metadata != null && x.Metadata.Contains(usernameOrEmail, StringComparison.Ordinal))
+            : allLogs.Count;
     }
 }

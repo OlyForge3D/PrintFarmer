@@ -278,12 +278,7 @@ namespace Farm.Web.Api.Tests.Hubs
                 return true;
             }
 
-            if (value == null || expectedValue == null)
-            {
-                return false;
-            }
-
-            return value.Equals(expectedValue);
+            return value == null || expectedValue == null ? false : value.Equals(expectedValue);
         }
     }
 }

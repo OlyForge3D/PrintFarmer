@@ -170,7 +170,8 @@ public class SystemLogLoggerProvider : ILoggerProvider
         {
             _logQueue.Dispose();
             _cts.Dispose();
-            _processingTask?.Dispose();
+            // Tasks don't need explicit disposal in modern .NET
+            // Disposing incomplete tasks throws InvalidOperationException in .NET 10+
         }
     }
 }
@@ -179,20 +180,12 @@ public class SystemLogLoggerProvider : ILoggerProvider
 /// Logger that queues log messages for batch processing.
 /// Extracts correlation ID from HTTP context for distributed tracing.
 /// </summary>
-internal class SystemLogLogger : ILogger
+internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog> logQueue, LogLevel minimumLevel, IHttpContextAccessor? httpContextAccessor = null) : ILogger
 {
-    private readonly string _categoryName;
-    private readonly BlockingCollection<SystemLog> _logQueue;
-    private readonly LogLevel _minimumLevel;
-    private readonly IHttpContextAccessor? _httpContextAccessor;
-
-    public SystemLogLogger(string categoryName, BlockingCollection<SystemLog> logQueue, LogLevel minimumLevel, IHttpContextAccessor? httpContextAccessor = null)
-    {
-        _categoryName = categoryName;
-        _logQueue = logQueue;
-        _minimumLevel = minimumLevel;
-        _httpContextAccessor = httpContextAccessor;
-    }
+    private readonly string _categoryName = categoryName;
+    private readonly BlockingCollection<SystemLog> _logQueue = logQueue;
+    private readonly LogLevel _minimumLevel = minimumLevel;
+    private readonly IHttpContextAccessor? _httpContextAccessor = httpContextAccessor;
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
     {

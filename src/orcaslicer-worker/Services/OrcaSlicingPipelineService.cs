@@ -162,8 +162,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 WorkingDirectory = workDir
             }
         };
-        Task progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
         _ = process.Start();
+#pragma warning disable CA2025 // progressTask references process but completes before disposal (awaited explicitly)
+        Task progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+#pragma warning restore CA2025
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
@@ -173,11 +175,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
         }
-        if (!File.Exists(gcodeFilePath))
-        {
-            throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
-        }
-        return gcodeFilePath;
+        return !File.Exists(gcodeFilePath)
+            ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
+            : gcodeFilePath;
     }
 #pragma warning restore S1172
 

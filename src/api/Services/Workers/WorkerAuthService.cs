@@ -15,20 +15,13 @@ public interface IWorkerAuthService
     bool IsAuthorized(HttpContext httpContext);
 }
 
-public sealed class WorkerAuthService : IWorkerAuthService
+public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
 {
-    private readonly string? _sharedKey;
-    private readonly IHostEnvironment _env;
+    private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
+                     ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+    private readonly IHostEnvironment _env = env;
 
     public const string HeaderName = "X-Worker-Key";
-
-    public WorkerAuthService(IConfiguration configuration, IHostEnvironment env)
-    {
-        _env = env;
-        // Hierarchy: explicit section, environment variable fallback WORKER_SHARED_API_KEY
-        _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
-                     ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
-    }
 
     public bool IsAuthorized(HttpContext httpContext)
     {

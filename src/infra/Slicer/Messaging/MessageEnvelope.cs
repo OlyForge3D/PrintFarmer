@@ -134,12 +134,9 @@ public record MessageEnvelope
     /// <returns>True if envelopes represent the same logical job</returns>
     public bool IsDuplicateOf(MessageEnvelope other)
     {
-        if (other is null)
-        {
-            return false;
-        }
-
-        return CorrelationId == other.CorrelationId &&
+        return other is null
+            ? false
+            : CorrelationId == other.CorrelationId &&
                string.Equals(Checksum, other.Checksum, StringComparison.Ordinal);
     }
 }

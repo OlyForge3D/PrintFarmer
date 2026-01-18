@@ -45,12 +45,9 @@ public class SetupController(ISetupService setupService) : ControllerBase
                 return BadRequest(result);
             }
 
-            if (result.Error?.Contains("not found in database") == true)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError, result);
-            }
-
-            return BadRequest(result);
+            return result.Error?.Contains("not found in database") == true
+                ? StatusCode(StatusCodes.Status500InternalServerError, result)
+                : BadRequest(result);
         }
 
         return Ok(result);

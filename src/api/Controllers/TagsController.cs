@@ -237,12 +237,7 @@ public class TagsController(
         try
         {
             var tag = await _tagService.GetTagByIdAsync(tagId, ct);
-            if (tag == null)
-            {
-                return NotFound(new { error = "Tag not found" });
-            }
-
-            return Ok(tag);
+            return tag == null ? NotFound(new { error = "Tag not found" }) : Ok(tag);
         }
         catch (Exception ex)
         {

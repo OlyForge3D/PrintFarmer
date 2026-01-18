@@ -592,7 +592,7 @@ cd Farm.Slicers.OrcaSlicer.v2_9_x
 <!-- Farm.Slicers.OrcaSlicer.v2_9_x/Farm.Slicers.OrcaSlicer.v2_9_x.csproj -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <Version>2.9.4</Version>
   </PropertyGroup>
@@ -896,7 +896,7 @@ Create `src/Slicers/Farm.Slicers.YourSlicer.vX_X_x/Farm.Slicers.YourSlicer.vX_X_
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>

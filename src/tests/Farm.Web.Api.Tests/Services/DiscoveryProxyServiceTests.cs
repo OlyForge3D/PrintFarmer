@@ -154,15 +154,10 @@ public class DiscoveryProxyServiceTests
         return hubContext;
     }
 
-    private sealed class RecordingHandler : HttpMessageHandler
+    private sealed class RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
         public HttpRequestMessage? LastRequest { get; private set; }
-
-        public RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        {
-            _handler = handler;
-        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -171,14 +166,9 @@ public class DiscoveryProxyServiceTests
         }
     }
 
-    private sealed class ThrowingHandler : HttpMessageHandler
+    private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
     {
-        private readonly Exception _exception;
-
-        public ThrowingHandler(Exception exception)
-        {
-            _exception = exception;
-        }
+        private readonly Exception _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

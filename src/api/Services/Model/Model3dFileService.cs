@@ -100,7 +100,7 @@ namespace Farm.Web.Api.Services.Model
             // Get all folders from the folder management service
             var allFolderPaths = await _folderManagementService.GetAllFolderPathsRecursiveAsync("models", "/", ct);
 
-            var folderEntries = new List<Model3DEntryDto>();
+            List<Model3DEntryDto> folderEntries = [];
 
             // Always include root folder
             folderEntries.Add(new Model3DEntryDto(
@@ -171,7 +171,7 @@ namespace Farm.Web.Api.Services.Model
                 ct);
 
             // Build model entries using existing MapToEntryDto
-            var entries = new List<Model3DEntryDto>();
+            List<Model3DEntryDto> entries = [];
             long totalSize = 0;
 
             foreach (var model in models)
@@ -205,12 +205,7 @@ namespace Farm.Web.Api.Services.Model
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
-            if (model == null)
-            {
-                return null;
-            }
-
-            return MapToDto(model);
+            return model == null ? null : MapToDto(model);
         }
 
         /// <summary>
@@ -240,11 +235,7 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            if (model == null)
-            {
-                return null;
-            }
-            return _fileOperations.GetFullThumbnailPath(model);
+            return model == null ? null : _fileOperations.GetFullThumbnailPath(model);
         }
 
         /// <summary>

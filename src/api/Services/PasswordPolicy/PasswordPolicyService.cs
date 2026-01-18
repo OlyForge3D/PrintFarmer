@@ -4,30 +4,23 @@ using Farm.Web.Api.DTOs.Auth;
 
 namespace Farm.Web.Api.Services.PasswordPolicy;
 
-public class PasswordPolicyService : IPasswordPolicyService
+public class PasswordPolicyService(IPasswordPolicyRepository repo) : IPasswordPolicyService
 {
-    private readonly IPasswordPolicyRepository _repo;
-
-    public PasswordPolicyService(IPasswordPolicyRepository repo)
-    {
-        _repo = repo;
-    }
+    private readonly IPasswordPolicyRepository _repo = repo;
 
     public async Task<PasswordPolicyDto> GetAsync(CancellationToken ct = default)
     {
         PasswordPolicyEntity? entity = await _repo.GetAsync(ct);
-        if (entity == null)
-        {
-            return new PasswordPolicyDto();
-        }
-        return new PasswordPolicyDto
-        {
-            MinLength = entity.MinLength,
-            RequireUppercase = entity.RequireUppercase,
-            RequireLowercase = entity.RequireLowercase,
-            RequireDigit = entity.RequireDigit,
-            RequireSymbol = entity.RequireSymbol
-        };
+        return entity == null
+            ? new PasswordPolicyDto()
+            : new PasswordPolicyDto
+            {
+                MinLength = entity.MinLength,
+                RequireUppercase = entity.RequireUppercase,
+                RequireLowercase = entity.RequireLowercase,
+                RequireDigit = entity.RequireDigit,
+                RequireSymbol = entity.RequireSymbol
+            };
     }
 
     public async Task<PasswordPolicyDto> UpdateAsync(UpdatePasswordPolicyRequest request, CancellationToken ct = default)

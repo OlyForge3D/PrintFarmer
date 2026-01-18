@@ -8,16 +8,10 @@ using Farm.Web.Api.Services.PrintJobQueue;
 
 namespace Farm.Web.Api.Services.PrintJobs
 {
-    public class EfPrintApprovalService : IPrintApprovalService
+    public class EfPrintApprovalService(IPrintApprovalRepository repo, IPrintJobQueueService queueService) : IPrintApprovalService
     {
-        private readonly IPrintApprovalRepository _repo;
-        private readonly IPrintJobQueueService _queueService;
-
-        public EfPrintApprovalService(IPrintApprovalRepository repo, IPrintJobQueueService queueService)
-        {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-            _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
-        }
+        private readonly IPrintApprovalRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        private readonly IPrintJobQueueService _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
 
         public async Task<Guid> CreatePendingApprovalAsync(Guid printJobId, Guid? printerId, string? requestedBy)
         {

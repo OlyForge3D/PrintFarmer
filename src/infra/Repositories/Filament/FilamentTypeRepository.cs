@@ -10,14 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Filament;
 
-public class FilamentTypeRepository : IFilamentTypeRepository
+public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
 {
-    private readonly AppDbContext _db;
-
-    public FilamentTypeRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct = default)
     {

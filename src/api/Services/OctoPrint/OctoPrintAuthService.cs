@@ -11,20 +11,12 @@ namespace Farm.Web.Api.Services.OctoPrint
         Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null);
     }
 
-    public class OctoPrintAuthService : IOctoPrintAuthService
+    public class OctoPrintAuthService(IOptions<OctoPrintSettings> options, ILogger<OctoPrintAuthService> logger, Farm.Web.Api.Data.Repositories.IApiKeyRepository apiKeyRepo, IConfiguration config) : IOctoPrintAuthService
     {
-        private readonly OctoPrintSettings _settings;
-        private readonly ILogger<OctoPrintAuthService> _logger;
-        private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _apiKeyRepo;
-        private readonly IConfiguration _config;
-
-        public OctoPrintAuthService(IOptions<OctoPrintSettings> options, ILogger<OctoPrintAuthService> logger, Farm.Web.Api.Data.Repositories.IApiKeyRepository apiKeyRepo, IConfiguration config)
-        {
-            _settings = options.Value;
-            _logger = logger;
-            _apiKeyRepo = apiKeyRepo;
-            _config = config;
-        }
+        private readonly OctoPrintSettings _settings = options.Value;
+        private readonly ILogger<OctoPrintAuthService> _logger = logger;
+        private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _apiKeyRepo = apiKeyRepo;
+        private readonly IConfiguration _config = config;
 
         public async Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null)
         {

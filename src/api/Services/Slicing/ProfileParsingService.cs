@@ -207,21 +207,18 @@ public sealed class ProfileParsingService : IProfileParsingService
     /// </summary>
     private static JsonNode? CloneJsonNode(JsonNode? node)
     {
-        if (node is null)
-        {
-            return null;
-        }
+        return node is null
+            ? null
+            : node switch
+            {
+                JsonObject obj => new JsonObject(obj.Select(kvp =>
+                    new KeyValuePair<string, JsonNode?>(kvp.Key, CloneJsonNode(kvp.Value)))),
 
-        return node switch
-        {
-            JsonObject obj => new JsonObject(obj.Select(kvp =>
-                new KeyValuePair<string, JsonNode?>(kvp.Key, CloneJsonNode(kvp.Value)))),
+                JsonArray arr => new JsonArray(arr.Select(CloneJsonNode).ToArray()),
 
-            JsonArray arr => new JsonArray(arr.Select(CloneJsonNode).ToArray()),
+                JsonValue val => JsonValue.Create(val.GetValue<object>()),
 
-            JsonValue val => JsonValue.Create(val.GetValue<object>()),
-
-            _ => node
-        };
+                _ => node
+            };
     }
 }

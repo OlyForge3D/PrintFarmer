@@ -13,14 +13,9 @@ namespace Farm.Infrastructure.Repositories.Artifacts;
 /// Entity Framework implementation of the artifacts repository.
 /// Each method creates a scoped context to prevent DbContext threading issues.
 /// </summary>
-public class EfArtifactsRepository : IArtifactsRepository
+public class EfArtifactsRepository(IDbContextFactory<AppDbContext> dbFactory) : IArtifactsRepository
 {
-    private readonly IDbContextFactory<AppDbContext> _dbFactory;
-
-    public EfArtifactsRepository(IDbContextFactory<AppDbContext> dbFactory)
-    {
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
-    }
+    private readonly IDbContextFactory<AppDbContext> _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
 
     public async Task<Artifact> AddAsync(Artifact artifact, CancellationToken ct = default)
     {

@@ -15,24 +15,16 @@ namespace Farm.Web.Api.Services.Artifacts;
 /// <summary>
 /// Background service for cleaning up old or excess artifacts based on retention policy.
 /// </summary>
-public class ArtifactCleanupService : IArtifactCleanupService
+public class ArtifactCleanupService(
+    IArtifactsRepository artifactsRepo,
+    IOptions<ArtifactStorageSettings> opts,
+    IWebHostEnvironment env,
+    ILogger<ArtifactCleanupService> logger) : IArtifactCleanupService
 {
-    private readonly IArtifactsRepository _artifactsRepo;
-    private readonly ArtifactStorageSettings _settings;
-    private readonly IWebHostEnvironment _env;
-    private readonly ILogger<ArtifactCleanupService> _logger;
-
-    public ArtifactCleanupService(
-        IArtifactsRepository artifactsRepo,
-        IOptions<ArtifactStorageSettings> opts,
-        IWebHostEnvironment env,
-        ILogger<ArtifactCleanupService> logger)
-    {
-        _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
-        _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IArtifactsRepository _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
+    private readonly ArtifactStorageSettings _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
+    private readonly IWebHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
+    private readonly ILogger<ArtifactCleanupService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<int> ScanAndCleanupAsync(CancellationToken ct)
     {
@@ -42,7 +34,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        List<Artifact> candidatesForDeletion = new List<Artifact>();
+        List<Artifact> candidatesForDeletion = [];
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)

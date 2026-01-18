@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Bootstrap script for macOS (Monterey/Big Sur/Apple Silicon/Intel)
-# Installs Homebrew (if missing), .NET 9.x (via dotnet-install or Homebrew), Node.js >=20.19 (recommended v20.19.0), git
+# Installs Homebrew (if missing), .NET 10.x (via dotnet-install or Homebrew), Node.js >=20.19 (recommended v20.19.0), git
 # Designed to be idempotent.
 
 set -euo pipefail
 
-REQ_DOTNET_VERSION=${DOTNET_VERSION:-9.0.302}
+REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.102}
 # Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
 NODE_VERSION=${NODE_VERSION:-20}
 

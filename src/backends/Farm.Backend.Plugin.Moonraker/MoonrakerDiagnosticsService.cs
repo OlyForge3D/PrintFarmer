@@ -3,16 +3,10 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerDiagnosticsService : IMoonrakerDiagnosticsService
+public class MoonrakerDiagnosticsService(IMoonrakerClient moonrakerClient, IUnifiedLoggingService logger) : IMoonrakerDiagnosticsService
 {
-    private readonly IMoonrakerClient _moonrakerClient;
-    private readonly IUnifiedLoggingService _logger;
-
-    public MoonrakerDiagnosticsService(IMoonrakerClient moonrakerClient, IUnifiedLoggingService logger)
-    {
-        _moonrakerClient = moonrakerClient;
-        _logger = logger;
-    }
+    private readonly IMoonrakerClient _moonrakerClient = moonrakerClient;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     private async Task<T?> ExecuteWithRetriesAsync<T>(Func<Task<T>> func)
     {

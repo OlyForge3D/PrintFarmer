@@ -14,16 +14,9 @@ namespace Farm.Web.Api.Services.SlicerServices
     /// Database-backed implementation of ISlicerJobQueue which delegates to ISliceJobRepository/EfSliceJobRepository
     /// This provides equivalent semantics for the HTTP-based worker claim/renew/complete flow used by HttpJobPollerService.
     /// </summary>
-    public class DbSlicerJobQueue : ISlicerJobQueue
+    public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
     {
-        private readonly ISliceJobRepository _repo;
-        private readonly IUnifiedLoggingService _logger;
-
-        public DbSlicerJobQueue(ISliceJobRepository repo, IUnifiedLoggingService logger)
-        {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
 
         public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
         {
@@ -41,12 +34,7 @@ namespace Farm.Web.Api.Services.SlicerServices
                 wid = Guid.NewGuid();
             }
             SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
-            if (job == null)
-            {
-                return null;
-            }
-
-            return ToDistributedJob(job);
+            return job == null ? null : ToDistributedJob(job);
         }
 
         public async Task CompleteJobAsync(DistributedSlicingJob job, SlicingResult result, CancellationToken cancellationToken = default)

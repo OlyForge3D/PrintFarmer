@@ -121,7 +121,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaPrinterPresetDto> ParsePrinterPresets(JsonArray printerArray)
     {
-        List<OrcaPrinterPresetDto> printers = new List<OrcaPrinterPresetDto>();
+        List<OrcaPrinterPresetDto> printers = [];
 
         foreach (JsonNode? node in printerArray)
         {
@@ -171,7 +171,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaFilamentPresetDto> ParseFilamentPresets(JsonArray filamentArray)
     {
-        List<OrcaFilamentPresetDto> filaments = new List<OrcaFilamentPresetDto>();
+        List<OrcaFilamentPresetDto> filaments = [];
 
         foreach (JsonNode? node in filamentArray)
         {
@@ -202,7 +202,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaProcessPresetDto> ParseProcessPresets(JsonArray processArray)
     {
-        List<OrcaProcessPresetDto> processes = new List<OrcaProcessPresetDto>();
+        List<OrcaProcessPresetDto> processes = [];
 
         foreach (JsonNode? node in processArray)
         {

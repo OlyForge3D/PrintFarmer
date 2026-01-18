@@ -8,14 +8,9 @@ namespace Farm.Web.Api.Services.Slicing;
 /// <summary>
 /// Maps OrcaSlicer bundle presets to PrintFarmer catalog entities using fuzzy matching and confidence scoring.
 /// </summary>
-public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
+public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogRepo) : IOrcaPresetMappingService
 {
-    private readonly ICatalogRepository _catalogRepo;
-
-    public OrcaPresetMappingService(ICatalogRepository catalogRepo)
-    {
-        _catalogRepo = catalogRepo ?? throw new ArgumentNullException(nameof(catalogRepo));
-    }
+    private readonly ICatalogRepository _catalogRepo = catalogRepo ?? throw new ArgumentNullException(nameof(catalogRepo));
 
     public async Task<OrcaBundleMappingResult> MapBundlePresetsAsync(OrcaBundlePreviewDto preview, CancellationToken ct = default)
     {
@@ -79,12 +74,12 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
         PrinterModel? bestMatch = null;
         double bestScore = 0.0;
-        List<string> reasons = new List<string>();
+        List<string> reasons = [];
 
         foreach (PrinterModel model in catalogModels)
         {
             double score = 0.0;
-            List<string> matchReasons = new List<string>();
+            List<string> matchReasons = [];
 
             // Model name similarity (40% weight)
             double nameScore = CalculateStringSimilarity(preset.PrinterModel ?? preset.Name, model.Name);
@@ -260,12 +255,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
         int distance = LevenshteinDistance(a, b);
         int maxLength = Math.Max(a.Length, b.Length);
 
-        if (maxLength == 0)
-        {
-            return 1.0;
-        }
-
-        return 1.0 - ((double)distance / maxLength);
+        return maxLength == 0 ? 1.0 : 1.0 - ((double)distance / maxLength);
     }
 
     private static string NormalizeString(string input)

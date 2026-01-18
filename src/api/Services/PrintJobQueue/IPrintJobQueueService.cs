@@ -15,7 +15,7 @@ public interface IPrintJobQueueService
 
 public record EnqueuePrintJobRequest
 (
-    Guid gcodeFileId,
+    [property: System.Text.Json.Serialization.JsonRequired] Guid gcodeFileId,
     Guid? assignedPrinterId,
     string? priority,
     double? requiredNozzleDiameter,

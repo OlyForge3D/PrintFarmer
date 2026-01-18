@@ -165,7 +165,7 @@ Solutions to common issues in PrintFarmer.
 2. **Check .NET Installation**
    ```bash
    dotnet --info
-   # Should show .NET 9.0 SDK
+   # Should show .NET 10.0 SDK
    ```
 
 3. **Review Startup Logs**

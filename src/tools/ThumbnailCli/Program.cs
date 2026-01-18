@@ -139,11 +139,9 @@ internal static class Program
     private static string Require(IReadOnlyList<string> args, params string[] keys)
     {
         var value = GetValue(args, keys);
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new ArgumentException($"Missing required option: {string.Join(" | ", keys)}");
-        }
-        return value;
+        return string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException($"Missing required option: {string.Join(" | ", keys)}")
+            : value;
     }
 
     private static string? GetValue(IReadOnlyList<string> args, params string[] keys)
@@ -154,12 +152,7 @@ internal static class Program
             {
                 if (string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (i + 1 < args.Count)
-                    {
-                        return args[i + 1];
-                    }
-
-                    return null;
+                    return i + 1 < args.Count ? args[i + 1] : null;
                 }
             }
         }

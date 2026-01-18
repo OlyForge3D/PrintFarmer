@@ -12,16 +12,10 @@ namespace Farm.OrcaSlicer.Worker.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Slicer Profiles")]
-public class ProfilesController : ControllerBase
+public class ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly ISlicerProfilesService _profileService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger)
-    {
-        _profileService = profileService;
-        _logger = logger;
-    }
+    private readonly ISlicerProfilesService _profileService = profileService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Get all available slicer profiles organized by manufacturer and model hierarchy.
@@ -272,11 +266,7 @@ public class ProfilesController : ControllerBase
         // Machine profile names follow pattern: "{Model} {Variant}" where variant is like "0.4 nozzle"
         // We need to remove nozzle size suffixes
         string[] parts = machineName.Split([" 0."], StringSplitOptions.None);
-        if (parts.Length > 1)
-        {
-            return parts[0].Trim();
-        }
-        return machineName;
+        return parts.Length > 1 ? parts[0].Trim() : machineName;
     }
 
     /// <summary>

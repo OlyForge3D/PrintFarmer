@@ -291,11 +291,7 @@ public class ProfilesController(
     public async Task<IActionResult> GetProfileAsync(Guid id)
     {
         ProcessProfileResponseDto? profile = await _profilesService.GetProfileAsync(id, CancellationToken.None);
-        if (profile == null)
-        {
-            return NotFound();
-        }
-        return Ok(profile);
+        return profile == null ? NotFound() : Ok(profile);
     }
 
     /// <summary>
@@ -651,12 +647,9 @@ public class ProfilesController(
             }
 
             _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
-            if (ex.Message.Contains("not found in registry", StringComparison.OrdinalIgnoreCase))
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
-            }
-
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
+            return ex.Message.Contains("not found in registry", StringComparison.OrdinalIgnoreCase)
+                ? StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry")
+                : StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
         {

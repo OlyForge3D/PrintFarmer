@@ -13,14 +13,9 @@ namespace Farm.Infrastructure.Repositories.FileConsistency;
 /// Entity Framework implementation for file audit repository.
 /// Provides read access to files and write access to audit results.
 /// </summary>
-public class EfFileAuditRepository : IFileAuditRepository
+public class EfFileAuditRepository(IDbContextFactory<AppDbContext> dbFactory) : IFileAuditRepository
 {
-    private readonly IDbContextFactory<AppDbContext> _dbFactory;
-
-    public EfFileAuditRepository(IDbContextFactory<AppDbContext> dbFactory)
-    {
-        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
-    }
+    private readonly IDbContextFactory<AppDbContext> _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
 
     public async Task<IReadOnlyList<Model3D>> GetAllModel3DFilesAsync(CancellationToken ct = default)
     {

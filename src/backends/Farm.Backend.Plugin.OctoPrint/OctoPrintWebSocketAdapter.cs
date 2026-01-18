@@ -18,14 +18,20 @@ namespace Farm.Backend.Plugin.OctoPrint;
 /// Maintains persistent WebSocket connection to /sockjs/websocket endpoint,
 /// with automatic fallback to HTTP polling every 10 seconds if WebSocket fails.
 /// </summary>
-public sealed class OctoPrintWebSocketAdapter : IDisposable
+public sealed class OctoPrintWebSocketAdapter(
+    Guid printerId,
+    Printer printer,
+    IUnifiedLoggingService logger,
+    IOctoPrintClient octoPrintClient,
+    IHubContext<PrinterHub> hub,
+    IPrinterStatusCacheWriter statusCacheWriter) : IDisposable
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IOctoPrintClient _octoPrintClient;
-    private readonly IHubContext<PrinterHub> _hub;
-    private readonly IPrinterStatusCacheWriter _statusCacheWriter;
-    private readonly Guid _printerId;
-    private readonly Printer _printer;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IOctoPrintClient _octoPrintClient = octoPrintClient;
+    private readonly IHubContext<PrinterHub> _hub = hub;
+    private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly Guid _printerId = printerId;
+    private readonly Printer _printer = printer;
     private readonly CancellationTokenSource _cts = new();
 
     private ClientWebSocket? _webSocket;
@@ -47,22 +53,6 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     public string SocketState => _socketState;
     public string ApiState => _apiState;
     public bool IsConnected => _webSocket?.State == WebSocketState.Open && _isAuthenticated;
-
-    public OctoPrintWebSocketAdapter(
-        Guid printerId,
-        Printer printer,
-        IUnifiedLoggingService logger,
-        IOctoPrintClient octoPrintClient,
-        IHubContext<PrinterHub> hub,
-        IPrinterStatusCacheWriter statusCacheWriter)
-    {
-        _printerId = printerId;
-        _printer = printer;
-        _logger = logger;
-        _octoPrintClient = octoPrintClient;
-        _hub = hub;
-        _statusCacheWriter = statusCacheWriter;
-    }
 
     /// <summary>
     /// Establishes WebSocket connection and starts receive loop.

@@ -14,16 +14,10 @@ namespace Farm.Infrastructure.Services;
 /// Service for managing job scheduling with timezone support
 /// Phase 4.1: Job Scheduling
 /// </summary>
-public class JobSchedulingService
+public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingService> logger)
 {
-    private readonly AppDbContext _context;
-    private readonly ILogger<JobSchedulingService> _logger;
-
-    public JobSchedulingService(AppDbContext context, ILogger<JobSchedulingService> logger)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
+    private readonly ILogger<JobSchedulingService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Schedule a print job for a specific date and time in a given timezone
@@ -39,12 +33,7 @@ public class JobSchedulingService
         // Validate job exists
         var job = await _context.PrintJobs
             .Include(j => j.Schedule)
-            .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
-
-        if (job == null)
-        {
-            throw new InvalidOperationException($"Print job '{jobId}' not found");
-        }
+            .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken) ?? throw new InvalidOperationException($"Print job '{jobId}' not found");
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
@@ -102,12 +91,7 @@ public class JobSchedulingService
         CancellationToken cancellationToken = default)
     {
         var schedule = await _context.JobSchedules
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
-
-        if (schedule == null)
-        {
-            throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
-        }
+            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
@@ -136,12 +120,7 @@ public class JobSchedulingService
     public async Task CancelSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         var schedule = await _context.JobSchedules
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
-
-        if (schedule == null)
-        {
-            throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
-        }
+            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsActive = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -157,12 +136,7 @@ public class JobSchedulingService
     public async Task PauseSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         var schedule = await _context.JobSchedules
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
-
-        if (schedule == null)
-        {
-            throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
-        }
+            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsPaused = true;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -178,12 +152,7 @@ public class JobSchedulingService
     public async Task ResumeSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         var schedule = await _context.JobSchedules
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
-
-        if (schedule == null)
-        {
-            throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
-        }
+            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsPaused = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -245,23 +214,20 @@ public class JobSchedulingService
             .ThenInclude(j => j.AssignedPrinter)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
-        if (schedule == null)
-        {
-            return null;
-        }
-
-        return new ScheduledJobDto
-        {
-            JobId = schedule.PrintJobId,
-            PrinterName = schedule.PrintJob?.AssignedPrinter?.Name ?? "Unassigned",
-            JobName = schedule.PrintJob?.Name ?? "Unknown",
-            ScheduledStartTime = schedule.ScheduledStartTime,
-            ScheduledStartTimeInTimeZone = ConvertFromUtc(schedule.ScheduledStartTime, schedule.TimeZone),
-            TimeZone = schedule.TimeZone,
-            RecurrencePattern = schedule.RecurrencePattern,
-            IsActive = schedule.IsActive,
-            IsPaused = schedule.IsPaused
-        };
+        return schedule == null
+            ? null
+            : new ScheduledJobDto
+            {
+                JobId = schedule.PrintJobId,
+                PrinterName = schedule.PrintJob?.AssignedPrinter?.Name ?? "Unassigned",
+                JobName = schedule.PrintJob?.Name ?? "Unknown",
+                ScheduledStartTime = schedule.ScheduledStartTime,
+                ScheduledStartTimeInTimeZone = ConvertFromUtc(schedule.ScheduledStartTime, schedule.TimeZone),
+                TimeZone = schedule.TimeZone,
+                RecurrencePattern = schedule.RecurrencePattern,
+                IsActive = schedule.IsActive,
+                IsPaused = schedule.IsPaused
+            };
     }
 
     /// <summary>

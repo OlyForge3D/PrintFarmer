@@ -12,21 +12,14 @@ namespace Farm.Web.Api.Services.Artifacts;
 /// <summary>
 /// Background hosted service that periodically runs artifact cleanup.
 /// </summary>
-public class ArtifactCleanupHostedService : BackgroundService
+public class ArtifactCleanupHostedService(
+    IServiceProvider serviceProvider,
+    IOptions<ArtifactStorageSettings> opts,
+    ILogger<ArtifactCleanupHostedService> logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<ArtifactCleanupHostedService> _logger;
-    private readonly ArtifactStorageSettings _settings;
-
-    public ArtifactCleanupHostedService(
-        IServiceProvider serviceProvider,
-        IOptions<ArtifactStorageSettings> opts,
-        ILogger<ArtifactCleanupHostedService> logger)
-    {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly ILogger<ArtifactCleanupHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ArtifactStorageSettings _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
