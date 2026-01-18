@@ -170,6 +170,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 "Phrozen",
                 "PrintersForAnts",  // Community derivative of Voron
                 "Prusa",
+                "Qidi",  // Note: OrcaSlicer manifest uses "Qidi" not "QIDI"
                 "Sovol",
                 "Ratrig",  // Note: OrcaSlicer manifest uses "Ratrig" not "RatRig", but model names use "RatRig V-Core"
                 "Voron",
@@ -238,6 +239,8 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("RatRig V-Core 4 IDEX 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 // Phrozen (manifest: "Phrozen" -> "Phrozen Arco")
                 ("Phrozen Arco", "Phrozen", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+                // Qidi (manifest: "Qidi" -> "Qidi Q1 Pro", "Qidi X-Plus 4", etc.)
+                ("QIDI X-Plus 4", "Qidi", 305.0, 305.0, 280.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)370, (int?)0, (int?)110, "PLA,PETG,ABS,ASA,PC,TPU,Nylon", (int?)600),
                 // Prusa (manifest: "Prusa MINI", "Prusa MK3S", "Prusa MK4S", "Prusa CORE One", "Prusa XL" - NO "Original Prusa")
                 ("Prusa MINI", "Prusa", 180.0, 180.0, 180.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS,ASA,PC", (int?)180),
                 ("Prusa MK3S", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
