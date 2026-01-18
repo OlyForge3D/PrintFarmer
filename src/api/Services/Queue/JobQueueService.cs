@@ -72,6 +72,17 @@ namespace Farm.Web.Api.Services.Queue
                 List<PrintJob> queuedJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
                 PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
 
+                // Get primary toolhead info (first toolhead or the one marked as primary)
+                var primaryToolhead = printer.Toolheads?.FirstOrDefault(t => t.IsPrimary)
+                    ?? printer.Toolheads?.FirstOrDefault();
+
+                // Collect all supported materials from all toolheads
+                var supportedMaterials = printer.Toolheads?
+                    .Where(t => t.SupportedMaterials != null)
+                    .SelectMany(t => t.SupportedMaterials!)
+                    .Distinct()
+                    .ToList();
+
                 overview.Add(new QueueOverviewDto
                 {
                     PrinterId = printer.Id,
@@ -81,7 +92,9 @@ namespace Farm.Web.Api.Services.Queue
                     QueuedJobsCount = queuedJobs.Count,
                     CurrentJobId = currentJob?.Id,
                     CurrentJobName = currentJob?.Name,
-                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(queuedJobs, currentJob)
+                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(queuedJobs, currentJob),
+                    NozzleDiameter = primaryToolhead?.NozzleDiameter,
+                    SupportedMaterials = supportedMaterials
                 });
             }
 

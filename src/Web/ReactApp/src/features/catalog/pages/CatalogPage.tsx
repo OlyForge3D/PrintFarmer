@@ -1,6 +1,6 @@
 import { useState, useEffect, useOptimistic, useTransition } from 'react';
 import { apiClient } from '@/services/api';
-import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, PlusIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/features/models3d/components/EditModelModal';
@@ -23,6 +23,7 @@ export function CatalogPage() {
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
   const [addManufacturerModalOpen, setAddManufacturerModalOpen] = useState(false);
   const [modelToEdit, setModelToEdit] = useState<PrinterModelDto | null>(null);
+  const [isCloneMode, setIsCloneMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
@@ -170,11 +171,25 @@ export function CatalogPage() {
 
   const openEditModal = (model: PrinterModelDto) => {
     setModelToEdit(model);
+    setIsCloneMode(false);
+    setEditModelModalOpen(true);
+  };
+
+  const openCloneModal = (model: PrinterModelDto) => {
+    // Create a temporary model object for cloning with the source model's data
+    const clonedModel: PrinterModelDto = {
+      ...model,
+      id: `temp-${Date.now()}` as string, // Temporary ID for add mode
+      name: `${model.name} - Copy`,
+    };
+    setModelToEdit(clonedModel);
+    setIsCloneMode(true);
     setEditModelModalOpen(true);
   };
 
   const closeEditModal = () => {
     setModelToEdit(null);
+    setIsCloneMode(false);
     setEditModelModalOpen(false);
   };
 
@@ -438,6 +453,14 @@ export function CatalogPage() {
                           <EditIcon className="h-4 w-4 text-blue-400" />
                         </Button>
                         <Button
+                          onClick={() => openCloneModal(model)}
+                          variant="subtle"
+                          size="sm"
+                          title="Clone model"
+                        >
+                          <CopyIcon className="h-4 w-4 text-green-400" />
+                        </Button>
+                        <Button
                           onClick={() => deleteModel(model.id, model.name)}
                           variant="subtle"
                           size="sm"
@@ -497,6 +520,7 @@ export function CatalogPage() {
         model={modelToEdit}
         isOpen={editModelModalOpen}
         onClose={closeEditModal}
+        isCloneMode={isCloneMode}
         onSuccess={() => {
           loadData();
           closeEditModal();

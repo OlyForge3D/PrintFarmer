@@ -23,5 +23,11 @@ public interface ICatalogService
 
     Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct);
     Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct);
+
+    // Component model methods
+    Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct);
+    Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct);
+    Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct);
+    Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct);
 }
 

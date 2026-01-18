@@ -369,15 +369,26 @@ export interface UpdatePrinterDto {
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   supportsAutoLeveling?: boolean;
   maxPrintSpeed?: number;
   backendPort?: number;
   frontendPort?: number;
   isEnabled?: boolean;
+  // Toolheads - for updating individual toolhead settings
+  toolheads?: UpdateToolheadDto[];
+}
+
+// Update payload for modifying toolhead settings
+export interface UpdateToolheadDto {
+  id: string;
+  name?: string;
+  index?: number;
+  nozzleDiameter?: number;
+  maxHotendTemp?: number;
+  supportedMaterials?: string[];
+  isPrimary?: boolean;
 }
 
 export interface ManufacturerDto {
@@ -399,6 +410,123 @@ export interface UpdateModelAliasesRequest {
   prusaSlicerNames: string[];
 }
 
+/**
+ * Nozzle material type for toolheads
+ */
+export enum NozzleType {
+  Brass = 0,
+  HardenedSteel = 1,
+  StainlessSteel = 2,
+  TungstenCarbide = 3,
+  Abrasive = 4,
+  Unknown = 99
+}
+
+export const NozzleTypeLabels: Record<NozzleType, string> = {
+  [NozzleType.Brass]: 'Brass',
+  [NozzleType.HardenedSteel]: 'Hardened Steel',
+  [NozzleType.StainlessSteel]: 'Stainless Steel',
+  [NozzleType.TungstenCarbide]: 'Tungsten Carbide',
+  [NozzleType.Abrasive]: 'Abrasive',
+  [NozzleType.Unknown]: 'Unknown'
+};
+
+/**
+ * Toolhead type - stock vs custom/aftermarket
+ */
+export enum ToolheadType {
+  Stock = 0,
+  Custom = 1
+}
+
+export const ToolheadTypeLabels: Record<ToolheadType, string> = {
+  [ToolheadType.Stock]: 'Stock',
+  [ToolheadType.Custom]: 'Custom'
+};
+
+// ============== Component Model Definitions ==============
+// These are database-backed entities that allow extensible component tracking.
+// Instead of enums, we use ID/name pairs for hotends, extruders, toolheads, and nozzles.
+
+/**
+ * Hotend model definition (from database)
+ */
+export interface HotendModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  maxTemp?: number;
+  isHighFlow: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Extruder model definition (from database)
+ */
+export interface ExtruderModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  gearRatio?: string;
+  isDirectDrive: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Toolhead model definition (from database)
+ */
+export interface ToolheadModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Nozzle model definition (from database)
+ */
+export interface NozzleModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  maxTemp?: number;
+  isHardened: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Toolhead template for a printer model
+ */
+export interface PrinterModelToolheadDto {
+  id: string;
+  name: string;
+  index: number;
+  nozzleDiameter?: number;
+  nozzleType?: NozzleType;
+  maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType;
+  // Component model references (IDs and resolved names from database)
+  hotendModelId?: string;
+  hotendModelName?: string;
+  extruderModelId?: string;
+  extruderModelName?: string;
+  toolheadModelDefId?: string;
+  toolheadModelDefName?: string;
+  nozzleModelId?: string;
+  nozzleModelName?: string;
+  supportedMaterials?: string[];
+  isPrimary: boolean;
+}
+
 export interface PrinterModelDto {
   id: string;
   name: string;
@@ -410,18 +538,17 @@ export interface PrinterModelDto {
   defaultBackend?: PrinterBackend;
   supportedFilamentTypes?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates for multi-toolhead printers
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 // Printer capabilities interface
@@ -437,9 +564,7 @@ export interface PrinterCapabilitiesExportDto {
   multiMaterial: boolean;
   supportsAutoLeveling: boolean;
   numberOfExtruders: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
   currentSpoolId?: number;
@@ -460,9 +585,7 @@ export interface PrinterCapabilitiesDto {
   hasEnclosure: boolean;
   multiMaterial: boolean;
   numberOfExtruders: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
   currentSpoolId?: number;
@@ -470,6 +593,18 @@ export interface PrinterCapabilitiesDto {
   supportsAutoLeveling: boolean;
   maxPrintSpeed?: number;
   lastUpdated: Date;
+}
+
+// Toolhead data for reading/editing
+export interface ToolheadDto {
+  id: string;
+  name?: string;
+  index: number;
+  nozzleDiameter?: number;
+  maxHotendTemp?: number;
+  supportedMaterials?: string[];
+  isPrimary: boolean;
+  lastUpdated?: Date;
 }
 
 // Printer details for edit page
@@ -489,11 +624,14 @@ export interface PrinterDetails {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
   originalServerUrl?: string;
   ipAddress?: string;
   backendPort?: number | null;
   frontendPort?: number | null;
   capabilities?: PrinterCapabilitiesDto;
+  toolheads?: ToolheadDto[];
 }
 
 // Temperature targets
@@ -608,18 +746,17 @@ export interface UpdateModelRequest {
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 export interface CreateModelRequest {
@@ -632,18 +769,17 @@ export interface CreateModelRequest {
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 // Resolve hostname/IP utility

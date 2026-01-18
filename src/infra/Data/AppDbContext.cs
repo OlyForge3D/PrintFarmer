@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> PrinterModels => Set<PrinterModel>();
     public DbSet<PrinterModelAlias> PrinterModelAliases => Set<PrinterModelAlias>();
+    public DbSet<PrinterModelToolhead> PrinterModelToolheads => Set<PrinterModelToolhead>();
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
     public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
@@ -76,6 +77,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
     // API Keys for OctoPrint API
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
+    // Component Model Definitions (extensible manufacturer-backed components)
+    public DbSet<HotendModelDefinition> HotendModelDefinitions => Set<HotendModelDefinition>();
+    public DbSet<ExtruderModelDefinition> ExtruderModelDefinitions => Set<ExtruderModelDefinition>();
+    public DbSet<ToolheadModelDefinition> ToolheadModelDefinitions => Set<ToolheadModelDefinition>();
+    public DbSet<NozzleModelDefinition> NozzleModelDefinitions => Set<NozzleModelDefinition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -182,6 +189,60 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(t => t.Index);
         });
 
+        // PrinterModelToolhead Entity Configuration (template toolheads for printer models)
+        _ = modelBuilder.Entity<PrinterModelToolhead>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).HasMaxLength(128);
+            _ = b.Property(t => t.Index).IsRequired();
+            _ = b.Property(t => t.NozzleDiameter).HasDefaultValue(0.4);
+            _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
+            _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
+
+            // JSON array properties
+            _ = b.Property(t => t.SupportedMaterials)
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+
+            // Foreign Key to PrinterModel
+            _ = b.HasOne(t => t.PrinterModel)
+             .WithMany(p => p.Toolheads)
+             .HasForeignKey(t => t.PrinterModelId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Foreign Keys to Component Models (optional relationships)
+            _ = b.HasOne(t => t.HotendModel)
+             .WithMany()
+             .HasForeignKey(t => t.HotendModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ExtruderModel)
+             .WithMany()
+             .HasForeignKey(t => t.ExtruderModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ToolheadModelDef)
+             .WithMany()
+             .HasForeignKey(t => t.ToolheadModelDefId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.NozzleModel)
+             .WithMany()
+             .HasForeignKey(t => t.NozzleModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            _ = b.HasIndex(t => t.PrinterModelId);
+            _ = b.HasIndex(t => t.Index);
+        });
+
+        // Component Model Definitions (extensible manufacturer-backed components)
+        ConfigureHotendModelDefinition(modelBuilder);
+        ConfigureExtruderModelDefinition(modelBuilder);
+        ConfigureToolheadModelDefinition(modelBuilder);
+        ConfigureNozzleModelDefinition(modelBuilder);
+
         // Location Entity Configuration
         _ = modelBuilder.Entity<Location>(b =>
         {
@@ -250,14 +311,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.MaxZ);
             _ = b.Property(m => m.DefaultBackend);
 
-            // Capability defaults
-            _ = b.Property(m => m.DefaultNozzleDiameter).HasDefaultValue(0.4);
+            // Capability defaults (nozzle diameter and max hotend temp are now on toolheads)
             _ = b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
             _ = b.Property(m => m.HasEnclosure).HasDefaultValue(false);
             _ = b.Property(m => m.MultiMaterial).HasDefaultValue(false);
             _ = b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
             _ = b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
-            _ = b.Property(m => m.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
             _ = b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
         });
@@ -1335,4 +1394,94 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             }
         }
     }
+
+    #region Component Model Definition Configurations
+
+    private void ConfigureHotendModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<HotendModelDefinition>(b =>
+        {
+            _ = b.HasKey(h => h.Id);
+            _ = b.Property(h => h.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(h => h.Description).HasMaxLength(512);
+            _ = b.Property(h => h.MaxTemp).HasDefaultValue(300);
+            _ = b.Property(h => h.IsHighFlow).HasDefaultValue(false);
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(h => h.Manufacturer)
+             .WithMany()
+             .HasForeignKey(h => h.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(h => h.ManufacturerId);
+            _ = b.HasIndex(h => h.Name);
+        });
+    }
+
+    private void ConfigureExtruderModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<ExtruderModelDefinition>(b =>
+        {
+            _ = b.HasKey(e => e.Id);
+            _ = b.Property(e => e.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(e => e.Description).HasMaxLength(512);
+            _ = b.Property(e => e.GearRatio).HasMaxLength(32);
+            _ = b.Property(e => e.IsDirectDrive).HasDefaultValue(true);
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(e => e.Manufacturer)
+             .WithMany()
+             .HasForeignKey(e => e.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(e => e.ManufacturerId);
+            _ = b.HasIndex(e => e.Name);
+        });
+    }
+
+    private void ConfigureToolheadModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<ToolheadModelDefinition>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(t => t.Description).HasMaxLength(512);
+
+            // Foreign Key to Manufacturer (nullable - community designs may not have a manufacturer)
+            _ = b.HasOne(t => t.Manufacturer)
+             .WithMany()
+             .HasForeignKey(t => t.ManufacturerId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Index for lookups
+            _ = b.HasIndex(t => t.ManufacturerId);
+            _ = b.HasIndex(t => t.Name);
+        });
+    }
+
+    private void ConfigureNozzleModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<NozzleModelDefinition>(b =>
+        {
+            _ = b.HasKey(n => n.Id);
+            _ = b.Property(n => n.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(n => n.Description).HasMaxLength(512);
+            _ = b.Property(n => n.MaxTemp).HasDefaultValue(500);
+            _ = b.Property(n => n.IsHardened).HasDefaultValue(false);
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(n => n.Manufacturer)
+             .WithMany()
+             .HasForeignKey(n => n.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(n => n.ManufacturerId);
+            _ = b.HasIndex(n => n.Name);
+        });
+    }
+
+    #endregion
 }

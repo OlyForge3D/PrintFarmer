@@ -34,7 +34,7 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
     queryKey: ['slicerProfilesExtended'],
     queryFn: async () => {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/slicer/profiles`, {
+      const res = await fetch(`${baseUrl}/slicer/profiles`, {
         headers: getAuthHeaders()
       });
       if (!res.ok) throw new Error('Failed to load profiles');
@@ -66,7 +66,7 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
   const cloneMutation = useMutation({
     mutationFn: async (sourceMachineId: string) => {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/slicer/profiles/clone-from-template`, {
+      const res = await fetch(`${baseUrl}/slicer/profiles/clone-from-template`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

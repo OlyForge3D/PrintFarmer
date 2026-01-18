@@ -4,6 +4,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// Plugin descriptor for SDCP (Simple Data Communication Protocol) backend client support.
@@ -81,6 +82,10 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
         // NOTE: Status clients are NOT registered in DI container. They are instantiated
         // on-demand by PrinterStatusClientFactory which properly handles their dependencies
         // on scoped services.
+
+        // Register the SdcpPollingService hosted service
+        // This service polls SDCP printers for status updates every 5 seconds
+        services.AddSingleton<IHostedService, SdcpPollingService>();
     }
 
     /// <summary>

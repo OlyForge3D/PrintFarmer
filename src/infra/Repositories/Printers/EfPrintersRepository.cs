@@ -16,9 +16,15 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 
     public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
 
+    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct) =>
+        await _db.Printers.Include(p => p.Toolheads).ToListAsync(ct);  // With tracking for updates
+
+    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct) =>
+        await _db.Printers.Include(p => p.Toolheads).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
+
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Toolheads).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {

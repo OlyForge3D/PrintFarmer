@@ -170,6 +170,96 @@ dotnet_diagnostic.IDE0055.severity = warning
 # Namespace declaration preferences (IDE0160 and IDE0161)
 csharp_style_namespace_declarations = file_scoped:warning
 
+# Using directive placement
+csharp_using_directive_placement = outside_namespace:warning
+
+##############################################
+# StyleCop Ordering Rules (Member Ordering)
+##############################################
+
+# SA1201: Elements must appear in the correct order
+dotnet_diagnostic.SA1201.severity = warning
+
+# SA1202: Elements must be ordered by access (public → internal → protected → private)
+dotnet_diagnostic.SA1202.severity = warning
+
+# SA1203: Constants, fields, constructors, methods, etc. must follow standard order
+dotnet_diagnostic.SA1203.severity = warning
+
+# SA1214: Static members should appear before instance members
+dotnet_diagnostic.SA1214.severity = warning
+
+# SA1216: Using directives must be sorted alphabetically
+dotnet_diagnostic.SA1216.severity = warning
+
+##############################################
+# StyleCop Rules - Disabled (Modern C# Style)
+##############################################
+
+# SA1101: Prefix local calls with this - controversial, modern C# doesn't require this
+dotnet_diagnostic.SA1101.severity = none
+
+# SA1633: File header is missing - not using file headers
+dotnet_diagnostic.SA1633.severity = none
+
+# SA1600: Elements should be documented - too noisy, using CS1591 instead
+dotnet_diagnostic.SA1600.severity = none
+
+# SA1601: Partial elements should be documented
+dotnet_diagnostic.SA1601.severity = none
+
+# SA1602: Enumeration items should be documented
+dotnet_diagnostic.SA1602.severity = none
+
+# SA1413: Use trailing comma in multi-line initializers - style preference
+dotnet_diagnostic.SA1413.severity = suggestion
+
+# SA1513: Closing brace should be followed by blank line - too strict
+dotnet_diagnostic.SA1513.severity = suggestion
+
+# SA1200: Using directives should be placed correctly - we use file-scoped namespaces
+dotnet_diagnostic.SA1200.severity = none
+
+# SA1309: Field names should not begin with underscore - conflicts with our naming convention
+dotnet_diagnostic.SA1309.severity = none
+
+# SA1310: Field names should not contain underscore - conflicts with our naming convention
+dotnet_diagnostic.SA1310.severity = none
+
+# SA1503: Braces should not be omitted - we enforce braces via IDE0011
+dotnet_diagnostic.SA1503.severity = none
+
+# SA1516: Elements should be separated by blank line - too strict
+dotnet_diagnostic.SA1516.severity = suggestion
+
+# SA1128: Put constructor initializers on their own line - style preference
+dotnet_diagnostic.SA1128.severity = suggestion
+
+# SA1402: File may only contain a single type - we allow multiple related types
+dotnet_diagnostic.SA1402.severity = none
+
+# SA1649: File name should match first type name - not always desirable
+dotnet_diagnostic.SA1649.severity = suggestion
+
+# SA1400: Access modifier should be declared - records and primary constructors
+dotnet_diagnostic.SA1400.severity = none
+
+##############################################
+# Recommended Member Order (StyleCop Default)
+##############################################
+# 1. Constants
+# 2. Fields
+# 3. Constructors
+# 4. Finalizers
+# 5. Delegates
+# 6. Events
+# 7. Enums
+# 8. Interfaces
+# 9. Properties
+# 10. Indexers
+# 11. Methods
+##############################################
+
 # CSharp code style settings:
 
 [*.cs]
@@ -182,6 +272,7 @@ csharp_new_line_before_finally = true
 csharp_new_line_before_members_in_object_initializers = true
 csharp_new_line_before_members_in_anonymous_types = true
 csharp_new_line_between_query_expression_clauses = true
+csharp_new_line_between_members = true
 
 # Indentation preferences
 csharp_indent_block_contents = true

@@ -46,6 +46,21 @@ public interface IPrintersService
     Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves all printers with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
+    Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Retrieves a single printer with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="id">The printer ID (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Printer entity with Toolheads if found; otherwise null</returns>
+    Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Adds a new printer to the database.
     /// </summary>
     /// <param name="p">The printer entity to add</param>
@@ -167,6 +182,17 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>The created printer as a DTO</returns>
     Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct);
+
+    /// <summary>
+    /// Applies template defaults from the PrinterModel to an existing printer.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the associated PrinterModel to the printer.
+    /// </summary>
+    /// <param name="printer">The printer entity to update (must include Toolheads if updating toolhead properties)</param>
+    /// <param name="forceOverwrite">If true, overwrites all values from template. If false, only fills in null/unset values.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if any values were updated, false if no changes were made</returns>
+    Task<bool> ApplyModelTemplateAsync(Printer printer, bool forceOverwrite, CancellationToken ct);
 
     /// <summary>
     /// Resolves a printer hostname to its base URL and IP address.

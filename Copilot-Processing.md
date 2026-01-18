@@ -1,53 +1,64 @@
-# Copilot Processing: Printer Model Alias Management UI
+# Copilot Processing: Edit Printer Toolheads UI
 
-**Session Start**: Adding UI support for managing printer model aliases  
-**Phase**: ✅ Backend Complete | ✅ UI Implementation Complete | 🎉 Ready for Testing
+**Session Start**: Adding UI support for editing individual toolheads in Edit Printer modal
+**Phase**: ✅ Complete
 
-## 🔄 PRINTER MODEL ALIAS MANAGEMENT UI - IMPLEMENTATION COMPLETE ✅
+## 🔄 EDIT PRINTER TOOLHEADS UI - IMPLEMENTATION COMPLETE ✅
 
-**Objective**: Add UI support for managing printer model aliases (OrcaSlicer and PrusaSlicer name mappings)  
+**Objective**: Update Edit Printer UI to allow editing individual toolheads (printerDetails contains array of toolheads that users can edit)
 **Status**: ✅ COMPLETE
 
 ### Implementation Details
 
-**1. TypeScript Types Added** (`src/Web/ReactApp/src/types/api.ts`)
-- ✅ `SlicerModelAliasDto` - Alias data structure with id, printerModelId, slicerModelName, slicerType
-- ✅ `UpdateModelAliasesRequest` - Request payload with orcaSlicerNames and prusaSlicerNames arrays
+**1. Backend Changes (Previous Session)**
+- ✅ `ToolheadDto` record added to Models.cs - exposes toolhead data for reading
+- ✅ `UpdateToolheadDto` record added to Models.cs - allows updating individual toolheads
+- ✅ `PrinterDetailsDto` extended with `Toolheads` array
+- ✅ `UpdatePrinterDto` extended with `Toolheads` array
+- ✅ `PrintersController.GetDetailsAsync` - populates toolheads from database
+- ✅ `PrintersController.UpdateAsync` - handles toolhead updates by ID
+- ✅ `EfPrintersRepository.FindByIdWithIncludesAsync` - includes Toolheads
 
-**2. API Client Methods** (`src/Web/ReactApp/src/services/api.ts`)
-- ✅ `getModelAliases(modelId)` - Fetch all aliases for a printer model
-- ✅ `updateModelAliases(modelId, request)` - Update aliases with new lists
-- ✅ Added imports for new types
+**2. TypeScript Types** (`src/Web/ReactApp/src/types/api.ts`)
+- ✅ `ToolheadDto` interface with id, name, index, nozzleDiameter, maxHotendTemp, supportedMaterials, isPrimary, lastUpdated
+- ✅ `UpdateToolheadDto` interface for update operations
+- ✅ `PrinterDetails` extended with `toolheads?: ToolheadDto[]`
+- ✅ `UpdatePrinterDto` extended with `toolheads?: UpdateToolheadDto[]`
 
-**3. ModelAliasEditor Component** (NEW FILE)
-- ✅ Path: `src/features/catalog/components/ModelAliasEditor.tsx`
-- ✅ Features:
-  - Separate sections for OrcaSlicer and PrusaSlicer aliases
-  - Add new aliases with input fields and validation
-  - Delete existing aliases with optimistic removal
-  - Loading state with spinner icon
-  - Error handling with user-friendly messages
-  - Keyboard support (Enter to add aliases)
-  - Responsive design with Tailwind CSS
-
-**4. EditModelModal Integration** 
-- ✅ Added ModelAliasEditor section to printer model editor
-- ✅ Section only shows when editing existing models (not during creation)
-- ✅ Descriptive help text explaining alias purpose
-- ✅ Auto-refresh model data on successful alias update
-- ✅ Maintains modal styling and layout consistency
+**3. EditPrinterModal UI Update** (`src/features/printers/components/EditPrinterModal.tsx`)
+- ✅ Added `toolheads` state (UpdateToolheadDto[]) to track toolhead edits
+- ✅ Added `expandedToolheads` state for accordion UI
+- ✅ Initialize toolheads from printerDetails.toolheads on load
+- ✅ Added `handleToolheadChange` function for individual toolhead field updates
+- ✅ Added `toggleToolheadExpanded` function for accordion UX
+- ✅ Updated `handleSubmit` to include toolheads array in update request
+- ✅ Added collapsible Toolheads section showing:
+  - Toolhead count in header
+  - Clickable accordion headers with expand/collapse icons
+  - Primary toolhead badge
+  - Summary view (nozzle diameter, max temp) when collapsed
+  - Full edit form when expanded:
+    - Name input
+    - Nozzle Diameter input
+    - Max Hotend Temp input
+    - Supported Materials selector (FilamentTypeSelector)
+    - Index input
+    - Primary Toolhead checkbox (auto-unsets other primaries)
 
 ### Code Quality Metrics
 
 ✅ **Build Status**: All systems passing
-- React production build: ✓ 9.87s
-- .NET API build: ✓ 0 errors, 2 pre-existing warnings
+- React production build: ✓ 10.00s
+- .NET API build: ✓ 0 errors
 - TypeScript compilation: ✓ 0 errors
 
 ✅ **Test Results**: All passing
-- Test Files: 39/39 passed
-- Tests: 400/400 passed
-- Duration: 8.65s
+- React unit tests: 474/474 passed (e2e config issues are pre-existing)
+- API printer tests: 225/225 passed
+
+---
+
+# Previous Session: Printer Model Alias Management UI
 
 ✅ **Linting**: 
 - ModelAliasEditor.tsx: 0 errors, 0 warnings

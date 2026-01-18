@@ -203,16 +203,19 @@ public class PrinterModel
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
     public int? DefaultBackend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
-    public double? DefaultNozzleDiameter { get; set; } = 0.4; // Most common nozzle size
+
     public bool HasHeatedBed { get; set; } = true;
     public bool HasEnclosure { get; set; }
     public bool MultiMaterial { get; set; }
     public int NumberOfExtruders { get; set; } = 1;
     public bool SupportsAutoLeveling { get; set; }
-    public int? MaxHotendTemp { get; set; } = 300;
     public int? MaxBedTemp { get; set; } = 120;
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
     public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
+
+    // Toolhead templates for multi-toolhead printers (contains nozzle diameter and max hotend temp)
+    public ICollection<PrinterModelToolhead> Toolheads { get; } = new List<PrinterModelToolhead>();
+
     // Asset URLs for UI display
     public string? CoverImageUrl { get; set; } // URL to printer cover image (from OrcaSlicer assets)
     public string? BedTextureUrl { get; set; } // URL to bed texture image (from OrcaSlicer assets)

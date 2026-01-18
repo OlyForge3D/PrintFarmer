@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { LoadingIcon, RefreshIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -26,18 +26,22 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const updateMutation = useUpdatePrinter();
 
   const [formData, setFormData] = useState<UpdatePrinterDto | null>(null);
+  const [originalFormData, setOriginalFormData] = useState<UpdatePrinterDto | null>(null);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [lastModelId, setLastModelId] = useState<string | undefined>();
   const [isRefreshingCameras, setIsRefreshingCameras] = useState(false);
   const [showCloneProfilesModal, setShowCloneProfilesModal] = useState(false);
+  const [toolheads, setToolheads] = useState<UpdateToolheadDto[]>([]);
+  const [originalToolheads, setOriginalToolheads] = useState<UpdateToolheadDto[]>([]);
+  const [expandedToolheads, setExpandedToolheads] = useState<Set<string>>(new Set());
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
 
   useEffect(() => {
     if (printerDetails) {
-      setFormData({
+      const initialFormData: UpdatePrinterDto = {
         name: printerDetails.name,
         serverUrl: printerDetails.serverUrl,
         originalServerUrl: printerDetails.originalServerUrl,
@@ -49,6 +53,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         dateAcquired: printerDetails.dateAcquired ? new Date(printerDetails.dateAcquired) : undefined,
         backend: printerDetails.backend,
         apiKey: printerDetails.apiKey,
+        cameraStreamUrl: printerDetails.cameraStreamUrl,
+        cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
         // Printer capabilities
         nozzleDiameter: printerDetails.capabilities?.nozzleDiameter,
         supportedMaterials: printerDetails.capabilities?.supportedMaterials,
@@ -59,15 +65,42 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         hasEnclosure: printerDetails.capabilities?.hasEnclosure,
         multiMaterial: printerDetails.capabilities?.multiMaterial,
         numberOfExtruders: printerDetails.capabilities?.numberOfExtruders,
-        minHotendTemp: printerDetails.capabilities?.minHotendTemp,
         maxHotendTemp: printerDetails.capabilities?.maxHotendTemp,
-        minBedTemp: printerDetails.capabilities?.minBedTemp,
         maxBedTemp: printerDetails.capabilities?.maxBedTemp,
         supportsAutoLeveling: printerDetails.capabilities?.supportsAutoLeveling,
         maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
-      });
+      };
+      
+      setFormData(initialFormData);
+      setOriginalFormData(initialFormData);
+      
+      // Initialize toolheads from printer details
+      let initialToolheads: UpdateToolheadDto[] = [];
+      if (printerDetails.toolheads && printerDetails.toolheads.length > 0) {
+        initialToolheads = printerDetails.toolheads.map((th: ToolheadDto) => ({
+          id: th.id,
+          name: th.name,
+          index: th.index,
+          nozzleDiameter: th.nozzleDiameter,
+          maxHotendTemp: th.maxHotendTemp,
+          supportedMaterials: th.supportedMaterials,
+          isPrimary: th.isPrimary,
+        }));
+        setToolheads(initialToolheads);
+        setOriginalToolheads(initialToolheads);
+        // Expand primary toolhead by default
+        const primaryId = printerDetails.toolheads.find((th: ToolheadDto) => th.isPrimary)?.id;
+        if (primaryId) {
+          setExpandedToolheads(new Set([primaryId]));
+        }
+      } else {
+        setToolheads([]);
+        setOriginalToolheads([]);
+        setExpandedToolheads(new Set());
+      }
+      
       // Prevent applying model defaults immediately after loading existing printer
       setLastModelId(printerDetails.modelId);
       setSelectedManufacturer(printerDetails.manufacturerId);
@@ -79,6 +112,72 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     setValidationErrors({});
     setError('');
   }, [onClose]);
+
+  // Helper to compare two values, treating null/undefined/NaN as equal
+  const valuesEqual = useCallback((a: unknown, b: unknown): boolean => {
+    if (a === b) return true;
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (typeof a === 'number' && typeof b === 'number') {
+      if (isNaN(a) && isNaN(b)) return true;
+    }
+    // For arrays (like supportedMaterials), do a deep comparison
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      const sortedA = [...a].sort();
+      const sortedB = [...b].sort();
+      return sortedA.every((val, idx) => val === sortedB[idx]);
+    }
+    return false;
+  }, []);
+
+  // Check if form data has changed
+  const hasFormChanges = useMemo(() => {
+    if (!formData || !originalFormData) return false;
+    
+    // Compare each field
+    const fields: (keyof UpdatePrinterDto)[] = [
+      'name', 'serverUrl', 'notes', 'manufacturerId', 'modelId',
+      'newManufacturerName', 'newModelName', 'backend', 'apiKey',
+      'cameraStreamUrl', 'cameraSnapshotUrl', 'nozzleDiameter',
+      'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
+      'hasHeatedBed', 'hasEnclosure', 'multiMaterial', 'numberOfExtruders',
+      'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
+      'backendPort', 'frontendPort'
+    ];
+    
+    for (const field of fields) {
+      if (!valuesEqual(formData[field], originalFormData[field])) {
+        return true;
+      }
+    }
+    
+    return false;
+  }, [formData, originalFormData, valuesEqual]);
+
+  // Check if toolheads have changed
+  const hasToolheadChanges = useMemo(() => {
+    if (toolheads.length !== originalToolheads.length) return true;
+    
+    for (let i = 0; i < toolheads.length; i++) {
+      const current = toolheads[i];
+      const original = originalToolheads.find(th => th.id === current.id);
+      if (!original) return true; // New toolhead added
+      
+      // Compare toolhead fields
+      if (current.name !== original.name) return true;
+      if (current.index !== original.index) return true;
+      if (current.nozzleDiameter !== original.nozzleDiameter) return true;
+      if (current.maxHotendTemp !== original.maxHotendTemp) return true;
+      if (current.isPrimary !== original.isPrimary) return true;
+      if (!valuesEqual(current.supportedMaterials, original.supportedMaterials)) return true;
+    }
+    
+    return false;
+  }, [toolheads, originalToolheads, valuesEqual]);
+
+  // Combined dirty state
+  const hasChanges = hasFormChanges || hasToolheadChanges;
   
   // Handle ESC key to close modal
   useEffect(() => {
@@ -111,9 +210,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           hasEnclosure: defaultCapabilities.hasEnclosure,
           multiMaterial: defaultCapabilities.multiMaterial,
           numberOfExtruders: defaultCapabilities.numberOfExtruders,
-          minHotendTemp: defaultCapabilities.minHotendTemp ?? prev.minHotendTemp,
           maxHotendTemp: defaultCapabilities.maxHotendTemp ?? prev.maxHotendTemp,
-          minBedTemp: defaultCapabilities.minBedTemp ?? prev.minBedTemp,
           maxBedTemp: defaultCapabilities.maxBedTemp ?? prev.maxBedTemp,
           supportsAutoLeveling: defaultCapabilities.supportsAutoLeveling,
           maxPrintSpeed: defaultCapabilities.maxPrintSpeed ?? prev.maxPrintSpeed,
@@ -128,6 +225,57 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     if (validationErrors[field]) {
       setValidationErrors(prev => { const clone = { ...prev }; delete clone[field]; return clone; });
     }
+  };
+
+  const handleToolheadChange = (toolheadId: string, field: keyof UpdateToolheadDto, value: unknown) => {
+    setToolheads(prev => prev.map(th => 
+      th.id === toolheadId ? { ...th, [field]: value } : th
+    ));
+  };
+
+  const toggleToolheadExpanded = (toolheadId: string) => {
+    setExpandedToolheads(prev => {
+      const next = new Set(prev);
+      if (next.has(toolheadId)) {
+        next.delete(toolheadId);
+      } else {
+        next.add(toolheadId);
+      }
+      return next;
+    });
+  };
+
+  const handleAddToolhead = () => {
+    const newId = crypto.randomUUID();
+    const newIndex = toolheads.length;
+    const newToolhead: UpdateToolheadDto = {
+      id: newId,
+      name: `Toolhead ${newIndex + 1}`,
+      index: newIndex,
+      nozzleDiameter: 0.4,
+      maxHotendTemp: 300,
+      supportedMaterials: ['PLA', 'PETG'],
+      isPrimary: newIndex === 0, // First toolhead is primary by default
+    };
+    setToolheads(prev => [...prev, newToolhead]);
+    setExpandedToolheads(prev => new Set([...prev, newId]));
+  };
+
+  const handleRemoveToolhead = (toolheadId: string) => {
+    setToolheads(prev => {
+      const filtered = prev.filter(th => th.id !== toolheadId);
+      // If we removed the primary toolhead, make the first remaining one primary
+      if (filtered.length > 0 && !filtered.some(th => th.isPrimary)) {
+        filtered[0].isPrimary = true;
+      }
+      // Re-index remaining toolheads
+      return filtered.map((th, idx) => ({ ...th, index: idx }));
+    });
+    setExpandedToolheads(prev => {
+      const next = new Set(prev);
+      next.delete(toolheadId);
+      return next;
+    });
   };
 
   const validateForm = (): boolean => {
@@ -148,7 +296,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     if (!validateForm()) return;
     setError('');
     try {
-      const result = await updateMutation.mutateAsync({ id: printerId, printer: formData });
+      // Include toolheads in the update if we have any
+      const updateData: UpdatePrinterDto = {
+        ...formData,
+        toolheads: toolheads.length > 0 ? toolheads : undefined,
+      };
+      const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
       toast.success(`Printer "${result.name}" updated`);
       onSuccess?.();
       // Show clone profiles modal if printer was just created or updated
@@ -203,8 +356,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         type="submit"
         form="edit-printer-form"
         variant="primary"
-        disabled={updateMutation.status === 'pending'}
+        disabled={updateMutation.status === 'pending' || !hasChanges}
         iconLeft={<CheckIcon className="w-4 h-4" />}
+        title={!hasChanges ? 'No changes to save' : undefined}
       >
         {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
       </Button>
@@ -403,74 +557,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 )}
               </div>
               <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField label="Nozzle Diameter (mm)" htmlFor="nozzle-diameter">
-                    <Input
-                      id="nozzle-diameter"
-                      type="number"
-                      step="0.1"
-                      value={formData.nozzleDiameter?.toString() || ''}
-                      onChange={e => {
-                        const value = e.target.value;
-                        handleInputChange('nozzleDiameter', value ? parseFloat(value) : undefined);
-                      }}
-                      placeholder="0.4"
-                      title="Nozzle diameter"
-                    />
-                  </FormField>
-                  <FormField label="Number of Extruders" htmlFor="num-extruders">
-                    <Input
-                      id="num-extruders"
-                      type="number"
-                      min="1"
-                      max="8"
-                      value={formData.numberOfExtruders || 1}
-                      onChange={e => handleInputChange('numberOfExtruders', parseInt(e.target.value, 10) || 1)}
-                      title="Number of extruders"
-                    />
-                  </FormField>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Supported Materials</label>
-                  <FilamentTypeSelector
-                    availableFilamentTypes={filamentTypes}
-                    selectedFilamentTypes={formData.supportedMaterials || []}
-                    onSelectionChange={(selectedTypes) => handleInputChange('supportedMaterials', selectedTypes)}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <FormField label="Min Hotend °C">
-                    <Input
-                      type="number"
-                      value={formData.minHotendTemp || ''}
-                      onChange={e => handleInputChange('minHotendTemp', parseInt(e.target.value, 10) || undefined)}
-                      placeholder="180"
-                      title="Minimum hotend temperature"
-                      className="text-sm"
-                    />
-                  </FormField>
-                  <FormField label="Max Hotend °C">
-                    <Input
-                      type="number"
-                      value={formData.maxHotendTemp || ''}
-                      onChange={e => handleInputChange('maxHotendTemp', parseInt(e.target.value, 10) || undefined)}
-                      placeholder="300"
-                      title="Maximum hotend temperature"
-                      className="text-sm"
-                    />
-                  </FormField>
-                  <FormField label="Min Bed °C">
-                    <Input
-                      type="number"
-                      value={formData.minBedTemp || ''}
-                      onChange={e => handleInputChange('minBedTemp', parseInt(e.target.value, 10) || undefined)}
-                      placeholder="0"
-                      title="Minimum bed temperature"
-                      className="text-sm"
-                    />
-                  </FormField>
+                <div className="grid grid-cols-2 gap-4">
                   <FormField label="Max Bed °C">
                     <Input
                       type="number"
@@ -478,64 +565,236 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       onChange={e => handleInputChange('maxBedTemp', parseInt(e.target.value, 10) || undefined)}
                       placeholder="120"
                       title="Maximum bed temperature"
-                      className="text-sm"
+                    />
+                  </FormField>
+                  <FormField label="Max Print Speed (mm/s)">
+                    <Input
+                      type="number"
+                      value={formData.maxPrintSpeed || ''}
+                      onChange={e => handleInputChange('maxPrintSpeed', parseInt(e.target.value, 10) || undefined)}
+                      placeholder="150"
+                      title="Maximum print speed"
                     />
                   </FormField>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <Checkbox
-                      id="hasHeatedBed"
-                      label="Heated bed"
-                      checked={formData.hasHeatedBed ?? true}
-                      onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
-                    />
-                    <Checkbox
-                      id="hasEnclosure"
-                      label="Enclosure"
-                      checked={formData.hasEnclosure ?? false}
-                      onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <Checkbox
-                      id="multiMaterial"
-                      label="Multi-material"
-                      checked={formData.multiMaterial ?? false}
-                      onChange={e => handleInputChange('multiMaterial', e.target.checked)}
-                    />
-                    <Checkbox
-                      id="supportsAutoLeveling"
-                      label="Auto-leveling"
-                      checked={formData.supportsAutoLeveling ?? false}
-                      onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
-                    />
-                  </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <Checkbox
+                    id="hasHeatedBed"
+                    label="Heated bed"
+                    checked={formData.hasHeatedBed ?? true}
+                    onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
+                  />
+                  <Checkbox
+                    id="hasEnclosure"
+                    label="Enclosure"
+                    checked={formData.hasEnclosure ?? false}
+                    onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
+                  />
+                  <Checkbox
+                    id="multiMaterial"
+                    label="Multi-material"
+                    checked={formData.multiMaterial ?? false}
+                    onChange={e => handleInputChange('multiMaterial', e.target.checked)}
+                  />
+                  <Checkbox
+                    id="supportsAutoLeveling"
+                    label="Auto-leveling"
+                    checked={formData.supportsAutoLeveling ?? false}
+                    onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
+                  />
                 </div>
+              </div>
+            </div>
 
-                <FormField label="Max Print Speed (mm/s)">
+            {/* Toolheads Section */}
+            <div className="border-t pt-5 mt-5">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-medium text-pf-text-primary">
+                  Toolheads ({toolheads.length})
+                </h4>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAddToolhead}
+                  iconLeft={<PlusIcon className="w-4 h-4" />}
+                >
+                  Add Toolhead
+                </Button>
+              </div>
+              {toolheads.length === 0 ? (
+                <p className="text-sm text-pf-text-secondary italic">No toolheads configured. Click "Add Toolhead" to add one.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-pf-text-secondary mb-3">Click to expand individual toolhead settings</p>
+                  <div className="space-y-3">
+                    {toolheads.map((toolhead, index) => (
+                    <div 
+                      key={toolhead.id} 
+                      className="border border-pf-border rounded-lg overflow-hidden"
+                    >
+                      {/* Toolhead Header - Clickable */}
+                      <button
+                        type="button"
+                        onClick={() => toggleToolheadExpanded(toolhead.id!)}
+                        className="w-full flex items-center justify-between p-3 bg-pf-bg-secondary hover:bg-pf-bg-tertiary transition-colors"
+                      >
+                        <div className="flex items-center space-x-3">
+                          {expandedToolheads.has(toolhead.id!) ? (
+                            <ChevronDownIcon className="w-5 h-5 text-pf-text-secondary" />
+                          ) : (
+                            <ChevronRightIcon className="w-5 h-5 text-pf-text-secondary" />
+                          )}
+                          <span className="font-medium text-pf-text-primary">
+                            {toolhead.name || `Toolhead ${index + 1}`}
+                          </span>
+                          {toolhead.isPrimary && (
+                            <span className="px-2 py-0.5 text-xs bg-pf-primary/20 text-pf-primary rounded-full">
+                              Primary
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-4 text-sm text-pf-text-secondary">
+                          {toolhead.nozzleDiameter && (
+                            <span>Ø{toolhead.nozzleDiameter}mm</span>
+                          )}
+                          {toolhead.maxHotendTemp && (
+                            <span>Max {toolhead.maxHotendTemp}°C</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveToolhead(toolhead.id!);
+                            }}
+                            className="p-1 text-pf-text-secondary hover:text-red-500 transition-colors"
+                            title="Remove toolhead"
+                          >
+                            <DeleteIcon className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </button>
+                      
+                      {/* Toolhead Details - Expandable */}
+                      {expandedToolheads.has(toolhead.id!) && (
+                        <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <FormField label="Name" htmlFor={`toolhead-name-${index}`}>
+                              <Input
+                                id={`toolhead-name-${index}`}
+                                value={toolhead.name || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'name', e.target.value || undefined)}
+                                placeholder={`Toolhead ${index + 1}`}
+                              />
+                            </FormField>
+                            <FormField label="Nozzle Diameter (mm)" htmlFor={`toolhead-nozzle-${index}`}>
+                              <Input
+                                id={`toolhead-nozzle-${index}`}
+                                type="number"
+                                step="0.1"
+                                value={toolhead.nozzleDiameter?.toString() || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleDiameter', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                placeholder="0.4"
+                              />
+                            </FormField>
+                            <FormField label="Max Hotend Temp (°C)" htmlFor={`toolhead-max-temp-${index}`}>
+                              <Input
+                                id={`toolhead-max-temp-${index}`}
+                                type="number"
+                                value={toolhead.maxHotendTemp?.toString() || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'maxHotendTemp', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                                placeholder="300"
+                              />
+                            </FormField>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-pf-text-secondary mb-1">
+                              Supported Materials
+                            </label>
+                            <FilamentTypeSelector
+                              availableFilamentTypes={filamentTypes}
+                              selectedFilamentTypes={toolhead.supportedMaterials || []}
+                              onSelectionChange={(selectedTypes) => handleToolheadChange(toolhead.id!, 'supportedMaterials', selectedTypes)}
+                            />
+                          </div>
+                          <div className="flex items-center space-x-4">
+                            <FormField label="Index" htmlFor={`toolhead-index-${index}`} className="w-20">
+                              <Input
+                                id={`toolhead-index-${index}`}
+                                type="number"
+                                min="0"
+                                value={toolhead.index?.toString() ?? index.toString()}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'index', parseInt(e.target.value, 10) || 0)}
+                                title="Toolhead index (T0, T1, etc.)"
+                              />
+                            </FormField>
+                            <div className="pt-6">
+                              <Checkbox
+                                id={`toolhead-primary-${index}`}
+                                label="Primary Toolhead"
+                                checked={toolhead.isPrimary ?? false}
+                                onChange={e => {
+                                  // When setting a toolhead as primary, unset others
+                                  if (e.target.checked) {
+                                    setToolheads(prev => prev.map(th => ({
+                                      ...th,
+                                      isPrimary: th.id === toolhead.id
+                                    })));
+                                  } else {
+                                    handleToolheadChange(toolhead.id!, 'isPrimary', false);
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Camera URLs Section */}
+            <div className="border-t pt-5 mt-5">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-medium text-pf-text-primary">Camera Configuration</h4>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRefreshCameraUrls}
+                  disabled={isRefreshingCameras}
+                  title="Auto-detect camera URLs from the printer backend"
+                  iconLeft={<RefreshIcon className={`w-4 h-4 ${isRefreshingCameras ? 'animate-spin' : ''}`} />}
+                >
+                  {isRefreshingCameras ? 'Detecting...' : 'Auto-Detect'}
+                </Button>
+              </div>
+              <div className="space-y-4">
+                <FormField label="Camera Stream URL" htmlFor="camera-stream-url">
                   <Input
-                    type="number"
-                    value={formData.maxPrintSpeed || ''}
-                    onChange={e => handleInputChange('maxPrintSpeed', parseInt(e.target.value, 10) || undefined)}
-                    placeholder="150"
-                    title="Maximum print speed"
+                    id="camera-stream-url"
+                    type="text"
+                    value={formData.cameraStreamUrl || ''}
+                    onChange={e => handleInputChange('cameraStreamUrl', e.target.value || undefined)}
+                    placeholder="http://printer.local/webcam/?action=stream"
+                    title="Live video stream URL (MJPEG or similar)"
+                  />
+                </FormField>
+                <FormField label="Camera Snapshot URL" htmlFor="camera-snapshot-url">
+                  <Input
+                    id="camera-snapshot-url"
+                    type="text"
+                    value={formData.cameraSnapshotUrl || ''}
+                    onChange={e => handleInputChange('cameraSnapshotUrl', e.target.value || undefined)}
+                    placeholder="http://printer.local/webcam/?action=snapshot"
+                    title="Static image snapshot URL (JPEG)"
                   />
                 </FormField>
               </div>
-            </div>
-            <div className="flex items-center justify-between space-x-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleRefreshCameraUrls}
-                disabled={isRefreshingCameras}
-                title="Refresh camera URLs from the printer backend"
-                iconLeft={<RefreshIcon className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />}
-              >
-                {isRefreshingCameras ? 'Detecting...' : 'Detect Cameras'}
-              </Button>
             </div>
           </form>
 

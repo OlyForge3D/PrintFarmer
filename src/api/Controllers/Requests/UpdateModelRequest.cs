@@ -12,7 +12,6 @@ public record UpdateModelRequest(
     Guid[]? SupportedFilamentTypeIds,
 
     // Default capabilities that can be inherited by new printers
-    double? DefaultNozzleDiameter = null,
     bool? HasHeatedBed = null,
     bool? HasEnclosure = null,
     bool? MultiMaterial = null,
@@ -20,8 +19,10 @@ public record UpdateModelRequest(
     bool? SupportsAutoLeveling = null,
 
     // Temperature ranges
-    int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
 
     // Speed capabilities
-    int? MaxPrintSpeed = null);
+    int? MaxPrintSpeed = null,
+
+    // Toolhead templates (contains nozzle diameter and max hotend temp)
+    PrinterModelToolheadDto[]? Toolheads = null);

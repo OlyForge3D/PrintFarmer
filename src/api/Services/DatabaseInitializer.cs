@@ -153,6 +153,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     {
         await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
         await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
+        await SeedComponentModelsAsync(); // Seed hotend, extruder, toolhead, nozzle models
         await SeedAuthenticationDataAsync();
         await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
@@ -174,6 +175,23 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 "Sovol",
                 "Ratrig",  // Note: OrcaSlicer manifest uses "Ratrig" not "RatRig", but model names use "RatRig V-Core"
                 "Voron",
+                // Bambu Lab (popular ecosystem for hotend adaptations)
+                "Bambu Lab",
+                // Component manufacturers (hotends, extruders, nozzles, toolheads)
+                "Phaetus",           // Dragon, Rapido, etc.
+                "Slice Engineering", // Mosquito, Copperhead, Mako
+                "E3D",               // V6, Revo, etc.
+                "Bondtech",          // BMG, LGX, LGX Lite
+                "TriangleLabs",      // CHC clones, nozzles
+                "West3D",            // Undertaker nozzles
+                "BIQU",              // Panda Revo, H2
+                "LDO",               // Motors, kits
+                "Orbiter",           // Orbiter extruders
+                "Microswiss",        // All-metal hotends
+                "DropEffect",        // NextG hotends
+                "Mellow",            // NF-Zone, CNC parts
+                "Fysetc",            // Budget boards and parts
+                "Community"          // For OpenSource community contributors
             };
 
             Dictionary<string, Manufacturer> manufacturers = new(StringComparer.OrdinalIgnoreCase);
@@ -248,6 +266,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("Prusa MK4", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
                 ("Prusa MK4S", "Prusa", 250.0, 210.0, 220.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
                 ("Prusa CORE One", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)250),
+                ("Prusa CORE One L", "Prusa", 300.0, 300.0, 300.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)250),
                 ("Prusa XL", "Prusa", 250.0, 220.0, 270.0, (int?)1, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, true, 5, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC,TPU", (int?)200),
             };
 
@@ -272,13 +291,11 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         MaxZ = z,
                         DefaultBackend = defaultBackend,
                         MotionType = (int?)motionType,
-                        DefaultNozzleDiameter = nozzleDiameter,
                         HasHeatedBed = hasBed,
                         HasEnclosure = hasEnclosure,
                         MultiMaterial = multiMaterial,
                         NumberOfExtruders = extruders,
                         SupportsAutoLeveling = autoLevel,
-                        MaxHotendTemp = maxHotend,
                         MaxBedTemp = maxBed,
                         MaxPrintSpeed = maxSpeed
                     });
@@ -367,7 +384,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "MK4IS", "Prusa MK4" },
                 { "MK4S", "Prusa MK4S" },
                 { "COREONE", "Prusa CORE" },
-                { "COREONEL", "Prusa CORE One" },
+                { "COREONEL", "Prusa CORE One L" },
                 { "XLIS", "Prusa XL" },
                 
                 // Voron models - PrusaSlicer abbreviations
@@ -570,6 +587,271 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         PrinterModel? unknownModel = await _context.PrinterModels.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
         return unknownModel ?? throw new InvalidOperationException("Unknown model not found. Ensure SeedCatalogDataAsync() has been called.");
+    }
+
+    /// <summary>
+    /// Seeds component model definitions (hotends, extruders, toolheads, nozzles) with manufacturer references.
+    /// These are extensible tables that allow adding new components without code changes.
+    /// </summary>
+    private async Task SeedComponentModelsAsync()
+    {
+        try
+        {
+            // Build manufacturer lookup
+            Dictionary<string, Guid> mfgLookup = await _context.Manufacturers
+                .AsNoTracking()
+                .ToDictionaryAsync(m => m.Name, m => m.Id, StringComparer.OrdinalIgnoreCase);
+
+            // ===== HOTEND MODELS =====
+            var hotendSeeds = new (string Name, string Mfg, int MaxTemp, bool IsHighFlow, string Desc, string? Url)[]
+            {
+                // Stock option - for unmodified/default hotends
+                ("Stock", "Unknown", 280, false, "Original hotend that came with the printer", null),
+                
+                // Bambu Lab
+                ("A1 Hotend", "Bambu Lab", 300, true, "Popular hotend from Bambu A1, commonly adapted to other printers", "https://bambulab.com/en/a1"),
+                
+                // Phaetus
+                ("Dragon Standard Flow", "Phaetus", 500, false, "Popular all-metal hotend with great heat break", "https://www.phaetus.com/products/dragon-hotend-standard-flow"),
+                ("Dragon High Flow", "Phaetus", 500, true, "High flow variant for faster prints", "https://www.phaetus.com/products/dragon-hotend-high-flow"),
+                ("Dragon ACE", "Phaetus", 500, false, "Dragon with integrated accelerometer", "https://www.phaetus.com/products/dragon-ace"),
+                ("Rapido", "Phaetus", 350, false, "Compact volcano-style hotend", "https://www.phaetus.com/products/rapido-hotend"),
+                ("Rapido HF", "Phaetus", 350, true, "High flow Rapido variant", "https://www.phaetus.com/products/rapido-hotend"),
+                ("Rapido 2", "Phaetus", 350, true, "Updated Rapido with improved heater", "https://www.phaetus.com/products/rapido-2-hotend"),
+                ("Rapido 2 Plus", "Phaetus", 350, true, "Large format high flow hotend", "https://www.phaetus.com/products/rapido-2-plus"),
+                
+                // Slice Engineering
+                ("Mosquito", "Slice Engineering", 500, false, "Premium all-metal hotend", "https://www.sliceengineering.com/products/mosquito-hotend"),
+                ("Mosquito Magnum", "Slice Engineering", 500, true, "High flow Mosquito", "https://www.sliceengineering.com/products/mosquito-magnum-hotend"),
+                ("Mosquito Magnum+", "Slice Engineering", 500, true, "Enhanced Magnum with better cooling", "https://www.sliceengineering.com/products/mosquito-magnum-plus-hotend"),
+                ("Copperhead", "Slice Engineering", 450, false, "Bi-metal heat break design", "https://www.sliceengineering.com/products/copperhead-heat-break"),
+                ("Mako", "Slice Engineering", 500, true, "Compact high flow hotend", "https://www.sliceengineering.com/products/mako-hotend"),
+                
+                // E3D
+                ("V6", "E3D", 285, false, "Classic all-metal hotend", "https://e3d-online.com/products/v6-all-metal-hotend"),
+                ("Revo Six", "E3D", 300, false, "Quick-swap nozzle system", "https://e3d-online.com/products/revo-six"),
+                ("Revo Voron", "E3D", 300, false, "Revo optimized for Voron", "https://e3d-online.com/products/revo-voron"),
+                ("Revo Micro", "E3D", 250, false, "Compact Revo for small printers", "https://e3d-online.com/products/revo-micro"),
+                
+                // TriangleLabs
+                ("CHC Pro", "TriangleLabs", 500, true, "High quality ceramic heater core", "https://www.aliexpress.com/item/1005004566533274.html"),
+                
+                // Microswiss
+                ("All Metal Hotend", "Microswiss", 300, false, "Direct replacement for Creality", "https://store.micro-swiss.com/collections/all-metal-hotend"),
+                ("FlowTech", "Microswiss", 300, true, "High flow design", "https://store.micro-swiss.com/products/flowtech-hotend"),
+                
+                // DropEffect
+                ("NextG", "DropEffect", 500, true, "Ultra high flow hotend", "https://www.dropeffect.com/products/nextg-hotend"),
+                ("XG", "DropEffect", 500, true, "Extra large format", "https://www.dropeffect.com/products/xg-hotend"),
+                
+                // BIQU
+                ("H2", "BIQU", 300, false, "Integrated extruder and hotend", "https://biqu.equipment/products/biqu-h2-extruder"),
+                ("H2 V2S", "BIQU", 300, false, "Updated H2 design", "https://biqu.equipment/products/biqu-h2-v2s-extruder"),
+                ("Panda Revo", "BIQU", 300, false, "Revo-compatible hotend", "https://biqu.equipment/products/panda-revo-hotend"),
+            };
+
+            foreach (var (name, mfg, maxTemp, isHighFlow, desc, url) in hotendSeeds)
+            {
+                if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
+                {
+                    _logger.LogWarning("[DB] Skipping hotend '{Name}': manufacturer '{Mfg}' not found", name, mfg);
+                    continue;
+                }
+
+                bool exists = await _context.HotendModelDefinitions.AnyAsync(h => h.Name == name && h.ManufacturerId == mfgId);
+                if (!exists)
+                {
+                    _context.HotendModelDefinitions.Add(new HotendModelDefinition
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = name,
+                        ManufacturerId = mfgId,
+                        MaxTemp = maxTemp,
+                        IsHighFlow = isHighFlow,
+                        Description = desc,
+                        Url = url
+                    });
+                }
+            }
+
+            // ===== EXTRUDER MODELS =====
+            var extruderSeeds = new (string Name, string Mfg, string GearRatio, bool IsDirectDrive, string Desc, string? Url)[]
+            {
+                // Stock option - for unmodified/default extruders
+                ("Stock", "Unknown", "N/A", false, "Original extruder that came with the printer", null),
+                
+                // Bondtech
+                ("BMG", "Bondtech", "3:1", true, "Dual-drive extruder, very popular", "https://www.bondtech.se/product/bmg-extruder/"),
+                ("LGX", "Bondtech", "3.5:1", true, "Large gears for better grip", "https://www.bondtech.se/product/lgx-large-gears-extruder/"),
+                ("LGX Lite", "Bondtech", "3.5:1", true, "Lighter weight LGX", "https://www.bondtech.se/product/lgx-lite-large-gears-extruder/"),
+                ("CW2", "Bondtech", "3:1", true, "Clockwork 2 compatible", "https://www.bondtech.se/product/cw2-extruder/"),
+                
+                // Orbiter
+                ("Orbiter 1.5", "Orbiter", "7.5:1", true, "Lightweight planetary gearbox", "https://www.orbiterprojects.com/orbiter-v1-5/"),
+                ("Orbiter 2.0", "Orbiter", "7.5:1", true, "Improved filament path", "https://www.orbiterprojects.com/orbiter-v2-0/"),
+                ("Orbiter 2.5", "Orbiter", "7.5:1", true, "Latest revision", "https://www.orbiterprojects.com/orbiter-v2-5/"),
+                
+                // E3D
+                ("Titan", "E3D", "3:1", false, "Compact geared extruder", "https://e3d-online.com/products/titan-extruder"),
+                ("Hemera", "E3D", "3:1", true, "Integrated hotend/extruder", "https://e3d-online.com/products/e3d-hemera"),
+                ("Hemera XS", "E3D", "3:1", true, "Compact Hemera", "https://e3d-online.com/products/e3d-hemera-xs"),
+                
+                // TriangleLabs
+                ("BMG Clone", "TriangleLabs", "3:1", true, "BMG compatible", "https://www.aliexpress.com/item/32917029058.html"),
+                ("Orbiter Clone", "TriangleLabs", "7.5:1", true, "Orbiter compatible", "https://www.aliexpress.com/item/1005003292442498.html"),
+                
+                // LDO
+                ("Galileo", "LDO", "7.5:1", true, "Compact planetary extruder", "https://docs.ldomotors.com/en/voron/toolhead-pcbs/galileo"),
+                ("Galileo 2", "LDO", "9:1", true, "Higher gear ratio Galileo", "https://docs.ldomotors.com/en/voron/toolhead-pcbs/galileo2"),
+                
+                // BIQU
+                ("H2 Extruder", "BIQU", "7:1", true, "Integrated with H2 hotend", "https://biqu.equipment/products/biqu-h2-extruder"),
+                
+                // Voron
+                ("Clockwork 1", "Voron", "3:1", true, "First generation Voron extruder", "https://github.com/VoronDesign/Voron-Afterburner"),
+                ("Clockwork 2", "Voron", "3:1", true, "Improved Voron extruder with better grip", "https://github.com/VoronDesign/Voron-Stealthburner"),
+            };
+
+            foreach (var (name, mfg, gearRatio, isDirectDrive, desc, url) in extruderSeeds)
+            {
+                if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
+                {
+                    _logger.LogWarning("[DB] Skipping extruder '{Name}': manufacturer '{Mfg}' not found", name, mfg);
+                    continue;
+                }
+
+                bool exists = await _context.ExtruderModelDefinitions.AnyAsync(e => e.Name == name && e.ManufacturerId == mfgId);
+                if (!exists)
+                {
+                    _context.ExtruderModelDefinitions.Add(new ExtruderModelDefinition
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = name,
+                        ManufacturerId = mfgId,
+                        GearRatio = gearRatio,
+                        IsDirectDrive = isDirectDrive,
+                        Description = desc,
+                        Url = url
+                    });
+                }
+            }
+
+            // ===== TOOLHEAD MODELS =====
+            // Note: Many toolheads are community designs without a specific manufacturer
+            var toolheadSeeds = new (string Name, string? Mfg, string Desc, string? Url)[]
+            {
+                // Voron official/community
+                ("StealthBurner", "Voron", "Enclosed direct drive toolhead for Voron", "https://github.com/VoronDesign/Voron-Stealthburner"),
+                ("MiniStealthBurner", "Voron", "Compact StealthBurner for V0", "https://github.com/VoronDesign/Voron-0"),
+                
+                // Community designs (use Unknown manufacturer)
+                ("DragonBurner", "Community", "Popular community toolhead design", "https://github.com/chirpy2605/voron/tree/main/V0/Dragon_Burner"),
+                ("Xol", "Community", "High performance community toolhead", "https://github.com/Armchair-Heavy-Industries/Xol-Toolhead"),
+                ("Archetype", "Community", "Modern community toolhead", "https://github.com/Armchair-Heavy-Industries/Archetype"),
+                ("Jabberwocky", "Community", "Community toolhead for V0", "https://github.com/Diyshift/Jabberwocky"),
+                ("AntHead", "Community", "Compact community design", "https://github.com/PrintersForAnts/AntHead"),
+                ("MiniAB", "Community", "Afterburner-based mini toolhead", "https://github.com/PrintersForAnts/Mini-AfterSherpa"),
+                
+                // RatRig
+                ("EVA", "Ratrig", "Universal toolhead system", "https://github.com/EVA-3D/eva-main"),
+                ("EVA 3", "Ratrig", "Latest EVA revision", "https://github.com/EVA-3D/eva-main"),
+                
+                // E3D
+                ("Hemera Toolhead", "E3D", "Official Hemera mounting", "https://e3d-online.com/products/e3d-hemera"),
+                ("Revo Toolhead", "E3D", "Quick-swap capable toolhead", "https://e3d-online.com/products/revo-voron"),
+            };
+
+            foreach (var (name, mfg, desc, url) in toolheadSeeds)
+            {
+                // Manufacturer is required - should always resolve
+                if (string.IsNullOrEmpty(mfg) || !mfgLookup.TryGetValue(mfg, out Guid mfgId))
+                {
+                    _logger.LogWarning("Toolhead {Name} has invalid manufacturer {Mfg}, using Unknown", name, mfg);
+                    mfgId = mfgLookup["Unknown"];
+                }
+
+                bool exists = await _context.ToolheadModelDefinitions.AnyAsync(t => t.Name == name && t.ManufacturerId == mfgId);
+
+                if (!exists)
+                {
+                    _context.ToolheadModelDefinitions.Add(new ToolheadModelDefinition
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = name,
+                        ManufacturerId = mfgId,
+                        Description = desc,
+                        Url = url
+                    });
+                }
+            }
+
+            // ===== NOZZLE MODELS =====
+            var nozzleSeeds = new (string Name, string Mfg, int MaxTemp, bool IsHardened, string Desc, string? Url)[]
+            {
+                // Slice Engineering
+                ("Vanadium", "Slice Engineering", 500, true, "Extreme wear resistance", "https://www.sliceengineering.com/products/vanadium-nozzle"),
+                ("BridgeMaster", "Slice Engineering", 300, false, "Optimized for bridging", "https://www.sliceengineering.com/products/bridgemaster-nozzle"),
+                ("GammaMaster", "Slice Engineering", 300, false, "Precision nozzle", "https://www.sliceengineering.com/products/gammamaster-nozzle"),
+                
+                // West3D
+                ("Undertaker", "West3D", 500, true, "High flow hardened nozzle", "https://west3d.com/products/undertaker-nozzle"),
+                ("Undertaker Volcano", "West3D", 500, true, "Volcano-style Undertaker", "https://west3d.com/products/undertaker-volcano-nozzle"),
+                
+                // E3D
+                ("V6 Brass", "E3D", 300, false, "Standard brass nozzle", "https://e3d-online.com/products/v6-brass-nozzle"),
+                ("V6 Hardened Steel", "E3D", 500, true, "Abrasion resistant", "https://e3d-online.com/products/v6-hardened-steel-nozzle"),
+                ("NozzleX", "E3D", 500, true, "WS2 coated nozzle", "https://e3d-online.com/products/nozzle-x"),
+                ("Revo Nozzle", "E3D", 300, false, "Quick-swap nozzle", "https://e3d-online.com/products/revo-nozzle"),
+                
+                // TriangleLabs
+                ("ZS Nozzle", "TriangleLabs", 500, true, "Hardened steel", "https://www.aliexpress.com/item/1005001347220543.html"),
+                ("CHC Nozzle", "TriangleLabs", 500, false, "For CHC hotends", "https://www.aliexpress.com/item/1005004566533274.html"),
+                
+                // Phaetus
+                ("PS Nozzle", "Phaetus", 300, false, "Plated steel", "https://www.phaetus.com/products/ps-nozzle"),
+                ("Tungsten Carbide", "Phaetus", 500, true, "Maximum wear resistance", "https://www.phaetus.com/products/tungsten-carbide-nozzle"),
+                
+                // Bondtech
+                ("CHT Nozzle", "Bondtech", 300, false, "Clone-hotend technology high flow nozzle", "https://www.bondtech.se/product/bondtech-cht-nozzle/"),
+                ("CHT Coated", "Bondtech", 500, true, "CHT with hardened coating for abrasives", "https://www.bondtech.se/product/bondtech-cht-coated-nozzle/"),
+            };
+
+            foreach (var (name, mfg, maxTemp, isHardened, desc, url) in nozzleSeeds)
+            {
+                if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
+                {
+                    _logger.LogWarning("[DB] Skipping nozzle '{Name}': manufacturer '{Mfg}' not found", name, mfg);
+                    continue;
+                }
+
+                bool exists = await _context.NozzleModelDefinitions.AnyAsync(n => n.Name == name && n.ManufacturerId == mfgId);
+                if (!exists)
+                {
+                    _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = name,
+                        ManufacturerId = mfgId,
+                        MaxTemp = maxTemp,
+                        IsHardened = isHardened,
+                        Description = desc,
+                        Url = url
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[DB] Component models seeded successfully (hotends, extruders, toolheads, nozzles)");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            _logger.LogWarning(ex, "Ignored unique constraint violation while seeding component models; another process probably inserted the same records.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DB] Error seeding component models");
+            throw;
+        }
     }
 
     private async Task SeedAuthenticationDataAsync()

@@ -55,6 +55,58 @@ public enum MotionType
 }
 
 /// <summary>
+/// Nozzle material type affecting heat resistance and material compatibility.
+/// </summary>
+public enum NozzleType
+{
+    /// <summary>
+    /// Standard brass nozzle - good thermal conductivity, not abrasion-resistant.
+    /// Best for: PLA, PETG, ABS, TPU.
+    /// </summary>
+    Brass = 0,
+
+    /// <summary>
+    /// Hardened steel nozzle - abrasion-resistant for filled filaments.
+    /// Best for: Carbon fiber, glass fiber, metal-filled filaments.
+    /// </summary>
+    HardenedSteel = 1,
+
+    /// <summary>
+    /// Stainless steel nozzle - food-safe and corrosion-resistant.
+    /// Best for: Food-safe applications, corrosive environments.
+    /// </summary>
+    StainlessSteel = 2,
+
+    /// <summary>
+    /// Tungsten carbide nozzle - extreme abrasion resistance.
+    /// Best for: Highly abrasive filaments, industrial use.
+    /// </summary>
+    TungstenCarbide = 3,
+
+    /// <summary>
+    /// Ruby-tipped or other abrasive-resistant nozzle.
+    /// Best for: Long-term use with abrasive filaments.
+    /// </summary>
+    Abrasive = 4,
+
+    /// <summary>
+    /// Unknown or unspecified nozzle type.
+    /// </summary>
+    Unknown = 99
+}
+
+/// <summary>
+/// Toolhead type - stock vs aftermarket/custom.
+/// </summary>
+public enum ToolheadType
+{
+    /// <summary>Stock/original toolhead from manufacturer.</summary>
+    Stock = 0,
+    /// <summary>Aftermarket or custom toolhead.</summary>
+    Custom = 1
+}
+
+/// <summary>
 /// Full printer representation including current status, coordinates, temperatures and optional spool information.
 /// </summary>
 /// <param name="Id">Printer identifier.</param>
@@ -436,7 +488,21 @@ public record UpdatePrinterDto(
     int? BackendPort = null,
     int? FrontendPort = null,
     // Approval workflow
-    bool? IsEnabled = null);
+    bool? IsEnabled = null,
+    // Toolheads - for updating individual toolhead settings
+    UpdateToolheadDto[]? Toolheads = null);
+
+/// <summary>
+/// Update payload for modifying toolhead settings.
+/// </summary>
+public record UpdateToolheadDto(
+    Guid Id,
+    string? Name = null,
+    int? Index = null,
+    double? NozzleDiameter = null,
+    int? MaxHotendTemp = null,
+    string[]? SupportedMaterials = null,
+    bool? IsPrimary = null);
 
 // Local spools removed; Spoolman is the source of truth
 
@@ -537,6 +603,59 @@ public record PrinterSpoolInfoDto(
 /// Printer manufacturer catalog entry.
 /// </summary>
 public record ManufacturerDto(Guid Id, string Name, string? Url = null, string? Description = null);
+
+// ============ Component Model DTOs ============
+
+/// <summary>
+/// Hotend model catalog entry.
+/// </summary>
+public record HotendModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    int? MaxTemp = null,
+    bool IsHighFlow = false,
+    string? Description = null,
+    string? Url = null);
+
+/// <summary>
+/// Extruder model catalog entry.
+/// </summary>
+public record ExtruderModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    string? GearRatio = null,
+    bool IsDirectDrive = true,
+    string? Description = null,
+    string? Url = null);
+
+/// <summary>
+/// Toolhead model catalog entry.
+/// </summary>
+public record ToolheadModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    string? Description = null,
+    string? Url = null);
+
+/// <summary>
+/// Nozzle model catalog entry.
+/// </summary>
+public record NozzleModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    int? MaxTemp = null,
+    bool IsHardened = false,
+    string? Description = null,
+    string? Url = null);
+
 /// <summary>
 /// Printer model catalog entry including optional build volume and defaults.
 /// </summary>
@@ -551,17 +670,41 @@ public record PrinterModelDto(
     PrinterBackend? DefaultBackend = null,
     string[]? SupportedFilamentTypes = null,
     // Default capabilities that can be inherited by new printers
-    double? DefaultNozzleDiameter = null,
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
     // Temperature ranges
-    int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
     // Speed capabilities
-    int? MaxPrintSpeed = null);
+    int? MaxPrintSpeed = null,
+    // Toolhead templates for multi-toolhead printers
+    PrinterModelToolheadDto[]? Toolheads = null);
+
+/// <summary>
+/// Toolhead template for a printer model (used when creating new printers from this model).
+/// </summary>
+public record PrinterModelToolheadDto(
+    Guid Id,
+    string Name,
+    int Index,
+    double? NozzleDiameter = null,
+    NozzleType? NozzleType = null,
+    int? MaxHotendTemp = null,
+    double? MaxFlowRate = null,
+    ToolheadType? ToolheadType = null,
+    // Component references - IDs for saving, Names for display
+    Guid? HotendModelId = null,
+    string? HotendModelName = null,
+    Guid? ExtruderModelId = null,
+    string? ExtruderModelName = null,
+    Guid? ToolheadModelDefId = null,
+    string? ToolheadModelDefName = null,
+    Guid? NozzleModelId = null,
+    string? NozzleModelName = null,
+    string[]? SupportedMaterials = null,
+    bool IsPrimary = false);
 
 /// <summary>
 /// Slicer-specific model name alias mapping (e.g., OrcaSlicer "Prusa MK4" -> PrusaSlicer "MK4").
@@ -645,7 +788,8 @@ public record PrinterDetailsDto(
     string? IpAddress = null,
     int? BackendPort = null,
     int? FrontendPort = null,
-    PrinterCapabilitiesDto? Capabilities = null);
+    PrinterCapabilitiesDto? Capabilities = null,
+    ToolheadDto[]? Toolheads = null);
 
 // Filament temperature presets (admin-configurable) - now dynamic
 /// <summary>
@@ -757,6 +901,19 @@ public class CreateToolheadDto
     /// </summary>
     public bool IsPrimary { get; set; }
 }
+
+/// <summary>
+/// Toolhead data for reading/display purposes.
+/// </summary>
+public record ToolheadDto(
+    Guid Id,
+    string? Name,
+    int Index,
+    double? NozzleDiameter,
+    int? MaxHotendTemp,
+    string[]? SupportedMaterials,
+    bool IsPrimary,
+    DateTime? LastUpdated = null);
 
 /// <summary>
 /// Printer discovered during network scanning.
@@ -1181,6 +1338,7 @@ public record PrinterCapabilitiesDto(
     int NumberOfExtruders = 1,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
+    int? MaxPrintSpeed = null,
     [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
     [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
     [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true,
@@ -2269,6 +2427,8 @@ public class QueueOverviewDto
     public Guid? CurrentJobId { get; set; }
     public string? CurrentJobName { get; set; }
     public DateTime? EstimatedCompletionTime { get; set; }
+    public double? NozzleDiameter { get; set; }
+    public List<string>? SupportedMaterials { get; set; }
 }
 
 public class UpdateJobPriorityDto
@@ -2427,13 +2587,7 @@ public class PrinterCapabilitiesExportDto
     public int NumberOfExtruders { get; set; } = 1;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? MinHotendTemp { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxHotendTemp { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? MinBedTemp { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxBedTemp { get; set; }

@@ -9,6 +9,7 @@ import {
   CreateFilamentTypeRequest,
   CreatePrinterDto,
   DiscoveredPrinterDto,
+  ExtruderModelDefinition,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -19,10 +20,12 @@ import {
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
+  HotendModelDefinition,
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
   MoveRequest,
+  NozzleModelDefinition,
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
@@ -41,6 +44,7 @@ import {
   TempTargets,
   TestConnectionRequest,
   TestConnectionResponse,
+  ToolheadModelDefinition,
   UpdateFilamentTypeRequest,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
@@ -731,6 +735,36 @@ export class ApiClient {
       }
       throw error;
     }
+  }
+
+  // ============ Component Model API methods ============
+
+  async getHotendModels(): Promise<HotendModelDefinition[]> {
+    const response = await this.client.get<HotendModelDefinition[]>(
+      "/catalog/hotends"
+    );
+    return response.data;
+  }
+
+  async getExtruderModels(): Promise<ExtruderModelDefinition[]> {
+    const response = await this.client.get<ExtruderModelDefinition[]>(
+      "/catalog/extruders"
+    );
+    return response.data;
+  }
+
+  async getToolheadModels(): Promise<ToolheadModelDefinition[]> {
+    const response = await this.client.get<ToolheadModelDefinition[]>(
+      "/catalog/toolheads"
+    );
+    return response.data;
+  }
+
+  async getNozzleModels(): Promise<NozzleModelDefinition[]> {
+    const response = await this.client.get<NozzleModelDefinition[]>(
+      "/catalog/nozzles"
+    );
+    return response.data;
   }
 
   // ============ File type API methods ============

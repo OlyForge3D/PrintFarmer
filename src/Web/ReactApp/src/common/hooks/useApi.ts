@@ -3,6 +3,7 @@ import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/ty
 import {
   ApiError,
   CreatePrinterDto,
+  ExtruderModelDefinition,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -11,8 +12,10 @@ import {
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
+  HotendModelDefinition,
   JobQueuePrintJob,
   ManufacturerDto,
+  NozzleModelDefinition,
   PrinterCapabilitiesDto,
   PrinterModelDto,
   Printer,
@@ -20,6 +23,7 @@ import {
   PrinterDetails,
   PrinterFast,
   StartDiscoveryRequest,
+  ToolheadModelDefinition,
   UpdatePrinterDto,
   FileHealthSummaryDto,
   FileHealthAuditDto,
@@ -42,6 +46,10 @@ export const queryKeys = {
   printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
+  hotendModels: ['hotend-models'] as const,
+  extruderModels: ['extruder-models'] as const,
+  toolheadModels: ['toolhead-models'] as const,
+  nozzleModels: ['nozzle-models'] as const,
   filamentTypes: ['filament-types'] as const,
   filamentPresets: ['presets', 'filament'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
@@ -441,6 +449,44 @@ export function useCreateModel() {
       queryClient.invalidateQueries({ queryKey: queryKeys.models(vars.manufacturerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.models() });
     }
+  });
+}
+
+// ============ Component Model Hooks ============
+
+export function useHotendModels(options?: UseQueryOptions<HotendModelDefinition[], ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.hotendModels,
+    queryFn: () => apiClient.getHotendModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useExtruderModels(options?: UseQueryOptions<ExtruderModelDefinition[], ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.extruderModels,
+    queryFn: () => apiClient.getExtruderModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useToolheadModels(options?: UseQueryOptions<ToolheadModelDefinition[], ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.toolheadModels,
+    queryFn: () => apiClient.getToolheadModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useNozzleModels(options?: UseQueryOptions<NozzleModelDefinition[], ApiError>) {
+  return useQuery({
+    queryKey: queryKeys.nozzleModels,
+    queryFn: () => apiClient.getNozzleModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
   });
 }
 

@@ -260,5 +260,86 @@ public class CatalogController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update model aliases" });
         }
     }
-}
 
+    // ============ Component Model Endpoints ============
+
+    /// <summary>
+    /// Gets all available hotend models.
+    /// </summary>
+    /// <returns>List of all hotend model definitions</returns>
+    [HttpGet("hotends")]
+    [ProducesResponseType(typeof(IEnumerable<HotendModelDto>), 200)]
+    public async Task<ActionResult<IEnumerable<HotendModelDto>>> GetHotendsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var hotends = await _catalogService.GetHotendModelsAsync(ct);
+            return Ok(hotends);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetHotendsAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve hotend models" });
+        }
+    }
+
+    /// <summary>
+    /// Gets all available extruder models.
+    /// </summary>
+    /// <returns>List of all extruder model definitions</returns>
+    [HttpGet("extruders")]
+    [ProducesResponseType(typeof(IEnumerable<ExtruderModelDto>), 200)]
+    public async Task<ActionResult<IEnumerable<ExtruderModelDto>>> GetExtrudersAsync(CancellationToken ct)
+    {
+        try
+        {
+            var extruders = await _catalogService.GetExtruderModelsAsync(ct);
+            return Ok(extruders);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetExtrudersAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve extruder models" });
+        }
+    }
+
+    /// <summary>
+    /// Gets all available toolhead models.
+    /// </summary>
+    /// <returns>List of all toolhead model definitions</returns>
+    [HttpGet("toolheads")]
+    [ProducesResponseType(typeof(IEnumerable<ToolheadModelDto>), 200)]
+    public async Task<ActionResult<IEnumerable<ToolheadModelDto>>> GetToolheadsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var toolheads = await _catalogService.GetToolheadModelsAsync(ct);
+            return Ok(toolheads);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetToolheadsAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve toolhead models" });
+        }
+    }
+
+    /// <summary>
+    /// Gets all available nozzle models.
+    /// </summary>
+    /// <returns>List of all nozzle model definitions</returns>
+    [HttpGet("nozzles")]
+    [ProducesResponseType(typeof(IEnumerable<NozzleModelDto>), 200)]
+    public async Task<ActionResult<IEnumerable<NozzleModelDto>>> GetNozzlesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var nozzles = await _catalogService.GetNozzleModelsAsync(ct);
+            return Ok(nozzles);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetNozzlesAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve nozzle models" });
+        }
+    }
+}

@@ -54,7 +54,11 @@ public class PrintersController(
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
+#pragma warning disable S1144 // Unused private types or members should be removed
+#pragma warning disable CA1823 // Avoid unused private fields
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
+#pragma warning restore CA1823 // Avoid unused private fields
+#pragma warning restore S1144 // Unused private types or members should be removed
 #pragma warning restore IDE0052
 
     /// <summary>
@@ -691,13 +695,17 @@ public class PrintersController(
             return NotFound();
         }
 
+        // Get primary toolhead for capabilities DTO (backward compatibility)
+        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
+
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
+        // This provides backward compatibility while we transition to using Toolheads directly
         PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
             Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
             p.Id,
             p.Name,
-            null, // NozzleDiameter - now per-Toolhead, not printer-wide
-            null, // SupportedMaterials - now per-Toolhead, not printer-wide
+            primaryToolhead?.NozzleDiameter,
+            primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
             p.MaxBuildVolumeY,
             p.MaxBuildVolumeZ,
@@ -706,13 +714,26 @@ public class PrintersController(
             p.MultiMaterial,
             p.SupportsAutoLeveling,
             p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
-            null, // MaxHotendTemp - now per-Toolhead
+            primaryToolhead?.MaxHotendTemp,
             p.MaxBedTemp,
+            p.MaxPrintSpeed,
             p.CurrentMaterial,
             p.CurrentSpoolId,
             p.IsAvailable,
             p.LastCapabilityUpdate
         );
+
+        // Map toolheads to DTOs
+        ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(
+            t.Id,
+            t.Name,
+            t.Index,
+            t.NozzleDiameter,
+            t.MaxHotendTemp,
+            t.SupportedMaterials,
+            t.IsPrimary,
+            t.UpdatedAt
+        )).ToArray();
 
         return new PrinterDetailsDto(
             p.Id,
@@ -730,13 +751,14 @@ public class PrintersController(
             p.DateAcquired,
             (PrinterBackend)p.Backend,
             p.ApiKey,
-            null, // CameraStreamUrl (not available here)
-            null, // CameraSnapshotUrl (not available here)
+            p.CameraStreamUrl,
+            p.CameraSnapshotUrl,
             p.OriginalServerUrl,
             p.IpAddress,
             p.BackendPort,
             p.FrontendPort,
-            capabilitiesDto
+            capabilitiesDto,
+            toolheadDtos
         );
     }
 
@@ -997,6 +1019,93 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Applies template defaults from the printer's associated model.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the PrinterModel template to the printer, overwriting existing values.
+    /// Useful for backfilling data on existing printers that were created before template support.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The updated printer with applied template values</returns>
+    /// <response code="200">Template applied successfully</response>
+    /// <response code="404">If the printer was not found</response>
+    /// <response code="500">If there was an error applying the template</response>
+    [HttpPost("{id:guid}/apply-template")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> ApplyModelTemplateAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            // Use FindByIdForTemplateUpdateAsync to get printer with Toolheads and tracking enabled
+            Printer? printer = await _printersService.FindByIdForTemplateUpdateAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound();
+            }
+
+            bool updated = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, ct);
+
+            if (updated)
+            {
+                await _printersService.SaveChangesAsync(ct);
+            }
+
+            PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct) ?? throw new InvalidOperationException("Printer not found after update");
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to apply model template for printer {id}");
+            return StatusCode(500, "Failed to apply model template");
+        }
+    }
+
+    /// <summary>
+    /// Applies template defaults from printer models to all printers.
+    /// Overwrites existing values with template defaults.
+    /// Useful for backfilling data on existing printers that were created before template support.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Summary of how many printers were updated</returns>
+    /// <response code="200">Templates applied successfully</response>
+    /// <response code="500">If there was an error applying templates</response>
+    [HttpPost("apply-templates")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> ApplyModelTemplatesToAllAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Use GetAllForTemplateUpdateAsync to get printers with Toolheads and tracking enabled
+            List<Printer> allPrinters = await _printersService.GetAllForTemplateUpdateAsync(ct);
+            int updatedCount = 0;
+            int totalCount = 0;
+
+            foreach (Printer printer in allPrinters)
+            {
+                totalCount++;
+                bool updated = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, ct);
+                if (updated)
+                {
+                    updatedCount++;
+                }
+            }
+
+            await _printersService.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"Applied model templates to {updatedCount}/{totalCount} printers");
+            return Ok(new { updated = updatedCount, total = totalCount, message = $"Applied templates to {updatedCount} printers" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply model templates to all printers");
+            return StatusCode(500, "Failed to apply model templates");
+        }
+    }
+
+    /// <summary>
     /// Updates an existing printer configuration.
     /// </summary>
     /// <param name="id">The unique identifier of the printer to update</param>
@@ -1015,7 +1124,8 @@ public class PrintersController(
     public async Task<ActionResult<PrinterDto>> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        Printer? p = await _printersService.FindByIdAsync(id, ct);
+        // Use FindByIdForTemplateUpdateAsync to load printer with Toolheads for updating
+        Printer? p = await _printersService.FindByIdForTemplateUpdateAsync(id, ct);
         if (p is null)
         {
             return NotFound();
@@ -1087,6 +1197,9 @@ public class PrintersController(
             p.IpAddress = resolveResp.ResolvedIp;
         }
 
+        // Track if model changed for template application
+        bool modelChanged = modelId != p.ModelId;
+
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -1096,6 +1209,12 @@ public class PrintersController(
         if (dto.Backend.HasValue)
         {
             p.Backend = (int)dto.Backend.Value;
+        }
+
+        // If model changed, apply template defaults from the new model (don't overwrite user-customized values)
+        if (modelChanged)
+        {
+            await _printersService.ApplyModelTemplateAsync(p, forceOverwrite: false, ct);
         }
 
         if (dto.ApiKey != null)
@@ -1129,17 +1248,46 @@ public class PrintersController(
         p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
 
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
+        p.MaxPrintSpeed = dto.MaxPrintSpeed ?? p.MaxPrintSpeed;
         p.LastCapabilityUpdate = DateTime.UtcNow;
 
-        // Update primary toolhead specs if provided
-        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
-        if (primaryToolhead != null)
+        // Update toolheads if provided
+        if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
         {
-            primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
-            primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+            foreach (UpdateToolheadDto toolheadDto in dto.Toolheads)
+            {
+                Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Id == toolheadDto.Id);
+                if (toolhead != null)
+                {
+                    toolhead.Name = toolheadDto.Name ?? toolhead.Name;
+                    if (toolheadDto.Index.HasValue)
+                    {
+                        toolhead.Index = toolheadDto.Index.Value;
+                    }
 
-            primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
-            primaryToolhead.UpdatedAt = DateTime.UtcNow;
+                    toolhead.NozzleDiameter = toolheadDto.NozzleDiameter ?? toolhead.NozzleDiameter;
+                    toolhead.MaxHotendTemp = toolheadDto.MaxHotendTemp ?? toolhead.MaxHotendTemp;
+                    toolhead.SupportedMaterials = toolheadDto.SupportedMaterials ?? toolhead.SupportedMaterials;
+                    if (toolheadDto.IsPrimary.HasValue)
+                    {
+                        toolhead.IsPrimary = toolheadDto.IsPrimary.Value;
+                    }
+
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
+        else
+        {
+            // Legacy: Update primary toolhead specs if no explicit toolheads array provided
+            Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
+            if (primaryToolhead != null)
+            {
+                primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
+                primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+                primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
+                primaryToolhead.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         // Build updated manufacturer/model names
@@ -1249,11 +1397,17 @@ public class PrintersController(
 
         // Map modelDto to a lightweight shape consistent with previous behavior
         // Note: modelDto contains ManufacturerName, SupportedFilamentTypes and capability fields
+        // Nozzle diameter and max hotend temp are now on toolheads
 
         try
         {
+            // Get nozzle diameter and max hotend temp from the primary toolhead (or first toolhead)
+            PrinterModelToolheadDto? primaryToolhead = modelDto.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelDto.Toolheads?.FirstOrDefault();
+            double? nozzleDiameter = primaryToolhead?.NozzleDiameter;
+            int? maxHotendTemp = primaryToolhead?.MaxHotendTemp;
+
             bool hasCapabilityData = modelDto.MaxX.HasValue || modelDto.MaxY.HasValue || modelDto.MaxZ.HasValue ||
-                                     modelDto.DefaultNozzleDiameter.HasValue || modelDto.MaxHotendTemp.HasValue ||
+                                     nozzleDiameter.HasValue || maxHotendTemp.HasValue ||
                                      modelDto.MaxBedTemp.HasValue || (modelDto.SupportedFilamentTypes != null && modelDto.SupportedFilamentTypes.Length > 0);
 
             if (!hasCapabilityData)
@@ -1265,7 +1419,7 @@ public class PrintersController(
                 Id: Guid.Empty,
                 PrinterId: Guid.Empty,
                 PrinterName: modelDto.Name,
-                NozzleDiameter: modelDto.DefaultNozzleDiameter,
+                NozzleDiameter: nozzleDiameter,
                     SupportedMaterials: modelDto.SupportedFilamentTypes ?? Array.Empty<string>(),
                 MaxBuildVolumeX: modelDto.MaxX,
                 MaxBuildVolumeY: modelDto.MaxY,
@@ -1274,7 +1428,7 @@ public class PrintersController(
                 HasEnclosure: modelDto.HasEnclosure,
                 MultiMaterial: modelDto.MultiMaterial,
                 NumberOfExtruders: modelDto.NumberOfExtruders,
-                MaxHotendTemp: modelDto.MaxHotendTemp,
+                MaxHotendTemp: maxHotendTemp,
                 MaxBedTemp: modelDto.MaxBedTemp,
                 CurrentMaterial: null,
                 CurrentSpoolId: null,

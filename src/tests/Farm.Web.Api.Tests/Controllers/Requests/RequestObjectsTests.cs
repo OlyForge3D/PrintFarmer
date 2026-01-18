@@ -313,13 +313,11 @@ public class UpdateModelRequestTests
             MaxZ: 200,
             DefaultBackend: PrinterBackend.Moonraker,
             SupportedFilamentTypeIds: filamentIds,
-            DefaultNozzleDiameter: 0.4,
             HasHeatedBed: true,
             HasEnclosure: false,
             MultiMaterial: false,
             NumberOfExtruders: 1,
             SupportsAutoLeveling: true,
-            MaxHotendTemp: 300,
             MaxBedTemp: 120,
             MaxPrintSpeed: 200);
 
@@ -330,11 +328,9 @@ public class UpdateModelRequestTests
         request.MaxZ.Should().Be(200);
         request.DefaultBackend.Should().Be(PrinterBackend.Moonraker);
         request.SupportedFilamentTypeIds.Should().HaveCount(2);
-        request.DefaultNozzleDiameter.Should().Be(0.4);
         request.HasHeatedBed.Should().BeTrue();
         request.HasEnclosure.Should().BeFalse();
         request.NumberOfExtruders.Should().Be(1);
-        request.MaxHotendTemp.Should().Be(300);
         request.MaxBedTemp.Should().Be(120);
         request.MaxPrintSpeed.Should().Be(200);
     }
@@ -386,17 +382,14 @@ public class UpdateModelRequestTests
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null, null,
-            DefaultNozzleDiameter: 0.8,
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MaxHotendTemp: 350,
             MaxBedTemp: 140,
             MaxPrintSpeed: 250);
 
-        request.MaxHotendTemp.Should().Be(350);
         request.MaxBedTemp.Should().Be(140);
     }
 
@@ -441,17 +434,14 @@ public class UpdateModelRequestTests
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null, null,
-            DefaultNozzleDiameter: null,
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MaxHotendTemp: 0,
             MaxBedTemp: 0,
             MaxPrintSpeed: 0);
 
-        request.MaxHotendTemp.Should().Be(0);
         request.MaxBedTemp.Should().Be(0);
         request.MaxPrintSpeed.Should().Be(0);
     }

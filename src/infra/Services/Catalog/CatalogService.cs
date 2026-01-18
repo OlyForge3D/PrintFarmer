@@ -122,7 +122,13 @@ public class CatalogService(
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -161,7 +167,13 @@ public class CatalogService(
             MaxY = maxY,
             MaxZ = maxZ,
             DefaultBackend = defaultBackend.HasValue ? (int)defaultBackend.Value : (int?)null,
-            DefaultNozzleDiameter = defaultNozzleDiameter
+            HasHeatedBed = hasHeatedBed ?? true,
+            HasEnclosure = hasEnclosure ?? false,
+            MultiMaterial = multiMaterial ?? false,
+            NumberOfExtruders = numberOfExtruders ?? 1,
+            SupportsAutoLeveling = supportsAutoLeveling ?? false,
+            MaxBedTemp = maxBedTemp,
+            MaxPrintSpeed = maxPrintSpeed
         };
 
         await _repo.AddModelAsync(model, ct);
@@ -218,7 +230,14 @@ public class CatalogService(
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
+        PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct)
     {
         PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
@@ -241,9 +260,40 @@ public class CatalogService(
         model.MaxZ = maxZ;
         model.DefaultBackend = defaultBackend.HasValue ? (int)defaultBackend.Value : (int?)null;
 
-        if (defaultNozzleDiameter.HasValue)
+        // Update capability fields
+        if (hasHeatedBed.HasValue)
         {
-            model.DefaultNozzleDiameter = defaultNozzleDiameter.Value;
+            model.HasHeatedBed = hasHeatedBed.Value;
+        }
+
+        if (hasEnclosure.HasValue)
+        {
+            model.HasEnclosure = hasEnclosure.Value;
+        }
+
+        if (multiMaterial.HasValue)
+        {
+            model.MultiMaterial = multiMaterial.Value;
+        }
+
+        if (numberOfExtruders.HasValue)
+        {
+            model.NumberOfExtruders = numberOfExtruders.Value;
+        }
+
+        if (supportsAutoLeveling.HasValue)
+        {
+            model.SupportsAutoLeveling = supportsAutoLeveling.Value;
+        }
+
+        if (maxBedTemp.HasValue)
+        {
+            model.MaxBedTemp = maxBedTemp.Value;
+        }
+
+        if (maxPrintSpeed.HasValue)
+        {
+            model.MaxPrintSpeed = maxPrintSpeed.Value;
         }
 
         if (supportedFilamentTypeIds != null)
@@ -254,19 +304,17 @@ public class CatalogService(
             await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);
         }
 
+        // Update toolheads if provided
+        if (toolheads != null)
+        {
+            await _repo.UpdateModelToolheadsAsync(model.Id, toolheads, ct);
+        }
+
         await _repo.SaveChangesAsync(ct);
         _cacheProvider.InvalidateModels(model.ManufacturerId);
 
-        return new PrinterModelDto(
-            model.Id,
-            model.Name,
-            model.ManufacturerId,
-            model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null,
-            model.MaxX,
-            model.MaxY,
-            model.MaxZ,
-            model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
+        // Re-fetch model to get updated toolheads
+        return await GetModelByIdAsync(model.Id, ct);
     }
 
     public async Task DeleteModelAsync(Guid id, CancellationToken ct)
@@ -422,6 +470,102 @@ public class CatalogService(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"[CatalogService] UpdateModelAliasesAsync failed for modelId {modelId}: {ex.Message}");
+            throw;
+        }
+    }
+
+    // ============ Component Model Methods ============
+
+    /// <summary>Gets all hotend model definitions.</summary>
+    public async Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var hotends = await _repo.GetHotendModelsAsync(ct);
+            return hotends.Select(h => new HotendModelDto(
+                h.Id,
+                h.Name,
+                h.ManufacturerId,
+                h.ManufacturerName,
+                h.MaxTemp,
+                h.IsHighFlow,
+                h.Description,
+                h.Url
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all extruder model definitions.</summary>
+    public async Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var extruders = await _repo.GetExtruderModelsAsync(ct);
+            return extruders.Select(e => new ExtruderModelDto(
+                e.Id,
+                e.Name,
+                e.ManufacturerId,
+                e.ManufacturerName,
+                e.GearRatio,
+                e.IsDirectDrive,
+                e.Description,
+                e.Url
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all toolhead model definitions.</summary>
+    public async Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var toolheads = await _repo.GetToolheadModelsAsync(ct);
+            return toolheads.Select(t => new ToolheadModelDto(
+                t.Id,
+                t.Name,
+                t.ManufacturerId,
+                t.ManufacturerName,
+                t.Description,
+                t.Url
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all nozzle model definitions.</summary>
+    public async Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var nozzles = await _repo.GetNozzleModelsAsync(ct);
+            return nozzles.Select(n => new NozzleModelDto(
+                n.Id,
+                n.Name,
+                n.ManufacturerId,
+                n.ManufacturerName,
+                n.MaxTemp,
+                n.IsHardened,
+                n.Description,
+                n.Url
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: " + ex.Message);
             throw;
         }
     }

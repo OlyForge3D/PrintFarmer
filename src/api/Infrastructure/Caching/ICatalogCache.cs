@@ -68,7 +68,14 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         IDbContextFactory<AppDbContext> dbFactory2 = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
-        IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+        IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking()
+            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .Include(m => m.Toolheads).ThenInclude(t => t.HotendModel)
+            .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
+            .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
+            .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+            .AsSplitQuery()
+            .AsQueryable();
         if (manufacturerId is Guid mid2)
         {
             q = q.Where(m => m.ManufacturerId == mid2);
@@ -84,18 +91,37 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                 m.MaxZ,
                 m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null,
                 m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
-                // Default capabilities
-                m.DefaultNozzleDiameter,
+                // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
                 m.HasHeatedBed,
                 m.HasEnclosure,
                 m.MultiMaterial,
                 m.NumberOfExtruders,
                 m.SupportsAutoLeveling,
                 // Temperature ranges
-                m.MaxHotendTemp,
                 m.MaxBedTemp,
                 // Speed capabilities
-                m.MaxPrintSpeed)).ToListAsync(ct);
+                m.MaxPrintSpeed,
+                // Toolheads
+                m.Toolheads.OrderBy(t => t.Index).Select(t => new PrinterModelToolheadDto(
+                    t.Id,
+                    t.Name,
+                    t.Index,
+                    t.NozzleDiameter,
+                    t.NozzleType.HasValue ? (NozzleType)t.NozzleType.Value : null,
+                    t.MaxHotendTemp,
+                    t.MaxFlowRate,
+                    t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+                    // Component model references (IDs and names)
+                    t.HotendModelId,
+                    t.HotendModel != null ? t.HotendModel.Name : null,
+                    t.ExtruderModelId,
+                    t.ExtruderModel != null ? t.ExtruderModel.Name : null,
+                    t.ToolheadModelDefId,
+                    t.ToolheadModelDef != null ? t.ToolheadModelDef.Name : null,
+                    t.NozzleModelId,
+                    t.NozzleModel != null ? t.NozzleModel.Name : null,
+                    t.SupportedMaterials,
+                    t.IsPrimary)).ToArray())).ToListAsync(ct);
         IEnumerable<string> etagInput = list.Select(m => m.Id.ToString("N") + ":" + m.Name).Prepend(manufacturerId?.ToString("N") ?? "all");
         string etag = ComputeWeakEtag(etagInput);
         _ = _cache.Set(key, (list, etag), _options.ListTtl);

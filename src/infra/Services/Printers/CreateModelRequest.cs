@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 /// <summary>
 /// Request object for creating a printer model.
 /// Infrastructure version (no ASP.NET binding attributes).
+/// Note: Nozzle diameter and max hotend temp are now defined per-toolhead.
 /// </summary>
 public record CreateModelRequest(
     Guid ManufacturerId,
@@ -19,17 +20,13 @@ public record CreateModelRequest(
     Guid[]? SupportedFilamentTypeIds,
 
     // Default capabilities that can be inherited by new printers
-    double? DefaultNozzleDiameter = 0.4,
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
 
-    // Temperature ranges
-    int? MinHotendTemp = 0,
-    int? MaxHotendTemp = 300,
-    int? MinBedTemp = 0,
+    // Temperature ranges (nozzle/hotend temps are on toolheads)
     int? MaxBedTemp = 120,
 
     // Speed capabilities

@@ -34,7 +34,13 @@ public interface ICatalogService
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
         CancellationToken ct);
 
     /// <summary>Updates an existing printer model.</summary>
@@ -47,7 +53,14 @@ public interface ICatalogService
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
+        PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct);
 
     /// <summary>Deletes a printer model.</summary>
@@ -67,4 +80,18 @@ public interface ICatalogService
 
     /// <summary>Gets the default (Unknown) manufacturer and model IDs.</summary>
     Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct);
+
+    // ============ Component Model Methods ============
+
+    /// <summary>Gets all hotend model definitions.</summary>
+    Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct);
+
+    /// <summary>Gets all extruder model definitions.</summary>
+    Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct);
+
+    /// <summary>Gets all toolhead model definitions.</summary>
+    Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct);
+
+    /// <summary>Gets all nozzle model definitions.</summary>
+    Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct);
 }

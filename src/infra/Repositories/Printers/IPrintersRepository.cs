@@ -25,4 +25,12 @@ public interface IPrintersRepository
     Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
     // Detach all tracked entities to prevent concurrent operation errors in bulk operations
     void DetachAllEntities();
+    /// <summary>
+    /// Gets all printers with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct);
+    /// <summary>
+    /// Gets a single printer with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct);
 }

@@ -296,6 +296,27 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Retrieves all printers with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
+    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
+    {
+        return await _unitOfWork.Printers.GetAllForTemplateUpdateAsync(ct);
+    }
+
+    /// <summary>
+    /// Retrieves a single printer with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="id">The printer ID (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Printer entity with Toolheads if found; otherwise null</returns>
+    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct)
+    {
+        return await _unitOfWork.Printers.FindByIdForTemplateUpdateAsync(id, ct);
+    }
+
+    /// <summary>
     /// Retrieves a single printer by its unique identifier.
     /// </summary>
     /// <param name="id">The printer ID (GUID)</param>
@@ -1186,6 +1207,10 @@ public class PrintersService(
         string serverUrlForStorage = resolvedBase;
         string originalUrlForStorage = inputUrl;
 
+        // Load the PrinterModel template to copy default values from
+        PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(modelId, ct);
+        _logger.LogDebug($"[CreatePrinterFromDto] Loaded PrinterModel template: {modelTemplate?.Name ?? "null"} for model ID {modelId}");
+
         Printer p = new()
         {
             Id = Guid.NewGuid(),
@@ -1211,10 +1236,23 @@ public class PrintersService(
             // Use provided camera URLs from discovery, or leave null
             CameraStreamUrl = dto.CameraStreamUrl,
             CameraSnapshotUrl = dto.CameraSnapshotUrl,
-            IsEnabled = dto.IsEnabled
+            IsEnabled = dto.IsEnabled,
+            // Copy hardware specifications from PrinterModel template
+            MaxBuildVolumeX = modelTemplate?.MaxX,
+            MaxBuildVolumeY = modelTemplate?.MaxY,
+            MaxBuildVolumeZ = modelTemplate?.MaxZ,
+            HasHeatedBed = modelTemplate?.HasHeatedBed ?? true,
+            HasEnclosure = modelTemplate?.HasEnclosure ?? false,
+            MultiMaterial = modelTemplate?.MultiMaterial ?? false,
+            SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+            MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
+            MaxBedTemp = modelTemplate?.MaxBedTemp
         };
 
-        // Create toolheads from import data or use defaults
+        // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
+        PrinterModelToolheadDto? primaryModelToolhead = modelTemplate?.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelTemplate?.Toolheads?.FirstOrDefault();
+
+        // Create toolheads from import data or use defaults from template
         if (dto.Toolheads != null && dto.Toolheads.Count > 0)
         {
             // Import toolheads from JSON export
@@ -1226,9 +1264,9 @@ public class PrintersService(
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    NozzleDiameter = toolheadDto.NozzleDiameter ?? 0.4,
-                    MaxHotendTemp = toolheadDto.MaxHotendTemp,
-                    SupportedMaterials = toolheadDto.SupportedMaterials,
+                    NozzleDiameter = toolheadDto.NozzleDiameter ?? primaryModelToolhead?.NozzleDiameter ?? 0.4,
+                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
+                    SupportedMaterials = toolheadDto.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes,
                     IsPrimary = toolheadDto.IsPrimary
                 };
                 p.Toolheads.Add(toolhead);
@@ -1237,17 +1275,27 @@ public class PrintersService(
         }
         else
         {
-            // Create a default single Toolhead for single-toolhead printers
-            Toolhead defaultToolhead = new()
+            // Create toolheads based on model template or defaults
+            int numExtruders = modelTemplate?.NumberOfExtruders ?? 1;
+            for (int i = 0; i < numExtruders; i++)
             {
-                Id = Guid.NewGuid(),
-                PrinterId = p.Id,
-                Name = "Extruder 1",
-                Index = 0,
-                IsPrimary = true,
-                NozzleDiameter = 0.4 // Standard default nozzle size
-            };
-            p.Toolheads.Add(defaultToolhead);
+                // Try to find a matching toolhead template by index, otherwise use primary
+                PrinterModelToolheadDto? templateToolhead = modelTemplate?.Toolheads?.FirstOrDefault(t => t.Index == i) ?? primaryModelToolhead;
+
+                Toolhead toolhead = new()
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = p.Id,
+                    Name = templateToolhead?.Name ?? $"Extruder {i + 1}",
+                    Index = i,
+                    IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
+                    NozzleDiameter = templateToolhead?.NozzleDiameter ?? 0.4,
+                    MaxHotendTemp = templateToolhead?.MaxHotendTemp,
+                    SupportedMaterials = templateToolhead?.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes
+                };
+                p.Toolheads.Add(toolhead);
+            }
+            _logger.LogInformation($"[CreatePrinterFromDto] Created {numExtruders} toolhead(s) from template for printer {p.Name}");
         }
 
         // Assign location if provided
@@ -1269,6 +1317,126 @@ public class PrintersService(
 
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
+    }
+
+    /// <summary>
+    /// Applies template defaults from the PrinterModel to an existing printer.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the associated PrinterModel to the printer.
+    /// </summary>
+    /// <param name="printer">The printer entity to update (must include Toolheads if updating toolhead properties)</param>
+    /// <param name="forceOverwrite">If true, overwrites all values from template. If false, only fills in null/unset values.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if any values were updated, false if no changes were made</returns>
+    public async Task<bool> ApplyModelTemplateAsync(Printer printer, bool forceOverwrite, CancellationToken ct)
+    {
+        if (printer.ModelId == Guid.Empty)
+        {
+            _logger.LogDebug($"[ApplyModelTemplate] Printer {printer.Name} has no model assigned - skipping template application");
+            return false;
+        }
+
+        PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
+        if (modelTemplate == null)
+        {
+            _logger.LogWarning($"[ApplyModelTemplate] PrinterModel {printer.ModelId} not found for printer {printer.Name}");
+            return false;
+        }
+
+        bool updated = false;
+
+        // Apply hardware specifications from template
+        if (modelTemplate.MaxX != null && (forceOverwrite || printer.MaxBuildVolumeX == null))
+        {
+            printer.MaxBuildVolumeX = modelTemplate.MaxX;
+            updated = true;
+        }
+        if (modelTemplate.MaxY != null && (forceOverwrite || printer.MaxBuildVolumeY == null))
+        {
+            printer.MaxBuildVolumeY = modelTemplate.MaxY;
+            updated = true;
+        }
+        if (modelTemplate.MaxZ != null && (forceOverwrite || printer.MaxBuildVolumeZ == null))
+        {
+            printer.MaxBuildVolumeZ = modelTemplate.MaxZ;
+            updated = true;
+        }
+        if (modelTemplate.MaxPrintSpeed != null && (forceOverwrite || printer.MaxPrintSpeed == null))
+        {
+            printer.MaxPrintSpeed = modelTemplate.MaxPrintSpeed;
+            updated = true;
+        }
+        if (modelTemplate.MaxBedTemp != null && (forceOverwrite || printer.MaxBedTemp == null))
+        {
+            printer.MaxBedTemp = modelTemplate.MaxBedTemp;
+            updated = true;
+        }
+
+        // Apply boolean capabilities
+        if (forceOverwrite || (!printer.HasEnclosure && modelTemplate.HasEnclosure))
+        {
+            printer.HasEnclosure = modelTemplate.HasEnclosure;
+            updated = true;
+        }
+        if (forceOverwrite || (!printer.MultiMaterial && modelTemplate.MultiMaterial))
+        {
+            printer.MultiMaterial = modelTemplate.MultiMaterial;
+            updated = true;
+        }
+        if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
+        {
+            printer.SupportsAutoLeveling = modelTemplate.SupportsAutoLeveling;
+            updated = true;
+        }
+        if (forceOverwrite || (!printer.HasHeatedBed && modelTemplate.HasHeatedBed))
+        {
+            printer.HasHeatedBed = modelTemplate.HasHeatedBed;
+            updated = true;
+        }
+
+        // Get default toolhead values from model's toolhead templates
+        PrinterModelToolheadDto? defaultModelToolhead = modelTemplate.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelTemplate.Toolheads?.FirstOrDefault();
+
+        // Apply toolhead defaults from model template
+        if (printer.Toolheads?.Count > 0)
+        {
+            foreach (var toolhead in printer.Toolheads)
+            {
+                // Find matching toolhead template by index, otherwise use default
+                PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
+
+                if (matchingTemplate?.NozzleDiameter != null && (forceOverwrite || toolhead.NozzleDiameter == null))
+                {
+                    toolhead.NozzleDiameter = matchingTemplate.NozzleDiameter;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+                if (matchingTemplate?.MaxHotendTemp != null && (forceOverwrite || toolhead.MaxHotendTemp == null))
+                {
+                    toolhead.MaxHotendTemp = matchingTemplate.MaxHotendTemp;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+                if (modelTemplate.SupportedFilamentTypes?.Length > 0 && (forceOverwrite || toolhead.SupportedMaterials == null || toolhead.SupportedMaterials.Length == 0))
+                {
+                    toolhead.SupportedMaterials = modelTemplate.SupportedFilamentTypes;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+            }
+        }
+
+        if (updated)
+        {
+            printer.LastCapabilityUpdate = DateTime.UtcNow;
+            _logger.LogInformation($"[ApplyModelTemplate] Applied template defaults from model '{modelTemplate.Name}' to printer '{printer.Name}'");
+        }
+        else
+        {
+            _logger.LogDebug($"[ApplyModelTemplate] Printer '{printer.Name}' already has all values set - no changes needed");
+        }
+
+        return updated;
     }
 
     /// <summary>

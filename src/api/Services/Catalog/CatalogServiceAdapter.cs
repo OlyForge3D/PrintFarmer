@@ -48,7 +48,13 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
             req.MaxZ,
             req.DefaultBackend,
             req.SupportedFilamentTypeIds,
-            req.DefaultNozzleDiameter,
+            req.HasHeatedBed,
+            req.HasEnclosure,
+            req.MultiMaterial,
+            req.NumberOfExtruders,
+            req.SupportsAutoLeveling,
+            req.MaxBedTemp,
+            req.MaxPrintSpeed,
             ct);
     }
 
@@ -63,7 +69,14 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
             req.MaxZ,
             req.DefaultBackend,
             req.SupportedFilamentTypeIds,
-            req.DefaultNozzleDiameter,
+            req.HasHeatedBed,
+            req.HasEnclosure,
+            req.MultiMaterial,
+            req.NumberOfExtruders,
+            req.SupportsAutoLeveling,
+            req.MaxBedTemp,
+            req.MaxPrintSpeed,
+            req.Toolheads,
             ct);
     }
 
@@ -98,5 +111,26 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         // Update aliases
         var aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
         return aliases;
+    }
+
+    // Component model methods - delegate to core service
+    public Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
+    {
+        return _coreCatalogService.GetHotendModelsAsync(ct);
+    }
+
+    public Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
+    {
+        return _coreCatalogService.GetExtruderModelsAsync(ct);
+    }
+
+    public Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
+    {
+        return _coreCatalogService.GetToolheadModelsAsync(ct);
+    }
+
+    public Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
+    {
+        return _coreCatalogService.GetNozzleModelsAsync(ct);
     }
 }
