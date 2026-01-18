@@ -65,7 +65,7 @@ namespace Farm.Web.Api.Services.Queue
         public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)
         {
             List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
-            List<QueueOverviewDto> overview = new List<QueueOverviewDto>();
+            List<QueueOverviewDto> overview = [];
 
             foreach (Printer printer in printers)
             {

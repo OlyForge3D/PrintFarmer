@@ -621,9 +621,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                         .ToList();
                 }
 
-                return new List<PrinterFileInfo>();
+                return [];
             }
-            return new List<PrinterFileInfo>();
+            return [];
         }
         catch (Exception ex)
         {
@@ -648,7 +648,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             catch (Exception legacyEx)
             {
                 _logger?.LogError(legacyEx, "Failed to get file list from legacy endpoint as well");
-                return new List<PrinterFileInfo>();
+                return [];
             }
         }
     }

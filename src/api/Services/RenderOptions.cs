@@ -296,7 +296,7 @@ public sealed class Mesh
 
 public sealed class Face
 {
-    public int[] Indices { get; set; } = Array.Empty<int>();
+    public int[] Indices { get; set; } = [];
     public int FaceIndex { get; set; }
     public int IndexCount => Indices?.Length ?? 0;
 }
@@ -305,7 +305,7 @@ public sealed class NormalizedMesh
 {
     public List<Vector3> Vertices { get; } = new();
     public List<Face> Faces { get; } = new();
-    public float[] Ao { get; set; } = Array.Empty<float>();
+    public float[] Ao { get; set; } = [];
 
     public List<Vector3> Normals { get; } = new();
 }

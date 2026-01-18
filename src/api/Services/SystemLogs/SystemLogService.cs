@@ -15,7 +15,7 @@ public class SystemLogService(Farm.Infrastructure.Repositories.SystemLogs.ISyste
 
     public async Task<IReadOnlyList<SystemLog>> QueryLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
     {
-        List<SystemLog> list = new List<SystemLog>();
+        List<SystemLog> list = [];
         await foreach (SystemLog item in _repo.QueryAsync(correlationId, level, from, to, metadata))
         {
             list.Add(item);

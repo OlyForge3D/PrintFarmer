@@ -74,7 +74,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        List<MachineProfileDto> profiles = new List<MachineProfileDto>();
+        List<MachineProfileDto> profiles = [];
 
         try
         {
@@ -106,7 +106,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         string manufacturerName = bundle.Name; // Extract from bundle
 
                         // Load from both machine_model_list and machine_list
-                        List<ManufacturerBundleProfileEntry> allMachineEntries = new List<ManufacturerBundleProfileEntry>();
+                        List<ManufacturerBundleProfileEntry> allMachineEntries = [];
                         if (bundle.MachineModelList != null)
                         {
                             allMachineEntries.AddRange(bundle.MachineModelList);
@@ -187,7 +187,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        List<FilamentProfileDto> profiles = new List<FilamentProfileDto>();
+        List<FilamentProfileDto> profiles = [];
 
         try
         {
@@ -304,7 +304,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        List<ProcessProfileDto> profiles = new List<ProcessProfileDto>();
+        List<ProcessProfileDto> profiles = [];
 
         try
         {
@@ -473,8 +473,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Collect all profiles in the inheritance chain (parent -> child order)
-            List<string> inheritanceChain = new List<string>();
-            HashSet<string> visited = new HashSet<string>();
+            List<string> inheritanceChain = [];
+            HashSet<string> visited = [];
 
             if (!CollectInheritanceChainAsJson(filePath, inheritanceChain, visited))
             {
@@ -615,7 +615,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Accumulate all properties from all profiles
-            Dictionary<string, string> allProps = new Dictionary<string, string>();
+            Dictionary<string, string> allProps = [];
 
             foreach (string profileJson in profileJsons)
             {
@@ -875,7 +875,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
-        Dictionary<string, object> dict = new Dictionary<string, object>();
+        Dictionary<string, object> dict = [];
         try
         {
             if (elem.ValueKind == JsonValueKind.Object)

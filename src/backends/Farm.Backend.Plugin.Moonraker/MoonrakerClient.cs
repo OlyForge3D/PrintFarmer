@@ -866,7 +866,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -876,7 +876,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             if (!root.TryGetProperty("result", out JsonElement result) ||
                 result.ValueKind != JsonValueKind.Array)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             List<PrinterFileInfo> files = new();
@@ -923,7 +923,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         }
         catch
         {
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
@@ -1262,19 +1262,19 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return new List<(int, int, string)>();
+                return [];
             }
 
             MoonrakerResponse<List<ThumbnailInfo>>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<List<ThumbnailInfo>>>(cancellationToken: cts.Token);
             return response?.Result == null || response.Result.Count == 0
-                ? new List<(int, int, string)>()
+                ? []
                 : response.Result
                 .Select(t => (t.Width, t.Height, t.RelativePath))
                 .ToList();
         }
         catch
         {
-            return new List<(int, int, string)>();
+            return [];
         }
     }
 

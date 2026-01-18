@@ -74,7 +74,7 @@ public class ArtifactsController(
         }
 
         string[] allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        List<ArtifactDto> results = new List<ArtifactDto>();
+        List<ArtifactDto> results = [];
 
         try
         {

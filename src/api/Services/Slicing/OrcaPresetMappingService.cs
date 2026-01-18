@@ -74,12 +74,12 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
 
         PrinterModel? bestMatch = null;
         double bestScore = 0.0;
-        List<string> reasons = new List<string>();
+        List<string> reasons = [];
 
         foreach (PrinterModel model in catalogModels)
         {
             double score = 0.0;
-            List<string> matchReasons = new List<string>();
+            List<string> matchReasons = [];
 
             // Model name similarity (40% weight)
             double nameScore = CalculateStringSimilarity(preset.PrinterModel ?? preset.Name, model.Name);

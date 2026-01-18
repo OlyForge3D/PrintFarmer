@@ -124,7 +124,7 @@ namespace Farm.Web.Api.Services.Gcode
                 ct);
 
             // Build file entries
-            var entries = new List<GcodeFileEntryDto>();
+            List<GcodeFileEntryDto> entries = [];
             long totalSize = 0;
 
             // Get storage directory once (same for all files)
@@ -381,7 +381,7 @@ namespace Farm.Web.Api.Services.Gcode
         {
             // Get all folders from the folder management service
             var allFolderPaths = await _folderService.GetAllFolderPathsRecursiveAsync("gcode", "/", ct);
-            var folderEntries = new List<GcodeFileEntryDto>();
+            List<GcodeFileEntryDto> folderEntries = [];
 
             // Always include root folder
             folderEntries.Add(new GcodeFileEntryDto(

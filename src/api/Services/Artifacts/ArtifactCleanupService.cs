@@ -34,7 +34,7 @@ public class ArtifactCleanupService(
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        List<Artifact> candidatesForDeletion = new List<Artifact>();
+        List<Artifact> candidatesForDeletion = [];
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)

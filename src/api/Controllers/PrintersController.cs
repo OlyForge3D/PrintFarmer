@@ -613,7 +613,7 @@ public class PrintersController(
             return BadRequest("No valid printers provided");
         }
 
-        List<PrinterDto> registered = new List<PrinterDto>();
+        List<PrinterDto> registered = [];
 
         foreach (DiscoveredPrinterDto discovered in printers)
         {

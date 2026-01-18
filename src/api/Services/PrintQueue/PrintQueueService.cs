@@ -1042,7 +1042,7 @@ public class PrintQueueService(
             }
 
             // Build state transitions from job history
-            var transitions = new List<StateTransitionDto>();
+            List<StateTransitionDto> transitions = [];
 
             // Add initial Queued state
             transitions.Add(new StateTransitionDto

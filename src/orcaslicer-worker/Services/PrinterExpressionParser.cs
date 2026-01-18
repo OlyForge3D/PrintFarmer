@@ -35,7 +35,7 @@ public static class PrinterExpressionParser
 
         try
         {
-            List<string> matchingMachines = new List<string>();
+            List<string> matchingMachines = [];
 
             foreach (MachineProfileDto machine in availableMachines)
             {

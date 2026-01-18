@@ -100,7 +100,7 @@ namespace Farm.Web.Api.Services.Model
             // Get all folders from the folder management service
             var allFolderPaths = await _folderManagementService.GetAllFolderPathsRecursiveAsync("models", "/", ct);
 
-            var folderEntries = new List<Model3DEntryDto>();
+            List<Model3DEntryDto> folderEntries = [];
 
             // Always include root folder
             folderEntries.Add(new Model3DEntryDto(
@@ -171,7 +171,7 @@ namespace Farm.Web.Api.Services.Model
                 ct);
 
             // Build model entries using existing MapToEntryDto
-            var entries = new List<Model3DEntryDto>();
+            List<Model3DEntryDto> entries = [];
             long totalSize = 0;
 
             foreach (var model in models)

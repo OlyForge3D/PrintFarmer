@@ -556,8 +556,8 @@ public sealed class MoonrakerSubscriptionService(
                 objectsElem.ValueKind == JsonValueKind.Array)
             {
                 var blocklist = new[] { "menu" }; // Objects to skip (same as Mainsail)
-                var subscribedObjects = new List<string>();
-                var skippedObjects = new List<string>();
+                List<string> subscribedObjects = [];
+                List<string> skippedObjects = [];
 
                 foreach (var objElem in objectsElem.EnumerateArray())
                 {

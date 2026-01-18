@@ -533,7 +533,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", apiKey);
 
         // OctoPrint supports limit and start query parameters for pagination
-        var queryParams = new List<string>();
+        List<string> queryParams = [];
         if (limit.HasValue)
         {
             queryParams.Add($"limit={limit.Value}");
@@ -1662,7 +1662,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
             if (!response.IsSuccessStatusCode)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             string jsonContent = await response.Content.ReadAsStringAsync();
@@ -1680,7 +1680,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         catch (Exception ex)
         {
             LogError("Get file list failed", ex);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 

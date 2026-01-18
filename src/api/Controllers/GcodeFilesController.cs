@@ -991,7 +991,7 @@ public class GcodeFilesController(
 
             int movedCount = 0;
             int failedCount = 0;
-            var failedFiles = new List<(string id, string reason)>();
+            List<(string id, string reason)> failedFiles = [];
 
             // Move each file - virtual move (update database folder reference)
             foreach (var fileIdStr in request.ModelIds)
@@ -1187,7 +1187,7 @@ public sealed record UpdateSettingsRequest(
 /// <summary>Request body for bulk deletion of virtual G-code files.</summary>
 public sealed class DeleteFilesRequest
 {
-    [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = Array.Empty<Guid>();
+    [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = [];
 }
 
 // ---------------- Chunk Upload DTOs ----------------

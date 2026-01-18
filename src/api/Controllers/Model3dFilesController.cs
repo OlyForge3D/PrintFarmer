@@ -764,7 +764,7 @@ public class Model3DFilesController(
 
             int movedCount = 0;
             int failedCount = 0;
-            var failedFiles = new List<(string id, string reason)>();
+            List<(string id, string reason)> failedFiles = [];
 
             // Move each file - this is a virtual move (just update database)
             foreach (var modelIdStr in request.ModelIds)
@@ -876,6 +876,6 @@ public record CreateFolderRequest(string Path);
 public sealed class DeleteModelsRequest
 {
     [JsonPropertyName("modelIds")]
-    public IList<Guid> ModelIds { get; init; } = Array.Empty<Guid>();
+    public IList<Guid> ModelIds { get; init; } = [];
 }
 
