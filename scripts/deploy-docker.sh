@@ -56,6 +56,7 @@ TEAR_DOWN=false
 SHOW_HELP=false
 REDEPLOY=false
 PREPULL=false
+NO_CACHE=false
 AUTO_ADMIN=false
 AUTO_ADMIN_USERNAME=""
 AUTO_ADMIN_PASSWORD=""
@@ -2243,6 +2244,8 @@ OPTIONS:
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, and ALL bind-mounted storage including database).
         --clean             Useful for starting completely fresh.
+    --no-cache              Build Docker images without using cache. Use when NuGet
+                            packages are corrupted from .NET version migrations.
     --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
@@ -4626,6 +4629,12 @@ EOF
         # Prepare build args including ORCA_ASSET_PATH for offline deployments
         declare -a compose_build_args=(--build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}")
         
+        # Add --no-cache if requested (useful when NuGet packages are corrupted from .NET version migrations)
+        if [ "$NO_CACHE" = "true" ]; then
+            compose_build_args+=(--no-cache)
+            print_info "Building without cache (--no-cache enabled)"
+        fi
+        
         # Copy AppImage files to build context if they exist (for offline builds)
         # Docker cannot access host paths in build args, so we must copy files into the build context
         if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ] && [ -n "${ORCA_ASSET_PATH:-}" ] && [ -d "${ORCA_ASSET_PATH}" ]; then
@@ -6571,6 +6580,10 @@ while [ $# -gt 0 ]; do
             ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
+            shift
+            ;;
+        --no-cache)
+            NO_CACHE=true
             shift
             ;;
         --regenerate-config)
