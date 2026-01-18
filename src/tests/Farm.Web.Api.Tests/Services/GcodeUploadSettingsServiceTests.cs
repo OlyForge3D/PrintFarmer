@@ -12,7 +12,7 @@ public class GcodeUploadSettingsTests
         var settings = new InMemoryGcodeUploadSettings();
 
         // Assert
-        var extensions = settings.AllowedExtensions;
+        var extensions = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", extensions);
         Assert.Contains(".bgcode", extensions);
     }
@@ -28,7 +28,7 @@ public class GcodeUploadSettingsTests
         settings.UpdateAllowedExtensions(newExtensions);
 
         // Assert
-        var extensions = settings.AllowedExtensions;
+        var extensions = settings.GetAllowedExtensions();
         Assert.Equal(4, extensions.Count);
         Assert.Contains(".g", extensions);
         Assert.Contains(".nc", extensions);
@@ -45,7 +45,7 @@ public class GcodeUploadSettingsTests
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.AllowedExtensions;
+        var result = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", result);
         Assert.Contains(".bgcode", result);
         Assert.Contains(".g", result);
@@ -62,7 +62,7 @@ public class GcodeUploadSettingsTests
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.AllowedExtensions;
+        var result = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", result);
         Assert.Contains(".g", result);
         Assert.Contains(".nc", result);
@@ -79,7 +79,7 @@ public class GcodeUploadSettingsTests
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.AllowedExtensions;
+        var result = settings.GetAllowedExtensions();
         Assert.Equal(2, result.Count);
         Assert.Contains(".gcode", result);
         Assert.Contains(".g", result);
@@ -90,13 +90,13 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        Assert.Contains(".gcode", settings.AllowedExtensions);
+        Assert.Contains(".gcode", settings.GetAllowedExtensions());
 
         // Act
         settings.UpdateAllowedExtensions(new[] { ".xyz", ".abc" });
 
         // Assert
-        var result = settings.AllowedExtensions;
+        var result = settings.GetAllowedExtensions();
         Assert.DoesNotContain(".gcode", result);
         Assert.Contains(".xyz", result);
         Assert.Contains(".abc", result);
@@ -111,7 +111,7 @@ public class GcodeUploadSettingsTests
 
         // Act
         settings.UpdateAllowedExtensions(extensions);
-        var result = settings.AllowedExtensions;
+        var result = settings.GetAllowedExtensions();
 
         // Assert
         Assert.Equal(3, result.Count);

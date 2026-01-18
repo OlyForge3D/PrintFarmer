@@ -175,10 +175,10 @@ public class PredictionController(PredictionService predictionService) : Control
 public class RecordCompletionRequest
 {
     /// <summary>Actual duration of the print in milliseconds</summary>
-    public long ActualDurationMs { get; set; }
+    public required long ActualDurationMs { get; set; }
 
     /// <summary>Whether the job completed successfully</summary>
-    public bool IsSuccess { get; set; } = true;
+    public bool IsSuccess { get; set; } = true;  // Has default value, not required
 
     /// <summary>Reason for failure if not successful</summary>
     public string? FailureReason { get; set; }

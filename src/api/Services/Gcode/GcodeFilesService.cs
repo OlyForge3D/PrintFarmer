@@ -440,7 +440,7 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
-            if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            if (!uploadSettings.GetAllowedExtensions().Contains(ext, StringComparer.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Invalid file type '{ext}'");
             }
@@ -1007,7 +1007,7 @@ namespace Farm.Web.Api.Services.Gcode
             long used = 0;
             long limit = 0;
             _ = quotaService.TryAddUsage(userId, 0, out used, out limit);
-            return Task.FromResult(new GcodeUploadSettingsResponse(uploadSettings.AllowedExtensions, limit, used));
+            return Task.FromResult(new GcodeUploadSettingsResponse(uploadSettings.GetAllowedExtensions(), limit, used));
         }
 
         #region Helper Methods

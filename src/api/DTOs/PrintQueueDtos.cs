@@ -101,7 +101,7 @@ public class UpdateQueueJobRequest
 /// </summary>
 public class UpdateQueueJobPriorityRequest
 {
-    public int NewPriority { get; set; }
+    public required int NewPriority { get; set; }
 }
 
 /// <summary>

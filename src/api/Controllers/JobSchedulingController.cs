@@ -208,7 +208,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
 /// </summary>
 public class ScheduleJobRequest
 {
-    public DateTime ScheduledStartTime { get; set; }
+    public required DateTime ScheduledStartTime { get; set; }
     public string? TimeZone { get; set; }
     public string? RecurrencePattern { get; set; }
     public DateTime? RecurrenceEndDate { get; set; }
@@ -219,6 +219,6 @@ public class ScheduleJobRequest
 /// </summary>
 public class RescheduleJobRequest
 {
-    public DateTime NewScheduledTime { get; set; }
+    public required DateTime NewScheduledTime { get; set; }
     public string? TimeZone { get; set; }
 }

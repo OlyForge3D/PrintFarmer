@@ -43,7 +43,7 @@ public class GcodeFilesController(
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
-    private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.AllowedExtensions;
+    private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.GetAllowedExtensions();
 
     /// <summary>
     /// Resolves a GCode file path to an absolute path.
@@ -1193,7 +1193,7 @@ public sealed class DeleteFilesRequest
 // ---------------- Chunk Upload DTOs ----------------
 public sealed record ChunkInitRequest(
     [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size")] long Size,
+    [property: JsonPropertyName("size"), JsonRequired] long Size,
     [property: JsonPropertyName("path")] string? Path,
     [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm = null,
     [property: JsonPropertyName("expectedHash")] string? ExpectedHash = null
