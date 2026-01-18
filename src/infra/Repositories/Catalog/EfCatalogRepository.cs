@@ -47,7 +47,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default)
     {
-        return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).FirstOrDefaultAsync(m => m.Id == id, ct);
+        return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery().FirstOrDefaultAsync(m => m.Id == id, ct);
     }
 
     public async Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default)
@@ -68,7 +68,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default)
     {
-        IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+        IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery();
         if (manufacturerId.HasValue)
         {
             q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
@@ -90,7 +90,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
     {
-        PrinterModel? model = await _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+        PrinterModel? model = await _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id, ct);
         return model is null
             ? null
@@ -184,11 +184,10 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default)
     {
-        // Remove all existing aliases for this model
-        var existingAliases = await _db.PrinterModelAliases
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
+        await _db.PrinterModelAliases
             .Where(a => a.PrinterModelId == modelId)
-            .ToListAsync(ct);
-        _db.PrinterModelAliases.RemoveRange(existingAliases);
+            .ExecuteDeleteAsync(ct);
 
         // Add new OrcaSlicer aliases
         foreach (var name in orcaSlicerNames ?? new List<string>())

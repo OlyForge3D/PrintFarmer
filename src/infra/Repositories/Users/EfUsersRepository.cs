@@ -20,6 +20,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .AsNoTracking()
+            .AsSplitQuery()
             .ToListAsync(ct);
 
         return users.Select(u => new UserDto
@@ -73,8 +74,8 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
 
     public async Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
     {
-        List<UserRole> existingRoles = await _db.UserRoles.Where(ur => ur.UserId == userId).ToListAsync(ct);
-        _db.UserRoles.RemoveRange(existingRoles);
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
+        await _db.UserRoles.Where(ur => ur.UserId == userId).ExecuteDeleteAsync(ct);
         foreach (Guid roleId in roleIds)
         {
             Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
@@ -99,8 +100,8 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         {
             return;
         }
-        List<UserRole> userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
-        _db.UserRoles.RemoveRange(userRoles);
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
+        await _db.UserRoles.Where(ur => ur.UserId == id).ExecuteDeleteAsync(ct);
         _ = _db.Users.Remove(user);
     }
 
@@ -112,6 +113,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
             .Include(r => r.RolePermissions)
             .ThenInclude(rp => rp.Action)
             .AsNoTracking()
+            .AsSplitQuery()
             .ToListAsync(ct);
 
         return roles.Select(r => new RoleDto

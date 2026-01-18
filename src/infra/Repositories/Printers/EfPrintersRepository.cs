@@ -14,11 +14,11 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().ToListAsync(ct);
 
-    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).ToListAsync(ct);
+    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
 
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == id, ct);
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
@@ -37,33 +37,22 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
         }
 
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk deletes without loading entities into memory
 
         // Remove GcodeFile records that reference this printer as source
-        List<GcodeFile> gcodeFilesReferencing = await _db.GcodeFiles
+        await _db.GcodeFiles
             .Where(gf => gf.SourcePrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (gcodeFilesReferencing.Any())
-        {
-            _db.GcodeFiles.RemoveRange(gcodeFilesReferencing);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // Remove PrintJob records assigned to this printer
-        List<PrintJob> jobsForPrinter = await _db.PrintJobs
+        await _db.PrintJobs
             .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (jobsForPrinter.Any())
-        {
-            _db.PrintJobs.RemoveRange(jobsForPrinter);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // Remove GcodeHarvestOperation records for this printer
-        List<GcodeHarvestOperation> harvestOpsForPrinter = await _db.GcodeHarvestOperations
+        await _db.GcodeHarvestOperations
             .Where(h => h.PrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (harvestOpsForPrinter.Any())
-        {
-            _db.GcodeHarvestOperations.RemoveRange(harvestOpsForPrinter);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
 
@@ -90,7 +79,8 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
             .AsNoTracking()
             .Include(p => p.Manufacturer)
             .Include(p => p.Model)
-            .Include(p => p.Location);
+            .Include(p => p.Location)
+            .AsSplitQuery();
         if (ids != null && ids.Length > 0)
         {
             q = q.Where(p => ids.Contains(p.Id));
