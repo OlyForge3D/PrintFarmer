@@ -244,10 +244,11 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation>());
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)); // Increased to allow startup logging
 
         // Act
         await _service.StartAsync(cts.Token);
+        await Task.Delay(100); // Give service time to start and log
         cts.Cancel();
 
         try
@@ -256,11 +257,11 @@ public class HarvestCompletionServiceTests
         }
         catch (OperationCanceledException) { }
 
-        // Assert - Service should stop without throwing
+        // Assert - Service should stop without throwing and log startup message
         _loggerMock.Verify(l => l.LogInformation(
             It.IsAny<string>(),
             It.IsAny<string?>(),
-            It.IsAny<string?>()), Times.AtLeastOnce);
+            It.IsAny<object?>()), Times.AtLeastOnce);
     }
 
     [Fact]

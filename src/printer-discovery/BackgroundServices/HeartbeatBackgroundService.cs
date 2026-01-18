@@ -12,7 +12,9 @@ public class HeartbeatBackgroundService(
     ILogger<HeartbeatBackgroundService> logger,
     IConfiguration config) : BackgroundService
 {
+#pragma warning disable CA2213 // HttpClient is injected and managed by DI container
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+#pragma warning restore CA2213
     private readonly ILogger<HeartbeatBackgroundService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly string _apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
     private readonly int _heartbeatIntervalSeconds = config.GetValue("Discovery:HeartbeatIntervalSeconds", 30);

@@ -6,10 +6,12 @@ using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure
 {
+#pragma warning disable CS0618 // AuthenticationHandler constructor with ISystemClock is obsolete but required until ASP.NET packages support TimeProvider directly
     public class TestAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder, new TimeProviderSystemClock(options.CurrentValue.TimeProvider ?? TimeProvider.System))
+#pragma warning restore CS0618
     {
         public const string SchemeName = "TestScheme";
         // Adapter to provide the (obsolete) ISystemClock interface from a TimeProvider instance.
@@ -24,10 +26,6 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
 
             public DateTimeOffset UtcNow => _tp.GetUtcNow();
         }
-
-#pragma warning restore CS0618
-#pragma warning disable CS0618 // using adapter for ISystemClock for current ASP.NET ref
-#pragma warning restore CS0618
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {

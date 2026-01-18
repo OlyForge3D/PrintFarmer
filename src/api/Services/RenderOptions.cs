@@ -312,6 +312,7 @@ public sealed class NormalizedMesh
 
 #pragma warning disable CA1051
 #pragma warning disable CA1815
+#pragma warning disable S1104 // Struct fields used for performance in rendering pipeline
 public struct Triangle
 {
     public Vector4 V0;
@@ -337,13 +338,16 @@ public struct Triangle
 
     public float D0, D1, D2; // depth in [0,1]
 }
+#pragma warning restore S1104
 
+#pragma warning disable S1104 // Struct fields used for performance in rendering pipeline
 public struct ClipVertex
 {
     public Vector4 C;   // clip-space position
     public Vector3 N;   // view-space normal
     public float Ao;
 }
+#pragma warning restore S1104
 
 #pragma warning restore CA1051
 #pragma warning restore CA1815

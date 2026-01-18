@@ -429,7 +429,7 @@ public sealed class OctoPrintPollingService(
                 : "noResponse";
         }
 
-        return ex is OperationCanceledException ? "noResponse" : "noResponse";
+        return "noResponse"; // All other exceptions including OperationCanceledException
     }
 
     /// <summary>

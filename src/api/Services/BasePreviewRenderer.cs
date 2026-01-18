@@ -128,6 +128,7 @@ public abstract class BasePreviewRenderer
         return mesh;
     }
 
+#pragma warning disable S2368 // Multidimensional arrays required for efficient image processing
     protected void DrawGroundShadow(Image<Rgba32> img, float[,] depth01, RenderOptions opt)
     {
         int w = img.Width, h = img.Height;
@@ -197,6 +198,7 @@ public abstract class BasePreviewRenderer
     }
 
     protected float[,] BoxBlurSeparable(float[,] src, int w, int h, int r)
+#pragma warning restore S2368
     {
         var tmp = new float[w, h];
         var dst = new float[w, h];
@@ -1142,7 +1144,9 @@ public abstract class BasePreviewRenderer
     //  TRUE SILHOUETTE EDGE DETECTION (A1 subtle)
     // ---------------------------------------------------------------------
 
+#pragma warning disable S2368 // Multidimensional arrays required for efficient image processing
     protected void DrawSilhouetteEdges(Image<Rgba32> img, List<Triangle> tris, float[,] depth01, RenderOptions options)
+#pragma warning restore S2368
     {
         int w = img.Width;
         int h = img.Height;

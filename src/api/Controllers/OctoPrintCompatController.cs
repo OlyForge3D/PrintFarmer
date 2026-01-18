@@ -29,6 +29,7 @@ namespace Farm.Web.Api.Controllers
         [HttpPost("files/local")]
         [AllowAnonymous]
         [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
+#pragma warning disable S6932 // OctoPrint compatibility requires raw request access
         public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId, [FromQuery] bool print = false)
         {
             var apiKey = Request.Headers["X-Api-Key"].ToString();
@@ -56,6 +57,7 @@ namespace Farm.Web.Api.Controllers
             }
 
             var file = Request.Form.Files[0];
+#pragma warning restore S6932
 
             if (file.Length == 0)
             {

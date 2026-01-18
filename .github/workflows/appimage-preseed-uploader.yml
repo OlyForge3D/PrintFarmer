@@ -6,9 +6,9 @@ on:
       slicer:
         description: 'Which slicer to fetch (prusa|orca)'
         required: true
-        default: 'prusa'
+        default: 'orca'
       version:
-        description: 'Version string (for Prusa: 2.8.0 or for Orca: 1.8.1). If empty, script will attempt to use latest release.'
+        description: 'Version string (for Prusa: 2.8.0 or for Orca: 2.3.1). If empty, script will attempt to use latest release.'
         required: false
         default: ''
 
