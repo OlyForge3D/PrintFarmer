@@ -54,6 +54,7 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, IUnifi
         {
             _cache.UpdateStatus(status);
         }
+
         _logger.LogDebug($"[StatusCache] Updated multiple printer statuses");
     }
 }

@@ -129,6 +129,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         {
             return ("timeout", "Connection timed out");
         }
+
         if (ex is HttpRequestException hre)
         {
             if (hre.InnerException is System.Net.Sockets.SocketException se)
@@ -141,12 +142,15 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     _ => ("network_error", hre.Message)
                 };
             }
+
             return ("http_error", hre.Message);
         }
+
         if (ex is System.Security.Authentication.AuthenticationException)
         {
             return ("tls_error", "TLS/SSL negotiation failed");
         }
+
         return ("unknown", ex.Message);
     }
 
@@ -203,6 +207,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     {
                         logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}", null, null);
                     }
+
                     return result.Items;
                 }
 
@@ -266,6 +271,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     {
                         logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}", null, null);
                     }
+
                     return result.Items;
                 }
                 else if (result.Success)
@@ -309,6 +315,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Stop paging on first failure after at least one success; otherwise treat as total failure
                 break;
             }
+
             anySuccess = true;
 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
@@ -394,6 +401,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Stop paging on first failure after at least one success; otherwise treat as total failure
                 break;
             }
+
             anySuccess = true;
 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
@@ -568,6 +576,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         // case-insensitive scan
         foreach (JsonProperty prop in obj.EnumerateObject())
         {
@@ -580,6 +589,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return false;
     }
 
@@ -674,6 +684,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return i;
             }
         }
+
         // case-insensitive
         if (el.ValueKind == JsonValueKind.Object)
         {
@@ -688,6 +699,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return 0;
     }
 
@@ -700,6 +712,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return d;
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -713,6 +726,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -740,12 +754,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         {
             s = string.Concat(s[0], s[0], s[1], s[1], s[2], s[2]);
         }
+
         // Drop alpha if present (ARGB/RGBA -> take first 6 of last 8)
         if (s.Length == 8 && s.All(IsHex))
         {
             // Heuristic: keep first 6 (assume RRGGBB and ignore alpha at the end)
             s = s[..6];
         }
+
         return s.Length == 6 && s.All(IsHex) ? "#" + s : null;
     }
 
@@ -761,6 +777,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return v.GetString();
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -774,6 +791,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -791,6 +809,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -818,8 +837,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             {
                 return next.ValueKind == JsonValueKind.String ? next.GetString() : null;
             }
+
             current = next;
         }
+
         return null;
     }
 
@@ -839,6 +860,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         return false;
     }
 
@@ -853,6 +875,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -867,6 +890,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return false;
     }
 
@@ -879,6 +903,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return v.GetBoolean();
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -892,6 +917,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -909,6 +935,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -926,6 +953,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 

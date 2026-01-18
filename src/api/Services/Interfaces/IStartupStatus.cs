@@ -10,14 +10,22 @@ namespace Farm.Web.Api.Services.Interfaces;
 public interface IStartupStatus
 {
     DateTime? InitializationStartedUtc { get; }
+
     DateTime? InitializationCompletedUtc { get; }
+
     TimeSpan? InitializationDuration { get; }
+
     Exception? FailureException { get; }
+
     StartupPhase Phase { get; }
+
     bool IsReady { get; }
+
     bool IsFailed { get; }
 
     void MarkInitializationStarted();
+
     void MarkReady();
+
     void MarkFailed(Exception? ex = null);
 }

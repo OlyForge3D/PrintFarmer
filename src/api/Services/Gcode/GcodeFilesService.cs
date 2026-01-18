@@ -678,6 +678,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 throw new ArgumentException("name is required");
             }
+
             if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\n') || name.Contains('\r'))
             {
                 throw new ArgumentException("Invalid directory name");
@@ -895,6 +896,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 return null;
             }
+
             // Return path by combining FilePath (directory) with FileName (GUID filename)
             // FilePath is the storage directory, FileName is the GUID-based filename
             return Path.Combine(file.FilePath, file.FileName);
@@ -907,6 +909,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 return null;
             }
+
             // Return path AND original filename for download scenarios
             string filePath = Path.Combine(file.FilePath, file.FileName);
             return (filePath, file.Name);
@@ -979,6 +982,7 @@ namespace Farm.Web.Api.Services.Gcode
                 {
                     throw new InvalidOperationException("Destination directory exists (cannot overwrite)");
                 }
+
                 Directory.Move(sourceFull, destFull);
             }
             else
@@ -1050,6 +1054,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 normalizedPath = normalizedPath[1..];
             }
+
             if (normalizedPath.EndsWith('/'))
             {
                 normalizedPath = normalizedPath[..^1];
@@ -1383,6 +1388,7 @@ namespace Farm.Web.Api.Services.Gcode
                 {
                     gcodeFile.Description = metadata.Description;
                 }
+
                 // Note: Tags are managed separately through the tagging service, not during upload
                 // User-provided printer model overrides extracted one
                 if (metadata.PrinterModelId.HasValue)
@@ -1710,6 +1716,7 @@ namespace Farm.Web.Api.Services.Gcode
                 byte[] hashBytes = await sha256.ComputeHashAsync(hashStream, ct);
                 fileHash = Convert.ToHexString(hashBytes);
             }
+
             _logger.LogInformation($"Calculated file hash: {fileHash.Substring(0, 8)}...");
 
             // Check for duplicates (allow if from same source/printer path, but otherwise reject)

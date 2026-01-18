@@ -96,6 +96,7 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new InvalidOperationException("Filament type with this name already exists");
             }
+
             FilamentType filamentType = new()
             {
                 Id = Guid.NewGuid(),
@@ -133,15 +134,18 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             FilamentType? entity = await _repo.GetEntityByIdAsync(id, ct);
             if (entity is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             if (!string.IsNullOrWhiteSpace(req.Name))
             {
                 entity.Name = req.Name.Trim();
             }
+
             entity.DefaultHotendTemp = req.DefaultTemperatures.Hotend;
             entity.DefaultBedTemp = req.DefaultTemperatures.Bed;
             await _repo.UpdateFilamentTypeAsync(entity, ct);
@@ -161,6 +165,7 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             await _repo.DeleteFilamentTypeAsync(id, ct);
             await _repo.SaveChangesAsync(ct);
         }
@@ -206,6 +211,7 @@ namespace Farm.Web.Api.Services.Filament
                     await _repo.UpdateFilamentTypeAsync(filamentType, ct);
                 }
             }
+
             await _repo.SaveChangesAsync(ct);
         }
 

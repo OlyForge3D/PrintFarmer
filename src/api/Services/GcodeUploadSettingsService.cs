@@ -5,6 +5,7 @@ namespace Farm.Web.Api.Services;
 public interface IGcodeUploadSettings
 {
     IReadOnlyCollection<string> GetAllowedExtensions();
+
     void UpdateAllowedExtensions(IEnumerable<string> extensions);
 }
 
@@ -67,8 +68,10 @@ public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 
                     usedBytes = bytes;
                     return usedBytes <= _dailyLimitBytes;
                 }
+
                 continue;
             }
+
             long newTotal = current.bytes + bytes;
             if (_usage.TryUpdate(key, (today, newTotal), current))
             {

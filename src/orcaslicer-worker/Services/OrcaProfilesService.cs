@@ -648,6 +648,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 _ = sb.Append(kvp.Value);
                 first = false;
             }
+
             _ = sb.Append('}');
 
             // Validate by parsing
@@ -890,6 +891,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             // If serialization fails, return empty dict
         }
+
         return dict;
     }
 
@@ -978,6 +980,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 return machines;
             }
         }
+
         return null;
     }
 }

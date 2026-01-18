@@ -6,7 +6,9 @@
 public class GcodeProcessingException : Exception
 {
     public string? FileName { get; }
+
     public string? Step { get; }
+
     public Dictionary<string, object> ContextData { get; } = new();
 
     public GcodeProcessingException()

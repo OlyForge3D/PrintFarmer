@@ -219,9 +219,13 @@ public class NetworkValidationResult
     internal readonly List<string> _errors = new();
     internal readonly List<string> _warnings = new();
     internal readonly List<string> _suggestions = new();
+
     public IReadOnlyList<string> Errors => _errors;
+
     public IReadOnlyList<string> Warnings => _warnings;
+
     public IReadOnlyList<string> Suggestions => _suggestions;
+
     public bool IsValid => _errors.Count == 0;
 }
 
@@ -231,8 +235,12 @@ public class NetworkValidationResult
 public class CidrValidationResult
 {
     public bool IsValid { get; set; }
+
     public string Error { get; set; } = string.Empty;
+
     public string? Suggestion { get; set; }
+
     public IPAddress? NetworkAddress { get; set; }
+
     public int PrefixLength { get; set; }
 }

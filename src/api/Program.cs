@@ -166,6 +166,7 @@ builder.Services.AddCors(options =>
             {
                 return true;
             }
+
             string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(o => o.Trim()).ToArray();
             return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
@@ -383,6 +384,7 @@ if (isMonolithicDeployment)
                     return; // leaves configuration.RootPath unset -> no static file serving attempt
                 }
             }
+
             string relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
             configuration.RootPath = relative; // e.g. ../../wwwroot or wwwroot
         }
@@ -402,6 +404,7 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     {
         devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
     }
+
     _ = builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
     _ = builder.Services.AddHttpClient("SpaProxy");
     // SpaDevServerWatcher is implemented as a BackgroundService; register it as a hosted service
@@ -452,6 +455,7 @@ builder.Services.AddAuthentication("Bearer")
             // The concrete startup logging references will be populated after the application is built.
             options.Events = ProgramHelpers.CreateJwtEvents(null, null);
         }
+
         // Allow HTTP in test runs and relax validation for test environment
         if (builder.Environment.EnvironmentName == "Testing")
         {
@@ -463,6 +467,7 @@ builder.Services.AddAuthentication("Bearer")
         {
             throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
         }
+
         string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
         string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
 
@@ -846,6 +851,7 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
                 {
                     dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
                 }
+
                 if (File.Exists(dataSource))
                 {
                     fileSizeBytes = new System.IO.FileInfo(dataSource).Length;
@@ -1020,6 +1026,7 @@ public partial class Program
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
+
     protected Program() { }
 }
 

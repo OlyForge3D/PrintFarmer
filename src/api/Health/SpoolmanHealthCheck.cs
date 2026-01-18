@@ -16,6 +16,7 @@ public class SpoolmanHealthCheck(Services.Interfaces.ISpoolmanService spoolmanSe
         {
             return HealthCheckResult.Healthy("Spoolman not configured");
         }
+
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
         string[] paths = ["/api/v1/health", "/api/v1/info"]; // fallback list
         HttpClient client = _httpClientFactory.CreateClient("SpoolmanHealth");
@@ -39,6 +40,7 @@ public class SpoolmanHealthCheck(Services.Interfaces.ISpoolmanService spoolmanSe
                 }
             }
         }
+
         return HealthCheckResult.Degraded("Spoolman probe failed");
     }
 }

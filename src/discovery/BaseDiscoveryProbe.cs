@@ -14,9 +14,13 @@ namespace Farm.Infrastructure.Discovery;
 public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 {
     public abstract string DisplayName { get; }
+
     protected abstract int[] Ports { get; }
+
     protected abstract string EndpointPath { get; }
+
     protected abstract PrinterBackend Backend { get; }
+
     protected abstract string PrinterName { get; }
 
     // Expose backend via interface
@@ -79,6 +83,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
             }
             catch { }
         }
+
         return null;
     }
 }

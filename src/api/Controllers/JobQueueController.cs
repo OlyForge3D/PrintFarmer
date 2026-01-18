@@ -50,6 +50,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
@@ -99,6 +100,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);

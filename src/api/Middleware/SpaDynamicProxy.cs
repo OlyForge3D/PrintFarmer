@@ -8,9 +8,13 @@ namespace Farm.Web.Api.Middleware;
 public sealed class SpaProxyActivationState
 {
     private volatile bool _active;
+
     public Uri DevServerUrl { get; }
+
     public bool Active => _active;
+
     public void Activate() => _active = true;
+
     public SpaProxyActivationState(string devServerUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(devServerUrl);
@@ -18,6 +22,7 @@ public sealed class SpaProxyActivationState
         {
             throw new ArgumentException("Invalid SPA dev server URL", nameof(devServerUrl));
         }
+
         DevServerUrl = uri;
     }
 }
@@ -56,6 +61,7 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
             {
                 // Logging moved to method injection if needed
             }
+
             await Task.Delay(_intervalMs, stoppingToken);
         }
     }
@@ -87,6 +93,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
                 {
                     _ = req.Headers.TryAddWithoutValidation("X-Correlation-Id", correlationId);
                 }
+
                 HttpResponseMessage resp = await s_client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
                 if (IsHtml(resp))
                 {
@@ -95,10 +102,12 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
                     {
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
+
                     foreach (KeyValuePair<string, IEnumerable<string>> h in resp.Content.Headers)
                     {
                         context.Response.Headers[h.Key] = h.Value.ToArray();
                     }
+
                     // Prevent double encoding
                     _ = context.Response.Headers.Remove("transfer-encoding");
                     await resp.Content.CopyToAsync(context.Response.Body);
@@ -110,6 +119,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
                 logger.LogWarning(ex, $"[SPA] Proxy failure to {target}", null, null);
             }
         }
+
         await _next(context);
     }
 
@@ -132,8 +142,10 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             {
                 continue;
             }
+
             _ = req.Headers.TryAddWithoutValidation(header.Key, header.Value.AsEnumerable());
         }
+
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
     }
 }

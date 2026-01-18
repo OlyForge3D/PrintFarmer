@@ -64,18 +64,22 @@ public sealed class ChunkedUploadService(
         {
             throw new ArgumentException("userId required", nameof(userId));
         }
+
         if (string.IsNullOrWhiteSpace(fileName))
         {
             throw new ArgumentException("fileName required", nameof(fileName));
         }
+
         if (fileSize <= 0)
         {
             throw new ArgumentException("fileSize must be positive", nameof(fileSize));
         }
+
         if (string.IsNullOrWhiteSpace(targetDirectory))
         {
             throw new ArgumentException("targetDirectory required", nameof(targetDirectory));
         }
+
         if (allowedExtensions == null || allowedExtensions.Count == 0)
         {
             throw new ArgumentException("allowedExtensions required", nameof(allowedExtensions));
@@ -120,6 +124,7 @@ public sealed class ChunkedUploadService(
             {
                 throw new ArgumentException("Unsupported hashAlgorithm. Allowed: sha256, sha1");
             }
+
             normalizedHashAlgo = algo;
             normalizedExpectedHash = string.IsNullOrWhiteSpace(expectedHash) ? null : expectedHash.Trim();
             hasher = algo == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -554,6 +559,7 @@ public sealed class ChunkedUploadService(
                     {
                         File.Delete(state.TempFilePath);
                     }
+
                     if (File.Exists(state.MetaFilePath))
                     {
                         File.Delete(state.MetaFilePath);
@@ -575,6 +581,7 @@ public sealed class ChunkedUploadService(
             {
                 await sourceStream.CopyToAsync(destStream);
             }
+
             // Delete after successful copy
             File.Delete(state.TempFilePath);
         }
@@ -731,20 +738,35 @@ public sealed class ChunkedUploadService(
     private sealed class InternalUploadState
     {
         public required string Id { get; init; }
+
         public required string UserId { get; init; }
+
         public required string TempFilePath { get; init; }
+
         public required string MetaFilePath { get; init; }
+
         public required string TargetDirectoryFullPath { get; init; }
+
         public required string FinalSafeName { get; set; }
+
         public required long TotalSize { get; init; }
+
         public long UploadedBytes { get; set; }
+
         public required DateTime CreatedUtc { get; init; }
+
         public string? HashAlgorithm { get; init; }
+
         public string? ExpectedHash { get; init; }
+
         public string? FinalHash { get; set; }
+
         public IncrementalHash? Hasher { get; init; }
+
         public bool Paused { get; set; }
+
         public string? ThumbnailPath { get; set; }
+
         public string? VirtualDirectory { get; init; }
     }
 }

@@ -15,8 +15,11 @@ namespace Farm.Web.Api.Infrastructure.Caching;
 public interface ICatalogCache
 {
     Task<(IReadOnlyList<ManufacturerDto> list, string etag)> GetManufacturersAsync(CancellationToken ct);
+
     Task<(IReadOnlyList<PrinterModelDto> list, string etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct);
+
     void InvalidateManufacturers();
+
     void InvalidateModels(Guid? manufacturerId = null);
 }
 
@@ -35,6 +38,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
 
     private const string ManufacturersKey = "catalog:mfglst";
     private const string ModelsAllKey = "catalog:models:all";
+
     private static string ModelsKey(Guid id) => $"catalog:models:{id}";
 
     public async Task<(IReadOnlyList<ManufacturerDto> list, string etag)> GetManufacturersAsync(CancellationToken ct)
@@ -80,6 +84,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         {
             q = q.Where(m => m.ManufacturerId == mid2);
         }
+
         List<PrinterModelDto> list = await q.OrderBy(m => m.Name)
             .Select(m => new PrinterModelDto(
                 m.Id,

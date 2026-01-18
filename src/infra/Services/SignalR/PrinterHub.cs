@@ -30,11 +30,13 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
                 await Clients.Caller.SendAsync("discoveryprogress", progress);
                 break;
             }
+
             // If cancelled/connection aborted stop early
             if (Context.ConnectionAborted.IsCancellationRequested)
             {
                 break;
             }
+
             await Task.Delay(100, Context.ConnectionAborted);
         }
     }

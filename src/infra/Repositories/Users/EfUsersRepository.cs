@@ -100,6 +100,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         {
             return;
         }
+
         // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
         await _db.UserRoles.Where(ur => ur.UserId == id).ExecuteDeleteAsync(ct);
         _ = _db.Users.Remove(user);
@@ -227,6 +228,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         {
             return false;
         }
+
         // Current password check is done in service; repository only updates if hash differs
         string existingPreview = user.PasswordHash is not null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : (user.PasswordHash ?? "(null)");
         string newPreview = newPasswordHash is not null && newPasswordHash.Length > 10 ? newPasswordHash.Substring(0, 10) : (newPasswordHash ?? "(null)");
@@ -235,6 +237,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         {
             return true; // no change needed
         }
+
         user.PasswordHash = newPasswordHash ?? string.Empty;
         user.UpdatedAt = DateTime.UtcNow;
         _ = await _db.SaveChangesAsync(ct);

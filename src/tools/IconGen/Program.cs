@@ -135,5 +135,6 @@ static string? FindRepoRoot()
 
         dir = dir.Parent;
     }
+
     return null;
 }

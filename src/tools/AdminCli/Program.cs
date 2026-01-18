@@ -39,18 +39,22 @@ internal static class Program
                 {
                     argsDic["range"] = savedConfig.Range;
                 }
+
                 if (!string.IsNullOrEmpty(savedConfig.Interface))
                 {
                     argsDic["interface"] = savedConfig.Interface;
                 }
+
                 if (!argsDic.ContainsKey("timeout"))
                 {
                     argsDic["timeout"] = savedConfig.Timeout.ToString();
                 }
+
                 if (!argsDic.ContainsKey("concurrent"))
                 {
                     argsDic["concurrent"] = savedConfig.Concurrent.ToString();
                 }
+
                 Console.WriteLine("[AdminCli] Loaded saved discovery config from last run");
             }
         }
@@ -215,6 +219,7 @@ internal static class Program
             {
                 Console.WriteLine($"  IP Range Filter: {string.Join(", ", rangeConstraints)}");
             }
+
             if (interfaceConstraints.Count > 0)
             {
                 Console.WriteLine($"  Interface Filter: {string.Join(", ", interfaceConstraints)}");
@@ -526,10 +531,12 @@ internal static class Program
         {
             return 0;
         }
+
         if (ip1 == null)
         {
             return -1;
         }
+
         if (ip2 == null)
         {
             return 1;
@@ -579,6 +586,7 @@ internal static class Program
                 }
             }
         }
+
         return 32;
     }
 
@@ -613,9 +621,13 @@ internal static class Program
     private class DiscoveredPrinterInfo
     {
         public string IpAddress { get; set; } = string.Empty;
+
         public string Backend { get; set; } = string.Empty;
+
         public int? BackendPort { get; set; }
+
         public int? FrontendPort { get; set; }
+
         public string? FriendlyName { get; set; }
     }
 
@@ -671,6 +683,7 @@ internal static class Program
 #pragma warning restore CA1303
                 return;
             }
+
             Console.WriteLine("needsSetup=" + status.NeedsSetup.ToString().ToLowerInvariant());
         }
         catch (Exception ex)
@@ -727,12 +740,14 @@ internal static class Program
                 i++;
                 continue;
             }
+
             string key = token[2..];
             if (key.Length == 0)
             {
                 i++;
                 continue;
             }
+
             if (i + 1 < raw.Length && !raw[i + 1].StartsWith("--", StringComparison.Ordinal))
             {
                 dic[key] = raw[i + 1];
@@ -744,11 +759,14 @@ internal static class Program
                 i++;
             }
         }
+
         return dic;
     }
 
     private sealed record SetupStatus(bool NeedsSetup);
+
     private sealed record AuthResult(bool Success, string? Token, DateTime? ExpiresAt, object? User, string? Error);
+
     private sealed record DiscoveryConfig(string Range = "", string Interface = "", int Timeout = 200, int Concurrent = 10, string Format = "json", bool NoApproval = false);
 
     private static string GetConfigPath() => Path.Combine(
@@ -766,6 +784,7 @@ internal static class Program
             {
                 _ = Directory.CreateDirectory(directory);
             }
+
             string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(configPath, json);
         }
@@ -784,6 +803,7 @@ internal static class Program
             {
                 return null;
             }
+
             string json = await File.ReadAllTextAsync(configPath);
             return JsonSerializer.Deserialize<DiscoveryConfig>(json);
         }

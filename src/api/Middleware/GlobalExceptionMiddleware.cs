@@ -29,6 +29,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             await _next(context);
         }
+
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
@@ -106,7 +107,9 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 public class PrinterNotFoundException : Exception
 {
     public PrinterNotFoundException(string message) : base(message) { }
+
     public PrinterNotFoundException(string message, Exception innerException) : base(message, innerException) { }
+
     public PrinterNotFoundException()
     {
     }
@@ -118,7 +121,9 @@ public class PrinterNotFoundException : Exception
 public class SpoolmanServiceException : Exception
 {
     public SpoolmanServiceException(string message) : base(message) { }
+
     public SpoolmanServiceException(string message, Exception innerException) : base(message, innerException) { }
+
     public SpoolmanServiceException()
     {
     }

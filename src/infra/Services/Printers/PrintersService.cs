@@ -137,6 +137,7 @@ public class PrintersService(
                 {
                     job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
                 }
+
                 return response;
             }
             else
@@ -460,7 +461,7 @@ public class PrintersService(
     /// <summary>
     /// Retrieves real-time status for a printer including temperatures, position, and job progress.
     /// </summary>
-    /// <param name="id">Unique printer identifier (GUID)</param>
+    /// <param name="id">Unique printer identifier (GUID).</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Comprehensive status DTO with real-time printer state</returns>
     /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
@@ -575,6 +576,7 @@ public class PrintersService(
                     _logger.LogDebug($"Failed to get camera URLs for printer {p.Id}: {ex.Message}");
                 }
             }
+
             return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
         }));
         return dtos;
@@ -924,6 +926,7 @@ public class PrintersService(
             await writer.WriteAsync(indentedJson);
             await writer.FlushAsync();
         }
+
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("]");
         await writer.FlushAsync();
@@ -1271,6 +1274,7 @@ public class PrintersService(
                 };
                 p.Toolheads.Add(toolhead);
             }
+
             _logger.LogInformation($"[CreatePrinterFromDto] Imported {dto.Toolheads.Count} toolhead(s) for printer {p.Name}");
         }
         else
@@ -1295,6 +1299,7 @@ public class PrintersService(
                 };
                 p.Toolheads.Add(toolhead);
             }
+
             _logger.LogInformation($"[CreatePrinterFromDto] Created {numExtruders} toolhead(s) from template for printer {p.Name}");
         }
 
@@ -1351,21 +1356,25 @@ public class PrintersService(
             printer.MaxBuildVolumeX = modelTemplate.MaxX;
             updated = true;
         }
+
         if (modelTemplate.MaxY != null && (forceOverwrite || printer.MaxBuildVolumeY == null))
         {
             printer.MaxBuildVolumeY = modelTemplate.MaxY;
             updated = true;
         }
+
         if (modelTemplate.MaxZ != null && (forceOverwrite || printer.MaxBuildVolumeZ == null))
         {
             printer.MaxBuildVolumeZ = modelTemplate.MaxZ;
             updated = true;
         }
+
         if (modelTemplate.MaxPrintSpeed != null && (forceOverwrite || printer.MaxPrintSpeed == null))
         {
             printer.MaxPrintSpeed = modelTemplate.MaxPrintSpeed;
             updated = true;
         }
+
         if (modelTemplate.MaxBedTemp != null && (forceOverwrite || printer.MaxBedTemp == null))
         {
             printer.MaxBedTemp = modelTemplate.MaxBedTemp;
@@ -1378,16 +1387,19 @@ public class PrintersService(
             printer.HasEnclosure = modelTemplate.HasEnclosure;
             updated = true;
         }
+
         if (forceOverwrite || (!printer.MultiMaterial && modelTemplate.MultiMaterial))
         {
             printer.MultiMaterial = modelTemplate.MultiMaterial;
             updated = true;
         }
+
         if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
         {
             printer.SupportsAutoLeveling = modelTemplate.SupportsAutoLeveling;
             updated = true;
         }
+
         if (forceOverwrite || (!printer.HasHeatedBed && modelTemplate.HasHeatedBed))
         {
             printer.HasHeatedBed = modelTemplate.HasHeatedBed;
@@ -1411,12 +1423,14 @@ public class PrintersService(
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }
+
                 if (matchingTemplate?.MaxHotendTemp != null && (forceOverwrite || toolhead.MaxHotendTemp == null))
                 {
                     toolhead.MaxHotendTemp = matchingTemplate.MaxHotendTemp;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }
+
                 if (modelTemplate.SupportedFilamentTypes?.Length > 0 && (forceOverwrite || toolhead.SupportedMaterials == null || toolhead.SupportedMaterials.Length == 0))
                 {
                     toolhead.SupportedMaterials = modelTemplate.SupportedFilamentTypes;
@@ -2768,6 +2782,7 @@ public class PrintersService(
                             // Use default port based on backend type
                             backendPort = backendEnum == PrinterBackend.Moonraker ? 7125 : 80;
                         }
+
                         string serverUrl = $"http://{ipAddress}";
 
                         CreatePrinterDto printer = new()

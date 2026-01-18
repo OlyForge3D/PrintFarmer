@@ -63,13 +63,15 @@ namespace Lib3MF
         Colors = 3,
         Composite = 4,
         Multi = 5
-    };
+    }
+;
 
     public enum eSlicesMeshResolution
     {
         Fullres = 0,
         Lowres = 1
-    };
+    }
+;
 
     public enum eModelUnit
     {
@@ -79,7 +81,8 @@ namespace Lib3MF
         Inch = 3,
         Foot = 4,
         Meter = 5
-    };
+    }
+;
 
     public enum eObjectType
     {
@@ -87,14 +90,16 @@ namespace Lib3MF
         Model = 1,
         Support = 2,
         SolidSupport = 3
-    };
+    }
+;
 
     public enum eTextureType
     {
         Unknown = 0,
         PNG = 1,
         JPEG = 2
-    };
+    }
+;
 
     public enum eTextureTileStyle
     {
@@ -102,35 +107,40 @@ namespace Lib3MF
         Mirror = 1,
         Clamp = 2,
         NoTileStyle = 3
-    };
+    }
+;
 
     public enum eTextureFilter
     {
         Auto = 0,
         Linear = 1,
         Nearest = 2
-    };
+    }
+;
 
     public enum eBeamLatticeCapMode
     {
         Sphere = 0,
         HemiSphere = 1,
         Butt = 2
-    };
+    }
+;
 
     public enum eBeamLatticeClipMode
     {
         NoClipMode = 0,
         Inside = 1,
         Outside = 2
-    };
+    }
+;
 
     public enum eBeamLatticeBallMode
     {
         BeamLatticeBallModeNone = 0,
         Mixed = 1,
         All = 2
-    };
+    }
+;
 
     public enum eProgressIdentifier
     {
@@ -158,14 +168,16 @@ namespace Lib3MF
         WRITETRIANGLES = 21,
         WRITESLICES = 22,
         WRITEKEYSTORE = 23
-    };
+    }
+;
 
     public enum eBlendMethod
     {
         NoBlendMethod = 0,
         Mix = 1,
         Multiply = 2
-    };
+    }
+;
 
     public enum eChannelName
     {
@@ -173,7 +185,8 @@ namespace Lib3MF
         Green = 1,
         Blue = 2,
         Alpha = 3
-    };
+    }
+;
 
     public enum eCompositionMethod
     {
@@ -182,13 +195,15 @@ namespace Lib3MF
         Min = 2,
         Max = 3,
         Mask = 4
-    };
+    }
+;
 
     public enum eCompositionSpace
     {
         Raw = 0,
         LinearColor = 1
-    };
+    }
+;
 
     public enum eImplicitNodeType
     {
@@ -243,7 +258,8 @@ namespace Lib3MF
         VectorFromScalar = 48,
         UnsignedMesh = 49,
         Mod = 50
-    };
+    }
+;
 
     public enum eImplicitPortType
     {
@@ -251,7 +267,8 @@ namespace Lib3MF
         Vector = 1,
         Matrix = 2,
         ResourceID = 3
-    };
+    }
+;
 
     public enum eImplicitNodeConfiguration
     {
@@ -259,17 +276,20 @@ namespace Lib3MF
         ScalarToScalar = 1,
         VectorToVector = 2,
         MatrixToMatrix = 3
-    };
+    }
+;
 
     public enum eEncryptionAlgorithm
     {
         AES256_GCM = 1
-    };
+    }
+;
 
     public enum eWrappingAlgorithm
     {
         RSA_OAEP = 0
-    };
+    }
+;
 
     public enum eMgfAlgorithm
     {
@@ -278,19 +298,22 @@ namespace Lib3MF
         MGF1_SHA256 = 256,
         MGF1_SHA384 = 384,
         MGF1_SHA512 = 512
-    };
+    }
+;
 
     public enum eDigestMethod
     {
         SHA1 = 160,
         SHA256 = 256
-    };
+    }
+;
 
     public enum eCompression
     {
         NoCompression = 0,
         Deflate = 1
-    };
+    }
+;
 
     public struct sTriangle
     {
@@ -3499,6 +3522,7 @@ namespace Lib3MF
                         Object = System.Activator.CreateInstance(typeof(T), Handle) as T;
                         break;
                 }
+
                 return Object;
             }
 
@@ -3516,6 +3540,7 @@ namespace Lib3MF
             {
                 // dispose managed state (managed objects).
             }
+
             if (Handle != IntPtr.Zero)
             {
                 Internal.Lib3MFWrapper.Release(Handle);

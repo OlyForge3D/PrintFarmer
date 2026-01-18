@@ -195,7 +195,9 @@ namespace Farm.Web.Api.Services.Workers
     public class JobDispatchRetrySettings
     {
         public int MaxAttempts { get; set; } = 3;
+
         public int BaseDelayMs { get; set; } = 250;
+
         public double Multiplier { get; set; } = 2.0;
     }
 }

@@ -45,6 +45,7 @@ public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
         {
             result.Replace($"{{{{{key}}}}}", value);
         }
+
         return result.ToString();
     }
 }

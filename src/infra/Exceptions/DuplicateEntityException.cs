@@ -6,11 +6,15 @@
 public sealed class DuplicateEntityException : Exception
 {
     public string EntityType { get; } = string.Empty;
+
     public object ExistingDto { get; } = new object();
+
     public string? NormalizedName { get; }
 
     public DuplicateEntityException() { }
+
     public DuplicateEntityException(string message) : base(message) { }
+
     public DuplicateEntityException(string message, Exception inner) : base(message, inner) { }
 
     public DuplicateEntityException(string entityType, object existingDto, string? normalizedName, string? message = null, Exception? inner = null)

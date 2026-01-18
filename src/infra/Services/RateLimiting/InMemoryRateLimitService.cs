@@ -187,6 +187,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (hourly)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Too many slice jobs this hour. Retry in {Math.Ceiling(retryAfter.TotalMinutes)} minutes."));
             }
+
             if (attemptsInLastDay >= maxPerDay)
             {
                 DateTime oldestInDay = attemptList.Min();
@@ -194,6 +195,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (daily)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Daily slice job limit reached. Retry in {Math.Ceiling(retryAfter.TotalHours)} hours."));
             }
+
             int remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
             return Task.FromResult(new RateLimitResult(true, remaining));
         }
@@ -212,6 +214,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                     existing.Add(now);
                     existing.RemoveAll(a => (now - a).TotalHours > 24);
                 }
+
                 return existing;
             });
     }
@@ -232,6 +235,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                     // Clean up old attempts while recording
                     existing.RemoveAll(a => (now - a).TotalHours > 24);
                 }
+
                 return existing;
             });
     }

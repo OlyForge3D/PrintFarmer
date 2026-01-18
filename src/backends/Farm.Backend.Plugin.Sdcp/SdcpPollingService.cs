@@ -41,11 +41,17 @@ public sealed class SdcpPollingService(
     private sealed class PrinterPollingState
     {
         public Guid PrinterId { get; set; }
+
         public string? LastKnownState { get; set; }
+
         public double? LastKnownProgress { get; set; }
+
         public string? LastKnownJobName { get; set; }
+
         public bool LastKnownIsOnline { get; set; }
+
         public DateTime LastPollTime { get; set; }
+
         public int ConsecutiveFailures { get; set; }
     }
 

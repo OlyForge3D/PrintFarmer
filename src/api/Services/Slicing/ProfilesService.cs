@@ -136,18 +136,22 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     layerHeight = lhVal;
                 }
+
                 if (root.TryGetProperty("infillPercentage", out JsonElement inf) && inf.TryGetInt32(out int infVal))
                 {
                     infillPct = infVal;
                 }
+
                 if (root.TryGetProperty("material", out JsonElement mat) && mat.ValueKind == JsonValueKind.String)
                 {
                     material = mat.GetString() ?? material;
                 }
+
                 if (root.TryGetProperty("quality", out JsonElement q) && q.ValueKind == JsonValueKind.String)
                 {
                     quality = q.GetString() ?? quality;
                 }
+
                 _logger.LogDebug($"[ImportProfileAsync] Metadata extracted: layerHeight={layerHeight}, infillPct={infillPct}, material={material}, quality={quality}");
             }
             catch (Exception ex)
@@ -274,6 +278,7 @@ namespace Farm.Web.Api.Services.Slicing
                         _ => null
                     };
                 }
+
                 _logger.LogDebug($"[ExportProfileAsync] Settings parsed successfully. Keys: {string.Join(", ", settingsDict.Keys)}");
             }
             catch (Exception ex)
@@ -597,11 +602,13 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     continue;
                 }
+
                 if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
                 {
                     list = [];
                     machinesByModelId[pmid] = list;
                 }
+
                 list.Add(m);
             }
 
@@ -615,6 +622,7 @@ namespace Farm.Web.Api.Services.Slicing
                         manufacturerName = mName;
                     }
                 }
+
                 if (string.IsNullOrWhiteSpace(manufacturerName))
                 {
                     manufacturerName = "Unknown";
@@ -1673,6 +1681,7 @@ namespace Farm.Web.Api.Services.Slicing
                 _logger.LogWarning($"[GetProfileAsync] Profile not found with ID: {id}");
                 return null;
             }
+
             _logger.LogDebug($"[GetProfileAsync] Retrieved profile: {profile.Name}");
             return ToResponseDto(profile);
         }

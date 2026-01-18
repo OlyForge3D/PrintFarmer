@@ -147,14 +147,21 @@ public record MessageEnvelope
 public record SlicingJobContent
 {
     public Guid UserId { get; init; }
+
     public Guid PrinterId { get; init; }
+
 #pragma warning disable CA1056 // We intentionally keep raw string to preserve checksum stability across versions
     public string ModelFileUrl { get; init; } = string.Empty;
+
 #pragma warning restore CA1056
     public string ModelFileName { get; init; } = string.Empty;
+
     public SlicerEngineType SlicerEngine { get; init; }
+
     public SlicerProfileDto SlicerProfile { get; init; } = new();
+
     public SlicingJobPriority Priority { get; init; } = SlicingJobPriority.Normal;
+
     public Dictionary<string, object> Metadata { get; init; } = new Dictionary<string, object>();
 
     /// <summary>

@@ -343,6 +343,7 @@ namespace Farm.Web.Api.Services.Slicing
             {
                 svc.Tags = dto.FreeSlots.Value.ToString();
             }
+
             svc.UpdatedAt = DateTime.UtcNow;
 
             await _repo.SaveChangesAsync(ct);
@@ -579,6 +580,7 @@ namespace Farm.Web.Api.Services.Slicing
                     _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already seeded or seeding in progress, skipping");
                     return;
                 }
+
                 _logger.LogInformation("[SeedProfilesFromWorker] Acquired distributed lock for profile seeding");
 
                 // Early exit: Verify no system profiles exist (double-check after acquiring lock)

@@ -121,6 +121,7 @@ public static class LuceneLogQueryParser
                 {
                     filters.Add(log => !filter(log));
                 }
+
                 // OR and SHOULD are more complex; simplified here
             }
 

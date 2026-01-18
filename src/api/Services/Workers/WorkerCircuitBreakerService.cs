@@ -191,9 +191,13 @@ public class WorkerCircuitBreakerService(
     private sealed class WorkerCircuitState
     {
         public CircuitState State { get; set; } = CircuitState.Closed;
+
         public List<DateTime> RecentFailures { get; } = new();
+
         public int RecentSuccesses { get; set; }
+
         public DateTime OpenedAt { get; set; }
+
         public Lock Lock { get; } = new();
     }
 }
@@ -201,9 +205,13 @@ public class WorkerCircuitBreakerService(
 public interface IWorkerCircuitBreakerService
 {
     Task RecordJobFailureAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default);
+
     Task RecordJobSuccessAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default);
+
     void CheckCircuits();
+
     CircuitState GetCircuitState(Guid workerId);
+
     void ResetCircuit(Guid workerId);
 }
 

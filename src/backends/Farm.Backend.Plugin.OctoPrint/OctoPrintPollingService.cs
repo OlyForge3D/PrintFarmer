@@ -44,13 +44,21 @@ public sealed class OctoPrintPollingService(
     private sealed class PrinterPollingState
     {
         public Guid PrinterId { get; set; }
+
         public string? LastKnownState { get; set; }
+
         public double? LastKnownProgress { get; set; }
+
         public string? LastKnownJobName { get; set; }
+
         public bool LastKnownIsOnline { get; set; }
+
         public DateTime LastPollTime { get; set; }
+
         public int ConsecutiveFailures { get; set; }
+
         public string? LastApiState { get; set; } // "responding", "authFail", "noResponse"
+
         public OctoPrintWebSocketAdapter? WebSocketAdapter { get; set; }
     }
 
@@ -108,6 +116,7 @@ public sealed class OctoPrintPollingService(
             { adapter?.Dispose(); }
             catch { }
         }
+
         _webSocketAdapters.Clear();
 
         // Do not call Dispose() on running Task instances. They will be observed by the runtime when completed.
@@ -258,6 +267,7 @@ public sealed class OctoPrintPollingService(
                     {
                         adapter?.Dispose();
                     }
+
                     return;
                 }
 

@@ -78,6 +78,7 @@ namespace Farm.Web.Api
                     {
                         continue;
                     }
+
                     IPInterfaceProperties props = ni.GetIPProperties();
                     foreach (UnicastIPAddressInformation ua in props.UnicastAddresses)
                     {
@@ -97,11 +98,13 @@ namespace Farm.Web.Api
                                         v >>= 1;
                                     }
                                 }
+
                                 if (ones > 0)
                                 {
                                     prefix = ones;
                                 }
                             }
+
                             byte[] networkBytes = ua.Address.GetAddressBytes();
                             if (prefix is >= 8 and <= 32)
                             {
@@ -123,6 +126,7 @@ namespace Farm.Web.Api
                                         networkBytes[i] = 0;
                                     }
                                 }
+
                                 IPAddress networkBase = new(networkBytes);
                                 _ = suggestions.Add($"{networkBase}/{prefix}");
                             }
@@ -151,6 +155,7 @@ namespace Farm.Web.Api
                             context.Token = tok;
                         }
                     }
+
                     try
                     {
                         string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
@@ -230,6 +235,7 @@ namespace Farm.Web.Api
                                     {
                                         startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
                                     }
+
                                     context.Fail("This token has been revoked.");
                                 }
                             }

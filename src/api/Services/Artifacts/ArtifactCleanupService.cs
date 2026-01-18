@@ -98,6 +98,7 @@ public class ArtifactCleanupService(
                     artifact.SizeBytes,
                     artifact.CreatedAt);
             }
+
             return candidatesForDeletion.Count;
         }
 

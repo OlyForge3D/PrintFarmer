@@ -142,6 +142,7 @@ public static class ExampleSchemaFilter
             };
             */
         }
+
         // ---- Response DTO examples (select high-value read models) ----
         else if (t == typeof(PrinterDto))
         {

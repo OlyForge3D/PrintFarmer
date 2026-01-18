@@ -660,6 +660,7 @@ public class Model3DFilesController(
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Folder path contains empty segments. Path: '{relativePath}'"));
                 }
+
                 if (part.Contains("..") || part.Contains("\\") || part == ".")
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Invalid folder name: '{part}' in path '{relativePath}'. Cannot use '.', '..', or backslashes."));

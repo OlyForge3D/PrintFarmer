@@ -308,6 +308,7 @@ namespace Farm.Web.Api.Services.Queue
             {
                 return null;
             }
+
             job.Priority = request.Priority;
             job.UpdatedAt = DateTime.UtcNow;
             await _repo.SaveChangesAsync(ct);
@@ -378,6 +379,7 @@ namespace Farm.Web.Api.Services.Queue
                 {
                     return null; // caller will translate to BadRequest
                 }
+
                 job.AssignedPrinterId = request.AssignedPrinterId.Value;
             }
 

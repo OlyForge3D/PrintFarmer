@@ -8,6 +8,7 @@ namespace Farm.Web.Api.Infrastructure.Authorization;
 public sealed class RequirePermissionAttribute(string resource, string action) : Attribute, IAuthorizationRequirement
 {
     public string Resource { get; } = resource;
+
     public string Action { get; } = action;
 }
 

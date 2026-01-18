@@ -37,11 +37,13 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
         {
             return PrinterBackend.Moonraker;
         }
+
         // numeric-as-string
         if (int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrinterBackend), num))
         {
             return (PrinterBackend)num;
         }
+
         // case-insensitive name match
         return Enum.TryParse(value, ignoreCase: true, out PrinterBackend parsed) ? parsed : PrinterBackend.Moonraker;
     }

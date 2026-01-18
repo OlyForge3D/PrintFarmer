@@ -143,6 +143,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                     _logger.LogWarning($"    Unknown view '{view}', using default 'front'");
                     options.SetCameraView("front");
                 }
+
                 _logger.LogInformation($"    Camera: Pos({oldPos.X:F2},{oldPos.Y:F2},{oldPos.Z:F2}) -> ({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
                 _logger.LogInformation($"    Target: ({oldTgt.X:F2},{oldTgt.Y:F2},{oldTgt.Z:F2}) -> ({options.CameraTarget.X:F2},{options.CameraTarget.Y:F2},{options.CameraTarget.Z:F2})");
             }

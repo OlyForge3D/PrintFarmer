@@ -22,6 +22,7 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     private static readonly int[] FrontendPorts = new[] { 80, 8080, 8808 };
 
     public string DisplayName => "Moonraker";
+
     public PrinterBackend Backend => PrinterBackend.Moonraker;
 
     /// <summary>

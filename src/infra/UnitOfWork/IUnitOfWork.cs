@@ -7,5 +7,6 @@ namespace Farm.Infrastructure.UnitOfWork;
 public interface IUnitOfWork
 {
     AppDbContext Context { get; }
+
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

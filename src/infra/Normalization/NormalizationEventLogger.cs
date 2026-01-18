@@ -30,6 +30,7 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
         {
             return;
         }
+
         string key = entityType + "|" + normalized;
         DateTime now = DateTime.UtcNow;
         Counter counter = _counters.AddOrUpdate(key,
@@ -45,6 +46,7 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
                 {
                     existing.Count++;
                 }
+
                 return existing;
             });
 

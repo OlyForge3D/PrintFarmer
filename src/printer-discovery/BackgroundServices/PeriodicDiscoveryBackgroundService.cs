@@ -37,6 +37,7 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
             _httpClient.Dispose();
             _disposed = true;
         }
+
         base.Dispose();
     }
 

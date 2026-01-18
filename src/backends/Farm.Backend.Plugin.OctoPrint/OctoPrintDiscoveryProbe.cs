@@ -16,6 +16,7 @@ namespace Farm.Backend.Plugin.OctoPrint;
 public class OctoPrintDiscoveryProbe : INetworkDiscoveryProbe
 {
     public string DisplayName => "OctoPrint";
+
     public PrinterBackend Backend => PrinterBackend.OctoPrint;
 
     /// <summary>

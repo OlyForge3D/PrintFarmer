@@ -16,6 +16,7 @@ public class ModelAnalysisService : IModelAnalysisService
         {
             extension = Path.GetExtension(filePath) ?? string.Empty;
         }
+
         // Normalize extension to lower-case once for comparison convenience
         // Keep original extension casing and use explicit OrdinalIgnoreCase comparisons where needed
         // extension = extension.ToLowerInvariant();
@@ -124,6 +125,7 @@ public class ModelAnalysisService : IModelAnalysisService
                     {
                         break;
                     }
+
                     // 3 floats for normal (ignored) + 9 floats for vertices = 12 floats (4 bytes each)
                     // Vertex data starts at offset 12
                     for (int v = 0; v < 3; v++)
@@ -145,6 +147,7 @@ public class ModelAnalysisService : IModelAnalysisService
                         if (vz > maxZ)
                         { maxZ = vz; }
                     }
+
                     actualTriangles++;
                 }
 

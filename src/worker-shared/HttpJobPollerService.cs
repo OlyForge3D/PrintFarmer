@@ -330,9 +330,14 @@ public abstract class HttpJobPollerService(
 public class ArtifactResponse
 {
     public Guid Id { get; set; }
+
     public string Kind { get; set; } = string.Empty;
+
     public long FileSizeBytes { get; set; }
+
     public string Sha256Hash { get; set; } = string.Empty;
+
     public string FileUrl { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; set; }
 }

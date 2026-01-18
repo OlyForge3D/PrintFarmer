@@ -11,6 +11,7 @@ public sealed class FileManagementService : IFileManagementService
 {
     // Allowed model file extensions (centralized source of truth)
     private static readonly IReadOnlyCollection<string> AllowedModelExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" }.AsReadOnly();
+
     public (string storageRoot, string resolvedFullPath, string virtualNormalized) ResolveVirtualPath(
         string? virtualPath,
         string storageRoot)
@@ -119,6 +120,7 @@ public sealed class FileManagementService : IFileManagementService
             c[i++] = (char)(b >> 4 < 10 ? '0' + (b >> 4) : 'a' + (b >> 4) - 10);
             c[i++] = (char)((b & 0xF) < 10 ? '0' + (b & 0xF) : 'a' + (b & 0xF) - 10);
         }
+
         return new string(c);
     }
 

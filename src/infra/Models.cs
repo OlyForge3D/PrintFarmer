@@ -400,17 +400,29 @@ public class CreatePrinterDto : PrinterInfoDto
     /// Hardware specification fields - populated from exported printer data or discovery
     /// </summary>
     public double? MaxBuildVolumeX { get; set; }
+
     public double? MaxBuildVolumeY { get; set; }
+
     public double? MaxBuildVolumeZ { get; set; }
+
     public bool HasHeatedBed { get; set; } = true;
+
     public bool HasEnclosure { get; set; } = false;
+
     public bool MultiMaterial { get; set; } = false;
+
     public bool SupportsAutoLeveling { get; set; } = false;
+
     public double? NozzleDiameter { get; set; }
+
     public string[]? SupportedMaterials { get; set; }
+
     public int? MaxHotendTemp { get; set; }
+
     public int? MaxBedTemp { get; set; }
+
     public string? CurrentMaterial { get; set; }
+
     public int? CurrentSpoolId { get; set; }
 
     /// <summary>
@@ -512,6 +524,7 @@ public record UpdateToolheadDto(
 public record CommandResult(bool Success, string? Message = null);
 
 public record TempTargets(double? Hotend, double? Bed);
+
 public record MoveRequest(double? X, double? Y, double? Z, double? F);
 
 // Spoolman integration
@@ -523,6 +536,7 @@ public record SpoolmanConfigDto(string? BaseUrl)
 {
     [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
+
 /// <summary>
 /// Represents a single filament spool entity retrieved from Spoolman.
 /// </summary>
@@ -558,11 +572,13 @@ public record SpoolmanSpoolDto(
                 {
                     return (UsedWeightG.Value / InitialWeightG.Value) * 100.0;
                 }
+
                 if (RemainingWeightG.HasValue)
                 {
                     return ((InitialWeightG.Value - RemainingWeightG.Value) / InitialWeightG.Value) * 100.0;
                 }
             }
+
             return null;
         }
     }
@@ -1089,6 +1105,7 @@ public record NetworkDiscoverySettingsDto(
 public class HistoryListResponse
 {
     public int Count { get; set; }
+
     public HistoryJob[] Jobs { get; set; } = [];
 }
 
@@ -1098,18 +1115,30 @@ public class HistoryListResponse
 public class HistoryJob
 {
     public string JobId { get; set; } = string.Empty;
+
     public bool Exists { get; set; }
+
     public double? EndTime { get; set; }
+
     public double FilamentUsed { get; set; }
+
     public string Filename { get; set; } = string.Empty;
+
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO used for JSON serialization; setter required for deserialization")]
     public Dictionary<string, object> Metadata { get; set; } = [];
+
     public double PrintDuration { get; set; }
+
     public string Status { get; set; } = string.Empty;
+
     public double StartTime { get; set; }
+
     public double TotalDuration { get; set; }
+
     public string User { get; set; } = string.Empty;
+
     public AuxiliaryData[]? AuxiliaryData { get; set; }
+
     public string? ThumbnailUrl { get; set; }
 }
 
@@ -1119,9 +1148,13 @@ public class HistoryJob
 public class AuxiliaryData
 {
     public string Provider { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
+
     public object Value { get; set; } = new();
+
     public string Description { get; set; } = string.Empty;
+
     public string? Units { get; set; }
 }
 
@@ -1131,6 +1164,7 @@ public class AuxiliaryData
 public class HistoryTotals
 {
     public JobTotals JobTotals { get; set; } = new();
+
     public AuxiliaryTotals[]? AuxiliaryTotals { get; set; }
 }
 
@@ -1140,10 +1174,15 @@ public class HistoryTotals
 public class JobTotals
 {
     public int TotalJobs { get; set; }
+
     public double TotalTime { get; set; }
+
     public double TotalPrintTime { get; set; }
+
     public double TotalFilamentUsed { get; set; }
+
     public double LongestJob { get; set; }
+
     public double LongestPrint { get; set; }
 }
 
@@ -1153,8 +1192,11 @@ public class JobTotals
 public class AuxiliaryTotals
 {
     public string Provider { get; set; } = string.Empty;
+
     public string Field { get; set; } = string.Empty;
+
     public double Maximum { get; set; }
+
     public double Total { get; set; }
 }
 
@@ -1203,15 +1245,25 @@ public record GcodeFileDto(
 public class CreateGcodeFileDto
 {
     public string FileName { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public string[]? Tags { get; set; }
+
     public double? RequiredNozzleDiameter { get; set; }
+
     public string? RequiredMaterial { get; set; }
+
     public double? EstimatedPrintTimeMinutes { get; set; }
+
     public double? EstimatedFilamentLengthMm { get; set; }
+
     public double? EstimatedFilamentWeightG { get; set; }
+
     public Guid? PrinterModelId { get; set; }
+
     public string? SlicerName { get; set; }
+
     public string? SlicerVersion { get; set; }
 }
 
@@ -1293,14 +1345,23 @@ public record PrintJobDto(
 public class CreatePrintJobDto
 {
     public string Name { get; set; } = string.Empty;
+
     public int Priority { get; set; }
+
     public Guid GcodeFileId { get; set; }
+
     public double? HotendTemperature { get; set; }
+
     public double? BedTemperature { get; set; }
+
     public int? SpoolId { get; set; }
+
     public string[]? RequiredCapabilities { get; set; }
+
     public bool AutoAssign { get; set; } = true;
+
     public Guid[]? PreferredPrinterIds { get; set; }
+
     public Guid[]? ExcludedPrinterIds { get; set; }
 }
 
@@ -1402,16 +1463,27 @@ public record QueueStatusDto(
 public class GcodeLibrarySearchDto
 {
     public string? SearchTerm { get; set; }
+
     public string[]? Tags { get; set; }
+
     public string? RequiredMaterial { get; set; }
+
     public double? NozzleDiameter { get; set; }
+
     public Guid? TargetPrinterId { get; set; }
+
     public Guid? TargetModelId { get; set; }
+
     public DateTime? UploadedAfter { get; set; }
+
     public DateTime? UploadedBefore { get; set; }
+
     public int Skip { get; set; }
+
     public int Take { get; set; } = 50;
+
     public string SortBy { get; set; } = "UploadedAt";
+
     public bool SortDescending { get; set; } = true;
 }
 
@@ -1572,9 +1644,13 @@ public class StartGcodeHarvestDto
 public class ImportSelectedGcodeFilesDto
 {
     public Guid HarvestOperationId { get; set; }
+
     public Guid[] FileIds { get; set; } = [];
+
     public bool AddToLibraryOnly { get; set; } = true; // If false, also create print jobs
+
     public bool AutoDetectCapabilities { get; set; } = true;
+
     public string[]? DefaultTags { get; set; }
 }
 
@@ -1584,14 +1660,23 @@ public class ImportSelectedGcodeFilesDto
 public class GcodeHarvestResultDto
 {
     public Guid OperationId { get; set; }
+
     public bool Success { get; set; }
+
     public string Message { get; set; } = string.Empty;
+
     public int DiscoveredFiles { get; set; }
+
     public int ImportedFiles { get; set; }
+
     public string[]? Errors { get; set; }
+
     public string[] ImportedFileIds { get; set; } = Array.Empty<string>();
+
     public string[] SkippedFileIds { get; set; } = Array.Empty<string>();
+
     public string[] FailedFileIds { get; set; } = Array.Empty<string>();
+
     public Dictionary<string, string>? ErrorDetails { get; set; }
 
     // Constructor for backward compatibility
@@ -1672,23 +1757,37 @@ public record GcodeMetadataDto(
 public class Model3DDto
 {
     public Guid Id { get; set; }
+
     public string FileName { get; set; } = string.Empty; // GUID-based filename for internal storage
+
     public string? Name { get; set; } // Original filename uploaded by user (for display and editing)
+
     public long FileSize { get; set; }
+
     public string FileType { get; set; } = string.Empty; // stl, 3mf, obj, ply
+
     public DateTime UploadedAt { get; set; }
     /// <summary>
     /// URL to download the file. Auto-generated from Id if not explicitly set.
     /// </summary>
     public string Url { get; init; } = string.Empty;
+
     public string? ThumbnailUrl { get; set; }
+
     public string? Description { get; set; }
+
     public double? DimensionX { get; set; } // in mm
+
     public double? DimensionY { get; set; } // in mm
+
     public double? DimensionZ { get; set; } // in mm
+
     public int? TriangleCount { get; set; }
+
     public bool IsValid { get; set; } = true;
+
     public string? ValidationErrors { get; set; }
+
     public TagDto[]? Tags { get; set; }
 }
 
@@ -1760,8 +1859,11 @@ public record FolderOperationResultDto(
 public class TagDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Color { get; set; } // Hex color for UI display
+
     public string? Description { get; set; }
 }
 
@@ -1771,7 +1873,9 @@ public class TagDto
 public class CreateTagDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string? Color { get; set; }
+
     public string? Description { get; set; }
 }
 
@@ -1789,9 +1893,13 @@ public class AssignTagsDto
 public class TagSuggestionDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Color { get; set; }
+
     public int UsageCount { get; set; } // Number of models using this tag
+
     public bool IsPopular { get; set; } // True if in top N tags
 }
 
@@ -1801,11 +1909,17 @@ public class TagSuggestionDto
 public class TagAnalyticsDto
 {
     public int TotalTags { get; set; }
+
     public int TagsInUse { get; set; } // Tags with at least one model
+
     public int UnusedTags { get; set; } // Tags with no models
+
     public int TotalModelTagAssociations { get; set; }
+
     public double AverageTagsPerModel { get; set; }
+
     public IReadOnlyList<TagStatDto>? TopTags { get; set; } // Most used tags
+
     public IReadOnlyList<TagStatDto>? UnusedTagsList { get; set; } // For cleanup suggestions
 }
 
@@ -1815,9 +1929,13 @@ public class TagAnalyticsDto
 public class TagStatDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public int ModelCount { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime? LastUsedAt { get; set; }
 }
 
@@ -1827,7 +1945,9 @@ public class TagStatDto
 public class FilterModelsByTagsRequestDto
 {
     public Guid[]? IncludeTags { get; set; } // Tags to include
+
     public Guid[]? ExcludeTags { get; set; } // Tags to exclude
+
     public bool RequireAllTags { get; set; } = false; // If true, ALL include tags required; if false, ANY
 }
 
@@ -1837,6 +1957,7 @@ public class FilterModelsByTagsRequestDto
 public class FilterModelsResponseDto
 {
     public IReadOnlyList<Guid> ModelIds { get; set; } = [];
+
     public int Count { get; set; }
 }
 
@@ -1854,7 +1975,9 @@ public class UpdateModel3DDto
 public class BulkAssignTagsDto
 {
     public Guid[] ModelIds { get; set; } = [];
+
     public Guid[] TagIds { get; set; } = [];
+
     public bool ReplaceExisting { get; set; } = false; // If true, replaces all existing tags
 }
 
@@ -1864,6 +1987,7 @@ public class BulkAssignTagsDto
 public class BulkOperationResultDto
 {
     public int SuccessCount { get; set; }
+
     public int TotalCount { get; set; }
 }
 
@@ -1873,10 +1997,15 @@ public class BulkOperationResultDto
 public class Model3DSearchRequestDto
 {
     public string? Query { get; set; } // Search in name/description
+
     public Guid[]? TagIds { get; set; } // Filter by tags (AND logic - must have all specified tags)
+
     public int Page { get; set; } = 1;
+
     public int PageSize { get; set; } = 20;
+
     public string? SortBy { get; set; } = "uploadedAt"; // uploadedAt, name, size
+
     public bool Descending { get; set; } = true;
 }
 
@@ -1886,26 +2015,37 @@ public class Model3DSearchRequestDto
 public class Model3DSearchResultDto
 {
     public Model3DDto[] Models { get; set; } = [];
+
     public int TotalCount { get; set; }
+
     public int Page { get; set; }
+
     public int PageSize { get; set; }
+
     public int TotalPages { get; set; }
 }
 
 public class Model3DUploadResultDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string FileName { get; set; } = string.Empty;
+
     public long FileSize { get; set; }
+
     public string FileType { get; set; } = string.Empty;
+
     public DateTime UploadedAt { get; set; }
+
     public string Url { get; set; } = string.Empty;
 }
 
 public class Model3DValidationResultDto
 {
     public bool Valid { get; set; }
+
     public string[]? Issues { get; set; }
 }
 
@@ -1941,12 +2081,19 @@ public class SlicerProfileDto
 public class WorkerSlicerProfileDto
 {
     public double LayerHeight { get; set; } = 0.2;
+
     public int InfillPercentage { get; set; } = 20;
+
     public int PrintSpeed { get; set; } = 50; // mm/s
+
     public int NozzleTemperature { get; set; } = 210; // °C
+
     public int BedTemperature { get; set; } = 60; // °C
+
     public bool Supports { get; set; }
+
     public string Material { get; set; } = "PLA";
+
     public string Quality { get; set; } = "standard"; // draft, standard, fine
 }
 
@@ -1957,8 +2104,11 @@ public class WorkerSlicerProfileDto
 public class MachineProfileDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string Manufacturer { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public double? NozzleDiameter { get; set; } // e.g., 0.4, 0.6, 0.8 mm
     /// <summary>
     /// Whether this profile can be instantiated (used) in the slicer.
@@ -1971,6 +2121,7 @@ public class MachineProfileDto
     /// </summary>
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
+
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1981,14 +2132,22 @@ public class MachineProfileDto
 public class FilamentProfileDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string Material { get; set; } = "PLA";
+
     public string? Manufacturer { get; set; }
+
     public string? Description { get; set; }
+
     public int NozzleTemperature { get; set; } = 210;
+
     public int BedTemperature { get; set; } = 60;
+
     public int PrintSpeed { get; set; } = 50;
+
     [JsonPropertyName("compatible_printers")]
     public IList<string> CompatiblePrinters { get; set; } = [];
+
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
     /// <summary>
@@ -2002,6 +2161,7 @@ public class FilamentProfileDto
     /// </summary>
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
+
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -2012,14 +2172,22 @@ public class FilamentProfileDto
 public class ProcessProfileDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string Quality { get; set; } = "standard"; // draft, standard, fine
+
     public double LayerHeight { get; set; } = 0.2;
+
     public int InfillPercentage { get; set; } = 20;
+
     public int PrintSpeed { get; set; } = 50;
+
     public bool Supports { get; set; }
+
     public string? Description { get; set; }
+
     [JsonPropertyName("compatible_printers")]
     public IList<string> CompatiblePrinters { get; set; } = [];
+
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
     /// <summary>
@@ -2033,6 +2201,7 @@ public class ProcessProfileDto
     /// </summary>
     [JsonPropertyName("inherits")]
     public string? Inherits { get; set; }
+
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -2191,20 +2360,29 @@ public class ManufacturerBundleDto
 public class SliceResultDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public string GcodeUrl { get; set; } = string.Empty;
+
     public int PrintTime { get; set; } // in seconds
+
     public double FilamentUsed { get; set; } // in grams
+
     public int LayerCount { get; set; }
+
     // Added for contract tests: current status and progress of the job
     public string Status { get; set; } = string.Empty; // Queued, Slicing, Completed, Error, Cancelled
+
     public int Progress { get; set; } // 0-100
+
     public SliceMetadataDto Metadata { get; set; } = new();
 }
 
 public class SliceMetadataDto
 {
     public string SlicerVersion { get; set; } = string.Empty;
+
     public string ProfileUsed { get; set; } = string.Empty;
+
     public double EstimatedCost { get; set; }
 }
 
@@ -2212,45 +2390,80 @@ public class SliceMetadataDto
 public class CreateProcessProfileDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public string SlicerType { get; set; } = "PrusaSlicer"; // PrusaSlicer, OrcaSlicer, etc.
+
     public Guid? PrinterModelId { get; set; }
+
     public Guid? SpecificPrinterId { get; set; }
+
     public double LayerHeight { get; set; } = 0.2;
+
     public int InfillPercentage { get; set; } = 20;
+
     public double PrintSpeed { get; set; } = 50;
+
     public int NozzleTemperature { get; set; } = 210;
+
     public int BedTemperature { get; set; } = 60;
+
     public bool EnableSupports { get; set; }
+
     public string Material { get; set; } = "PLA";
+
     public string Quality { get; set; } = "Standard"; // Draft, Standard, Fine
+
     public string? AdvancedSettings { get; set; }
+
     public bool IsDefault { get; set; }
+
     public bool IsPublic { get; set; } = true;
 }
 
 public class ProcessProfileResponseDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public string SlicerType { get; set; } = string.Empty;
+
     public Guid? PrinterModelId { get; set; }
+
     public string? PrinterModelName { get; set; }
+
     public Guid? SpecificPrinterId { get; set; }
+
     public string? SpecificPrinterName { get; set; }
+
     public double LayerHeight { get; set; }
+
     public int InfillPercentage { get; set; }
+
     public int PrintSpeed { get; set; }
+
     public int NozzleTemperature { get; set; }
+
     public int BedTemperature { get; set; }
+
     public bool EnableSupports { get; set; }
+
     public string Material { get; set; } = string.Empty;
+
     public string Quality { get; set; } = string.Empty;
+
     public string? AdvancedSettings { get; set; }
+
     public bool IsDefault { get; set; }
+
     public bool IsPublic { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime UpdatedAt { get; set; }
 }
 
@@ -2258,41 +2471,67 @@ public class ProcessProfileResponseDto
 public class ImportProcessProfileDto
 {
     public string RawJson { get; set; } = string.Empty; // Raw profile JSON from slicer export
+
     public string? Name { get; set; } // Optional override; if null we derive from profileType + layerHeight
+
     public string? Description { get; set; }
+
     public string SlicerType { get; set; } = "PrusaSlicer"; // PrusaSlicer, OrcaSlicer, etc.
+
     public bool AllowSystemOverride { get; set; } = false; // If true, system profile match by hash can be overridden
+
     public bool SetDefault { get; set; } = false; // If true, sets profile as default after import (scope: global if user absent)
+
     public bool IsPublic { get; set; } = true; // Visibility to other users
 }
 
 public class ProcessProfileExtendedDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public string SlicerType { get; set; } = string.Empty;
+
     public double LayerHeight { get; set; }
+
     public int InfillPercentage { get; set; }
+
     public double PrintSpeed { get; set; }
+
     public bool EnableSupports { get; set; }
+
     public string Quality { get; set; } = string.Empty;
+
     public bool IsDefault { get; set; }
+
     public bool IsPublic { get; set; }
+
     public bool IsSystem { get; set; }
+
     public string Hash { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime UpdatedAt { get; set; }
+
     public Dictionary<string, object?> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class ProcessProfileExportDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string SlicerType { get; set; } = string.Empty;
+
     public string Hash { get; set; } = string.Empty;
+
     public string RawJson { get; set; } = string.Empty; // Sanitized raw profile JSON
+
     public Dictionary<string, object?> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -2302,12 +2541,19 @@ public class ProcessProfileExportDto
 public interface IProfileListItem
 {
     Guid Id { get; }
+
     string Name { get; }
+
     string SlicerType { get; }
+
     bool IsDefault { get; }
+
     bool IsSystem { get; }
+
     bool IsPublic { get; }
+
     string Hash { get; }
+
     string ProfileType { get; }
 }
 
@@ -2317,15 +2563,25 @@ public interface IProfileListItem
 public class ProcessProfileListItemDto : IProfileListItem
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string SlicerType { get; set; } = string.Empty;
+
     public string Quality { get; set; } = string.Empty;
+
     public double LayerHeight { get; set; }
+
     public int InfillPercentage { get; set; }
+
     public bool IsDefault { get; set; }
+
     public bool IsSystem { get; set; }
+
     public bool IsPublic { get; set; }
+
     public string Hash { get; set; } = string.Empty;
+
     public string ProfileType => "process";
 }
 
@@ -2335,16 +2591,27 @@ public class ProcessProfileListItemDto : IProfileListItem
 public class FilamentProfileListItemDto : IProfileListItem
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string SlicerType { get; set; } = string.Empty;
+
     public string Material { get; set; } = string.Empty;
+
     public int? NozzleTemperature { get; set; }
+
     public int? BedTemperature { get; set; }
+
     public int PrintSpeed { get; set; }
+
     public bool IsDefault { get; set; }
+
     public bool IsSystem { get; set; }
+
     public bool IsPublic { get; set; }
+
     public string Hash { get; set; } = string.Empty;
+
     public string ProfileType => "filament";
 }
 
@@ -2354,13 +2621,21 @@ public class FilamentProfileListItemDto : IProfileListItem
 public class MachineProfileListItemDto : IProfileListItem
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string SlicerType { get; set; } = string.Empty;
+
     public string Manufacturer { get; set; } = string.Empty;
+
     public bool IsDefault { get; set; }
+
     public bool IsSystem { get; set; }
+
     public bool IsPublic { get; set; }
+
     public string Hash { get; set; } = string.Empty;
+
     public string ProfileType => "machine";
 }
 
@@ -2375,23 +2650,31 @@ public class SlicerProfileListItemDto : ProcessProfileListItemDto { }
 public class ExtendedProfilesResponseDto
 {
     public IList<ProcessProfileListItemDto> ProcessProfiles { get; set; } = new List<ProcessProfileListItemDto>();
+
     public IList<FilamentProfileListItemDto> FilamentProfiles { get; set; } = new List<FilamentProfileListItemDto>();
+
     public IList<MachineProfileListItemDto> MachineProfiles { get; set; } = new List<MachineProfileListItemDto>();
 }
 
 public class BulkProfileImportRequest
 {
     public List<Guid>? ProfileIds { get; set; }
+
     public bool? MakePublic { get; set; }
 }
 
 public class BulkProfileImportResultDto
 {
     public Guid PrinterId { get; set; }
+
     public string PrinterName { get; set; } = string.Empty;
+
     public int TotalRequested { get; set; }
+
     public int TotalFound { get; set; }
+
     public int Imported { get; set; }
+
     public int Duplicated { get; set; }
 }
 
@@ -2405,14 +2688,18 @@ public class BulkImportFromWorkerRequest
     /// Profiles to import, as returned from the OrcaSlicer worker (/profiles endpoint)
     /// </summary>
     public List<SlicerProfileDto>? Profiles { get; set; }
+
     public bool? MakePublic { get; set; }
 }
 
 public class BulkImportFromWorkerResultDto
 {
     public Guid PrinterId { get; set; }
+
     public string PrinterName { get; set; } = string.Empty;
+
     public int Imported { get; set; }
+
     public int Duplicated { get; set; }
 }
 
@@ -2420,14 +2707,23 @@ public class BulkImportFromWorkerResultDto
 public class QueueOverviewDto
 {
     public Guid PrinterId { get; set; }
+
     public string PrinterName { get; set; } = string.Empty;
+
     public string PrinterModel { get; set; } = string.Empty;
+
     public bool IsAvailable { get; set; }
+
     public int QueuedJobsCount { get; set; }
+
     public Guid? CurrentJobId { get; set; }
+
     public string? CurrentJobName { get; set; }
+
     public DateTime? EstimatedCompletionTime { get; set; }
+
     public double? NozzleDiameter { get; set; }
+
     public List<string>? SupportedMaterials { get; set; }
 }
 
@@ -2453,18 +2749,31 @@ public enum SlicingJobStatus
 public class SlicingJobDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public SlicingJobStatus Status { get; set; } = SlicingJobStatus.Queued;
+
     public int Progress { get; set; } // 0-100
+
     public string? Message { get; set; }
+
     public string SlicerEngine { get; set; } = string.Empty; // prusaslicer, orcaslicer
+
     public Guid PrinterId { get; set; }
+
     public string ModelFilePath { get; set; } = string.Empty;
+
     public string? GcodeFilePath { get; set; }
+
     public SlicerProfileDto? Profile { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime? CompletedAt { get; set; }
+
     public int? EstimatedPrintTime { get; set; }
+
     public double? EstimatedFilamentUsed { get; set; }
+
     public int? LayerCount { get; set; }
 }
 
@@ -2475,23 +2784,41 @@ public class SlicingJobDto
 public class JobQueuePrintJobDto
 {
     public Guid Id { get; set; }
+
     public Guid GcodeFileId { get; set; }
+
     public string GcodeFileName { get; set; } = string.Empty;
+
     public Guid? AssignedPrinterId { get; set; }
+
     public string AssignedPrinterName { get; set; } = string.Empty;
+
     public PrintJobStatus? Status { get; set; }
+
     public int Priority { get; set; }
+
     public int QueuePosition { get; set; }
+
     public decimal? RequiredNozzleDiameter { get; set; }
+
     public string? RequiredMaterialType { get; set; }
+
     public TimeSpan? EstimatedPrintTime { get; set; }
+
     public double? EstimatedFilamentUsage { get; set; }
+
     public DateTime? ActualStartTime { get; set; }
+
     public DateTime? ActualEndTime { get; set; }
+
     public TimeSpan? ActualPrintTime { get; set; }
+
     public double? ActualFilamentUsage { get; set; }
+
     public string? FailureReason { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime UpdatedAt { get; set; }
 }
 
@@ -2502,9 +2829,13 @@ public class JobQueuePrintJobDto
 public class QueuePrintJobDto
 {
     public Guid GcodeFileId { get; set; }
+
     public Guid? AssignedPrinterId { get; set; } // If null, auto-assign to best available printer
+
     public PrintJobPriority Priority { get; set; } = PrintJobPriority.Normal;
+
     public decimal? RequiredNozzleDiameter { get; set; }
+
     public string? RequiredMaterialType { get; set; }
 }
 
@@ -2514,9 +2845,13 @@ public class QueuePrintJobDto
 public class UpdatePrintJobStatusDto
 {
     public PrintJobStatus? Status { get; set; }
+
     public PrintJobPriority? Priority { get; set; }
+
     public Guid? AssignedPrinterId { get; set; }
+
     public double? ActualFilamentUsage { get; set; }
+
     public string? FailureReason { get; set; }
 }
 
@@ -2534,6 +2869,7 @@ public class ReorderQueueDto
 public class JobOrderDto
 {
     public Guid JobId { get; set; }
+
     public int Position { get; set; }
 }
 
@@ -2544,15 +2880,25 @@ public class JobOrderDto
 public class CreateOrUpdatePrinterCapabilitiesDto
 {
     public decimal[]? NozzleDiameters { get; set; }
+
     public string[]? SupportedMaterials { get; set; }
+
     public decimal MaxPrintVolumeX { get; set; }
+
     public decimal MaxPrintVolumeY { get; set; }
+
     public decimal MaxPrintVolumeZ { get; set; }
+
     public int MaxHotendTemperature { get; set; }
+
     public int MaxBedTemperature { get; set; }
+
     public bool HasHeatedBed { get; set; }
+
     public bool HasEnclosure { get; set; }
+
     public bool SupportsAutoLeveling { get; set; }
+
     public int MaxPrintSpeed { get; set; }
 }
 
@@ -2581,9 +2927,13 @@ public class PrinterCapabilitiesExportDto
     public double? MaxBuildVolumeZ { get; set; }
 
     public bool HasHeatedBed { get; set; } = true;
+
     public bool HasEnclosure { get; set; } = false;
+
     public bool MultiMaterial { get; set; } = false;
+
     public bool SupportsAutoLeveling { get; set; } = false;
+
     public int NumberOfExtruders { get; set; } = 1;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -2599,6 +2949,7 @@ public class PrinterCapabilitiesExportDto
     public int? CurrentSpoolId { get; set; }
 
     public bool IsAvailable { get; set; } = true;
+
     public DateTime LastUpdated { get; set; }
 }
 
@@ -2608,7 +2959,9 @@ public class PrinterCapabilitiesExportDto
 public class PrinterWithCapabilitiesDto
 {
     public Guid PrinterId { get; set; }
+
     public string PrinterName { get; set; } = string.Empty;
+
     public string PrinterModel { get; set; } = string.Empty;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -2647,9 +3000,13 @@ public class PrinterWithCapabilitiesDto
 public class CompatiblePrinterDto
 {
     public Guid PrinterId { get; set; }
+
     public string PrinterName { get; set; } = string.Empty;
+
     public int CompatibilityScore { get; set; } // 0-100
+
     public string[] CompatibilityReasons { get; set; } = [];
+
     public int CurrentQueueLength { get; set; }
 }
 
@@ -2715,10 +3072,15 @@ public record UserRoleDto(
 public class CreateUserRequest
 {
     public string Username { get; set; } = string.Empty;
+
     public string Email { get; set; } = string.Empty;
+
     public string Password { get; set; } = string.Empty;
+
     public string? FirstName { get; set; }
+
     public string? LastName { get; set; }
+
     public Guid[] RoleIds { get; set; } = [];
 }
 
@@ -2728,8 +3090,11 @@ public class CreateUserRequest
 public class UpdateUserRequest
 {
     public string? FirstName { get; set; }
+
     public string? LastName { get; set; }
+
     public bool? IsActive { get; set; }
+
     public Guid[]? RoleIds { get; set; }
 }
 
@@ -2745,8 +3110,11 @@ public record UserAvailabilityDto(bool? UsernameExists, bool? EmailExists);
 public class CreateRoleRequest
 {
     public string Name { get; set; } = string.Empty;
+
     public string DisplayName { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public RolePermissionRequestDto[] Permissions { get; set; } = [];
 }
 
@@ -2756,7 +3124,9 @@ public class CreateRoleRequest
 public class UpdateRoleRequest
 {
     public string DisplayName { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public RolePermissionRequestDto[] Permissions { get; set; } = [];
 }
 
@@ -2785,11 +3155,17 @@ public record ConfirmEmailRequest(string Token);
 public class LocationDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public int PrinterCount { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime ModifiedAt { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -2844,6 +3220,7 @@ public class LocationDetailsDto : LocationDto
 public class CloneProfilesRequestDto
 {
     public Guid SourceMachineProfileId { get; set; } // Machine profile to clone from (e.g., "Prusa CORE One")
+
     public Guid TargetPrinterId { get; set; } // Printer to clone profiles to (e.g., "Prusa CORE One L custom instance)
 }
 
@@ -2853,11 +3230,17 @@ public class CloneProfilesRequestDto
 public class CloneProfilesResponseDto
 {
     public Guid SourceMachineProfileId { get; set; }
+
     public string SourceMachineName { get; set; } = string.Empty;
+
     public Guid TargetPrinterId { get; set; }
+
     public string TargetPrinterName { get; set; } = string.Empty;
+
     public int ProcessProfilesCloned { get; set; }
+
     public int FilamentProfilesCloned { get; set; }
+
     public int TotalProfilesCloned { get; set; }
 }
 
@@ -2881,8 +3264,12 @@ public static class PrinterBackendHelpers
 public class PrintJobStatusDto
 {
     public string? State { get; set; }
+
     public double? Progress { get; set; }
+
     public string? JobName { get; set; }
+
     public string? ThumbnailUrl { get; set; }
+
     public string? Error { get; set; }
 }

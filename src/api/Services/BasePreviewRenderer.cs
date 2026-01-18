@@ -48,6 +48,7 @@ public abstract class BasePreviewRenderer
         {
             mesh = CreateFallbackMesh();
         }
+
         var normalized = NormalizeMesh(mesh);
 
         // Calculate and store mesh bounds for dynamic camera targeting
@@ -627,6 +628,7 @@ public abstract class BasePreviewRenderer
     }
 
     protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
+
     protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
 
     // --------------------------------------------------------

@@ -32,6 +32,7 @@ public class MoonrakerDiagnosticsController(
         {
             return BadRequest("url is required");
         }
+
         _logger.LogInformation($"MoonrakerDiagnostics: GetFileRoots called for {url}", null, null);
 
         try
@@ -71,6 +72,7 @@ public class MoonrakerDiagnosticsController(
         {
             return BadRequest("url is required");
         }
+
         _logger.LogInformation($"MoonrakerDiagnostics: GetDirectory called for {url}, path {path}", null, null);
 
         try

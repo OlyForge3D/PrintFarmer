@@ -10,10 +10,15 @@ public interface ITagRepository
 {
     // Basic CRUD
     Task<Tag?> GetByIdAsync(Guid id, CancellationToken ct);
+
     Task<Tag?> GetByNameAsync(string name, CancellationToken ct);
+
     Task<IReadOnlyList<Tag>> ListAllAsync(CancellationToken ct);
+
     Task AddAsync(Tag tag, CancellationToken ct);
+
     Task RemoveAsync(Tag tag, CancellationToken ct);
+
     Task SaveChangesAsync(CancellationToken ct);
 
     // Object-agnostic tag assignment (works with any object type)
@@ -70,5 +75,6 @@ public interface ITagRepository
 
     // Tag analytics
     Task<int> GetTagUsageCountAsync(Guid tagId, CancellationToken ct);
+
     Task<DateTime?> GetTagLastUsedAtAsync(Guid tagId, CancellationToken ct);
 }

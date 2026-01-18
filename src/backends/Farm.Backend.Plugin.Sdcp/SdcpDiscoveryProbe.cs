@@ -18,6 +18,7 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
     private const int SDCP_DISCOVERY_PORT = 3000;
 
     public string DisplayName => "SDCP";
+
     public PrinterBackend Backend => PrinterBackend.SDCP;
 
     public virtual async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)

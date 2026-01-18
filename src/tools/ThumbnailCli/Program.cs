@@ -55,6 +55,7 @@ internal static class Program
                 Console.WriteLine($"Applying zoom: {opts.ZoomPercent.Value}%");
                 options.SetZoomPercent(defaultZoomPercent, opts.ZoomPercent.Value);
             }
+
             options.EnableGroundShadow = opts.EnableGroundShadow;
             options.TwoSided = opts.TwoSided;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
@@ -133,6 +134,7 @@ internal static class Program
                 }
             }
         }
+
         return false;
     }
 
@@ -156,6 +158,7 @@ internal static class Program
                 }
             }
         }
+
         return null;
     }
 

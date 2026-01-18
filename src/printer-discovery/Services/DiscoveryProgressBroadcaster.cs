@@ -173,6 +173,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
         {
             await _hubConnection.DisposeAsync();
         }
+
         _connectionLock.Dispose();
     }
 }

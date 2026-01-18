@@ -431,6 +431,7 @@ public class CatalogService(
         {
             throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
         }
+
         _cachedUnknownMfgId = unknownMfgId;
 
         Guid? unknownModelId = _cachedUnknownModelId ?? await _repo.GetUnknownModelIdAsync(ct);
@@ -438,6 +439,7 @@ public class CatalogService(
         {
             throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
         }
+
         _cachedUnknownModelId = unknownModelId;
 
         return (unknownMfgId.Value, unknownModelId.Value);

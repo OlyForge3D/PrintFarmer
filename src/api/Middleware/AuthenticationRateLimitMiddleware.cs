@@ -31,6 +31,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLog
         {
             // If anything goes wrong while checking env, fall back to normal behaviour
         }
+
         string path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
         string method = context.Request.Method.ToUpperInvariant();
 

@@ -22,6 +22,7 @@ public class SlicingProgressController(IStoredFileOperationsService fileOperatio
         {
             HttpContext.Response.Headers["Content-Type"] = "text/event-stream";
         }
+
         HttpContext.Response.Headers["Cache-Control"] = "no-cache";
         HttpContext.Response.Headers["X-Accel-Buffering"] = "no"; // disable buffering for nginx
 
@@ -51,6 +52,7 @@ public class SlicingProgressController(IStoredFileOperationsService fileOperatio
             {
                 break;
             }
+
             try
             {
                 await Task.Delay(1000, ct);

@@ -10,17 +10,22 @@ namespace Farm.Web.Api.Services;
 public sealed class RenderOptions
 {
     public int Width { get; set; } = 800;
+
     public int Height { get; set; } = 600;
 
     public bool UseOrthographic { get; set; } = true;
+
     public float OrthoSize { get; set; } = 1.65f;
 
     public Vector3 CameraPosition { get; set; } = new Vector3(1.75f, 1.75f, 1.35f);
+
     public Vector3 CameraTarget { get; set; } = new Vector3(0f, 0f, 0.55f);
+
     public Vector3 CameraUp { get; set; } = Vector3.UnitZ;
 
     // Model vertical bounds (min/max Z after normalization) - updated after mesh loading
     public float ModelBoundsMinZ { get; set; } = 0f;
+
     public float ModelBoundsMaxZ { get; set; } = 1f;
 
     // Camera view name to apply after mesh bounds are known
@@ -96,15 +101,21 @@ public sealed class RenderOptions
     public Vector3 BaseColorLinear { get; set; } = new(0.20f, 0.70f, 0.90f);
 
     public Rgba32 ModelBaseColor { get; set; } = new Rgba32(150, 210, 200);
+
     public Rgba32 BackgroundColor { get; set; } = new Rgba32(34, 36, 40);
 
     public bool EnableSilhouetteEdges { get; set; } = true;
+
     public Rgba32 SilhouetteColor { get; set; } = new Rgba32(20, 20, 25, 180);
+
     public float SilhouetteEdgeWidth { get; set; } = 1.0f;
+
     public float SilhouetteAngleThresholdDeg { get; set; } = 82f;
+
     public float SilhouetteDepthEpsilon { get; set; } = 0.003f;
 
     public bool EnableAmbientOcclusion { get; set; } = true;
+
     public float AmbientOcclusionStrength { get; set; } = 0.65f;
 
     // Render both windings to avoid holes when viewing from back/inside
@@ -115,6 +126,7 @@ public sealed class RenderOptions
 
     // Lifted diffuse base
     public float AmbientFactor { get; set; } = 0.30f;
+
     public float DiffuseFactor { get; set; } = 0.70f;
 
     // NEW: wrap lighting (soft terminator)
@@ -122,17 +134,24 @@ public sealed class RenderOptions
 
     // NEW: AO shaping
     public float AOMin { get; set; } = 0.70f;
+
     public float AOMax { get; set; } = 1.00f;
+
     public float AOPower { get; set; } = 1.25f;     // >1 makes AO less linear / more Orca-like
 
     // NEW: subtle sheen
     public float SpecularStrength { get; set; } = 0.08f;
+
     public float SpecularPower { get; set; } = 48f;
 
     public bool EnableGroundShadow { get; set; } = true;
+
     public float GroundShadowOpacity { get; set; } = 0.08f;
+
     public int GroundShadowBlurRadiusPx { get; set; } = 10;
+
     public int GroundShadowOffsetXPx { get; set; } = 2;
+
     public int GroundShadowOffsetYPx { get; set; } = 25;
 
     public bool AntiAlias2x { get; set; } = true;
@@ -291,20 +310,25 @@ public sealed class RenderOptions
 public sealed class Mesh
 {
     public List<Vector3> Vertices { get; } = new();
+
     public List<Face> Faces { get; } = new();
 }
 
 public sealed class Face
 {
     public int[] Indices { get; set; } = [];
+
     public int FaceIndex { get; set; }
+
     public int IndexCount => Indices?.Length ?? 0;
 }
 
 public sealed class NormalizedMesh
 {
     public List<Vector3> Vertices { get; } = new();
+
     public List<Face> Faces { get; } = new();
+
     public float[] Ao { get; set; } = [];
 
     public List<Vector3> Normals { get; } = new();
@@ -363,6 +387,7 @@ public static class VectorExtensions
 public sealed class MeshLoadOptions
 {
     public bool MergeMeshes { get; set; } = true;
+
     public bool UseZUp { get; set; } = true;   // false = Y-up
 }
 

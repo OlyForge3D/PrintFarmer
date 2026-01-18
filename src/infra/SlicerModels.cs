@@ -58,12 +58,19 @@ public enum SlicerEngineType
 public class SlicingJobRequest
 {
     public Guid UserId { get; set; }
+
     public Guid PrinterId { get; set; }
+
     public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
+
     public string ModelFileName { get; set; } = string.Empty;
+
     public SlicerEngineType SlicerEngine { get; set; } = SlicerEngineType.OrcaSlicer;
+
     public SlicerProfileDto SlicerProfile { get; set; } = new();
+
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
+
     public Dictionary<string, object> Metadata { get; } = [];
 
     /// <summary>
@@ -82,6 +89,7 @@ public class SlicingJobRequest
         {
             return Envelope;
         }
+
         SlicingJobContent jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(this);
         return Slicer.Messaging.MessageEnvelope.Create(jobContent, SlicerEngine, Priority);
     }
@@ -93,9 +101,13 @@ public class SlicingJobRequest
 public class SlicingJobResponse
 {
     public Guid JobId { get; set; }
+
     public SlicingJobStatus Status { get; set; }
+
     public DateTime EstimatedCompletionTime { get; set; }
+
     public int QueuePosition { get; set; }
+
     public Uri SlicerWorkerUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
 }
 
@@ -106,31 +118,51 @@ public class SlicingJobResponse
 public class DistributedSlicingJob : SlicingJobDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+
     public Guid UserId { get; set; }
+
     public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
+
     public string ModelFileName { get; set; } = string.Empty;
+
     public SlicerEngineType EngineType { get; set; }
+
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
 
     // Extended distributed processing fields
     public DateTime? StartedAt { get; set; }
+
     public string? WorkerId { get; set; }
+
     public string? ErrorMessage { get; set; }
+
     public Uri? ResultFileUrl { get; set; }
+
     public long? InputFileSizeBytes { get; set; }
+
     public long? OutputFileSizeBytes { get; set; }
+
     public double EstimatedPrintTimeSeconds { get; set; }
+
     public double EstimatedFilamentUsageGrams { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
+
     public int RetryCount { get; set; } // default 0
+
     public DateTime? LastRetryAt { get; set; }
+
     public DateTime? ScheduledAt { get; set; } // Optional: when job becomes available for processing (for delayed retries)
 
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
+
     public string Checksum { get; set; } = string.Empty;
+
     public int Attempt { get; set; } = 1;
+
     public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+
     public string EnvelopeVersion { get; set; } = Slicer.Messaging.MessageEnvelope.CurrentVersion;
 
     /// <summary>
@@ -220,20 +252,34 @@ public class DistributedSlicingJob : SlicingJobDto
 public class SlicingJobStatusResponse
 {
     public Guid JobId { get; set; }
+
     public SlicingJobStatus Status { get; set; }
+
     public int Progress { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime? StartedAt { get; set; }
+
     public DateTime? CompletedAt { get; set; }
+
     public string? WorkerId { get; set; }
+
     public string? ErrorMessage { get; set; }
+
     public Uri? ResultFileUrl { get; set; }
+
     public double EstimatedPrintTimeSeconds { get; set; }
+
     public double EstimatedFilamentUsageGrams { get; set; }
+
     public int LayerCount { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
+
     // Retry & scheduling metadata
     public int RetryCount { get; set; }
+
     public DateTime? ScheduledAt { get; set; }
 }
 
@@ -243,14 +289,23 @@ public class SlicingJobStatusResponse
 public class SlicingResult
 {
     public bool Success { get; set; }
+
     public Uri? ResultFileUrl { get; set; }
+
     public string? Output { get; set; }
+
     public string? Error { get; set; }
+
     public double ProcessingTimeSeconds { get; set; }
+
     public long? OutputFileSizeBytes { get; set; }
+
     public double EstimatedPrintTimeSeconds { get; set; }
+
     public double EstimatedFilamentUsageGrams { get; set; }
+
     public int LayerCount { get; set; }
+
     public Dictionary<string, string> Metadata { get; } = [];
 }
 
@@ -260,13 +315,21 @@ public class SlicingResult
 public class SlicerHealthCheckResponse
 {
     public string Status { get; set; } = "unknown";
+
     public string? Version { get; set; }
+
     public int ActiveJobs { get; set; }
+
     public long QueueDepth { get; set; }
+
     public double CpuUsage { get; set; }
+
     public long AvailableMemoryMB { get; set; }
+
     public DateTime? LastJobCompletedAt { get; set; }
+
     public bool IsHealthy { get; set; }
+
     public Dictionary<string, object> Details { get; } = [];
 }
 
@@ -276,16 +339,25 @@ public class SlicerHealthCheckResponse
 public class SlicerWorkerConfiguration
 {
     public string WorkerId { get; set; } = Environment.MachineName + "-" + Guid.NewGuid().ToString("N")[..8];
+
     public SlicerEngineType SlicerEngine { get; set; }
+
     public int MaxConcurrentJobs { get; set; } = Environment.ProcessorCount;
+
     public int MaxRetryCount { get; set; } = 3;
+
     public TimeSpan JobTimeout { get; set; } = TimeSpan.FromMinutes(60);
+
     public TimeSpan HealthCheckInterval { get; set; } = TimeSpan.FromSeconds(30);
+
     // Temp directory is now expected to be injected / set explicitly via WithTempDirectory or composition root.
     // Default falls back to current working directory /temp to avoid system global temp (macOS TCC prompts).
     public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
+
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
+
     public double JitterPercent { get; set; } = 15.0; // Percent (+/-) applied to retry backoff range (e.g., 15 = +/-15%)
+
     public Dictionary<string, object> SlicerSpecificSettings { get; } = [];
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
@@ -303,10 +375,15 @@ public class SlicerWorkerConfiguration
 public class SlicingProgressUpdate
 {
     public Guid JobId { get; set; }
+
     public int Progress { get; set; }
+
     public SlicingJobStatus Status { get; set; }
+
     public string? CurrentStep { get; set; }
+
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
     public Dictionary<string, object> AdditionalData { get; } = [];
 }
 
@@ -316,15 +393,26 @@ public class SlicingProgressUpdate
 public class SlicerMetrics
 {
     public string WorkerId { get; set; } = string.Empty;
+
     public SlicerEngineType SlicerEngine { get; set; }
+
     public int TotalJobsProcessed { get; set; }
+
     public int SuccessfulJobs { get; set; }
+
     public int FailedJobs { get; set; }
+
     public double AverageProcessingTimeSeconds { get; set; }
+
     public double TotalProcessingTimeSeconds { get; set; }
+
     public long TotalBytesProcessed { get; set; }
+
     public DateTime StartTime { get; set; }
+
     public DateTime LastJobCompletedAt { get; set; }
+
     public double CpuUsagePercentage { get; set; }
+
     public long MemoryUsageMB { get; set; }
 }

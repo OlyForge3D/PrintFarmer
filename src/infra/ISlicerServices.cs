@@ -211,26 +211,41 @@ public interface ISlicerProgressNotifier
 public class SlicerQueueStats
 {
     public SlicerEngineType Engine { get; set; }
+
     public long QueuedJobs { get; set; }
+
     public long ProcessingJobs { get; set; }
+
     public long CompletedJobs { get; set; }
+
     public long FailedJobs { get; set; }
+
     public int ActiveWorkers { get; set; }
+
     public double AverageProcessingTimeSeconds { get; set; }
+
     public TimeSpan? EstimatedWaitTime { get; set; }
+
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 
 public class SlicerValidationResult
 {
     public bool IsValid { get; set; }
+
     private readonly List<string> _issues = new();
     private readonly List<string> _warnings = new();
+
     public IReadOnlyList<string> Issues => _issues;
+
     public IReadOnlyList<string> Warnings => _warnings;
+
     public long FileSizeBytes { get; set; }
+
     public string? FileType { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
+
     public void AddIssue(string issue)
     {
         if (!string.IsNullOrWhiteSpace(issue))
@@ -238,6 +253,7 @@ public class SlicerValidationResult
             _issues.Add(issue);
         }
     }
+
     public void AddWarning(string warning)
     {
         if (!string.IsNullOrWhiteSpace(warning))
@@ -245,6 +261,7 @@ public class SlicerValidationResult
             _warnings.Add(warning);
         }
     }
+
     public SlicerValidationResult()
     {
         IsValid = true;
@@ -254,32 +271,50 @@ public class SlicerValidationResult
 public class SlicerFileMetadata
 {
     public string Key { get; set; } = string.Empty;
+
     public long SizeBytes { get; set; }
+
     public string ContentType { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; set; }
+
     public DateTime LastModified { get; set; }
+
     public string? ETag { get; set; }
+
     public Dictionary<string, string> CustomMetadata { get; } = new Dictionary<string, string>();
 }
 
 public class SlicerEngineInfo
 {
     public SlicerEngineType Engine { get; set; }
+
     public string Version { get; set; } = string.Empty;
+
     public bool IsHealthy { get; set; }
+
     public int ActiveWorkers { get; set; }
+
     public long QueueDepth { get; set; }
+
     public IReadOnlyList<string> SupportedExtensions { get; set; } = Array.Empty<string>();
+
     public TimeSpan? EstimatedWaitTime { get; set; }
 }
 
 public class SlicerOrchestratorHealth
 {
     public bool IsHealthy { get; set; }
+
     public Dictionary<SlicerEngineType, SlicerEngineInfo> Engines { get; } = new Dictionary<SlicerEngineType, SlicerEngineInfo>();
+
     public bool JobQueueHealthy { get; set; }
+
     public bool FileStorageHealthy { get; set; }
+
     public int TotalActiveJobs { get; set; }
+
     public long TotalQueuedJobs { get; set; }
+
     public DateTime LastHealthCheck { get; set; } = DateTime.UtcNow;
 }

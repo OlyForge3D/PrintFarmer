@@ -14,6 +14,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
 {
     public string DisplayName => "PrusaLink";
+
     public PrinterBackend Backend => PrinterBackend.PrusaLink;
 
     /// <summary>

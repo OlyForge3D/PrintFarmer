@@ -117,14 +117,17 @@ namespace Farm.Web.Api.Services.Users
             {
                 user.FirstName = request.FirstName;
             }
+
             if (!string.IsNullOrWhiteSpace(request.LastName))
             {
                 user.LastName = request.LastName;
             }
+
             if (request.IsActive.HasValue)
             {
                 user.IsActive = request.IsActive.Value;
             }
+
             user.UpdatedAt = DateTime.UtcNow;
 
             if (request.RoleIds != null)
@@ -197,10 +200,12 @@ namespace Farm.Web.Api.Services.Users
             {
                 usernameExists = await _users.UsernameExistsAsync(username.Trim(), ct);
             }
+
             if (!string.IsNullOrWhiteSpace(email))
             {
                 emailExists = await _users.EmailExistsAsync(email.Trim(), ct);
             }
+
             return new UserAvailabilityDto(usernameExists, emailExists);
         }
     }

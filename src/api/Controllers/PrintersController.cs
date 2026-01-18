@@ -891,6 +891,7 @@ public class PrintersController(
                     {
                         registered.Add(existingDto);
                     }
+
                     continue;
                 }
 
@@ -942,6 +943,7 @@ public class PrintersController(
         {
             return NotFound();
         }
+
         printer.InMaintenance = inMaintenance;
         await _printersService.SaveChangesAsync(ct);
 
@@ -953,11 +955,13 @@ public class PrintersController(
             ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(printer.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
+
         if (printer.ModelId != Guid.Empty)
         {
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
             modelName = mod?.Name;
         }
+
         PrinterDto dto = new(
             Id: printer.Id,
             Name: printer.Name,
@@ -1130,6 +1134,7 @@ public class PrintersController(
         {
             return NotFound();
         }
+
         // resolve or create manufacturer/model
         Guid manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -1167,8 +1172,10 @@ public class PrintersController(
                 {
                     throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
                 }
+
                 manufacturerId = unknownMfgId.Value;
             }
+
             if (modelId == Guid.Empty)
             {
                 Guid? unknownModelId = await _catalogRepository.GetUnknownModelIdAsync(ct);
@@ -1176,6 +1183,7 @@ public class PrintersController(
                 {
                     throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
                 }
+
                 modelId = unknownModelId.Value;
             }
         }
@@ -1227,6 +1235,7 @@ public class PrintersController(
         {
             p.BackendPort = dto.BackendPort.Value;
         }
+
         if (dto.FrontendPort.HasValue)
         {
             p.FrontendPort = dto.FrontendPort.Value;
@@ -1298,6 +1307,7 @@ public class PrintersController(
             ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(p.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
+
         if (p.ModelId != Guid.Empty)
         {
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
@@ -1359,6 +1369,7 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         // Delegate hostname normalization and resolution to the service
         try
         {
@@ -1465,6 +1476,7 @@ public class PrintersController(
         {
             return NotFound();
         }
+
         await _printersService.RemoveAsync(p, ct);
         return NoContent();
     }
@@ -1557,6 +1569,7 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -1572,6 +1585,7 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -1587,6 +1601,7 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }

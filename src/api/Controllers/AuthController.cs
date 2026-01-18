@@ -345,4 +345,5 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 }
 
 public record ConfirmEmailResponse(bool Success, string Message);
+
 public record ResendConfirmationResponse(bool Success, string Message);

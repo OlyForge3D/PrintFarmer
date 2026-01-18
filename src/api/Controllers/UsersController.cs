@@ -101,6 +101,7 @@ public class UsersController(
         {
             return NotFound();
         }
+
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation($"User {currentUserId} updated user {id}");
         return Ok(updated);
@@ -126,6 +127,7 @@ public class UsersController(
         {
             return NotFound();
         }
+
         _logger.LogInformation($"User {currentUserId} deleted user {id}");
         return NoContent();
     }

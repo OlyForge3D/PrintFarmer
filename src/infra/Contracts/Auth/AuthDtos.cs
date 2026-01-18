@@ -51,9 +51,13 @@ public class LoginRequest
 public class LoginResponse
 {
     public string AccessToken { get; set; } = string.Empty;
+
     public string RefreshToken { get; set; } = string.Empty;
+
     public DateTime AccessTokenExpires { get; set; }
+
     public DateTime RefreshTokenExpires { get; set; }
+
     public UserDto User { get; set; } = null!;
 }
 
@@ -72,8 +76,11 @@ public class RefreshTokenRequest
 public class RefreshTokenResponse
 {
     public string AccessToken { get; set; } = string.Empty;
+
     public string RefreshToken { get; set; } = string.Empty;
+
     public DateTime AccessTokenExpires { get; set; }
+
     public DateTime RefreshTokenExpires { get; set; }
 }
 
@@ -110,6 +117,7 @@ public class ForgotPasswordRequest
 public class ForgotPasswordResponse
 {
     public bool Success { get; set; }
+
     public string Message { get; set; } = string.Empty;
 }
 
@@ -140,6 +148,7 @@ public class ResetPasswordRequest
 public class ResetPasswordResponse
 {
     public bool Success { get; set; }
+
     public string Message { get; set; } = string.Empty;
 }
 
@@ -149,15 +158,25 @@ public class ResetPasswordResponse
 public class UserDto
 {
     public Guid Id { get; set; }
+
     public string Username { get; set; } = string.Empty;
+
     public string Email { get; set; } = string.Empty;
+
     public string? FirstName { get; set; }
+
     public string? LastName { get; set; }
+
     public bool IsActive { get; set; }
+
     public bool EmailConfirmed { get; set; }
+
     public DateTime? LastLogin { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
     public List<string> Roles { get; set; } = new();
+
     public List<string> Permissions { get; set; } = new();
 }
 
@@ -167,11 +186,17 @@ public class UserDto
 public class RoleDto
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string DisplayName { get; set; } = string.Empty;
+
     public string? Description { get; set; }
+
     public bool IsSystemRole { get; set; }
+
     public bool IsActive { get; set; }
+
     public List<PermissionDto> Permissions { get; set; } = new();
 }
 
@@ -181,7 +206,9 @@ public class RoleDto
 public class PermissionDto
 {
     public string Resource { get; set; } = string.Empty;
+
     public string Action { get; set; } = string.Empty;
+
     public bool Granted { get; set; }
 
     /// <summary>

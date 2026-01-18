@@ -295,6 +295,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             _logger?.LogError($"PrusaLink API returned {response.StatusCode} for {url}");
             throw new HttpRequestException($"PrusaLink API error: {response.StatusCode}", null, response.StatusCode);
         }
+
         string json = await response.Content.ReadAsStringAsync(ct);
 
         // Deserialize to appropriate type based on response content
@@ -310,6 +311,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 _ => JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!
             };
         }
+
         return JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!;
     }
 

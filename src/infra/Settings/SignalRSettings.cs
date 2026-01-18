@@ -7,7 +7,9 @@ namespace Farm.Infrastructure.Settings;
 public class SignalRSettings : IAppSetting
 {
     public const string SectionName = "SignalR";
+
     public static string SectionKey => SectionName;
+
     [SettingDisplay(
         Name = "Log Level",
         Description = "Minimum log level for SignalR events.",

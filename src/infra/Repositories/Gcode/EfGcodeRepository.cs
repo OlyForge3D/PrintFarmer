@@ -128,6 +128,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             // Join with FolderNode and filter by path
             filterQuery = filterQuery.Where(f => f.Folder != null && f.Folder.Path == normalizedPath);
         }
+
         // If path is null/empty, include ALL files (no filter)
 
         // Apply search filter at database level
@@ -319,6 +320,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             var op = latestOps.FirstOrDefault(o => o.PrinterId == printerId);
             result[printerId] = op?.LatestOpId;
         }
+
         return result;
     }
 

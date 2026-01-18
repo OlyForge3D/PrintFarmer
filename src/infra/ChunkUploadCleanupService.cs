@@ -26,6 +26,7 @@ public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string web
             {
                 _logger.LogDebug($"Chunk cleanup sweep failed: {ex.Message}");
             }
+
             await Task.Delay(_interval, stoppingToken);
         }
     }
@@ -55,17 +56,20 @@ public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string web
                 {
                     continue;
                 }
+
                 // Paired .part file
                 string part = meta.Substring(0, meta.Length - ".meta.json".Length);
                 if (File.Exists(part))
                 {
                     File.Delete(part);
                 }
+
                 File.Delete(meta);
                 removed++;
             }
             catch { /* ignore */ }
         }
+
         if (removed > 0)
         {
             _logger.LogInformation($"Chunk cleanup removed {removed} stale uploads");

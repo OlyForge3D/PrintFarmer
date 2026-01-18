@@ -33,6 +33,7 @@ public class SettingsService : ISettingsService
         string? key = appAttr?.Key ?? sysAttr?.Key;
         return key == null ? null : _settings.TryGetValue(key, out object? value) ? value : null;
     }
+
     private readonly IUnifiedLoggingService _logger;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
@@ -122,16 +123,20 @@ public class SettingsService : ISettingsService
                 // SystemSettings: config only
                 instance = config.GetSection(sysAttr!.Key).Get(type) ?? Activator.CreateInstance(type);
             }
+
             if (instance == null)
             {
                 throw new InvalidOperationException($"Could not create instance of settings type {type.FullName}");
             }
+
             if (instance is IValidatableSetting validatable)
             {
                 validatable.Validate();
             }
+
             newSettings[key] = instance;
         }
+
         _settings = newSettings;
     }
 
@@ -194,6 +199,7 @@ public class SettingsService : ISettingsService
         await _settingsRepo.DeleteAsync(lockKey, ct);
         await _settingsRepo.SaveChangesAsync(ct);
     }
+
     /// <summary>
     /// Returns metadata for all discovered settings classes for dynamic UI generation.
     /// Only returns AppSettings (IAppSetting), not SystemSettings (ISystemSetting).
@@ -254,6 +260,7 @@ public class SettingsService : ISettingsService
                         };
 #pragma warning restore S1244 // Floating point numbers should not be tested for equality
                     }
+
                     return meta;
                 }).ToList();
             yield return new SettingMetadata

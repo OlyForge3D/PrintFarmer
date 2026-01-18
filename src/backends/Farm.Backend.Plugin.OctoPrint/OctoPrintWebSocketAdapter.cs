@@ -51,7 +51,9 @@ public sealed class OctoPrintWebSocketAdapter(
     private DateTime _lastHttpPoll = DateTime.MinValue;
 
     public string SocketState => _socketState;
+
     public string ApiState => _apiState;
+
     public bool IsConnected => _webSocket?.State == WebSocketState.Open && _isAuthenticated;
 
     /// <summary>
@@ -466,6 +468,7 @@ public sealed class OctoPrintWebSocketAdapter(
                         hotendTarget = target.GetDouble();
                     }
                 }
+
                 if (tempProp.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
                 {
                     if (bed.TryGetProperty("actual", out var actual))
@@ -525,16 +528,27 @@ public sealed class OctoPrintWebSocketAdapter(
     private sealed class PrinterStateData
     {
         public bool IsOnline { get; set; }
+
         public bool Operational { get; set; }
+
         public string? State { get; set; }
+
         public double? X { get; set; }
+
         public double? Y { get; set; }
+
         public double? Z { get; set; }
+
         public double? HotendTemp { get; set; }
+
         public double? BedTemp { get; set; }
+
         public double? HotendTarget { get; set; }
+
         public double? BedTarget { get; set; }
+
         public string? ThumbnailUrl { get; set; }
+
         public string? CameraStreamUrl { get; set; }
     }
 #pragma warning restore S3459, S1144

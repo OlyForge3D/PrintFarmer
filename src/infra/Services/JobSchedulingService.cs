@@ -372,13 +372,21 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
 public class ScheduledJobDto
 {
     public Guid JobId { get; set; }
+
     public string JobName { get; set; } = string.Empty;
+
     public string PrinterName { get; set; } = string.Empty;
+
     public DateTime ScheduledStartTime { get; set; } // UTC
+
     public DateTime ScheduledStartTimeInTimeZone { get; set; } // In user's timezone
+
     public string TimeZone { get; set; } = "UTC";
+
     public string? RecurrencePattern { get; set; }
+
     public bool IsActive { get; set; }
+
     public bool IsPaused { get; set; }
 }
 
@@ -388,10 +396,15 @@ public class ScheduledJobDto
 public class JobExecutionDto
 {
     public Guid Id { get; set; }
+
     public DateTime ScheduledExecutionTime { get; set; }
+
     public DateTime? ActualStartTime { get; set; }
+
     public string Status { get; set; } = string.Empty;
+
     public string? Message { get; set; }
+
     public int? DurationSeconds { get; set; }
 }
 
@@ -401,6 +414,8 @@ public class JobExecutionDto
 public class TimeZoneDto
 {
     public string Id { get; set; } = string.Empty;
+
     public string DisplayName { get; set; } = string.Empty;
+
     public string Offset { get; set; } = string.Empty;
 }

@@ -37,6 +37,7 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
         {
             // Accessing migrations can throw if no design-time services; treat as EnsureCreated.
         }
+
         return new MigrationStatus(mode, hasMigrations, appliedAny, provider);
     }
 }

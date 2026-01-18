@@ -8,8 +8,11 @@ namespace Farm.Infrastructure;
 public class OrcaBundlePreviewDto
 {
     public List<OrcaPrinterPresetDto> Printers { get; set; } = new();
+
     public List<OrcaFilamentPresetDto> Filaments { get; set; } = new();
+
     public List<OrcaProcessPresetDto> Processes { get; set; } = new();
+
     public Dictionary<string, string> Metadata { get; set; } = new();
 }
 
@@ -19,17 +22,29 @@ public class OrcaBundlePreviewDto
 public class OrcaPrinterPresetDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string? InherentFrom { get; set; } // Base profile reference
+
     public string? PrinterModel { get; set; }
+
     public string? Manufacturer { get; set; }
+
     public double BedWidth { get; set; }
+
     public double BedDepth { get; set; }
+
     public double MaxZHeight { get; set; }
+
     public double NozzleDiameter { get; set; } = 0.4;
+
     public int MaxBedTemperature { get; set; }
+
     public int MaxHotendTemperature { get; set; }
+
     public bool HasHeatedBed { get; set; }
+
     public string? PrinterTechnology { get; set; } // FFF, SLA
+
     public Dictionary<string, object?> RawParameters { get; set; } = new();
 }
 
@@ -39,14 +54,23 @@ public class OrcaPrinterPresetDto
 public class OrcaFilamentPresetDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string? InherentFrom { get; set; }
+
     public string? FilamentType { get; set; } // PLA, PETG, ABS, etc.
+
     public int? NozzleTemperature { get; set; }
+
     public int? BedTemperature { get; set; }
+
     public string? Manufacturer { get; set; }
+
     public double? Density { get; set; } // g/cm³
+
     public double? Cost { get; set; } // per kg
+
     public string? Color { get; set; }
+
     public Dictionary<string, object?> RawParameters { get; set; } = new();
 }
 
@@ -56,22 +80,39 @@ public class OrcaFilamentPresetDto
 public class OrcaProcessPresetDto
 {
     public string Name { get; set; } = string.Empty;
+
     public string? InherentFrom { get; set; }
+
     public double LayerHeight { get; set; } = 0.2;
+
     public double FirstLayerHeight { get; set; }
+
     public int InfillPercentage { get; set; } = 20;
+
     public string? InfillPattern { get; set; }
+
     public int? PrintSpeed { get; set; } // mm/s
+
     public int? InfillSpeed { get; set; }
+
     public int? OuterWallSpeed { get; set; }
+
     public int? InnerWallSpeed { get; set; }
+
     public bool EnableSupports { get; set; }
+
     public string? SupportType { get; set; }
+
     public int? SupportAngle { get; set; }
+
     public int Perimeters { get; set; } = 3;
+
     public int TopLayers { get; set; } = 4;
+
     public int BottomLayers { get; set; } = 4;
+
     public string? Quality { get; set; } // Derived from layer height or explicit
+
     public Dictionary<string, object?> RawParameters { get; set; } = new();
 }
 
@@ -81,10 +122,15 @@ public class OrcaProcessPresetDto
 public class ImportOrcaBundleDto
 {
     public string BundleJson { get; set; } = string.Empty; // Raw JSON bundle
+
     public bool AllowSystemOverride { get; set; } = false;
+
     public bool SetDefaults { get; set; } = false; // Set imported profiles as defaults
+
     public bool ImportPrinters { get; set; } = true;
+
     public bool ImportFilaments { get; set; } = true;
+
     public bool ImportProcesses { get; set; } = true;
 }
 
@@ -94,10 +140,15 @@ public class ImportOrcaBundleDto
 public class ImportOrcaBundleResultDto
 {
     public int PrintersImported { get; set; }
+
     public int FilamentsImported { get; set; }
+
     public int ProcessesImported { get; set; }
+
     public List<string> Warnings { get; set; } = new();
+
     public List<string> Errors { get; set; } = new();
+
     public bool Success { get; set; }
 }
 

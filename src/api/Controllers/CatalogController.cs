@@ -42,6 +42,7 @@ public class CatalogController(
                 Response.Headers["ETag"] = etag;
                 return StatusCode(StatusCodes.Status304NotModified);
             }
+
             Response.Headers["ETag"] = etag;
             return Ok(list);
         }
@@ -83,6 +84,7 @@ public class CatalogController(
         {
             return BadRequest("Name is required");
         }
+
         // Normalize via shared helper for consistent rule across API & seeding
         ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, request.Url, request.Description, ct);
         // The service handles normalization and cache invalidation; include normalized header only if different
@@ -91,6 +93,7 @@ public class CatalogController(
         {
             Response.Headers["X-Normalized-Name"] = normalized;
         }
+
         return CreatedAtRoute("GetManufacturerById", new { id = dto.Id }, dto);
     }
 
@@ -109,6 +112,7 @@ public class CatalogController(
                 return StatusCode(StatusCodes.Status304NotModified);
             }
         }
+
         Response.Headers["ETag"] = etag;
         return Ok(list);
     }
@@ -139,6 +143,7 @@ public class CatalogController(
         {
             return BadRequest("Name is required");
         }
+
         try
         {
             PrinterModelDto created = await _catalogService.CreateModelAsync(req, ct);
@@ -146,6 +151,7 @@ public class CatalogController(
             {
                 Response.Headers["X-Normalized-Name"] = created.Name;
             }
+
             return CreatedAtRoute("GetPrinterModelById", new { id = created.Id }, created);
         }
         catch (KeyNotFoundException)
@@ -158,6 +164,7 @@ public class CatalogController(
             {
                 Response.Headers["X-Normalized-Name"] = dex.NormalizedName;
             }
+
             return Conflict(new { error = dex.Message });
         }
     }

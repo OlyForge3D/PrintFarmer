@@ -176,6 +176,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 _fileSystem.DeleteFile(filePath);
                 _logger.LogDebug($"Deleted file {keyOrUrl} from {filePath}");
             }
+
             return Task.CompletedTask;
         }
         catch (Exception ex)
@@ -305,6 +306,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             string key = uri.AbsolutePath.TrimStart('/');
             return GetFilePath(key);
         }
+
         if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase) &&
             Uri.TryCreate(keyOrUrl, UriKind.Absolute, out Uri? fileUri))
         {
@@ -357,30 +359,37 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             return "model/stl";
         }
+
         if (extension.Equals(".obj", StringComparison.OrdinalIgnoreCase))
         {
             return "model/obj";
         }
+
         if (extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
         {
             return "application/vnd.ms-3mfdocument";
         }
+
         if (extension.Equals(".ply", StringComparison.OrdinalIgnoreCase))
         {
             return "model/ply";
         }
+
         if (extension.Equals(".gcode", StringComparison.OrdinalIgnoreCase))
         {
             return "text/plain";
         }
+
         if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
         {
             return "application/json";
         }
+
         if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
         {
             return "text/plain";
         }
+
         return extension.Equals(".log", StringComparison.OrdinalIgnoreCase) ? "text/plain" : "application/octet-stream";
     }
 
@@ -418,6 +427,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             {
                 return null;
             }
+
             string json = _fileSystem.ReadAllText(metaPath);
             JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("ContentType", out JsonElement ctElem) && ctElem.ValueKind == System.Text.Json.JsonValueKind.String)
@@ -429,6 +439,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             _logger.LogWarning($"Failed to read sidecar metadata for {filePath}: {ex.Message}");
         }
+
         return null;
     }
 }
@@ -439,5 +450,6 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 public class LocalFileStorageOptions
 {
     public string BasePath { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "storage");
+
     public string? BaseUrl { get; set; }
 }

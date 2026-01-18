@@ -27,12 +27,14 @@ public static class SlicingJobStore
             job = direct;
             return true;
         }
+
         string compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
         if (compact != id && _jobs.TryGetValue(compact, out SlicingJobDto? alt))
         {
             job = alt;
             return true;
         }
+
         job = null;
         return false;
     }

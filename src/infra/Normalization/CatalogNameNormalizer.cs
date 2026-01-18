@@ -40,11 +40,13 @@ public static class CatalogNameNormalizer
         {
             return string.Empty;
         }
+
         string trimmed = name.Trim();
         if (CanonicalManufacturerMap.TryGetValue(trimmed, out string? canonical))
         {
             return canonical; // Known brand stylization
         }
+
         // Also try collapsing whitespace to catch spaced vs non-spaced variants
         string collapsed = string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c)));
         return CanonicalManufacturerMap.TryGetValue(collapsed, out canonical) ? canonical : CapitalizeFirst(trimmed);

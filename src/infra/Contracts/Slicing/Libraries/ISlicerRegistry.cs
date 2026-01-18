@@ -55,6 +55,7 @@ public class SlicerRegistry : ISlicerRegistry
                 list = [];
                 _librariesByName[library.SlicerName] = list;
             }
+
             list.Add(library);
         }
 

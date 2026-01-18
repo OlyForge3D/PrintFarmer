@@ -8,7 +8,9 @@
 public sealed class DatabaseConstraintException : Exception
 {
     public string? ConstraintName { get; }
+
     public string EntityType { get; } = "Entity";
+
     public string PropertyName { get; } = "Property";
 
     /// <summary>
@@ -77,6 +79,7 @@ public sealed class DatabaseConstraintException : Exception
                 propertyName = match.Groups[1].Value;
                 message = $"{entityType}.{propertyName} is required but was not provided";
             }
+
             constraintName = "NOT NULL";
         }
         else if (ex.Message.Contains("CHECK constraint failed", StringComparison.OrdinalIgnoreCase))

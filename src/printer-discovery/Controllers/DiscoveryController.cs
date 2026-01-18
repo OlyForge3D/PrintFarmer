@@ -200,10 +200,15 @@ public class DiscoveryController(
 public class DiscoveryResult
 {
     public string Hostname { get; set; } = string.Empty;
+
     public string IpAddress { get; set; } = string.Empty;
+
     public int Port { get; set; }
+
     public string PrinterBackend { get; set; } = string.Empty;
+
     public DateTime DiscoveredAt { get; set; }
+
     public bool Registered { get; set; }
 }
 
@@ -213,10 +218,15 @@ public class DiscoveryResult
 public class ServiceInfo
 {
     public string ServiceName { get; set; } = string.Empty;
+
     public string Version { get; set; } = string.Empty;
+
     public int ScanIntervalSeconds { get; set; }
+
     public bool PeriodicDiscoveryEnabled { get; set; }
+
     public string ApiBaseUrl { get; set; } = string.Empty;
+
     public DateTime Timestamp { get; set; }
 }
 
@@ -257,5 +267,6 @@ public class StreamingDiscoveryRequest
 public class StreamingDiscoveryResponse
 {
     public string SessionId { get; set; } = string.Empty;
+
     public string Message { get; set; } = string.Empty;
 }

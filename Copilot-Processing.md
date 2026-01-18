@@ -1,64 +1,68 @@
-# Copilot Processing: Edit Printer Toolheads UI
+# Copilot Processing: HardwareModel Base Class & UI Integration
 
-**Session Start**: Adding UI support for editing individual toolheads in Edit Printer modal
+**Session Start**: Refactoring component models to use abstract base class and wiring up UI
 **Phase**: ✅ Complete
 
-## 🔄 EDIT PRINTER TOOLHEADS UI - IMPLEMENTATION COMPLETE ✅
+## 🔄 HARDWARE MODEL REFACTORING & UI INTEGRATION - COMPLETE ✅
 
-**Objective**: Update Edit Printer UI to allow editing individual toolheads (printerDetails contains array of toolheads that users can edit)
+**Objective**: Extract common properties into HardwareModel abstract base class and wire up component model selection in EditModelModal
 **Status**: ✅ COMPLETE
 
-### Implementation Details
+### Implementation Summary
 
-**1. Backend Changes (Previous Session)**
-- ✅ `ToolheadDto` record added to Models.cs - exposes toolhead data for reading
-- ✅ `UpdateToolheadDto` record added to Models.cs - allows updating individual toolheads
-- ✅ `PrinterDetailsDto` extended with `Toolheads` array
-- ✅ `UpdatePrinterDto` extended with `Toolheads` array
-- ✅ `PrintersController.GetDetailsAsync` - populates toolheads from database
-- ✅ `PrintersController.UpdateAsync` - handles toolhead updates by ID
-- ✅ `EfPrintersRepository.FindByIdWithIncludesAsync` - includes Toolheads
+**Backend Refactoring**:
+- ✅ Created `HardwareModel` abstract base class with: Id, Name, ManufacturerId, Description, Url, Manufacturer navigation
+- ✅ `HotendModelDefinition` now extends HardwareModel (adds: MaxTemp, IsHighFlow)
+- ✅ `ExtruderModelDefinition` now extends HardwareModel (adds: GearRatio, IsDirectDrive)
+- ✅ `ToolheadModelDefinition` now extends HardwareModel (no additional properties)
+- ✅ `NozzleModelDefinition` now extends HardwareModel (adds: MaxTemp, IsHardened)
+- ✅ ManufacturerId is now non-nullable (required) - community designs use "Unknown" manufacturer
+- ✅ Updated ToolheadModelDto to use non-nullable ManufacturerId
+- ✅ Updated ICatalogRepository, EfCatalogRepository, DatabaseInitializer for non-nullable ManufacturerId
+- ✅ Updated TypeScript ToolheadModelDefinition interface to use required manufacturerId
 
-**2. TypeScript Types** (`src/Web/ReactApp/src/types/api.ts`)
-- ✅ `ToolheadDto` interface with id, name, index, nozzleDiameter, maxHotendTemp, supportedMaterials, isPrimary, lastUpdated
-- ✅ `UpdateToolheadDto` interface for update operations
-- ✅ `PrinterDetails` extended with `toolheads?: ToolheadDto[]`
-- ✅ `UpdatePrinterDto` extended with `toolheads?: UpdateToolheadDto[]`
+**Frontend UI Integration**:
+- ✅ Added useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels hooks to EditModelModal
+- ✅ Replaced read-only Toolhead Model input with Select dropdown populated from toolheadModels
+- ✅ Replaced read-only Extruder input with Select dropdown populated from extruderModels
+- ✅ Replaced read-only Hotend input with Select dropdown populated from hotendModels
+- ✅ Replaced read-only Nozzle Model input with Select dropdown populated from nozzleModels
+- ✅ Dropdowns show "Manufacturer - Name" format with additional info (gear ratio, high flow, hardened)
 
-**3. EditPrinterModal UI Update** (`src/features/printers/components/EditPrinterModal.tsx`)
-- ✅ Added `toolheads` state (UpdateToolheadDto[]) to track toolhead edits
-- ✅ Added `expandedToolheads` state for accordion UI
-- ✅ Initialize toolheads from printerDetails.toolheads on load
-- ✅ Added `handleToolheadChange` function for individual toolhead field updates
-- ✅ Added `toggleToolheadExpanded` function for accordion UX
-- ✅ Updated `handleSubmit` to include toolheads array in update request
-- ✅ Added collapsible Toolheads section showing:
-  - Toolhead count in header
-  - Clickable accordion headers with expand/collapse icons
-  - Primary toolhead badge
-  - Summary view (nozzle diameter, max temp) when collapsed
-  - Full edit form when expanded:
-    - Name input
-    - Nozzle Diameter input
-    - Max Hotend Temp input
-    - Supported Materials selector (FilamentTypeSelector)
-    - Index input
-    - Primary Toolhead checkbox (auto-unsets other primaries)
+### Files Modified
 
-### Code Quality Metrics
+**Backend**:
+- `src/infra/Domain/ComponentModels.cs` - Extracted HardwareModel base class, all 4 component models extend it
+- `src/infra/Repositories/Catalog/ICatalogRepository.cs` - Changed toolhead ManufacturerId from Guid? to Guid
+- `src/infra/Repositories/Catalog/EfCatalogRepository.cs` - Updated toolhead method signature and ordering
+- `src/infra/Models.cs` - Changed ToolheadModelDto ManufacturerId from Guid? to Guid
+- `src/api/Services/DatabaseInitializer.cs` - Updated toolhead seeding for required ManufacturerId
 
-✅ **Build Status**: All systems passing
-- React production build: ✓ 10.00s
-- .NET API build: ✓ 0 errors
-- TypeScript compilation: ✓ 0 errors
+**Frontend**:
+- `src/Web/ReactApp/src/types/api.ts` - Changed ToolheadModelDefinition.manufacturerId from optional to required
+- `src/Web/ReactApp/src/features/models3d/components/EditModelModal.tsx` - Added component model hooks and Select dropdowns
 
-✅ **Test Results**: All passing
-- React unit tests: 474/474 passed (e2e config issues are pre-existing)
-- API printer tests: 225/225 passed
+### Build Status
+✅ **.NET Build**: Passed (0 errors, 0 warnings)
+✅ **React Build**: Passed (10.27s)
+✅ **React Tests**: 474/474 passed
 
 ---
 
-# Previous Session: Printer Model Alias Management UI
+# Previous Session: Component Model API Integration
+```typescript
+import { useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
+
+// Example usage:
+const { data: hotends, isLoading } = useHotendModels();
+const { data: extruders } = useExtruderModels();
+const { data: toolheads } = useToolheadModels();
+const { data: nozzles } = useNozzleModels();
+```
+
+---
+
+# Previous Session: Edit Printer Toolheads UI
 
 ✅ **Linting**: 
 - ModelAliasEditor.tsx: 0 errors, 0 warnings

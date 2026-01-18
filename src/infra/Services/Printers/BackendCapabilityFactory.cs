@@ -202,6 +202,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         {
             _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} NOT FOUND in capabilities cache!");
         }
+
         return TryGetClientWithCapability(backend, BackendCapabilities.FileList, out client);
     }
 
@@ -286,6 +287,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = cameraClient;
             return true;
         }
+
         return false;
     }
 
@@ -297,6 +299,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = detectionClient;
             return true;
         }
+
         return false;
     }
 
@@ -308,6 +311,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = historyClient;
             return true;
         }
+
         return false;
     }
 
@@ -319,6 +323,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = movementClient;
             return true;
         }
+
         return false;
     }
 
@@ -330,6 +335,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = tempClient;
             return true;
         }
+
         return false;
     }
 
@@ -341,6 +347,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = controlClient;
             return true;
         }
+
         return false;
     }
 
@@ -352,6 +359,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = uploadClient;
             return true;
         }
+
         return false;
     }
 
@@ -363,6 +371,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             client = startPrintClient;
             return true;
         }
+
         return false;
     }
 

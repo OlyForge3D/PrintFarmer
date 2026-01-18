@@ -5,7 +5,9 @@ namespace Farm.Infrastructure.Services;
 public interface IDiscoveryProgressCache
 {
     void Set(string sessionId, DiscoveryProgressDto progress);
+
     bool TryGet(string sessionId, out DiscoveryProgressDto? progress);
+
     void Remove(string sessionId);
 
     /// <summary>
@@ -58,6 +60,7 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
             cts.Cancel();
             return true;
         }
+
         return false;
     }
 }

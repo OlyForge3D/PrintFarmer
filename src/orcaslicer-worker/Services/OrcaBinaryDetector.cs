@@ -55,8 +55,10 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 {
                     // ignored
                 }
+
                 return false;
             }
+
             return proc.ExitCode == 0 || proc.ExitCode == 1;
         }
         catch { return false; }
@@ -90,6 +92,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             {
                 _ = tcs.TrySetResult(true);
             }
+
             proc.EnableRaisingEvents = true;
             proc.Exited += OnExited;
 

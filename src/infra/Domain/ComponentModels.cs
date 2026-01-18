@@ -7,6 +7,7 @@
 public abstract class HardwareModel
 {
     public Guid Id { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     /// <summary>

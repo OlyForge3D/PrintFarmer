@@ -33,6 +33,7 @@ namespace Farm.Web.Api.Services.OctoPrint
                 _logger.LogWarning("Missing X-Api-Key header while requirement is enabled.");
                 return false;
             }
+
             // Check for global admin key from configuration (appsettings or secret)
             string? globalKey = _config["OctoPrint:GlobalApiKey"];
             if (!string.IsNullOrEmpty(globalKey) && string.Equals(globalKey, apiKey, StringComparison.Ordinal))

@@ -113,10 +113,12 @@ public class ArtifactsController(
             {
                 return "gcode";
             }
+
             if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
                 return "thumbnail";
             }
+
             if (file.ContentType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
             {
                 return "log";
@@ -175,6 +177,7 @@ public class ArtifactsController(
         {
             return BadRequest(new { error = "unsupported artifact kind", allowedKinds = allowed });
         }
+
         try
         {
             Artifact artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);

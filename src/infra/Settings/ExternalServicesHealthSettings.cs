@@ -10,6 +10,7 @@ public class ExternalServicesHealthSettings : IAppSetting, IValidatableSetting
 {
     // SectionKey required by the IAppSetting static abstract - kept for reflection/consistency
     public static string SectionKey => "ExternalServicesHealth";
+
     [JsonPropertyName("percentFailedThreshold")]
     [SettingDisplay(Name = "Percent Failed Threshold", Description = "Percent of failed external services required to mark the system Unhealthy (0-100).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 100, Order = 10)]
     public int PercentFailedThreshold { get; set; } = 100; // 0-100, default 100 means only Unhealthy when 100% fail

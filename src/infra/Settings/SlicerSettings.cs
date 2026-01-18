@@ -7,6 +7,7 @@ namespace Farm.Infrastructure.Settings;
 public class SlicerSettings : IAppSetting
 {
     public const string SectionName = "Slicer";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Slicer Enabled", Description = "Enable or disable slicer integration.", InputType = SettingInputType.Boolean)]

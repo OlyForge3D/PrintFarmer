@@ -9,6 +9,7 @@ namespace Farm.Infrastructure.Settings;
 public sealed class TempTargets
 {
     public TempTargets() { }
+
     public TempTargets(int hotend, int bed)
     {
         Hotend = hotend;

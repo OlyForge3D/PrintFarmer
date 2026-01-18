@@ -11,9 +11,13 @@ public sealed class SliceJobMetrics : IDisposable
     private bool _disposed;
 
     public Counter<long> JobsCompletedTotal { get; }
+
     public Counter<long> JobsCompletedWithLogTotal { get; }
+
     public Histogram<int> ArtifactsPerJobHistogram { get; }
+
     public Counter<long> JobsTimedOutTotal { get; }
+
     public Counter<long> JobRetriesTotal { get; }
 
     public SliceJobMetrics()

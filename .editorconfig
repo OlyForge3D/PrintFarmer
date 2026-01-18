@@ -209,16 +209,16 @@ dotnet_diagnostic.SA1600.severity = none
 dotnet_diagnostic.SA1601.severity = none
 
 # SA1602: Enumeration items should be documented
-dotnet_diagnostic.SA1602.severity = none
+dotnet_diagnostic.SA1602.severity = warning
 
 # SA1413: Use trailing comma in multi-line initializers - style preference
 dotnet_diagnostic.SA1413.severity = suggestion
 
 # SA1513: Closing brace should be followed by blank line - too strict
-dotnet_diagnostic.SA1513.severity = suggestion
+dotnet_diagnostic.SA1513.severity = warning
 
 # SA1200: Using directives should be placed correctly - we use file-scoped namespaces
-dotnet_diagnostic.SA1200.severity = none
+dotnet_diagnostic.SA1200.severity = warning
 
 # SA1309: Field names should not begin with underscore - conflicts with our naming convention
 dotnet_diagnostic.SA1309.severity = none
@@ -226,23 +226,23 @@ dotnet_diagnostic.SA1309.severity = none
 # SA1310: Field names should not contain underscore - conflicts with our naming convention
 dotnet_diagnostic.SA1310.severity = none
 
-# SA1503: Braces should not be omitted - we enforce braces via IDE0011
-dotnet_diagnostic.SA1503.severity = none
+# SA1503: Braces should not be omitted
+dotnet_diagnostic.SA1503.severity = warning
 
-# SA1516: Elements should be separated by blank line - too strict
-dotnet_diagnostic.SA1516.severity = suggestion
+# SA1516: Elements should be separated by blank line
+dotnet_diagnostic.SA1516.severity = warning
 
 # SA1128: Put constructor initializers on their own line - style preference
 dotnet_diagnostic.SA1128.severity = suggestion
 
 # SA1402: File may only contain a single type - we allow multiple related types
-dotnet_diagnostic.SA1402.severity = none
+dotnet_diagnostic.SA1402.severity = warning
 
 # SA1649: File name should match first type name - not always desirable
-dotnet_diagnostic.SA1649.severity = suggestion
+dotnet_diagnostic.SA1649.severity = warning
 
 # SA1400: Access modifier should be declared - records and primary constructors
-dotnet_diagnostic.SA1400.severity = none
+dotnet_diagnostic.SA1400.severity = warning
 
 ##############################################
 # Recommended Member Order (StyleCop Default)

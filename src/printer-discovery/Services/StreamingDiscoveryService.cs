@@ -187,6 +187,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                             {
                                 discovered.Add(result);
                             }
+
                             _logger.LogInformation("[STREAMING-DISCOVERY] Found NEW printer at {Ip}: {Name}", ip, result.Name);
 
                             // Broadcast printer found event immediately

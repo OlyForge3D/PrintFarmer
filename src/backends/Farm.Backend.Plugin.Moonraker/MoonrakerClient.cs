@@ -176,6 +176,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             {
                 state = stNode.GetString();
             }
+
             // Only report job details when printing
             if (!string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase))
             {
@@ -199,8 +200,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     catch
                     {
                     }
+
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
+
                 if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
                     ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
                 {
@@ -404,6 +407,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         catch
         {
         }
+
         // Prefer print job state (printing, paused, complete) over system state, but not for error states
         // If system is shutdown/error, that takes precedence over print_stats state
         string? state = null;
@@ -419,6 +423,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             // Otherwise prefer job state if available
             state = job?.PrintState ?? status.State;
         }
+
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try
@@ -442,6 +447,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
                         { try { hotendT = tt.GetDouble(); } catch { } }
                     }
+
                     if (status2.TryGetProperty("heater_bed", out JsonElement hb))
                     {
                         if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
@@ -463,6 +469,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             cam = streamUrl;
             snap = snapshotUrl;
         }
+
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
     }
 
@@ -685,6 +692,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         enabled = true;
                     }
                 }
+
                 if (!enabled)
                 {
                     continue;
@@ -760,6 +768,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         stream = NormalizeCameraUrl(s, baseUrl);
                     }
                 }
+
                 if (snapshot is null && cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
                 {
                     string? s = sn.GetString();
@@ -796,6 +805,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         {
             _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
+
         return (stream, snapshot);
     }
 
@@ -919,6 +929,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     }
                 }
             }
+
             return files;
         }
         catch
@@ -951,6 +962,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         {
             // Silently fail if thumbnail retrieval fails
         }
+
         return null;
     }
 
@@ -1666,6 +1678,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                 _logger.LogWarning($"[Moonraker] History response deserialization returned null");
                 return null;
             }
+
             _logger.LogInformation($"[Moonraker] Successfully fetched {response.Result.Count} history items");
             return response.Result;
         }

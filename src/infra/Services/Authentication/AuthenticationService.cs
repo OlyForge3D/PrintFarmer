@@ -117,14 +117,17 @@ public class AuthenticationService(
                 UserDto? dtoExisting = await GetUserWithRolesAndPermissionsAsync(existing.Id);
                 return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), dtoExisting);
             }
+
             if (await _usersRepository.UsernameExistsStrictAsync(request.Username))
             {
                 return new AuthenticationResult(false, Error: "Username is already taken");
             }
+
             if (await _usersRepository.EmailExistsStrictAsync(request.Email))
             {
                 return new AuthenticationResult(false, Error: "Email is already registered");
             }
+
             User user = new()
             {
                 Id = Guid.NewGuid(),
@@ -144,6 +147,7 @@ public class AuthenticationService(
             {
                 await _usersRepository.UpdateUserRolesAsync(user.Id, new[] { defaultRole.Id });
             }
+
             await _usersRepository.SaveChangesAsync();
 
             // Audit log successful registration
@@ -210,6 +214,7 @@ public class AuthenticationService(
             {
                 return false;
             }
+
             byte[] keyBytes = Encoding.UTF8.GetBytes(rawKey);
 #pragma warning disable S6781
             TokenValidationParameters parms = new()
@@ -247,6 +252,7 @@ public class AuthenticationService(
             {
                 return null;
             }
+
             byte[] keyBytes = Encoding.UTF8.GetBytes(rawKey);
 #pragma warning disable S6781
             TokenValidationParameters parms = new()
@@ -285,6 +291,7 @@ public class AuthenticationService(
     }
 
     public Task<User?> GetUserByUsernameAsync(string username) => _usersRepository.GetByUsernameAsync(username);
+
     public Task<User?> GetUserByEmailAsync(string email) => _usersRepository.GetByEmailAsync(email);
 
     public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
@@ -294,6 +301,7 @@ public class AuthenticationService(
         {
             return false;
         }
+
         // Diagnostic logging to help tests: print a short preview of the stored hash and verification result
         try
         {
@@ -314,6 +322,7 @@ public class AuthenticationService(
         {
             return false;
         }
+
         string newHash = _passwordHashing.HashPassword(newPassword);
         bool success = await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
 
@@ -590,6 +599,7 @@ public class AuthenticationService(
         {
             return null;
         }
+
         string[] roles = (await _usersRepository.GetActiveRoleNamesAsync(user.Id)).ToArray();
         string[] permissions = (await _usersRepository.GetGrantedPermissionsAsync(user.Id))
             .Select(p => $"{p.Resource}:{p.Action}")

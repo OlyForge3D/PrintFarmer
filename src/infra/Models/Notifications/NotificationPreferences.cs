@@ -11,6 +11,7 @@ public class NotificationPreferences
     /// User these preferences belong to
     /// </summary>
     public Guid UserId { get; set; }
+
     public virtual User? User { get; set; }
 
     /// <summary>

@@ -187,6 +187,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
             // Join with FolderNode and filter by path
             query = query.Where(m => m.Folder != null && m.Folder.Path == normalizedPath);
         }
+
         // If path is null/empty, include ALL files (no filter)
 
         // Apply search filter at database level

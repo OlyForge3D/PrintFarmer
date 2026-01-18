@@ -10,7 +10,9 @@ namespace Farm.Infrastructure.Settings;
 public class GcodeUploadSettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "GcodeUpload";
+
     public static string SectionKey => SectionName;
+
     private static readonly List<string> _defaultExtensions = new() { ".gcode" };
 
     [SettingDisplay(Name = "Allowed Extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
@@ -29,6 +31,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
         {
             throw new ValidationException("At least one allowed extension is required.");
         }
+
         if (DailyUploadLimitBytes < 1)
         {
             throw new ValidationException("DailyUploadLimitBytes must be positive.");

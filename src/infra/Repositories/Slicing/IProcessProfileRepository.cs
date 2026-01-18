@@ -12,17 +12,29 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 public interface IProcessProfileRepository
 {
     Task<ProcessProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetByUserAsync(Guid userId, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetPublicAsync(CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem, Guid? userId = null, CancellationToken ct = default);
+
     Task<ProcessProfile?> GetDefaultAsync(SlicerType engine, Guid? userId = null, CancellationToken ct = default);
+
     Task<ProcessProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
+
     Task AddAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task UpdateAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task DeleteAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task SetDefaultAsync(ProcessProfile profile, Guid? userId, CancellationToken ct = default);
+
     Task<ProcessProfile> AddOrUpdateFromImportAsync(ProcessProfile imported, bool allowSystemOverride, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default);
+
     Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
 }
 
@@ -108,6 +120,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             existing.IsDefault = false;
             existing.UpdatedAt = DateTime.UtcNow;
         }
+
         profile.IsDefault = true;
         profile.UpdatedAt = DateTime.UtcNow;
         _ = await _db.SaveChangesAsync(ct);
@@ -132,11 +145,13 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             _ = await _db.SaveChangesAsync(ct);
             return imported;
         }
+
         // If existing is system and override not allowed, just return existing
         if (existing.IsSystem && !allowSystemOverride)
         {
             return existing;
         }
+
         // Update mutable fields
         existing.Name = imported.Name;
         existing.Description = imported.Description;

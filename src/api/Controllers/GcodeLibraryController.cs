@@ -77,10 +77,12 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
             {
                 return BadRequest("Metadata is required");
             }
+
             if (file == null || file.Length == 0)
             {
                 return BadRequest("No file provided");
             }
+
             if (!file.FileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest("File must be a .gcode file");
@@ -116,6 +118,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
             {
                 return BadRequest("Request body is required");
             }
+
             // Delegate update entirely to the service
             GcodeFileDto updated = await gcodeService.UpdateFileAsync(id, request, CancellationToken.None);
             return updated == null ? NotFound($"G-code file with ID {id} not found") : Ok(updated);

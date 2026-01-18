@@ -175,6 +175,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
         }
+
         return !File.Exists(gcodeFilePath)
             ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
             : gcodeFilePath;
@@ -235,44 +236,53 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
             }
+
             Match fm = filamentRegex.Match(line);
             if (fm.Success)
             {
                 double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                 metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
             }
+
             Match lc = layerRegex.Match(line);
             if (lc.Success)
             {
                 metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
             }
+
             Match lcm = layerCommentRegex.Match(line);
             if (lcm.Success)
             {
                 maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
             }
         }
+
         if (metadata.LayerCount == 0 && maxLayer > 0)
         {
             metadata.LayerCount = maxLayer + 1;
         }
+
         const double epsilon = 0.0001;
         if (Math.Abs(metadata.PrintTimeSeconds) < epsilon)
         {
             metadata.PrintTimeSeconds = metadata.LayerCount > 0 ? metadata.LayerCount * 120 : 1800;
         }
+
         if (Math.Abs(metadata.FilamentUsageGrams) < epsilon)
         {
             metadata.FilamentUsageGrams = Math.Max(5.0, fileInfo.Length / 50000.0);
         }
+
         if (metadata.LayerCount == 0)
         {
             metadata.LayerCount = lines.Count(l => l.StartsWith("G1 Z", StringComparison.Ordinal) || l.StartsWith("G0 Z", StringComparison.Ordinal));
         }
+
         if (metadata.LayerCount == 0)
         {
             metadata.LayerCount = 100;
         }
+
         return metadata;
     }
 
@@ -287,7 +297,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private sealed class GcodeMetadata
     {
         public double PrintTimeSeconds { get; set; }
+
         public double FilamentUsageGrams { get; set; }
+
         public int LayerCount { get; set; }
     }
 

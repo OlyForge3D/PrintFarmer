@@ -21,6 +21,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer status information including online status and state</returns>
     Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default);
+
     // Overload to accept Uri for analyzer CA1054 friendliness
     Task<PrinterStatus> GetStatusAsync(Uri baseUrl, CancellationToken ct = default);
 
@@ -31,6 +32,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer information including hostname, or null if not available</returns>
     Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(string baseUrl, CancellationToken ct = default);
+
     Task<MoonrakerPrinterInfo?> GetPrinterInfoAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -40,6 +42,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing current job information, or null if no job is active</returns>
     Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default);
+
     Task<PrinterJob?> GetJobAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -49,6 +52,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed printer status including temperatures, position, and job progress</returns>
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default);
+
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default);
 
     #endregion
@@ -63,6 +67,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the camera stream URL, or null if configuration fails</returns>
     Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
     Task<string?> GetCameraStreamUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
 
     /// <summary>
@@ -73,6 +78,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the camera snapshot URL, or null if configuration fails</returns>
     Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
     Task<string?> GetCameraSnapshotUrlAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
 
     /// <summary>
@@ -82,6 +88,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the camera snapshot as byte array, or null if no camera is available</returns>
     Task<byte[]?> GetCameraSnapshotAsync(string baseUrl, CancellationToken ct = default);
+
     Task<byte[]?> GetCameraSnapshotAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -93,6 +100,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing (stream URL, snapshot URL) tuple, or (null, null) if no camera is configured</returns>
     Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default);
+
     Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(Uri baseUrl, int? frontendPort = null, CancellationToken ct = default);
 
     #endregion
@@ -125,6 +133,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the home command was successfully sent</returns>
     Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> SendHomeAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -134,6 +143,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the XY home command was successfully sent</returns>
     Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> HomeXYAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -143,6 +153,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the Z home command was successfully sent</returns>
     Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> HomeZAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -154,6 +165,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the temperature commands were successfully sent</returns>
     Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default);
+
     Task<bool> SetTempsAsync(Uri baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default);
 
     /// <summary>
@@ -167,6 +179,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move command was successfully sent</returns>
     Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
+
     Task<bool> MoveAsync(Uri baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
 
     /// <summary>
@@ -180,6 +193,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move command was successfully sent</returns>
     Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
+
     Task<bool> MoveToAsync(Uri baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
 
     #endregion
@@ -193,6 +207,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the pause command was successfully sent</returns>
     Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> PauseAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -202,6 +217,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the resume command was successfully sent</returns>
     Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> ResumeAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -211,6 +227,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the emergency stop command was successfully sent</returns>
     Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> EmergencyStopAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -220,6 +237,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the firmware restart command was successfully sent</returns>
     Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -229,6 +247,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the disable motors command was successfully sent</returns>
     Task<bool> DisableMotorsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> DisableMotorsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -239,6 +258,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the G-code command was successfully sent</returns>
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
+
     Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default);
 
     /// <summary>
@@ -249,6 +269,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the print start command was successfully sent</returns>
     Task<bool> StartPrintAsync(string baseUrl, string fileName, CancellationToken ct = default);
+
     Task<bool> StartPrintAsync(Uri baseUrl, string fileName, CancellationToken ct = default);
 
     #endregion
@@ -262,6 +283,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing an array of G-code file names</returns>
     Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string[]> GetFileListAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -271,6 +293,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing file root information</returns>
     Task<FileRoot[]> GetFileRootsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<FileRoot[]> GetFileRootsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -282,6 +305,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing directory information, or null if the directory doesn't exist</returns>
     Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default);
+
     Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default);
 
     /// <summary>
@@ -292,6 +316,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the create directory response, or null if creation failed</returns>
     Task<DirectoryCreateResponse?> CreateDirectoryAsync(string baseUrl, string path, CancellationToken ct = default);
+
     Task<DirectoryCreateResponse?> CreateDirectoryAsync(Uri baseUrl, string path, CancellationToken ct = default);
 
     /// <summary>
@@ -303,6 +328,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the deletion was successful</returns>
     Task<bool> DeleteFileOrDirectoryAsync(string baseUrl, string path, bool force = false, CancellationToken ct = default);
+
     Task<bool> DeleteFileOrDirectoryAsync(Uri baseUrl, string path, bool force = false, CancellationToken ct = default);
 
     /// <summary>
@@ -314,6 +340,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the move operation was successful</returns>
     Task<bool> MoveFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default);
+
     Task<bool> MoveFileAsync(Uri baseUrl, string source, string dest, CancellationToken ct = default);
 
     /// <summary>
@@ -325,6 +352,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the copy operation was successful</returns>
     Task<bool> CopyFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default);
+
     Task<bool> CopyFileAsync(Uri baseUrl, string source, string dest, CancellationToken ct = default);
 
     /// <summary>
@@ -335,6 +363,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the file deletion was successful</returns>
     Task<bool> DeleteFileAsync(string baseUrl, string path, CancellationToken ct = default);
+
     Task<bool> DeleteFileAsync(Uri baseUrl, string path, CancellationToken ct = default);
 
     /// <summary>
@@ -345,6 +374,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing a stream for reading the file, or null if the file doesn't exist</returns>
     Task<Stream?> GetFileStreamAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<Stream?> GetFileStreamAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     #endregion
@@ -359,6 +389,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing G-code metadata, or null if metadata is not available</returns>
     Task<GCodeMetadata?> GetFileMetadataAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<GCodeMetadata?> GetFileMetadataAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -369,6 +400,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the metadata scan was successfully started</returns>
     Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<bool> StartMetadataScanAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -380,6 +412,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing thumbnail metadata list, or empty list if no thumbnails are available</returns>
     Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -390,6 +423,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the thumbnail image as byte array, or null if no thumbnail is available</returns>
     Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<byte[]?> GetFileThumbnailAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -401,6 +435,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the thumbnail URL relative path, or null if no thumbnail is available</returns>
     Task<string?> GetFileThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<string?> GetFileThumbnailUrlAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -411,6 +446,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the file contents as byte array, or null if the file doesn't exist</returns>
     Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default);
+
     Task<byte[]?> DownloadFileAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
@@ -422,6 +458,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed file information</returns>
     Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(string baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default);
+
     Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(Uri baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default);
 
     #endregion
@@ -437,6 +474,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the upload was successful</returns>
     Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
+
     Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
 
     /// <summary>
@@ -451,6 +489,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing the upload response, or null if upload failed</returns>
     Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content,
         bool print = false, CancellationToken ct = default);
+
     Task<FileUploadResponse?> UploadFileAsync(Uri baseUrl, string root, string filename, Stream content,
         bool print = false, CancellationToken ct = default);
 
@@ -465,6 +504,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing the upload response, or null if upload failed</returns>
     Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content,
         bool print = false, CancellationToken ct = default);
+
     Task<FileUploadResponse?> UploadFileWithPathAsync(Uri baseUrl, string path, Stream content,
         bool print = false, CancellationToken ct = default);
 
@@ -484,6 +524,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the history list response, or null if history is unavailable</returns>
     Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default);
+
     Task<HistoryListResponse?> GetHistoryListAsync(Uri baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default);
 
     /// <summary>
@@ -494,6 +535,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed job information, or null if the job doesn't exist</returns>
     Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default);
+
     Task<HistoryJob?> GetHistoryJobAsync(Uri baseUrl, string jobId, CancellationToken ct = default);
 
     /// <summary>
@@ -504,6 +546,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the job deletion was successful</returns>
     Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default);
+
     Task<bool> DeleteHistoryJobAsync(Uri baseUrl, string jobId, CancellationToken ct = default);
 
     /// <summary>
@@ -513,6 +556,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing history totals and statistics, or null if unavailable</returns>
     Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<HistoryTotals?> GetHistoryTotalsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -522,6 +566,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the history reset was successful</returns>
     Task<bool> ResetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<bool> ResetHistoryTotalsAsync(Uri baseUrl, CancellationToken ct = default);
 
     #endregion
@@ -535,6 +580,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman status information, or null if Spoolman is not configured</returns>
     Task<SpoolmanStatus?> GetSpoolmanStatusAsync(string baseUrl, CancellationToken ct = default);
+
     Task<SpoolmanStatus?> GetSpoolmanStatusAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -544,6 +590,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the active spool ID, or null if no spool is active</returns>
     Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default);
+
     Task<int?> GetSpoolmanActiveSpoolAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -554,6 +601,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the spool activation was successful</returns>
     Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default);
+
     Task<bool> SetSpoolmanActiveSpoolAsync(Uri baseUrl, int? spoolId, CancellationToken ct = default);
 
     /// <summary>
@@ -569,6 +617,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing the Spoolman API response as JSON string, or null if the request failed</returns>
     Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path,
         string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default);
+
     Task<string?> SpoolmanProxyRequestAsync(Uri baseUrl, string method, string path,
         string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default);
 
@@ -583,6 +632,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the spools list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanSpoolsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -593,6 +643,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing spool information as JSON string, or null if the spool doesn't exist</returns>
     Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanSpoolByIdAsync(Uri baseUrl, int spoolId, CancellationToken ct = default);
 
     /// <summary>
@@ -603,6 +654,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created spool information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanSpoolAsync(string baseUrl, object spoolData, CancellationToken ct = default);
+
     Task<string?> CreateSpoolmanSpoolAsync(Uri baseUrl, object spoolData, CancellationToken ct = default);
 
     /// <summary>
@@ -614,6 +666,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated spool information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanSpoolAsync(string baseUrl, int spoolId, object spoolData, CancellationToken ct = default);
+
     Task<string?> UpdateSpoolmanSpoolAsync(Uri baseUrl, int spoolId, object spoolData, CancellationToken ct = default);
 
     /// <summary>
@@ -624,6 +677,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the spool deletion was successful</returns>
     Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default);
+
     Task<bool> DeleteSpoolmanSpoolAsync(Uri baseUrl, int spoolId, CancellationToken ct = default);
 
     #endregion
@@ -637,6 +691,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the filaments list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanFilamentsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanFilamentsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -647,6 +702,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing filament information as JSON string, or null if the filament doesn't exist</returns>
     Task<string?> GetSpoolmanFilamentByIdAsync(string baseUrl, int filamentId, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanFilamentByIdAsync(Uri baseUrl, int filamentId, CancellationToken ct = default);
 
     /// <summary>
@@ -657,6 +713,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created filament information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanFilamentAsync(string baseUrl, object filamentData, CancellationToken ct = default);
+
     Task<string?> CreateSpoolmanFilamentAsync(Uri baseUrl, object filamentData, CancellationToken ct = default);
 
     /// <summary>
@@ -668,6 +725,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated filament information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanFilamentAsync(string baseUrl, int filamentId, object filamentData, CancellationToken ct = default);
+
     Task<string?> UpdateSpoolmanFilamentAsync(Uri baseUrl, int filamentId, object filamentData, CancellationToken ct = default);
 
     /// <summary>
@@ -678,6 +736,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the filament deletion was successful</returns>
     Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default);
+
     Task<bool> DeleteSpoolmanFilamentAsync(Uri baseUrl, int filamentId, CancellationToken ct = default);
 
     #endregion
@@ -691,6 +750,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the vendors list as JSON string, or null if the request failed</returns>
     Task<string?> GetSpoolmanVendorsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanVendorsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -701,6 +761,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing vendor information as JSON string, or null if the vendor doesn't exist</returns>
     Task<string?> GetSpoolmanVendorByIdAsync(string baseUrl, int vendorId, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanVendorByIdAsync(Uri baseUrl, int vendorId, CancellationToken ct = default);
 
     /// <summary>
@@ -711,6 +772,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the created vendor information as JSON string, or null if creation failed</returns>
     Task<string?> CreateSpoolmanVendorAsync(string baseUrl, object vendorData, CancellationToken ct = default);
+
     Task<string?> CreateSpoolmanVendorAsync(Uri baseUrl, object vendorData, CancellationToken ct = default);
 
     /// <summary>
@@ -722,6 +784,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the updated vendor information as JSON string, or null if update failed</returns>
     Task<string?> UpdateSpoolmanVendorAsync(string baseUrl, int vendorId, object vendorData, CancellationToken ct = default);
+
     Task<string?> UpdateSpoolmanVendorAsync(Uri baseUrl, int vendorId, object vendorData, CancellationToken ct = default);
 
     /// <summary>
@@ -732,6 +795,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the vendor deletion was successful</returns>
     Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default);
+
     Task<bool> DeleteSpoolmanVendorAsync(Uri baseUrl, int vendorId, CancellationToken ct = default);
 
     #endregion
@@ -746,6 +810,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the filament usage was successfully recorded</returns>
     Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default);
+
     Task<bool> UseSpoolmanFilamentAsync(Uri baseUrl, double length, CancellationToken ct = default);
 
     /// <summary>
@@ -755,6 +820,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman server information as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanInfoAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanInfoAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -764,6 +830,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing Spoolman health information as JSON string, or null if health check failed</returns>
     Task<string?> GetSpoolmanHealthAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanHealthAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -778,6 +845,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing search results as JSON string, or null if search failed</returns>
     Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default);
+
     Task<string?> SearchSpoolmanSpoolsAsync(Uri baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default);
 
@@ -792,6 +860,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing search results as JSON string, or null if search failed</returns>
     Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
         int? limit = null, int? offset = null, CancellationToken ct = default);
+
     Task<string?> SearchSpoolmanFilamentsAsync(Uri baseUrl, string? query = null,
         int? limit = null, int? offset = null, CancellationToken ct = default);
 
@@ -804,6 +873,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the archive operation was successful</returns>
     Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default);
+
     Task<bool> ArchiveSpoolmanSpoolAsync(Uri baseUrl, int spoolId, bool archived = true, CancellationToken ct = default);
 
     /// <summary>
@@ -813,6 +883,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing statistics as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanStatsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanStatsAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -822,6 +893,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing backup information as JSON string, or null if backup failed</returns>
     Task<string?> BackupSpoolmanAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> BackupSpoolmanAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
@@ -831,6 +903,7 @@ public interface IMoonrakerClient : IBackendClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing integration information as JSON string, or null if unavailable</returns>
     Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default);
+
     Task<string?> GetSpoolmanIntegrationsAsync(Uri baseUrl, CancellationToken ct = default);
 
     #endregion

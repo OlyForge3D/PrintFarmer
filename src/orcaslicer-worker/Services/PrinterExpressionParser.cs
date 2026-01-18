@@ -173,6 +173,7 @@ public static class PrinterExpressionParser
             {
                 _ = pattern.Append(_expression[_position++]);
             }
+
             Consume('/');
             return pattern.ToString();
         }
@@ -190,6 +191,7 @@ public static class PrinterExpressionParser
                 {
                     _ = value.Append(_expression[_position++]);
                 }
+
                 Consume('"');
                 return value.ToString();
             }
@@ -208,6 +210,7 @@ public static class PrinterExpressionParser
             {
                 _ = id.Append(_expression[_position++]);
             }
+
             return id.ToString();
         }
 
@@ -223,6 +226,7 @@ public static class PrinterExpressionParser
             {
                 _ = num.Append(_expression[_position++]);
             }
+
             return num.ToString();
         }
 

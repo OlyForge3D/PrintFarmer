@@ -16,6 +16,7 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
         {
             correlationId = context.TraceIdentifier;
         }
+
         // Store in HttpContext.Items for downstream access
         context.Items["CorrelationId"] = correlationId;
 

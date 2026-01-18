@@ -104,14 +104,17 @@ public static class DatabaseInitializationExtensions
                                 {
                                     found.Add(reader.GetString(0));
                                 }
+
                                 if (Array.TrueForAll(required, r => found.Contains(r)))
                                 {
                                     allPresent = true;
                                     break;
                                 }
+
                                 attempts++;
                                 await Task.Delay(delayMs, startupCts.Token);
                             }
+
                             if (!allPresent)
                             {
                                 logger.LogWarning("[Startup] Core tables did not appear within the short wait window. Seeding will proceed but may retry on missing-table errors.");
@@ -169,6 +172,7 @@ public static class DatabaseInitializationExtensions
                             {
                                 tables.Add(reader.GetString(0));
                             }
+
                             if (!tables.Contains("Manufacturers") || !tables.Contains("FilamentTypes"))
                             {
                                 logger.LogWarning("[Startup] Core domain tables not present yet: {Tables}. Will proceed but this may indicate a seeding issue. TablesFound={TablesFound}", string.Join(',', tables), tables.Count);

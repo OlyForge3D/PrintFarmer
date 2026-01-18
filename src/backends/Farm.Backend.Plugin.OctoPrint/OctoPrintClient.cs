@@ -21,8 +21,11 @@ namespace Farm.Backend.Plugin.OctoPrint;
 public sealed class OctoPrintPrinterState
 {
     public bool Operational { get; set; }
+
     public bool Printing { get; set; }
+
     public string State { get; set; } = string.Empty;
+
     public Dictionary<string, object>? Temperatures { get; set; }
 }
 
@@ -32,9 +35,13 @@ public sealed class OctoPrintPrinterState
 public sealed class OctoPrintJobStatus
 {
     public string? Filename { get; set; }
+
     public double? Progress { get; set; }
+
     public double? PrintTime { get; set; }
+
     public double? PrintTimeLeft { get; set; }
+
     public Dictionary<string, object>? Filament { get; set; }
 }
 
@@ -414,6 +421,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     state = stateProp.GetString();
                     isOnline = state != null && state != "Offline";
                 }
+
                 if (root.TryGetProperty("temperature", out JsonElement tempProp))
                 {
                     if (tempProp.TryGetProperty("tool0", out JsonElement tool0))
@@ -422,17 +430,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                         {
                             hotendTemp = actual.GetDouble();
                         }
+
                         if (tool0.TryGetProperty("target", out JsonElement target))
                         {
                             hotendTarget = target.GetDouble();
                         }
                     }
+
                     if (tempProp.TryGetProperty("bed", out JsonElement bed))
                     {
                         if (bed.TryGetProperty("actual", out JsonElement actual))
                         {
                             bedTemp = actual.GetDouble();
                         }
+
                         if (bed.TryGetProperty("target", out JsonElement target))
                         {
                             bedTarget = target.GetDouble();
@@ -446,10 +457,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     {
                         x = xProp.GetDouble();
                     }
+
                     if (posProp.TryGetProperty("y", out JsonElement yProp))
                     {
                         y = yProp.GetDouble();
                     }
+
                     if (posProp.TryGetProperty("z", out JsonElement zProp))
                     {
                         z = zProp.GetDouble();
@@ -475,6 +488,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                         progress = completion.GetDouble();
                     }
                 }
+
                 if (root.TryGetProperty("job", out JsonElement jobProp))
                 {
                     if (jobProp.TryGetProperty("file", out JsonElement fileProp))
@@ -1546,12 +1560,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     state.State = textProp.GetString() ?? string.Empty;
                 }
+
                 if (stateObj.TryGetProperty("flags", out JsonElement flagsProp))
                 {
                     if (flagsProp.TryGetProperty("operational", out JsonElement opProp))
                     {
                         state.Operational = opProp.GetBoolean();
                     }
+
                     if (flagsProp.TryGetProperty("printing", out JsonElement printProp))
                     {
                         state.Printing = printProp.GetBoolean();
@@ -1594,6 +1610,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     status.Filename = nameProp.GetString();
                 }
+
                 if (jobObj.TryGetProperty("filament", out JsonElement filamentObj))
                 {
                     status.Filament = new Dictionary<string, object>();
@@ -1610,10 +1627,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     status.Progress = completionProp.GetDouble(); // OctoPrint sends 0-100, keep as-is
                 }
+
                 if (progressObj.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
                 {
                     status.PrintTime = printTimeProp.GetDouble();
                 }
+
                 if (progressObj.TryGetProperty("printTimeLeft", out JsonElement leftProp) && leftProp.ValueKind != JsonValueKind.Null)
                 {
                     status.PrintTimeLeft = leftProp.GetDouble();

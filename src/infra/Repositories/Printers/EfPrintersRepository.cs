@@ -91,6 +91,7 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
         {
             q = q.Where(p => ids.Contains(p.Id));
         }
+
         return await q.ToListAsync(ct);
     }
 

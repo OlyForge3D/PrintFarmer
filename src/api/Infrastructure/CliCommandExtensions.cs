@@ -70,6 +70,7 @@ public static class CliCommandExtensions
             {
                 await Console.Error.WriteLineAsync($"[CLI] Database initialization failed: {ex.Message}");
             }
+
             Environment.Exit(1);
         }
 

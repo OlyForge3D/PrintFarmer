@@ -275,6 +275,7 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
                     _logger.LogWarning($"Failed to parse transform matrix value at index {i}: {parts[i]}");
                     return vertices;
                 }
+
                 matrix[i] = val;
             }
 
@@ -393,22 +394,31 @@ public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3Mf
     private class ComponentData
     {
         public int Index { get; set; }
+
         public List<(float x, float y, float z)> Vertices { get; set; } = new();
+
         public List<(int v1, int v2, int v3)> Triangles { get; set; } = new();
 
         // Bounding box in original coordinates
         public float MinX { get; set; }
+
         public float MaxX { get; set; }
+
         public float MinY { get; set; }
+
         public float MaxY { get; set; }
+
         public float MinZ { get; set; }
+
         public float MaxZ { get; set; }
 
         // Grid layout offsets to position on XY plane
         public float GridOffsetX { get; set; }
+
         public float GridOffsetY { get; set; }
 
         public float Width => MaxX - MinX;
+
         public float Length => MaxY - MinY;
     }
 

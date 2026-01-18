@@ -33,6 +33,7 @@ namespace Farm.Web.Api.Services.SlicerServices
                 // WorkerId may be a GUID string in the shared model; try fallback
                 wid = Guid.NewGuid();
             }
+
             SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
             return job == null ? null : ToDistributedJob(job);
         }

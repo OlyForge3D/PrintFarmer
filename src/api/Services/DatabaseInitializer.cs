@@ -123,6 +123,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         await Task.Delay(TimeSpan.FromSeconds(2));
                     }
                 }
+
                 _logger.LogInformation("[DB] Database initialization completed successfully");
                 return; // Success - exit retry loop
             }
@@ -205,6 +206,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     _ = _context.Manufacturers.Add(existing);
                     _ = await _context.SaveChangesAsync();
                 }
+
                 manufacturers[normalized] = existing;
             }
 
@@ -278,6 +280,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 {
                     continue;
                 }
+
                 bool exists = await _context.PrinterModels.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
@@ -301,6 +304,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     });
                 }
             }
+
             _ = await _context.SaveChangesAsync();
             await SeedPrinterModelAliasesAsync();
             await SeedModelFilamentTypesAsync(modelSeeds);
@@ -522,6 +526,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     }
                 }
             }
+
             try
             {
                 _ = await _context.SaveChangesAsync();
@@ -565,6 +570,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 _ = _context.FilamentTypes.Add(filamentType);
             }
         }
+
         try
         {
             _ = await _context.SaveChangesAsync();
@@ -865,6 +871,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         {
             return;
         }
+
         await SeedActionsAsync();
         await SeedResourcesAsync();
         await SeedRolesAsync();
@@ -906,6 +913,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         {
             return false;
         }
+
         // Walk inner exceptions to find DB-specific messages
         Exception? e = ex;
         while (e != null)
@@ -916,11 +924,13 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             {
                 return true;
             }
+
             // Postgres
             if (msg.Contains("duplicate key value", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique_violation", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
+
             // SQL Server
             if (msg.Contains("violation of unique", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase))
             {
@@ -929,6 +939,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
             e = e.InnerException;
         }
+
         return false;
     }
 
@@ -1020,6 +1031,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 }
             }
         }
+
         Role? userRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_user");
         if (userRole != null)
         {
@@ -1056,6 +1068,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             }
         }
     }
+
     // === END: Seeding logic merged from DatabaseSeeder ===
 
     /// <summary>

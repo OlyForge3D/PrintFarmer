@@ -965,6 +965,7 @@ public class PrintQueueService(
             {
                 query = query.Where(pj => pj.ActualStartTime >= dateFrom || pj.CreatedAt >= dateFrom);
             }
+
             if (dateTo.HasValue)
             {
                 query = query.Where(pj => pj.ActualEndTime <= dateTo || pj.CreatedAt <= dateTo);
@@ -1138,6 +1139,7 @@ public class PrintQueueService(
             {
                 query = query.Where(pj => pj.ActualEndTime >= dateFrom);
             }
+
             if (dateTo.HasValue)
             {
                 query = query.Where(pj => pj.ActualEndTime <= dateTo);

@@ -11,8 +11,11 @@ namespace Farm.Web.Api.Data.Repositories
     public interface IPrintApprovalRepository
     {
         Task AddAsync(PrintApproval approval);
+
         Task<PrintApproval?> GetAsync(Guid id);
+
         Task RemoveAsync(PrintApproval approval);
+
         Task<IEnumerable<PrintApproval>> ListPendingAsync();
     }
 

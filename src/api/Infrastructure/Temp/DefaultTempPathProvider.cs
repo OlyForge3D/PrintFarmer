@@ -37,6 +37,7 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
             {
                 // swallow – final fallback
             }
+
             _tempRoot = fallback;
         }
     }

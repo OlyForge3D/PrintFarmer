@@ -313,6 +313,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     ? await dbContext.Printers.ToListAsync(cancellationToken)
                     : await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
             }
+
             int externalServiceCount = 0;
             int failedServices = 0;
             List<object> failedDetails = new();

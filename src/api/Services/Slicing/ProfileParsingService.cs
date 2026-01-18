@@ -145,6 +145,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         {
             _ = sb.Append(b.ToString("x2")); // lower-case hex for consistency
         }
+
         return sb.ToString();
     }
 

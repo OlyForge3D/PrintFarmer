@@ -103,6 +103,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             {
                 gcodeFile.Tags.Add(tag);
             }
+
             return;
         }
 
@@ -307,6 +308,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     gcodeFile.Tags.Add(tag);
                 }
+
                 break;
 
             case "Model3D":
@@ -317,6 +319,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     model3d.Tags.Add(tag);
                 }
+
                 break;
         }
     }
@@ -342,6 +345,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     gcodeFile.Tags.Remove(tag);
                 }
+
                 break;
 
             case "Model3D":
@@ -352,6 +356,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     model3d.Tags.Remove(tag);
                 }
+
                 break;
         }
     }
@@ -371,6 +376,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     gcodeFile.Tags.Clear();
                 }
+
                 break;
 
             case "Model3D":
@@ -381,6 +387,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
                 {
                     model3d.Tags.Clear();
                 }
+
                 break;
         }
     }

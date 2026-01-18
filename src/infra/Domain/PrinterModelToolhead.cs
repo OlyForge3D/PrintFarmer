@@ -103,9 +103,13 @@ public class PrinterModelToolhead
     #region Navigation Properties
 
     public PrinterModel? PrinterModel { get; set; }
+
     public HotendModelDefinition? HotendModel { get; set; }
+
     public ExtruderModelDefinition? ExtruderModel { get; set; }
+
     public ToolheadModelDefinition? ToolheadModelDef { get; set; }
+
     public NozzleModelDefinition? NozzleModel { get; set; }
 
     #endregion

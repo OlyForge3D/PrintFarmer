@@ -318,6 +318,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
                 return Array.Empty<string>();
             }
+
             return Array.Empty<string>();
         }
         catch (Exception ex)
@@ -370,6 +371,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                     }
                 }
             }
+
             return result;
         }
         catch (Exception ex)
@@ -391,6 +393,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             {
                 _logger?.LogError(legacyEx, "Failed to get file details from legacy endpoint as well");
             }
+
             return result;
         }
     }
@@ -623,6 +626,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
                 return [];
             }
+
             return [];
         }
         catch (Exception ex)
@@ -707,6 +711,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
 #pragma warning disable CA1056 // URI-like properties should not be strings (transport records)
 public record PrusaStatus(bool IsOnline, string? State);
+
 public record PrusaJob(
     string? PrintState,
     double? Progress,
@@ -715,6 +720,7 @@ public record PrusaJob(
     [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraStreamUrl,
     [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraSnapshotUrl
 );
+
 public record PrusaCompositeStatus(
     bool IsOnline,
     string? State,
@@ -730,70 +736,114 @@ public record PrusaCompositeStatus(
 public class PrintJobProgress
 {
     public int JobId { get; set; }
+
     public string State { get; set; } = string.Empty;
+
     public double Progress { get; set; }
+
     public int TimePrinting { get; set; }
+
     public int? TimeRemaining { get; set; }
+
     public string? FileName { get; set; }
+
     public bool InaccurateEstimates { get; set; }
 
     public bool IsActive => State is JobStates.Printing or JobStates.Paused;
+
     public bool IsFinished => State is JobStates.Finished or JobStates.Stopped;
+
     public bool HasError => State == JobStates.Error;
 
     public TimeSpan PrintingTime => TimeSpan.FromSeconds(TimePrinting);
+
     public TimeSpan? RemainingTime => TimeRemaining.HasValue ? TimeSpan.FromSeconds(TimeRemaining.Value) : null;
 }
 
 public class SimplePrinterStatus
 {
     public string State { get; set; } = string.Empty;
+
     public bool IsOnline { get; set; }
+
     public double? NozzleTemp { get; set; }
+
     public double? NozzleTarget { get; set; }
+
     public double? BedTemp { get; set; }
+
     public double? BedTarget { get; set; }
+
     public double? AxisX { get; set; }
+
     public double? AxisY { get; set; }
+
     public double? AxisZ { get; set; }
+
     public int? FanSpeed { get; set; }
+
     public int? FlowRate { get; set; }
+
     public int? SpeedMultiplier { get; set; }
 
     public bool IsPrinting => State == PrinterStates.Printing;
+
     public bool IsPaused => State == PrinterStates.Paused;
+
     public bool IsIdle => State == PrinterStates.Idle;
+
     public bool HasError => State == PrinterStates.Error;
+
     public bool NeedsAttention => State == PrinterStates.Attention;
 }
 
 public class PrinterInformation
 {
     public string Name { get; set; } = string.Empty;
+
     public string? Location { get; set; }
+
     public string Serial { get; set; } = string.Empty;
+
     public string? Hostname { get; set; }
+
     public string FirmwareVersion { get; set; } = string.Empty;
+
     public string PrusaLinkVersion { get; set; } = string.Empty;
+
     public string ApiVersion { get; set; } = string.Empty;
+
     public double NozzleDiameter { get; set; }
+
     public int MinExtrusionTemp { get; set; }
+
     public bool HasMmu { get; set; }
+
     public bool SdCardReady { get; set; }
+
     public bool HasActiveCamera { get; set; }
+
     public bool SupportsUploadByPut { get; set; }
 }
 
 public class StorageInformation
 {
     public string Name { get; set; } = string.Empty;
+
     public string Type { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     public bool Available { get; set; }
+
     public bool ReadOnly { get; set; }
+
     public long? FreeSpace { get; set; }
+
     public long? TotalSpace { get; set; }
+
     public long? PrintFileSize { get; set; }
+
     public long? SystemFileSize { get; set; }
 
     public double? UsagePercentage => TotalSpace.HasValue && TotalSpace > 0
@@ -804,15 +854,19 @@ public class StorageInformation
 public class PrusaLinkException : Exception
 {
     public PrusaLinkError? ErrorDetails { get; }
+
     public int StatusCode { get; }
 
     public PrusaLinkException(string message) : base(message) { }
+
     public PrusaLinkException(string message, Exception innerException) : base(message, innerException) { }
+
     public PrusaLinkException(string message, int statusCode, PrusaLinkError? errorDetails = null) : base(message)
     {
         StatusCode = statusCode;
         ErrorDetails = errorDetails;
     }
+
     public PrusaLinkException() { }
 }
 

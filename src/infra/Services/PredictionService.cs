@@ -441,11 +441,17 @@ public enum ConfidenceLevel
 public class CompletionPredictionDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public DateTime EstimatedCompletionTime { get; set; }
+
     public TimeSpan? EstimatedDuration { get; set; }
+
     public ConfidenceLevel Confidence { get; set; }
+
     public int SampleSize { get; set; }
+
     public double? VariancePercent { get; set; }
+
     public string? Note { get; set; }
 }
 
@@ -455,15 +461,25 @@ public class CompletionPredictionDto
 public class PredictionDurationStatsDto
 {
     public int TotalJobs { get; set; }
+
     public int SuccessfulJobs { get; set; }
+
     public double SuccessRate { get; set; }           // 0.0 to 1.0
+
     public TimeSpan AverageDuration { get; set; }
+
     public TimeSpan MedianDuration { get; set; }
+
     public TimeSpan MinDuration { get; set; }
+
     public TimeSpan MaxDuration { get; set; }
+
     public double StandardDeviation { get; set; }
+
     public double Variance { get; set; }
+
     public string? Material { get; set; }
+
     public string? PrinterModelName { get; set; }
 }
 
@@ -473,13 +489,22 @@ public class PredictionDurationStatsDto
 public class PrintJobStatisticsDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public long? ActualDurationMs { get; set; }
+
     public long? EstimatedDurationMs { get; set; }
+
     public string? Material { get; set; }
+
     public int? NozzleTemperature { get; set; }
+
     public int? BedTemperature { get; set; }
+
     public int SpeedPercentage { get; set; }
+
     public bool IsSuccess { get; set; }
+
     public string? FailureReason { get; set; }
+
     public DateTime? CompletedAtUtc { get; set; }
 }

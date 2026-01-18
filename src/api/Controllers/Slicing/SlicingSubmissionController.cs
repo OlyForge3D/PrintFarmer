@@ -55,12 +55,14 @@ public class SlicingSubmissionController(
             {
                 modelFile = files[0];
             }
+
             // Preserve other fields from form when not supplied via bound parameters
             slicerEngine ??= form["slicerEngine"].FirstOrDefault();
             printerId ??= form["printerId"].FirstOrDefault();
             profileRaw ??= form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
             priorityRaw ??= form["priority"].FirstOrDefault();
         }
+
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");

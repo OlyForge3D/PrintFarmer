@@ -276,8 +276,10 @@ public class SlicerOrchestrator(
                 {
                     r.Metadata[kv.Key] = kv.Value;
                 }
+
                 responses.Add(r);
             }
+
             return responses;
         }
         catch (Exception ex)
@@ -376,10 +378,12 @@ public class SlicerOrchestrator(
         {
             throw new ArgumentException("UserId is required", nameof(request));
         }
+
         if (request.PrinterId == Guid.Empty)
         {
             throw new ArgumentException("PrinterId is required", nameof(request));
         }
+
         if (request.ModelFileUrl == null)
         {
             throw new ArgumentException("ModelFileUrl is required", nameof(request));

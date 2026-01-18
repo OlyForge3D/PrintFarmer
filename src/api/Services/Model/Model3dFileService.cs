@@ -221,6 +221,7 @@ namespace Farm.Web.Api.Services.Model
             {
                 return null;
             }
+
             // Return relative path by combining FilePath (directory) with FileName (GUID filename)
             // FilePath is the storage directory, FileName is the GUID-based filename
             return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, "").TrimStart(Path.DirectorySeparatorChar, '/');
@@ -457,6 +458,7 @@ namespace Farm.Web.Api.Services.Model
                         {
                             _fileSystem.DeleteFile(finalFilePath);
                         }
+
                         // Move temp to final location
                         _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
 
@@ -559,6 +561,7 @@ namespace Farm.Web.Api.Services.Model
                     {
                         _fileSystem.DeleteFile(tempFilePath);
                     }
+
                     // Try to clean up final file if it was already moved
                     if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
                     {

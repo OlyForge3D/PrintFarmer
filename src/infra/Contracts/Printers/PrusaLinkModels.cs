@@ -7,11 +7,17 @@ namespace Farm.Infrastructure.Contracts.Printers.PrusaLink;
 public class VersionInfo
 {
     public string Api { get; set; } = string.Empty;
+
     public string Version { get; set; } = string.Empty;
+
     public string Printer { get; set; } = string.Empty;
+
     public string Text { get; set; } = string.Empty;
+
     public string Firmware { get; set; } = string.Empty;
+
     public string? Sdk { get; set; }
+
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO for JSON transport; setter needed for deserialization")]
     public Dictionary<string, object> Capabilities { get; set; } = new Dictionary<string, object>();
 }
@@ -20,16 +26,27 @@ public class VersionInfo
 public class PrinterInfo
 {
     public bool Mmu { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
     public string? Location { get; set; }
+
     public bool FarmMode { get; set; }
+
     public double NozzleDiameter { get; set; }
+
     public int MinExtrusionTemp { get; set; }
+
     public string Serial { get; set; } = string.Empty;
+
     public bool SdReady { get; set; }
+
     public bool ActiveCamera { get; set; }
+
     public string? Hostname { get; set; }
+
     public string? Port { get; set; }
+
     public bool NetworkErrorChime { get; set; }
 }
 
@@ -37,57 +54,84 @@ public class PrinterInfo
 public class StatusInfo
 {
     public StatusJob? Job { get; set; }
+
     public StatusPrinterInfo Printer { get; set; } = new();
+
     public StatusTransfer? Transfer { get; set; }
+
     public StatusStorage? Storage { get; set; }
+
     public StatusCamera? Camera { get; set; }
 }
 
 public class StatusJob
 {
     public int? Id { get; set; }
+
     public double? Progress { get; set; }
+
     public int? TimeRemaining { get; set; }
+
     public int? TimePrinting { get; set; }
 }
 
 public class StatusPrinterInfo
 {
     public string State { get; set; } = string.Empty;
+
     public double? TempNozzle { get; set; }
+
     public double? TargetNozzle { get; set; }
+
     public double? TempBed { get; set; }
+
     public double? TargetBed { get; set; }
+
     public double? AxisX { get; set; }
+
     public double? AxisY { get; set; }
+
     public double? AxisZ { get; set; }
+
     public int? Flow { get; set; }
+
     public int? Speed { get; set; }
+
     public int? FanHotend { get; set; }
+
     public int? FanPrint { get; set; }
+
     public PrinterStatusInfo? StatusPrinter { get; set; }
+
     public PrinterStatusInfo? StatusConnect { get; set; }
 }
 
 public class PrinterStatusInfo
 {
     public bool Ok { get; set; }
+
     public string Message { get; set; } = string.Empty;
 }
 
 public class StatusTransfer
 {
     public int Id { get; set; }
+
     public int TimeTransferring { get; set; }
+
     public double? Progress { get; set; }
+
     public long? DataTransferred { get; set; }
 }
 
 public class StatusStorage
 {
     public string Name { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     public bool ReadOnly { get; set; }
+
     public long? FreeSpace { get; set; }
 }
 
@@ -100,10 +144,15 @@ public class StatusCamera
 public abstract class JobBase
 {
     public int Id { get; set; }
+
     public string State { get; set; } = string.Empty;
+
     public double Progress { get; set; }
+
     public int TimePrinting { get; set; }
+
     public int? TimeRemaining { get; set; }
+
     public bool InaccurateEstimates { get; set; }
 }
 
@@ -120,12 +169,19 @@ public class JobFilePrint : JobBase
 public class JobFile
 {
     public string Name { get; set; } = string.Empty;
+
     public string DisplayName { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     public string? DisplayPath { get; set; }
+
     public long Size { get; set; }
+
     public long MTimestamp { get; set; }
+
     public PrintFileMetadata? Meta { get; set; }
+
     public PrintFileRefs? Refs { get; set; }
 }
 
@@ -144,13 +200,21 @@ public class StorageListResponse
 public class Storage
 {
     public string Name { get; set; } = string.Empty;
+
     public string Type { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     public long? PrintFiles { get; set; }
+
     public long? SystemFiles { get; set; }
+
     public long? FreeSpace { get; set; }
+
     public long? TotalSpace { get; set; }
+
     public bool Available { get; set; }
+
     public bool ReadOnly { get; set; }
 }
 
@@ -158,14 +222,23 @@ public class Storage
 public class Transfer
 {
     public string Type { get; set; } = string.Empty;
+
     public string DisplayName { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Url { get; set; }
+
     public long? Size { get; set; }
+
     public double Progress { get; set; }
+
     public long Transferred { get; set; }
+
     public int? TimeRemaining { get; set; }
+
     public int TimeTransferring { get; set; }
+
     public bool ToPrint { get; set; }
 }
 
@@ -173,10 +246,15 @@ public class Transfer
 public abstract class FileInfoBase
 {
     public string Name { get; set; } = string.Empty;
+
     public bool ReadOnly { get; set; }
+
     public long? Size { get; set; }
+
     public string Type { get; set; } = string.Empty;
+
     public long MTimestamp { get; set; }
+
     public string? DisplayName { get; set; }
 }
 
@@ -193,28 +271,36 @@ public class FileRefs
 public class PrintFileInfo : FileInfoBase
 {
     public PrintFileRefs? Refs { get; set; }
+
     public PrintFileMetadata? Meta { get; set; }
 }
 
 public class PrintFileRefs
 {
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Download { get; set; }
+
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Icon { get; set; }
+
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Thumbnail { get; set; }
 }
 
 public class PrintFileMetadata
 {
     public int? BedTemperature { get; set; }
+
     public int[]? BedTemperaturePerTool { get; set; }
+
     public int? Temperature { get; set; }
+
     public int[]? TemperaturePerTool { get; set; }
+
     public int? BrimWidth { get; set; }
 
     [JsonPropertyName("estimated printing time (normal mode)")]
     public string? EstimatedPrintingTimeNormal { get; set; }
 
     public int? EstimatedPrintTime { get; set; }
+
     public int? FadedLayers { get; set; }
 
     [JsonPropertyName("filament cost")]
@@ -242,35 +328,60 @@ public class PrintFileMetadata
     public double[]? FilamentUsedMmPerTool { get; set; }
 
     public string? FilamentType { get; set; }
+
     public string[]? FilamentTypePerTool { get; set; }
+
     public string? FillDensity { get; set; }
+
     public int? InitialExposureTime { get; set; }
+
     public double? LayerHeight { get; set; }
+
     public string? MaterialName { get; set; }
+
     public int? ExposureTime { get; set; }
+
     public int? MaxExposureTime { get; set; }
+
     public int? MaxInitialExposureTime { get; set; }
+
     public int? MinExposureTime { get; set; }
+
     public int? MinInitialExposureTime { get; set; }
+
     public double? NozzleDiameter { get; set; }
+
     public double[]? NozzleDiameterPerTool { get; set; }
+
     public bool? NormalPercentPresent { get; set; }
+
     public bool? NormalLeftPresent { get; set; }
+
     public bool? QuietPercentPresent { get; set; }
+
     public bool? QuietLeftPresent { get; set; }
+
     public bool? LayerInfoPresent { get; set; }
+
     public double? MaxLayerZ { get; set; }
+
     public int? PrintTime { get; set; }
+
     public string? PrinterModel { get; set; }
+
     public string? SupportMaterial { get; set; }
+
     public int? Ironing { get; set; }
+
     public double? RequiredResinMl { get; set; }
+
     public string? Profile { get; set; }
 }
 
 public class FirmwareFileInfo : FileInfoBase
 {
     public FirmwareFileRefs? Refs { get; set; }
+
     public FirmwareMetadata? Meta { get; set; }
 }
 
@@ -282,7 +393,9 @@ public class FirmwareFileRefs
 public class FirmwareMetadata
 {
     public string? Version { get; set; }
+
     public int? PrinterType { get; set; }
+
     public int? PrinterVersion { get; set; }
 }
 
@@ -293,9 +406,13 @@ public class FirmwareMetadata
 public class FileChild
 {
     public string Name { get; set; } = string.Empty;
+
     public string Display { get; set; } = string.Empty;
+
     public string Path { get; set; } = string.Empty;
+
     public string? Origin { get; set; }
+
     public string? Type { get; set; }
 
     [SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "DTO for JSON deserialization")]
@@ -313,45 +430,65 @@ public record FileStatus(bool Exists, bool ReadOnly, bool CurrentlyPrinted);
 public class Camera
 {
     public string CameraId { get; set; } = string.Empty;
+
     public CameraConfigInfo? Config { get; set; }
+
     public bool Connected { get; set; }
+
     public bool Detected { get; set; }
+
     public bool Stored { get; set; }
+
     public bool Linked { get; set; }
 }
 
 public class CameraConfigInfo
 {
     public string Path { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
+
     public string Driver { get; set; } = string.Empty;
+
     public string Resolution { get; set; } = string.Empty;
 }
 
 public class CameraConfig
 {
     public string Name { get; set; } = string.Empty;
+
     public string TriggerScheme { get; set; } = string.Empty;
+
     public CameraResolution[] AvailableResolutions { get; set; } = Array.Empty<CameraResolution>();
+
     public CameraResolution Resolution { get; set; } = new();
+
     public double Focus { get; set; }
+
     public string[] Capabilities { get; set; } = Array.Empty<string>();
 }
 
 public class CameraConfigSet
 {
     public string? Name { get; set; }
+
     public string? TriggerScheme { get; set; }
+
     public CameraResolution? Resolution { get; set; }
+
     public int? Rotation { get; set; }
+
     public double? Focus { get; set; }
+
     public double? Exposure { get; set; }
+
     public bool? SendToConnect { get; set; }
 }
 
 public class CameraResolution
 {
     public int Width { get; set; }
+
     public int Height { get; set; }
 }
 
@@ -359,6 +496,7 @@ public class CameraResolution
 public class UpdateInfo
 {
     public string? NewVersion { get; set; }
+
     public bool UpdateAvailable { get; set; }
 }
 
@@ -366,8 +504,11 @@ public class UpdateInfo
 public class PrusaLinkError
 {
     public string Code { get; set; } = string.Empty;
+
     public string Title { get; set; } = string.Empty;
+
     public string Text { get; set; } = string.Empty;
+
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape; keep string for JSON")] public string? Url { get; set; }
 }
 

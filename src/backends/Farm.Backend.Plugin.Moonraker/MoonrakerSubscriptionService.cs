@@ -19,17 +19,29 @@ namespace Farm.Backend.Plugin.Moonraker;
 internal sealed class PrinterState
 {
     public double? X { get; set; }
+
     public double? Y { get; set; }
+
     public double? Z { get; set; }
+
     public double? HotendTemp { get; set; }
+
     public double? BedTemp { get; set; }
+
     public double? HotendTarget { get; set; }
+
     public double? BedTarget { get; set; }
+
     public string? State { get; set; }
+
     public double? Progress { get; set; }
+
     public string? JobName { get; set; }
+
     public string? HomedAxes { get; set; }
+
     public string? CameraStreamUrl { get; set; }
+
     public string? ThumbnailUrl { get; set; }
 }
 
@@ -65,6 +77,7 @@ public sealed class MoonrakerSubscriptionService(
         HttpPollingOnly,    // Use HTTP polling only (Klippy disconnected/shutdown)
         WebSocketWithFallback // Use WebSocket but ready to fallback (transition states)
     }
+
     private Task? _mainLoop;
 
     // Connection configuration constants
@@ -106,6 +119,7 @@ public sealed class MoonrakerSubscriptionService(
         {
             // Already disposed/cancelled – safe to ignore during shutdown
         }
+
         List<Task> tasks = new(_loops.Values);
         if (_mainLoop is not null)
         {
@@ -164,6 +178,7 @@ public sealed class MoonrakerSubscriptionService(
             {
                 _logger.LogError(ex, "Error enumerating printers for subscription");
             }
+
             try
             {
                 await CheckForStaleConnectionsAsync(ct);
@@ -390,6 +405,7 @@ public sealed class MoonrakerSubscriptionService(
                 {
                     await heartbeatCts.CancelAsync();
                 }
+
                 try
                 { await (heartbeatTask ?? Task.CompletedTask); }
                 catch { }
@@ -688,6 +704,7 @@ public sealed class MoonrakerSubscriptionService(
                         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
                         return;
                     }
+
                     _ = sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 } while (!result.EndOfMessage);
             }
@@ -741,6 +758,7 @@ public sealed class MoonrakerSubscriptionService(
                 // Response handling extracted to reduce nesting
                 await HandleJsonRpcResponseAsync(root, message, printer, ct);
             }
+
             // Check if this is a JSON-RPC notification (has "method" field but no "id")
             else if (root.TryGetProperty("method", out JsonElement methodProp))
             {
@@ -792,6 +810,7 @@ public sealed class MoonrakerSubscriptionService(
                         await TriggerHttpPollingFallbackAsync(printer, ct);
                     }
                 }
+
                 return;
             }
 
@@ -842,6 +861,7 @@ public sealed class MoonrakerSubscriptionService(
                         printer.Name, p[0].GetRawText());
                     await ProcessStatusUpdateAsync(p[0], printer.Id, printer.BackendUrl, printer.CameraStreamUrl, null, ct);
                 }
+
                 break;
 
             case "notify_klippy_disconnected":
@@ -1453,6 +1473,7 @@ public sealed class MoonrakerSubscriptionService(
             {
                 normalized = "http://" + normalized;
             }
+
             UriBuilder ub = new(normalized);
             if (ub.Port == -1)
             {
@@ -1623,10 +1644,15 @@ public sealed class MoonrakerSubscriptionService(
 internal sealed class ConnectionMetrics
 {
     public int ReconnectAttempts { get; set; }
+
     public DateTime LastConnected { get; set; }
+
     public DateTime LastReconnectAttempt { get; set; }
+
     public TimeSpan GetNextBackoffDelay() => TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(ReconnectAttempts, 8))));
+
     public void Reset() { ReconnectAttempts = 0; LastConnected = DateTime.UtcNow; }
+
     public void IncrementAttempts() { ReconnectAttempts++; LastReconnectAttempt = DateTime.UtcNow; }
 }
 

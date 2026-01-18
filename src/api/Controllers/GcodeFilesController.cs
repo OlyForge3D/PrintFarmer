@@ -68,11 +68,13 @@ public class GcodeFilesController(
         {
             return BadRequest("path is required");
         }
+
         algorithm = (algorithm ?? "sha256").Trim();
         if (!algorithm.Equals("sha256", StringComparison.OrdinalIgnoreCase) && !algorithm.Equals("sha1", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Unsupported algorithm. Allowed: sha256, sha1");
         }
+
         try
         {
             // Use existing secure resolver on the parent directory, then combine sanitized filename
@@ -84,15 +86,18 @@ public class GcodeFilesController(
             {
                 return NotFound();
             }
+
             if (!System.IO.File.Exists(fullPath))
             {
                 return NotFound();
             }
+
             // Only allow hashing of gcode/bgcode to avoid arbitrary file disclosure.
             if (!fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest("Only .gcode or .bgcode files supported");
             }
+
             using FileStream fs = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             IncrementalHash hasher = algorithm == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             byte[] buffer = new byte[81920];
@@ -103,6 +108,7 @@ public class GcodeFilesController(
                 hasher.AppendData(buffer, 0, read);
                 total += read;
             }
+
             string hex = fileManagementService.ToHex(hasher.GetHashAndReset());
             return Ok(new GcodeFileHashResponse(fileName, total, algorithm, hex));
         }
@@ -894,6 +900,7 @@ public class GcodeFilesController(
         {
             vPath = "/" + vPath;
         }
+
         // Collapse .. segments
         string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(s => s != "." && s != "..")
@@ -956,6 +963,7 @@ public class GcodeFilesController(
         {
             return BadRequest("allowedExtensions is required");
         }
+
         uploadSettings.UpdateAllowedExtensions(req.AllowedExtensions);
         return NoContent();
     }

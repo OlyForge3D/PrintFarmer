@@ -55,6 +55,7 @@ public class GcodeHarvestController(
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             _logger.LogInformation($"Queueing harvest operation for printer {request.PrinterId}");
@@ -156,6 +157,7 @@ public class GcodeHarvestController(
             {
                 return NotFound();
             }
+
             PagedResult<DiscoveredGcodeFileDto> result = await _harvestService.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
             return Ok(result);
         }
@@ -187,6 +189,7 @@ public class GcodeHarvestController(
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             GcodeHarvestResultDto result = await _harvestService.ImportSelectedFilesAsync(request, ct);

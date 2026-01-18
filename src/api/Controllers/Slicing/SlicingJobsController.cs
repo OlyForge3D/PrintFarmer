@@ -52,6 +52,7 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         SlicingJobDto j = job;
         // Extract profile information from composite SlicerProfileDto
         string profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
@@ -110,6 +111,7 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         // Add deprecation signalling headers (RFC 8594) before issuing redirect
         DateTime deprecationDate = new(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
         DateTime sunsetDate = new(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
@@ -132,6 +134,7 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
@@ -145,20 +148,24 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         if (!fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound();
         }
+
         if (fileName.Contains("..", StringComparison.Ordinal) || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             return NotFound();
         }
+
         string rebuiltPath = Path.Combine(tempRoot, fileName);
         string path = rebuiltPath;
         if (!_fileManagementService.IsSafePath(path, tempRoot))
         {
             return NotFound();
         }
+
         // At this point 'path' is reconstructed from a trusted root + sanitized filename (.gcode enforced, traversal rejected).
         // Suppress analyzer warning: path cannot be influenced directly by user input beyond GUID lookup.
         return !System.IO.File.Exists(path) ? NotFound() : PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");

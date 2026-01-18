@@ -145,6 +145,7 @@ namespace Farm.Web.Api.Services.Tags
                             Description = existingTag.Description
                         };
                     }
+
                     throw;
                 }
 

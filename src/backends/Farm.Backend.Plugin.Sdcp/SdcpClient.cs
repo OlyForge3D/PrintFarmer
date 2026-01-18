@@ -47,68 +47,101 @@ public record SdcpData<T>(
 public class SdcpStatusResponse
 {
     public SdcpStatus? Status { get; set; }
+
     public string? MainboardID { get; set; }
+
     public long TimeStamp { get; set; }
+
     public string? Topic { get; set; }
 }
 
 public class SdcpStatus
 {
     public int[]? CurrentStatus { get; set; }
+
     public int TimeLapseStatus { get; set; }
+
     public int PlatFormType { get; set; }
+
     public double TempOfHotbed { get; set; }
+
     public double TempOfNozzle { get; set; }
+
     public double TempOfBox { get; set; }
+
     public double TempTargetHotbed { get; set; }
+
     public double TempTargetNozzle { get; set; }
+
     public double TempTargetBox { get; set; }
+
     public string? CurrenCoord { get; set; }
+
     public SdcpFanSpeed? CurrentFanSpeed { get; set; }
+
     public double ZOffset { get; set; }
+
     public SdcpLightStatus? LightStatus { get; set; }
+
     public SdcpPrintInfo? PrintInfo { get; set; }
 }
 
 public class SdcpFanSpeed
 {
     public int ModelFan { get; set; }
+
     public int AuxiliaryFan { get; set; }
+
     public int BoxFan { get; set; }
 }
 
 public class SdcpLightStatus
 {
     public int SecondLight { get; set; }
+
     public int[]? RgbLight { get; set; }
 }
 
 public class SdcpPrintInfo
 {
     public int Status { get; set; }
+
     public int CurrentLayer { get; set; }
+
     public int TotalLayer { get; set; }
+
     public long CurrentTicks { get; set; }
+
     public long TotalTicks { get; set; }
+
     public string? Filename { get; set; }
+
     public string? TaskId { get; set; }
+
     public int PrintSpeedPct { get; set; }
+
     public double Progress { get; set; }
 }
 
 public class SdcpAckResponse
 {
     public string? Id { get; set; }
+
     public SdcpAckData? Data { get; set; }
+
     public string? Topic { get; set; }
 }
 
 public class SdcpAckData
 {
     public int Cmd { get; set; }
+
     public SdcpAckResult? Data { get; set; }
+
     public string? RequestID { get; set; }
+
     public string? MainboardID { get; set; }
+
     public long TimeStamp { get; set; }
 }
 
@@ -549,6 +582,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         {
             _logger.LogDebug(ex, "Failed to get camera URL for {BaseUrl}", baseUrl);
         }
+
         return null;
     }
 
@@ -626,6 +660,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         {
             _logger.LogDebug(ex, "Failed to get camera snapshot URL for {BaseUrl}", baseUrl);
         }
+
         return null;
     }
 

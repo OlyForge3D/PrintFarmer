@@ -57,6 +57,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         {
             return;
         }
+
         // Remove existing
         _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
         // Add new
@@ -111,6 +112,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         {
             q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
         }
+
         List<PrinterModel> models = await q.ToListAsync(ct);
         List<PrinterModelDto> list = models.Select(m => new PrinterModelDto(
             m.Id,

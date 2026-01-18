@@ -36,13 +36,21 @@ public class FileConsistencyAuditService(
     private class AuditResults
     {
         public int FilesChecked { get; set; }
+
         public int ValidCount { get; set; }
+
         public int MissingCount { get; set; }
+
         public int CorruptedCount { get; set; }
+
         public int OrphanedCount { get; set; }
+
         public List<Guid> MissingFileIds { get; set; } = new();
+
         public List<Guid> CorruptedFileIds { get; set; } = new();
+
         public List<string> OrphanedPaths { get; set; } = new();
+
         public string SummaryMessage { get; set; } = string.Empty;
     }
 

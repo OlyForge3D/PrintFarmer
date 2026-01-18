@@ -68,6 +68,7 @@ public class ClamAVVirusScanner : IVirusScanner
                 {
                     // Swallow secondary kill exceptions
                 }
+
                 return VirusScanResult.Unknown;
             }
 
@@ -98,6 +99,7 @@ public class ClamAVVirusScanner : IVirusScanner
                 return path;
             }
         }
+
         return null;
 
         static string? Which(string name)

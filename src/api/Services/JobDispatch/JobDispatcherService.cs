@@ -328,6 +328,7 @@ public class JobDispatcherService(
                         await Task.Delay(delayMs, cancellationToken);
                         continue;
                     }
+
                     return false;
                 }
                 else
@@ -347,6 +348,7 @@ public class JobDispatcherService(
                     await Task.Delay(delayMs, cancellationToken);
                     continue;
                 }
+
                 return false;
             }
             catch (TaskCanceledException)
@@ -360,6 +362,7 @@ public class JobDispatcherService(
                 return false;
             }
         }
+
         return false;
     }
 }

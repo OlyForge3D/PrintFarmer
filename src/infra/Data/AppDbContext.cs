@@ -11,44 +11,77 @@ namespace Farm.Infrastructure.Data;
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<AppSettingsEntity> AppSettingsEntities => Set<AppSettingsEntity>();
+
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
+
     public DbSet<Printer> Printers => Set<Printer>();
+
     public DbSet<Location> Locations => Set<Location>();
+
     public DbSet<Spool> Spools => Set<Spool>();
+
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
+
     public DbSet<PrinterModel> PrinterModels => Set<PrinterModel>();
+
     public DbSet<PrinterModelAlias> PrinterModelAliases => Set<PrinterModelAlias>();
+
     public DbSet<PrinterModelToolhead> PrinterModelToolheads => Set<PrinterModelToolhead>();
+
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
+
     public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
+
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
+
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+
     public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
+
     public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();
+
     public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
+
     public DbSet<PrintJobStatistics> PrintJobStatistics => Set<PrintJobStatistics>();
+
     public DbSet<RetryPolicy> RetryPolicies => Set<RetryPolicy>();
+
     public DbSet<JobRetry> JobRetries => Set<JobRetry>();
+
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
+
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
+
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
+
     public DbSet<HarvestFileGcodeFileMapping> HarvestFileGcodeFileMappings => Set<HarvestFileGcodeFileMapping>();
+
     public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
+
     public DbSet<Tag> Tags => Set<Tag>();
+
     public DbSet<FolderNode> Folders => Set<FolderNode>();
+
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
+
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
+
     public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();
+
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
+
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
+
     public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
+
     public DbSet<Worker> Workers => Set<Worker>();
+
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 
@@ -60,28 +93,44 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // Notifications & User Communication
     public DbSet<Notification> Notifications => Set<Notification>();
+
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
+
     public DbSet<Role> Roles => Set<Role>();
+
     public DbSet<Resource> Resources => Set<Resource>();
+
     public DbSet<Domain.Action> Actions => Set<Domain.Action>();
+
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
     public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
+
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
+
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
+
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
+
     // API Keys for OctoPrint API
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     // Component Model Definitions (extensible manufacturer-backed components)
     public DbSet<HotendModelDefinition> HotendModelDefinitions => Set<HotendModelDefinition>();
+
     public DbSet<ExtruderModelDefinition> ExtruderModelDefinitions => Set<ExtruderModelDefinition>();
+
     public DbSet<ToolheadModelDefinition> ToolheadModelDefinitions => Set<ToolheadModelDefinition>();
+
     public DbSet<NozzleModelDefinition> NozzleModelDefinitions => Set<NozzleModelDefinition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -128,6 +177,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = ipIndex.HasFilter("[IpAddress] IS NOT NULL");
             }
+
             _ = b.HasOne(p => p.Manufacturer)
              .WithMany()
              .HasForeignKey(p => p.ManufacturerId)
@@ -275,6 +325,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             // Persisted shadow column for cross-provider case-insensitive uniqueness.
             // We populate this in SaveChanges overrides (lower-invariant) to avoid provider-specific computed syntax.
             _ = b.Property<string>("NameLowered")
@@ -293,6 +344,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             _ = b.HasOne(m => m.Manufacturer)
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)
@@ -330,6 +382,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             _ = b.HasIndex(f => f.Name).IsUnique();
             _ = b.Property(f => f.DefaultHotendTemp);
             _ = b.Property(f => f.DefaultBedTemp);
@@ -1385,6 +1438,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
             }
         }
+
         foreach (EntityEntry<PrinterModel> entry in ChangeTracker.Entries<PrinterModel>())
         {
             if (entry.State == EntityState.Added || entry.State == EntityState.Modified)

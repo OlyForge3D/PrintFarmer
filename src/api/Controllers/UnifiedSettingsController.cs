@@ -19,6 +19,7 @@ public class UnifiedSettingsController(
 
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
+
     private Dictionary<string, string> _keyNameToClassNameMapCache => _keyNameToClassNameMap ??= BuildKeyNameToClassNameMap();
 
     /// <summary>
@@ -39,6 +40,7 @@ public class UnifiedSettingsController(
             object settings = _modularSettingsService.GetByKey(meta.Key);
             result[meta.Key] = settings ?? new { };
         }
+
         return Ok(result);
     }
 
@@ -116,9 +118,11 @@ public class UnifiedSettingsController(
                                     {
                                         errors[key] = vex.Message;
                                     }
+
                                     return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
                                 }
                             }
+
                             System.Reflection.MethodInfo? saveMethod = typeof(ISettingsService).GetMethod("Save");
                             if (saveMethod != null)
                             {
@@ -182,6 +186,7 @@ public class UnifiedSettingsController(
                 {
                     errors[""] = vex.Message;
                 }
+
                 return BadRequest(new { message = "Validation failed", errors });
             }
 
@@ -305,6 +310,7 @@ public class UnifiedSettingsController(
             {
                 errors[""] = vex.Message;
             }
+
             return BadRequest(new { message = $"Validation failed for class '{keyName}'", errors });
         }
         catch (Exception ex)

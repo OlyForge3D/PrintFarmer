@@ -313,6 +313,7 @@ public class GcodeHarvestService(
                         _logger.LogError(switchEx, $"[DIAGNOSTIC-HARVEST] Exception calling GetFileListAsync: {switchEx.Message}");
                         throw;
                     }
+
                     _logger.LogError($"[DIAGNOSTIC-HARVEST] File discovery completed. Returned {fileList?.Count ?? 0} files");
                     if ((fileList?.Count ?? 0) == 0)
                     {
@@ -373,26 +374,31 @@ public class GcodeHarvestService(
                         break;
                     }
                 }
+
                 if (!extOk)
                 {
                     _logger.LogDebug($"❌ File '{f.Name}' rejected: extension doesn't match any of [{string.Join(", ", allowedExts)}]");
                     return false;
                 }
+
                 if (operation.MinFileSizeBytes.HasValue && f.Size < operation.MinFileSizeBytes.Value)
                 {
                     _logger.LogDebug($"❌ File '{f.Name}' rejected: size {f.Size} < minimum {operation.MinFileSizeBytes.Value}");
                     return false;
                 }
+
                 if (operation.MaxFileSizeBytes.HasValue && f.Size > operation.MaxFileSizeBytes.Value)
                 {
                     _logger.LogDebug($"❌ File '{f.Name}' rejected: size {f.Size} > maximum {operation.MaxFileSizeBytes.Value}");
                     return false;
                 }
+
                 if (operation.ModifiedAfter.HasValue && f.ModifiedAt.HasValue && f.ModifiedAt < operation.ModifiedAfter)
                 {
                     _logger.LogDebug($"❌ File '{f.Name}' rejected: modified {f.ModifiedAt} < required {operation.ModifiedAfter}");
                     return false;
                 }
+
                 _logger.LogDebug($"✅ File '{f.Name}' passed all filters");
                 return true;
             }
@@ -424,6 +430,7 @@ public class GcodeHarvestService(
                     _logger.LogError(ex, $"[DIAGNOSTIC-HARVEST] SaveChangesAsync FAILED with exception: {ex.Message}");
                     throw;
                 }
+
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] AFTER SAVE: FilesFound={dbOperation.FilesFound}");
 
                 // Verify the save actually persisted by querying again
@@ -712,10 +719,12 @@ public class GcodeHarvestService(
         {
             page = 1;
         }
+
         if (pageSize < 1)
         {
             pageSize = 1;
         }
+
         if (pageSize > 500)
         {
             pageSize = 500; // guardrail
@@ -728,6 +737,7 @@ public class GcodeHarvestService(
         {
             totalPages = 1;
         }
+
         if (page > totalPages)
         {
             page = totalPages;
@@ -883,6 +893,7 @@ public class GcodeHarvestService(
                         }
                     }
                 }
+
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
 
                 // Get or create root folder for gcode files
@@ -1356,14 +1367,19 @@ public class GcodeHarvestService(
     private sealed class PrinterFileInfo
     {
         public string Name { get; set; } = string.Empty;
+
         public string Path { get; set; } = string.Empty;
+
         public long Size { get; set; }
+
         public DateTime? ModifiedAt { get; set; }
 
         // Metadata from API (populated during discovery for backends that support it)
         // This avoids downloading files just to extract metadata
         public string? SlicerName { get; set; }
+
         public string? SlicerVersion { get; set; }
+
         public double? FilamentWeightGrams { get; set; }
     }
 
@@ -1419,6 +1435,7 @@ public class GcodeHarvestService(
         {
             _logger.LogWarning($"Printer with ID {printerId} not found");
         }
+
         return printer;
     }
 

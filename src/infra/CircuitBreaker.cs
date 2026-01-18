@@ -16,7 +16,9 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
     private readonly Lock _lock = new();
 
     public string Name { get; set; } = "CircuitBreaker";
+
     public CircuitState State => _state;
+
     public int FailureCount => _failureCount;
 
     public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken ct = default)
@@ -137,16 +139,22 @@ public enum CircuitState
 public class CircuitBreakerOpenException : Exception
 {
     public CircuitBreakerOpenException(string message) : base(message) { }
+
     public CircuitBreakerOpenException(string message, Exception innerException) : base(message, innerException) { }
+
     public CircuitBreakerOpenException() { }
 }
 
 public record CircuitBreakerMetrics
 {
     public string Name { get; init; } = string.Empty;
+
     public CircuitState State { get; init; }
+
     public int FailureCount { get; init; }
+
     public DateTime LastFailureTime { get; init; }
+
     public int FailureThreshold { get; init; }
 }
 
@@ -180,6 +188,7 @@ public class CircuitBreakerService(IUnifiedLoggingService logger) : ICircuitBrea
         {
             cb.Reset();
         }
+
         _logger.LogInformation("All circuit breakers reset");
     }
 }
@@ -187,6 +196,8 @@ public class CircuitBreakerService(IUnifiedLoggingService logger) : ICircuitBrea
 public interface ICircuitBreakerService
 {
     CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null);
+
     IEnumerable<CircuitBreakerMetrics> GetAllMetrics();
+
     void ResetAll();
 }

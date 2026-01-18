@@ -14,31 +14,45 @@ public sealed class SlicerServiceMetrics : IDisposable
 
     // Job lifecycle metrics
     public Counter<long> JobsSubmittedTotal { get; }
+
     public Counter<long> JobsStartedTotal { get; }
+
     public Counter<long> JobsCompletedTotal { get; }
+
     public Counter<long> JobsFailedTotal { get; }
+
     public Counter<long> JobsCancelledTotal { get; }
 
     // Duration metrics
     public Histogram<double> JobQueueDurationSeconds { get; }
+
     public Histogram<double> JobExecutionDurationSeconds { get; }
+
     public Histogram<double> JobTotalDurationSeconds { get; }
 
     // Per-service capacity metrics
     public ObservableGauge<int> ServiceTotalCapacity { get; }
+
     public ObservableGauge<int> ServiceAvailableCapacity { get; }
+
     public ObservableGauge<int> ServiceActiveJobs { get; }
+
     public Histogram<int> ServiceCapacityUtilization { get; }
 
     // Service health metrics
     public Counter<long> ServiceRegistrations { get; }
+
     public Counter<long> ServiceDeregistrations { get; }
+
     public Counter<long> ServiceHeartbeatsTotal { get; }
+
     public Counter<long> ServiceHeartbeatFailuresTotal { get; }
+
     public Histogram<double> ServiceHeartbeatLatencyMs { get; }
 
     // API key rotation metrics
     public Counter<long> ApiKeyRotationsTotal { get; }
+
     public Counter<long> ApiKeyRotationFailuresTotal { get; }
 
     // Failure reason tracking
@@ -173,6 +187,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         {
             tags.Add("service_id", serviceId);
         }
+
         JobsSubmittedTotal.Add(1, tags);
     }
 
@@ -227,6 +242,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         {
             tags.Add("service_id", serviceId);
         }
+
         JobsFailedTotal.Add(1, tags);
         JobFailuresByReason.Add(1, tags);
 
@@ -249,6 +265,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         {
             tags.Add("service_id", serviceId);
         }
+
         JobsCancelledTotal.Add(1, tags);
     }
 

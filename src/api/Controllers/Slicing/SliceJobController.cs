@@ -57,6 +57,7 @@ public class SliceJobController(
         {
             return true; // empty allowed
         }
+
         try
         {
             string[]? parsed = JsonSerializer.Deserialize<string[]>(capabilitiesJson);
@@ -65,11 +66,13 @@ public class SliceJobController(
                 error = "Capabilities must be a JSON string array.";
                 return false;
             }
+
             if (parsed.Length > 32)
             {
                 error = "Too many capabilities (max 32).";
                 return false;
             }
+
             string[] canonical = parsed
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .Select(c => c.Trim().ToLowerInvariant())
@@ -79,12 +82,14 @@ public class SliceJobController(
                 error = "Duplicate capabilities are not allowed.";
                 return false;
             }
+
             List<string> invalid = canonical.Where(c => !Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
             if (invalid.Count > 0)
             {
                 error = $"Invalid capability slug(s): {string.Join(", ", invalid)}";
                 return false;
             }
+
             capabilities = canonical;
             return true;
         }
@@ -277,19 +282,23 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         if (request == null)
         {
             return BadRequest("Request body required");
         }
+
         if (request.ProgressPercent < 0 || request.ProgressPercent > 100)
         {
             return BadRequest("ProgressPercent must be between 0 and 100");
         }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
         if (job == null)
         {
             return NotFound($"Job {id} not found");
         }
+
         if (job.Status != SliceJobStatus.Processing)
         {
             return BadRequest($"Cannot update progress for job in status {job.Status}");
@@ -305,6 +314,7 @@ public class SliceJobController(
         {
             await _eventService.NotifyJobProgressAsync(updated, HttpContext.RequestAborted);
         }
+
         return NoContent();
     }
 
@@ -475,6 +485,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         try
         {
             if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
@@ -535,6 +546,7 @@ public class SliceJobController(
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, $"Claim failure: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             }
+
             _logger.LogError(ex, "Unhandled exception in ClaimJobAsync");
             return StatusCode(StatusCodes.Status500InternalServerError, "Claim failed");
         }
@@ -555,6 +567,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         if (request == null)
         {
             return BadRequest("Request body required");
@@ -564,6 +577,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id);
         if (job == null)
         {
@@ -581,6 +595,7 @@ public class SliceJobController(
         {
             return BadRequest($"Primary artifact {request.PrimaryArtifactId} not found");
         }
+
         if (primary.JobId != job.Id)
         {
             return BadRequest("Primary artifact job mismatch");
@@ -598,10 +613,12 @@ public class SliceJobController(
                 {
                     return BadRequest($"Artifact {aid} not found");
                 }
+
                 if (extra.JobId != job.Id)
                 {
                     return BadRequest($"Artifact {aid} does not belong to job {job.Id}");
                 }
+
                 allArtifactIds.Add(aid);
             }
         }

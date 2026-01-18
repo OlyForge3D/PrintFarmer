@@ -83,6 +83,7 @@ public class ProfilesController(
         {
             return BadRequest("rawJson is required");
         }
+
         if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType _))
         {
             return BadRequest("Invalid slicerType");
@@ -234,19 +235,23 @@ public class ProfilesController(
             {
                 return BadRequest("Request body is required");
             }
+
             if (string.IsNullOrWhiteSpace(request.Name))
             {
                 return BadRequest("Name is required");
             }
+
             if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType slicerType))
             {
                 return BadRequest("Invalid slicer type");
             }
+
             ProfileQuality quality = ProfileQuality.Standard;
             if (!string.IsNullOrWhiteSpace(request.Quality) && !Enum.TryParse(request.Quality, true, out quality))
             {
                 return BadRequest("Invalid quality setting");
             }
+
             // Map to service request and delegate creation
             CreateProcessProfileDto createReq = new CreateProcessProfileDto
             {

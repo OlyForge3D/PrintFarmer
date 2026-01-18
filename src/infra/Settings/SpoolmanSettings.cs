@@ -7,6 +7,7 @@ namespace Farm.Infrastructure.Settings;
 public class SpoolmanSettings : IAppSetting
 {
     public const string SectionName = "Spoolman";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(

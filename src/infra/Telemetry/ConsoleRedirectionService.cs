@@ -6,8 +6,11 @@ namespace Farm.Infrastructure.Telemetry;
 public interface IConsoleRedirectionService
 {
     void RedirectConsoleOutput();
+
     void RestoreConsoleOutput();
+
     void WriteLine(string message);
+
     void WriteError(string message);
 }
 
@@ -90,6 +93,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
         {
             _ = _buffer.Append(value);
         }
+
         FlushBuffer();
     }
 
@@ -110,6 +114,7 @@ internal class UnifiedConsoleWriter(IUnifiedLoggingService unifiedLogger, LogLev
         {
             FlushBuffer();
         }
+
         base.Dispose(disposing);
     }
 }
@@ -147,8 +152,12 @@ public static class UnifiedConsole
             Console.Error.WriteLine(message);
         }
     }    // Migration helpers to replace Console.WriteLine calls
+
     public static void Write(string message) => WriteLine(message);
+
     public static void Write(object value) => WriteLine(value?.ToString() ?? "null");
+
     public static void WriteLine(object value) => WriteLine(value?.ToString() ?? "null");
+
     public static void WriteLine() => WriteLine("");
 }

@@ -165,6 +165,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
             job.ArtifactsTotalBytes = 0;
             job.ArtifactsCount = 0;
         }
+
         job.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -238,6 +239,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
         {
             job.StartedAt = now;
         }
+
         job.UpdatedAt = now;
 
         await SaveChangesAsync(ct);
