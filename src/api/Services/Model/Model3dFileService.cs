@@ -205,12 +205,7 @@ namespace Farm.Web.Api.Services.Model
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
-            if (model == null)
-            {
-                return null;
-            }
-
-            return MapToDto(model);
+            return model == null ? null : MapToDto(model);
         }
 
         /// <summary>
@@ -240,11 +235,7 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            if (model == null)
-            {
-                return null;
-            }
-            return _fileOperations.GetFullThumbnailPath(model);
+            return model == null ? null : _fileOperations.GetFullThumbnailPath(model);
         }
 
         /// <summary>

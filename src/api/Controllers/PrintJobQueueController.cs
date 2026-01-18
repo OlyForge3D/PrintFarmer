@@ -43,12 +43,7 @@ public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLogg
         try
         {
             var added = await _service.EnqueueAsync(req, cancellationToken).ConfigureAwait(false);
-            if (added == null)
-            {
-                return BadRequest("Could not enqueue job");
-            }
-
-            return CreatedAtAction(nameof(GetByIdAsync), new { id = added.Id }, added);
+            return added == null ? BadRequest("Could not enqueue job") : CreatedAtAction(nameof(GetByIdAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -61,24 +56,14 @@ public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLogg
     public async Task<ActionResult<PrintJobDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
         var job = await _service.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        if (job == null)
-        {
-            return NotFound();
-        }
-
-        return Ok(job);
+        return job == null ? NotFound() : Ok(job);
     }
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
         var ok = await _service.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
-        if (!ok)
-        {
-            return NotFound();
-        }
-
-        return NoContent();
+        return !ok ? NotFound() : NoContent();
     }
 }
 

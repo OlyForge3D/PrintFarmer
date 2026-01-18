@@ -7,18 +7,12 @@ using Microsoft.Extensions.Hosting;
 
 namespace Farm.Infrastructure;
 
-public class ChunkUploadCleanupService : BackgroundService
+public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string webRootPath) : BackgroundService
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly string _webRootPath;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly string _webRootPath = webRootPath;
     private readonly TimeSpan _interval = TimeSpan.FromMinutes(15);
     private readonly TimeSpan _ttl = TimeSpan.FromHours(2);
-
-    public ChunkUploadCleanupService(IUnifiedLoggingService logger, string webRootPath)
-    {
-        _logger = logger;
-        _webRootPath = webRootPath;
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

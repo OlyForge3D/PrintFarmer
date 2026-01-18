@@ -4,10 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Slicing;
 
-public class EfProfilesRepository : IProfilesRepository
+public class EfProfilesRepository(AppDbContext db) : IProfilesRepository
 {
-    private readonly AppDbContext _db;
-    public EfProfilesRepository(AppDbContext db) => _db = db;
+    private readonly AppDbContext _db = db;
 
     public async Task<List<ProcessProfile>> GetAllAsync(CancellationToken ct) => await _db.ProcessProfiles.AsNoTracking().ToListAsync(ct);
 

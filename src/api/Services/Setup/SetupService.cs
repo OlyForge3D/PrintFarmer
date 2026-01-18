@@ -15,24 +15,16 @@ namespace Farm.Web.Api.Services.Setup;
 /// <summary>
 /// Service for handling initial application setup and configuration.
 /// </summary>
-public class SetupService : ISetupService
+public class SetupService(
+    IUsersRepository usersRepository,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ISetupService
 {
-    private readonly IUsersRepository _usersRepository;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public SetupService(
-        IUsersRepository usersRepository,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        IUnifiedLoggingService logger)
-    {
-        _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
-        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-        _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IUsersRepository _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
+    private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<bool> NeedsSetupAsync(CancellationToken ct)
     {
@@ -85,12 +77,9 @@ public class SetupService : ISetupService
             bool duplicateUser = await _usersRepository.AnyUserByUsernameOrEmailAsync(
                 request.Username, request.Email, ct);
 
-            if (duplicateUser)
-            {
-                return new AuthenticationResult(false, Error: "Username or email is already taken");
-            }
-
-            return new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system.");
+            return duplicateUser
+                ? new AuthenticationResult(false, Error: "Username or email is already taken")
+                : new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system.");
         }
 
         // Validate required fields

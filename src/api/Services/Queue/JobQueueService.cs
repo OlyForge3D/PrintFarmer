@@ -221,33 +221,30 @@ namespace Farm.Web.Api.Services.Queue
         public async Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
         {
             PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
-            if (job == null)
-            {
-                return null;
-            }
-
-            return new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.FileName ?? string.Empty,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt
-            };
+            return job == null
+                ? null
+                : new JobQueuePrintJobDto
+                {
+                    Id = job.Id,
+                    GcodeFileId = job.GcodeFileId,
+                    GcodeFileName = job.GcodeFile?.FileName ?? string.Empty,
+                    AssignedPrinterId = job.AssignedPrinterId,
+                    AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
+                    Status = (PrintJobStatus?)job.Status,
+                    Priority = job.Priority,
+                    QueuePosition = job.QueuePosition,
+                    RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+                    RequiredMaterialType = job.RequiredMaterialType,
+                    EstimatedPrintTime = job.EstimatedPrintTime,
+                    EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+                    ActualStartTime = job.ActualStartTime,
+                    ActualEndTime = job.ActualEndTime,
+                    ActualPrintTime = job.ActualPrintTime,
+                    ActualFilamentUsage = job.ActualFilamentUsage,
+                    FailureReason = job.FailureReason,
+                    CreatedAt = job.CreatedAt,
+                    UpdatedAt = job.UpdatedAt
+                };
         }
 
         /// <summary>

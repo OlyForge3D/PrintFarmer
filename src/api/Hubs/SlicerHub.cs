@@ -5,14 +5,9 @@ namespace Farm.Web.Api.Hubs;
 /// <summary>
 /// SignalR hub for broadcasting slicer registry events in real-time
 /// </summary>
-public class SlicerHub : Hub
+public class SlicerHub(ILogger<SlicerHub> logger) : Hub
 {
-    private readonly ILogger<SlicerHub> _logger;
-
-    public SlicerHub(ILogger<SlicerHub> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILogger<SlicerHub> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public override async Task OnConnectedAsync()
     {

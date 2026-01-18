@@ -12,21 +12,14 @@ namespace PrinterDiscovery.Controllers;
 [Route("api/discovery")]
 [Tags("Discovery")]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "S6960:This controller has multiple responsibilities", Justification = "Discovery endpoints are logically grouped")]
-public class DiscoveryController : ControllerBase
+public class DiscoveryController(
+    INetworkDiscoveryService discoveryService,
+    IStreamingDiscoveryService streamingDiscoveryService,
+    ILogger<DiscoveryController> logger) : ControllerBase
 {
-    private readonly INetworkDiscoveryService _discoveryService;
-    private readonly IStreamingDiscoveryService _streamingDiscoveryService;
-    private readonly ILogger<DiscoveryController> _logger;
-
-    public DiscoveryController(
-        INetworkDiscoveryService discoveryService,
-        IStreamingDiscoveryService streamingDiscoveryService,
-        ILogger<DiscoveryController> logger)
-    {
-        _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
-        _streamingDiscoveryService = streamingDiscoveryService ?? throw new ArgumentNullException(nameof(streamingDiscoveryService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly INetworkDiscoveryService _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
+    private readonly IStreamingDiscoveryService _streamingDiscoveryService = streamingDiscoveryService ?? throw new ArgumentNullException(nameof(streamingDiscoveryService));
+    private readonly ILogger<DiscoveryController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Start a streaming discovery scan with progress updates via SignalR.

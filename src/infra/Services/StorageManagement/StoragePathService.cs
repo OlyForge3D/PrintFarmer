@@ -8,21 +8,14 @@ namespace Farm.Infrastructure.Services.StorageManagement;
 /// Manages file storage paths across Docker, Kubernetes, and local development deployments.
 /// Uses IApplicationPathProvider abstraction instead of ASP.NET Core IWebHostEnvironment.
 /// </summary>
-public class StoragePathService : IStoragePathService
+public class StoragePathService(
+    IApplicationPathProvider pathProvider,
+    IConfiguration configuration,
+    ILogger<StoragePathService> logger) : IStoragePathService
 {
-    private readonly IApplicationPathProvider _pathProvider;
-    private readonly IConfiguration _configuration;
-    private readonly ILogger<StoragePathService> _logger;
-
-    public StoragePathService(
-        IApplicationPathProvider pathProvider,
-        IConfiguration configuration,
-        ILogger<StoragePathService> logger)
-    {
-        _pathProvider = pathProvider ?? throw new ArgumentNullException(nameof(pathProvider));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IApplicationPathProvider _pathProvider = pathProvider ?? throw new ArgumentNullException(nameof(pathProvider));
+    private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+    private readonly ILogger<StoragePathService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Get the gcode storage directory.

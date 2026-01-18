@@ -24,7 +24,11 @@ namespace Farm.Web.Api.Services.FileManagement;
 /// Runs on a configurable schedule (default: hourly).
 /// All findings are logged for administrative review and manual remediation.
 /// </summary>
-public class FileConsistencyAuditService : BackgroundService
+public class FileConsistencyAuditService(
+    IServiceScopeFactory scopeFactory,
+    IUnifiedLoggingService logger,
+    string modelsPath,
+    string gcodePath) : BackgroundService
 {
     /// <summary>
     /// Internal class to hold audit results before persisting to database.
@@ -42,23 +46,11 @@ public class FileConsistencyAuditService : BackgroundService
         public string SummaryMessage { get; set; } = string.Empty;
     }
 
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _interval = TimeSpan.FromHours(1); // Default: audit every hour
-    private readonly string _modelsPath;
-    private readonly string _gcodePath;
-
-    public FileConsistencyAuditService(
-        IServiceScopeFactory scopeFactory,
-        IUnifiedLoggingService logger,
-        string modelsPath,
-        string gcodePath)
-    {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _modelsPath = modelsPath ?? throw new ArgumentNullException(nameof(modelsPath));
-        _gcodePath = gcodePath ?? throw new ArgumentNullException(nameof(gcodePath));
-    }
+    private readonly string _modelsPath = modelsPath ?? throw new ArgumentNullException(nameof(modelsPath));
+    private readonly string _gcodePath = gcodePath ?? throw new ArgumentNullException(nameof(gcodePath));
 
     /// <summary>
     /// Allow interval configuration via environment variable for testing.

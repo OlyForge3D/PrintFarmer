@@ -38,18 +38,12 @@ public interface ICoreNetworkDiscoveryService
 /// <summary>
 /// Core implementation of network discovery using probes.
 /// </summary>
-public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
+public class CoreNetworkDiscoveryService(
+    IEnumerable<INetworkDiscoveryProbe> discoveryProbes,
+    ILogger<CoreNetworkDiscoveryService>? logger = null) : ICoreNetworkDiscoveryService
 {
-    private readonly IEnumerable<INetworkDiscoveryProbe> _discoveryProbes;
-    private readonly ILogger<CoreNetworkDiscoveryService>? _logger;
-
-    public CoreNetworkDiscoveryService(
-        IEnumerable<INetworkDiscoveryProbe> discoveryProbes,
-        ILogger<CoreNetworkDiscoveryService>? logger = null)
-    {
-        _discoveryProbes = discoveryProbes ?? throw new ArgumentNullException(nameof(discoveryProbes));
-        _logger = logger;
-    }
+    private readonly IEnumerable<INetworkDiscoveryProbe> _discoveryProbes = discoveryProbes ?? throw new ArgumentNullException(nameof(discoveryProbes));
+    private readonly ILogger<CoreNetworkDiscoveryService>? _logger = logger;
 
     /// <summary>
     /// Discover a single printer at the given IP address.

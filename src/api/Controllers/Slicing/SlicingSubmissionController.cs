@@ -139,12 +139,7 @@ public class SlicingSubmissionController(
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
             modelFile, slicerEngine, printerGuid, profile!, userId, HttpContext.RequestAborted);
 
-        if (!result.Success)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
-        }
-
-        return Accepted(result.Result);
+        return !result.Success ? StatusCode(StatusCodes.Status500InternalServerError, result.Error) : Accepted(result.Result);
     }
 
     [HttpPost("slice-model/{modelId}")]
@@ -214,11 +209,9 @@ public class SlicingSubmissionController(
         if (!result.Success)
         {
             // Check if it's a not found error
-            if (result.Error != null && result.Error.Contains("not found"))
-            {
-                return NotFound(result.Error);
-            }
-            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
+            return result.Error != null && result.Error.Contains("not found")
+                ? NotFound(result.Error)
+                : StatusCode(StatusCodes.Status500InternalServerError, result.Error);
         }
 
         return Accepted(result.Result);

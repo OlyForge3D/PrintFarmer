@@ -8,21 +8,14 @@ namespace Farm.Web.Api.Services.Workers;
 /// <summary>
 /// Background service for cleaning up stale workers (those without recent heartbeats)
 /// </summary>
-public class StaleWorkerCleanupHostedService : BackgroundService
+public class StaleWorkerCleanupHostedService(
+    IServiceProvider serviceProvider,
+    ILogger<StaleWorkerCleanupHostedService> logger,
+    IOptionsMonitor<StaleWorkerCleanupSettings> settingsMonitor) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<StaleWorkerCleanupHostedService> _logger;
-    private readonly IOptionsMonitor<StaleWorkerCleanupSettings> _settingsMonitor;
-
-    public StaleWorkerCleanupHostedService(
-        IServiceProvider serviceProvider,
-        ILogger<StaleWorkerCleanupHostedService> logger,
-        IOptionsMonitor<StaleWorkerCleanupSettings> settingsMonitor)
-    {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly ILogger<StaleWorkerCleanupHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IOptionsMonitor<StaleWorkerCleanupSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -127,12 +120,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
             return true;
         }
 
-        if (worker.LastHeartbeat < cutoffTime)
-        {
-            return true;
-        }
-
-        return false;
+        return worker.LastHeartbeat < cutoffTime;
     }
 
     private async Task MarkStaleWorkersOfflineAsync(IWorkerRepository workerRepository, List<Worker> staleWorkers)

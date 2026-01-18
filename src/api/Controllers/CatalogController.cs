@@ -60,11 +60,7 @@ public class CatalogController(
     public async Task<ActionResult<ManufacturerDto>> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
         ManufacturerDto? dto = await _catalogService.GetManufacturerByIdAsync(id, ct);
-        if (dto is null)
-        {
-            return NotFound();
-        }
-        return Ok(dto);
+        return dto is null ? NotFound() : Ok(dto);
     }
 
     /// <summary>
@@ -123,11 +119,7 @@ public class CatalogController(
     public async Task<ActionResult<PrinterModelDto>> GetPrinterModelByIdAsync(Guid id, CancellationToken ct)
     {
         PrinterModelDto? dto = await _catalogService.GetModelByIdAsync(id, ct);
-        if (dto is null)
-        {
-            return NotFound();
-        }
-        return Ok(dto);
+        return dto is null ? NotFound() : Ok(dto);
     }
 
     [HttpPost("printer-models")]
@@ -180,11 +172,7 @@ public class CatalogController(
         try
         {
             PrinterModelDto? updated = await _catalogService.UpdateModelAsync(id, req, ct);
-            if (updated is null)
-            {
-                return NotFound();
-            }
-            return NoContent();
+            return updated is null ? NotFound() : NoContent();
         }
         catch (Exception ex)
         {

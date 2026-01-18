@@ -11,14 +11,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
-public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class ArtifactsControllerTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public ArtifactsControllerTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact(DisplayName = "Artifact service upload + file presence works")]
     public async Task Artifact_Upload_And_File_Persisted()
@@ -60,23 +55,16 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
         _ = fileBytes.Length.Should().Be(data.Length);
     }
 
-    private sealed class TestFormFile : Microsoft.AspNetCore.Http.IFormFile
+    private sealed class TestFormFile(byte[] data, string fileName, string contentType) : Microsoft.AspNetCore.Http.IFormFile
     {
-        private readonly byte[] _data;
-        public TestFormFile(byte[] data, string fileName, string contentType)
-        {
-            _data = data;
-            FileName = fileName;
-            ContentType = contentType;
-            Name = "file";
-            Length = data.Length;
-        }
-        public string ContentType { get; }
+        private readonly byte[] _data = data;
+
+        public string ContentType { get; } = contentType;
         public string ContentDisposition { get; set; } = string.Empty;
         public Microsoft.AspNetCore.Http.IHeaderDictionary Headers { get; } = new Microsoft.AspNetCore.Http.HeaderDictionary();
-        public long Length { get; }
-        public string Name { get; }
-        public string FileName { get; }
+        public long Length { get; } = data.Length;
+        public string Name { get; } = "file";
+        public string FileName { get; } = fileName;
         public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
         public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {

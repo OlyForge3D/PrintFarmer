@@ -46,48 +46,36 @@ namespace Farm.Web.Api.Services.Gcode
     /// library services, providing a single source of truth for G-code file management.
     /// </para>
     /// </remarks>
-    public class GcodeFilesService : IGcodeFilesService, IGcodeFileProcessingService
+    /// <remarks>
+    /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
+    /// </remarks>
+    /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
+    /// <param name="unitOfWork">Unit of work for coordinated database operations.</param>
+    /// <param name="logger">Logging service for diagnostic and error logging.</param>
+    /// <param name="storagePathService">Service providing paths to storage directories.</param>
+    /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
+    /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
+    /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
+    /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
+    /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
+    public class GcodeFilesService(
+        IGcodeRepository gcodeRepo,
+        IUnitOfWork unitOfWork,
+        IUnifiedLoggingService logger,
+        IStoragePathService storagePathService,
+        IGcodeMetadataExtractorService metadataExtractor,
+        IGcodeThumbnailExtractorService thumbnailExtractor,
+        IFolderManagementService folderService,
+        IStoredFileOperationsService fileOperations) : IGcodeFilesService, IGcodeFileProcessingService
     {
-        private readonly IGcodeRepository _gcodeRepo;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IUnifiedLoggingService _logger;
-        private readonly IStoragePathService _storagePathService;
-        private readonly IGcodeMetadataExtractorService _metadataExtractor;
-        private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
-        private readonly IFolderManagementService _folderService;
-        private readonly IStoredFileOperationsService _fileOperations;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
-        /// </summary>
-        /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
-        /// <param name="unitOfWork">Unit of work for coordinated database operations.</param>
-        /// <param name="logger">Logging service for diagnostic and error logging.</param>
-        /// <param name="storagePathService">Service providing paths to storage directories.</param>
-        /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
-        /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
-        /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
-        /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
-        /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
-        public GcodeFilesService(
-            IGcodeRepository gcodeRepo,
-            IUnitOfWork unitOfWork,
-            IUnifiedLoggingService logger,
-            IStoragePathService storagePathService,
-            IGcodeMetadataExtractorService metadataExtractor,
-            IGcodeThumbnailExtractorService thumbnailExtractor,
-            IFolderManagementService folderService,
-            IStoredFileOperationsService fileOperations)
-        {
-            _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
-            _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-            _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
-            _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
-            _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-        }
+        private readonly IGcodeRepository _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+        private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
+        private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
+        private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
+        private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
         /// <summary>
         /// New efficient query method that pushes all filtering, sorting, and pagination to the database.
@@ -1041,12 +1029,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// <returns>Combined virtual path with proper separator handling</returns>
         private static string CombineVirtual(string? baseVirtual, string childName)
         {
-            if (baseVirtual == "/")
-            {
-                return "/" + childName;
-            }
-
-            return UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
+            return baseVirtual == "/" ? "/" + childName : UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
         }
 
         /// <summary>
@@ -1128,12 +1111,7 @@ namespace Farm.Web.Api.Services.Gcode
                 using StreamReader reader = new(filePath, Encoding.UTF8);
                 string gcodeContent = await reader.ReadToEndAsync(ct);
 
-                if (string.IsNullOrWhiteSpace(gcodeContent))
-                {
-                    return null;
-                }
-
-                return await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+                return string.IsNullOrWhiteSpace(gcodeContent) ? null : await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
             }
             catch (Exception ex)
             {
@@ -1342,12 +1320,7 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<GcodeFileDto?> GetFileAsync(Guid id, CancellationToken ct)
         {
             GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
-            if (file is null)
-            {
-                return null;
-            }
-
-            return MapToDto(file);
+            return file is null ? null : MapToDto(file);
         }
 
         /// <summary>
@@ -1591,12 +1564,7 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             string fullPath = Path.Combine(file.FilePath, file.FileName);
-            if (!System.IO.File.Exists(fullPath))
-            {
-                return null;
-            }
-
-            return await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+            return !System.IO.File.Exists(fullPath) ? null : await System.IO.File.ReadAllBytesAsync(fullPath, ct);
         }
 
         /// <summary>

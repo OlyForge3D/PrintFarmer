@@ -27,14 +27,9 @@ public interface I3MfToStlConversionService
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMfToStlConversionService : I3MfToStlConversionService
+public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3MfToStlConversionService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public ThreeMfToStlConversionService(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <inheritdoc/>
     public async Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default)

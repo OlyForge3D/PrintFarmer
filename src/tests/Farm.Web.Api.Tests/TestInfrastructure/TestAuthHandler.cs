@@ -6,7 +6,10 @@ using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure
 {
-    public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    public class TestAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder, new TimeProviderSystemClock(options.CurrentValue.TimeProvider ?? TimeProvider.System))
     {
         public const string SchemeName = "TestScheme";
         // Adapter to provide the (obsolete) ISystemClock interface from a TimeProvider instance.
@@ -15,21 +18,15 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
         // this adapter we'd need to upgrade the ASP.NET packages to a version that supports
         // TimeProvider in the base constructor.
 #pragma warning disable CS0618
-        private sealed class TimeProviderSystemClock : ISystemClock
+        private sealed class TimeProviderSystemClock(TimeProvider tp) : ISystemClock
         {
-            private readonly TimeProvider _tp;
-            public TimeProviderSystemClock(TimeProvider tp) => _tp = tp ?? TimeProvider.System;
+            private readonly TimeProvider _tp = tp ?? TimeProvider.System;
+
             public DateTimeOffset UtcNow => _tp.GetUtcNow();
         }
+
 #pragma warning restore CS0618
 #pragma warning disable CS0618 // using adapter for ISystemClock for current ASP.NET ref
-        public TestAuthHandler(
-            IOptionsMonitor<AuthenticationSchemeOptions> options,
-            ILoggerFactory logger,
-            UrlEncoder encoder)
-            : base(options, logger, encoder, new TimeProviderSystemClock(options.CurrentValue.TimeProvider ?? TimeProvider.System))
-        {
-        }
 #pragma warning restore CS0618
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()

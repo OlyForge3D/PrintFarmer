@@ -1069,7 +1069,7 @@ public class GcodeHarvestService(
             errorDetails["_operation"] = $"Failed to save harvest operation metadata: {ex.Message}";
         }
 
-        GcodeHarvestResultDto result = new GcodeHarvestResultDto(
+        GcodeHarvestResultDto result = new(
             request.HarvestOperationId,
             true,
             $"Imported {importedFileIds.Count} files",

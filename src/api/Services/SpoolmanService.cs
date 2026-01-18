@@ -22,11 +22,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     public SpoolmanConfigDto? GetConfig()
     {
         SpoolmanSettings? settings = settingsService.Get<SpoolmanSettings>();
-        if (settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl))
-        {
-            return null;
-        }
-        return new SpoolmanConfigDto(settings.BaseUrl);
+        return settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl) ? null : new SpoolmanConfigDto(settings.BaseUrl);
     }
 
     public async Task<SpoolmanProbeResult> ProbeAsync(string candidateBaseUrl, CancellationToken ct)
@@ -501,12 +497,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
-            if (doc is null)
-            {
-                return null;
-            }
-
-            return ParseSpool(doc.RootElement);
+            return doc is null ? null : ParseSpool(doc.RootElement);
         }
         catch
         {
@@ -755,12 +746,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             // Heuristic: keep first 6 (assume RRGGBB and ignore alpha at the end)
             s = s[..6];
         }
-        if (s.Length == 6 && s.All(IsHex))
-        {
-            return "#" + s;
-        }
-
-        return null;
+        return s.Length == 6 && s.All(IsHex) ? "#" + s : null;
     }
 
     private static bool IsHex(char c) =>

@@ -24,11 +24,9 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
                 if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]")
                 {
                     // Allow loopback
-                    if (InnerHandler != null)
-                    {
-                        return base.SendAsync(request, cancellationToken);
-                    }
-                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                    return InnerHandler != null
+                        ? base.SendAsync(request, cancellationToken)
+                        : Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
                 }
 
                 // Block all other outbound calls

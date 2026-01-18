@@ -272,16 +272,10 @@ public class DiscoveryProbeValidationTests
         public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
     }
 
-    private sealed class TestableBaseProbe : BaseDiscoveryProbe
+    private sealed class TestableBaseProbe(int port, bool shouldValidate) : BaseDiscoveryProbe
     {
-        private readonly int _port;
-        private readonly bool _shouldValidate;
-
-        public TestableBaseProbe(int port, bool shouldValidate)
-        {
-            _port = port;
-            _shouldValidate = shouldValidate;
-        }
+        private readonly int _port = port;
+        private readonly bool _shouldValidate = shouldValidate;
 
         public override string DisplayName => "TestBase";
         protected override int[] Ports => new[] { _port };

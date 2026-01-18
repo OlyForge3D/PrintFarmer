@@ -422,21 +422,18 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            if (job == null)
-            {
-                return null;
-            }
-
-            return new PrintJobProgress
-            {
-                JobId = job.Id,
-                State = job.State,
-                Progress = job.Progress,
-                TimePrinting = job.TimePrinting,
-                TimeRemaining = job.TimeRemaining,
-                FileName = job.File?.DisplayName ?? job.File?.Name,
-                InaccurateEstimates = job.InaccurateEstimates
-            };
+            return job == null
+                ? null
+                : new PrintJobProgress
+                {
+                    JobId = job.Id,
+                    State = job.State,
+                    Progress = job.Progress,
+                    TimePrinting = job.TimePrinting,
+                    TimeRemaining = job.TimeRemaining,
+                    FileName = job.File?.DisplayName ?? job.File?.Name,
+                    InaccurateEstimates = job.InaccurateEstimates
+                };
         }
         catch
         {
@@ -490,11 +487,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            if (job?.Id != null)
-            {
-                return await _apiClient.PauseJobAsync(baseUrl, job.Id, apiKey, ct);
-            }
-            return false;
+            return job?.Id != null ? await _apiClient.PauseJobAsync(baseUrl, job.Id, apiKey, ct) : false;
         }
         catch
         {
@@ -507,11 +500,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            if (job?.Id != null)
-            {
-                return await _apiClient.ResumeJobAsync(baseUrl, job.Id, apiKey, ct);
-            }
-            return false;
+            return job?.Id != null ? await _apiClient.ResumeJobAsync(baseUrl, job.Id, apiKey, ct) : false;
         }
         catch
         {
@@ -524,11 +513,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            if (job?.Id != null)
-            {
-                return await _apiClient.StopJobAsync(baseUrl, job.Id, apiKey, ct);
-            }
-            return false;
+            return job?.Id != null ? await _apiClient.StopJobAsync(baseUrl, job.Id, apiKey, ct) : false;
         }
         catch
         {

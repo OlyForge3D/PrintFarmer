@@ -18,16 +18,10 @@ namespace Farm.Web.Api.Tests.Integration;
 [Trait("Category", "Integration")]
 [Trait("Category", "Facade")]
 [TestTiming]
-public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IDisposable
+public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>, IDisposable
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly AppDbContext _dbContext;
-
-    public PrinterImportFacadeIntegrationTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-        _dbContext = factory.Services.CreateAsyncScope().ServiceProvider.GetRequiredService<AppDbContext>();
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
+    private readonly AppDbContext _dbContext = factory.Services.CreateAsyncScope().ServiceProvider.GetRequiredService<AppDbContext>();
 
     public void Dispose()
     {

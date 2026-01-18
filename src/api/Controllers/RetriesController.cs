@@ -174,12 +174,7 @@ public class RetriesController(
         try
         {
             var retry = await _retryService.GetRetryAsync(retryId, cancellationToken);
-            if (retry is null)
-            {
-                return NotFound($"Retry {retryId} not found");
-            }
-
-            return Ok(MapToDto(retry));
+            return retry is null ? NotFound($"Retry {retryId} not found") : Ok(MapToDto(retry));
         }
         catch (Exception ex)
         {

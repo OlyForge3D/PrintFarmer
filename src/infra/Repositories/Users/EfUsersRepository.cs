@@ -10,14 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Users;
 
-public class EfUsersRepository : IUsersRepository
+public class EfUsersRepository(AppDbContext db) : IUsersRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfUsersRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<IReadOnlyList<UserDto>> GetUsersAsync(CancellationToken ct = default)
     {

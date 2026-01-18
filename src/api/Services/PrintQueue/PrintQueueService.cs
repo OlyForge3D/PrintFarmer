@@ -1248,12 +1248,9 @@ public class PrintQueueService(
     /// </summary>
     private static decimal? CalculateVariancePercent(int? estimated, int? actual)
     {
-        if (!estimated.HasValue || !actual.HasValue || estimated.Value == 0)
-        {
-            return null;
-        }
-
-        return ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
+        return !estimated.HasValue || !actual.HasValue || estimated.Value == 0
+            ? null
+            : ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
     }
 
     // ============= NOTIFICATION HELPERS (Phase 4.3) =============
@@ -1435,12 +1432,7 @@ public class PrintQueueService(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        if (_retryService == null)
-        {
-            return Enumerable.Empty<JobRetry>();
-        }
-
-        return await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
+        return _retryService == null ? Enumerable.Empty<JobRetry>() : await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
     }
 
     /// <summary>
@@ -1448,12 +1440,7 @@ public class PrintQueueService(
     /// </summary>
     public async Task<IEnumerable<JobRetry>> GetDueRetriesAsync(CancellationToken cancellationToken = default)
     {
-        if (_retryService == null)
-        {
-            return Enumerable.Empty<JobRetry>();
-        }
-
-        return await _retryService.GetDueRetriesAsync(cancellationToken);
+        return _retryService == null ? Enumerable.Empty<JobRetry>() : await _retryService.GetDueRetriesAsync(cancellationToken);
     }
 }
 

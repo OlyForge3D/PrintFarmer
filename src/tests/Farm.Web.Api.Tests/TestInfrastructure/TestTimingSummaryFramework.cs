@@ -41,11 +41,9 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
 
     protected override ITestFrameworkExecutor CreateExecutor(AssemblyName assemblyName)
     {
-        if (!_auto)
-        {
-            return base.CreateExecutor(assemblyName);
-        }
-        return new AutoTimingFrameworkExecutor(assemblyName, SourceInformationProvider, DiagnosticMessageSink);
+        return !_auto
+            ? base.CreateExecutor(assemblyName)
+            : new AutoTimingFrameworkExecutor(assemblyName, SourceInformationProvider, DiagnosticMessageSink);
     }
 
     private void GenerateSummary()
@@ -200,23 +198,14 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
 
     private static string Truncate(string value, int max)
     {
-        if (string.IsNullOrEmpty(value) || value.Length <= max)
-        {
-            return value;
-        }
-        return value[..(max - 3)] + "...";
+        return string.IsNullOrEmpty(value) || value.Length <= max ? value : value[..(max - 3)] + "...";
     }
 
     private sealed record TimingEntry(string Category, string Class, string Method, double DurationMs);
 }
 
-internal sealed class AutoTimingFrameworkExecutor : XunitTestFrameworkExecutor
+internal sealed class AutoTimingFrameworkExecutor(AssemblyName assemblyName, ISourceInformationProvider sourceInformationProvider, IMessageSink diagnosticMessageSink) : XunitTestFrameworkExecutor(assemblyName, sourceInformationProvider, diagnosticMessageSink)
 {
-    public AutoTimingFrameworkExecutor(AssemblyName assemblyName, ISourceInformationProvider sourceInformationProvider, IMessageSink diagnosticMessageSink)
-        : base(assemblyName, sourceInformationProvider, diagnosticMessageSink)
-    {
-    }
-
     protected override void RunTestCases(IEnumerable<IXunitTestCase> testCases, IMessageSink executionMessageSink, ITestFrameworkExecutionOptions executionOptions)
     {
         AutoTimingMessageSink timingSink = new AutoTimingMessageSink(executionMessageSink);
@@ -224,12 +213,10 @@ internal sealed class AutoTimingFrameworkExecutor : XunitTestFrameworkExecutor
     }
 }
 
-internal sealed class AutoTimingMessageSink : LongLivedMarshalByRefObject, IMessageSink
+internal sealed class AutoTimingMessageSink(IMessageSink inner) : LongLivedMarshalByRefObject, IMessageSink
 {
-    private readonly IMessageSink _inner;
+    private readonly IMessageSink _inner = inner;
     private readonly ConcurrentDictionary<string, Stopwatch> _sw = new();
-
-    public AutoTimingMessageSink(IMessageSink inner) => _inner = inner;
 
     public bool OnMessage(IMessageSinkMessage message)
     {

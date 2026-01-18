@@ -148,18 +148,10 @@ public enum StorageThresholdLevel
 /// <summary>
 /// Event arguments for storage threshold exceeded events.
 /// </summary>
-public sealed class StorageThresholdEventArgs : EventArgs
+public sealed class StorageThresholdEventArgs(StorageThresholdLevel level, long currentBytes, long warningThreshold, long criticalThreshold) : EventArgs
 {
-    public StorageThresholdLevel Level { get; }
-    public long CurrentBytes { get; }
-    public long WarningThreshold { get; }
-    public long CriticalThreshold { get; }
-
-    public StorageThresholdEventArgs(StorageThresholdLevel level, long currentBytes, long warningThreshold, long criticalThreshold)
-    {
-        Level = level;
-        CurrentBytes = currentBytes;
-        WarningThreshold = warningThreshold;
-        CriticalThreshold = criticalThreshold;
-    }
+    public StorageThresholdLevel Level { get; } = level;
+    public long CurrentBytes { get; } = currentBytes;
+    public long WarningThreshold { get; } = warningThreshold;
+    public long CriticalThreshold { get; } = criticalThreshold;
 }

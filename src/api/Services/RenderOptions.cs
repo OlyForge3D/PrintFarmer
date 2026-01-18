@@ -276,12 +276,7 @@ public sealed class RenderOptions
         float absZ = Math.Abs(viewDirection.Z);
 
         // Threshold: if the view is pointing mostly in Z direction (> 0.9), use -Y as up
-        if (absZ > 0.9f)
-        {
-            return -Vector3.UnitY;
-        }
-
-        return Vector3.UnitZ;
+        return absZ > 0.9f ? -Vector3.UnitY : Vector3.UnitZ;
     }
 
     /// <summary>

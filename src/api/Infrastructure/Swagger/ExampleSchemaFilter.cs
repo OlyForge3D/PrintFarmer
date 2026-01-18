@@ -1,7 +1,5 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
-// using Microsoft.OpenApi.Any;
-// using Microsoft.OpenApi.Models;
 
 // Explicit using to disambiguate from Moonraker's LoginRequest
 using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
@@ -10,8 +8,8 @@ namespace Farm.Web.Api.Infrastructure.Swagger;
 
 /// <summary>
 /// OpenAPI schema enrichment utilities for improved Swagger UI clarity.
-/// Note: With native ASP.NET Core OpenAPI (no Swashbuckle), custom filters
-/// are applied via AddOperationTransformer and AddDocumentTransformer in Program.cs
+/// Using .NET 10 native ASP.NET Core OpenAPI with Document/Operation Transformers.
+/// Custom examples can be added via OpenApiOperation.Examples in Program.cs transformers.
 /// </summary>
 public static class ExampleSchemaFilter
 {

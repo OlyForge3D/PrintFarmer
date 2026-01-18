@@ -53,12 +53,9 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
-            if (added == null)
-            {
-                return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
-            }
-
-            return CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
+            return added == null
+                ? NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer")
+                : CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -79,12 +76,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
-            if (dto == null)
-            {
-                return NotFound($"Print job with ID {id} not found");
-            }
-
-            return Ok(dto);
+            return dto == null ? NotFound($"Print job with ID {id} not found") : Ok(dto);
         }
         catch (Exception ex)
         {
@@ -138,12 +130,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             bool ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
-            if (!ok)
-            {
-                return BadRequest("Cannot delete the job (not found or currently printing)");
-            }
-
-            return NoContent();
+            return !ok ? BadRequest("Cannot delete the job (not found or currently printing)") : NoContent();
         }
         catch (Exception ex)
         {

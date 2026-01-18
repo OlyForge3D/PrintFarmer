@@ -172,11 +172,7 @@ public class Model3DFilesController(
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
         Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-        if (dto == null)
-        {
-            return NotFound();
-        }
-        return Ok(dto);
+        return dto == null ? NotFound() : Ok(dto);
     }
 
     /// <summary>
@@ -309,12 +305,7 @@ public class Model3DFilesController(
         string contentType = _fileOperations.GetContentTypeForFile(fileExtension);
 
         // Return converted data or original file from disk
-        if (fileData != null)
-        {
-            return File(fileData, contentType, fileName);
-        }
-
-        return PhysicalFile(fullPath, contentType, fileName);
+        return fileData != null ? File(fileData, contentType, fileName) : PhysicalFile(fullPath, contentType, fileName);
     }
 
     /// <summary>

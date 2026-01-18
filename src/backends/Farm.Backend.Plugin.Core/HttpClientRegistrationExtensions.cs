@@ -64,12 +64,7 @@ public static class HttpClientRegistrationExtensions
                     // Check if second param is Action<HttpClient>
                     var secondParamType = parameters[1].ParameterType;
                     var expectedActionType = typeof(Action<System.Net.Http.HttpClient>);
-                    if (secondParamType != expectedActionType)
-                    {
-                        return false;
-                    }
-
-                    return true;
+                    return secondParamType == expectedActionType;
                 });
 
             if (addHttpClientMethod == null)

@@ -3,14 +3,9 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Gcode;
 
-public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
+public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGcodeMetadataExtractorService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public GcodeMetadataExtractorService(IUnifiedLoggingService logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Extract metadata from G-code file content by parsing comment lines.
@@ -21,7 +16,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         return await Task.Run(() =>
         {
             _logger.LogInformation("ExtractMetadataAsync: Starting metadata extraction");
-            GcodeMetadataExtracted metadata = new GcodeMetadataExtracted();
+            GcodeMetadataExtracted metadata = new();
 
             if (string.IsNullOrWhiteSpace(gcodeContent))
             {

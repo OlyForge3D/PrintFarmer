@@ -17,14 +17,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
-public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
+public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public ArtifactsMetricsTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     private static IFormFile CreateFormFile(byte[] content, string fileName, string contentType)
     {

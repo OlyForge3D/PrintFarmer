@@ -9,14 +9,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.SystemLogs;
 
-public class SystemLogService : ISystemLogService
+public class SystemLogService(Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository repo) : ISystemLogService
 {
-    private readonly Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository _repo;
-
-    public SystemLogService(Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository repo)
-    {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-    }
+    private readonly Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
 
     public async Task<IReadOnlyList<SystemLog>> QueryLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
     {

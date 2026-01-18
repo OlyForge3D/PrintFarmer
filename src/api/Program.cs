@@ -37,11 +37,11 @@ using Farm.Web.Api.Services.SlicerServices;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-// using Microsoft.OpenApi.Models;  // TODO: Update for .NET 10 OpenAPI
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -137,7 +137,7 @@ builder.Services.AddControllers(options =>
     })
     .AddJsonOptions(options =>
     {
-        // Configure JSON options for .NET 9 compatibility
+        // Configure JSON options for .NET 10 compatibility
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.WriteIndented = false;
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
@@ -148,46 +148,7 @@ builder.Services.AddControllers(options =>
     });
 
 builder.Services.AddEndpointsApiExplorer();
-// TODO: Update OpenAPI configuration for .NET 10
-/*
-builder.Services.AddOpenApi(options =>
-{
-    // Configure OpenAPI document with JWT Bearer security
-    OpenApiSecurityScheme securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
-    };
-
-    _ = options.AddOperationTransformer((operation, api, ct) =>
-    {
-        operation.Security ??= [];
-        operation.Security.Add(new()
-        {
-            [new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            }] = []
-        });
-        return Task.CompletedTask;
-    });
-
-    _ = options.AddDocumentTransformer((document, context, ct) =>
-    {
-        document.Components ??= new();
-        document.Components.SecuritySchemes["Bearer"] = securityScheme;
-        return Task.CompletedTask;
-    });
-});
-*/
+builder.Services.AddOpenApi();
 
 // CORS configuration for API access
 builder.Services.AddCors(options =>
@@ -266,8 +227,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
         .AddHttpClientInstrumentation()
         .AddEntityFrameworkCoreInstrumentation(options =>
         {
-            options.SetDbStatementForStoredProcedure = true;
-            options.SetDbStatementForText = true;
+            // Note: SetDbStatementForStoredProcedure and SetDbStatementForText removed in OpenTelemetry 1.14.0
+            // DB statements are now captured by default
             options.EnrichWithIDbCommand = (activity, command) =>
             {
                 _ = activity.SetTag("db.operation", command.CommandText);
@@ -691,7 +652,10 @@ try
         ITempPathProvider? tempProvider = _capturedTempPathProvider ?? app.Services.GetService<ITempPathProvider>();
         if (tempProvider != null)
         {
-            app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+            if (app.Logger.IsEnabled(LogLevel.Information))
+            {
+                app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+            }
         }
         else
         {
@@ -711,8 +675,10 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    // TODO: Re-add MapOpenApi after .NET 10 migration rewrite
+    // Enable OpenAPI documentation endpoint at /openapi/v1.json in development
+    // Temporarily disabled due to DateTime JSON serialization issue during schema reflection
     // _ = app.MapOpenApi();
+    // OpenAPI UI available at /openapi/ui.json (browser-friendly)
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -966,7 +932,10 @@ try
                 ServeUnknownFileTypes = true,
                 DefaultContentType = "application/octet-stream"
             });
-            app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+            if (app.Logger.IsEnabled(LogLevel.Information))
+            {
+                app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+            }
         }
         else
         {
@@ -1060,14 +1029,9 @@ namespace Farm.Web.Api.Testing
     using System.IO;
     using System.Text;
 
-    internal sealed class TestStartupFilter : IStartupFilter
+    internal sealed class TestStartupFilter(System.Action onConfigure) : IStartupFilter
     {
-        private readonly System.Action _onConfigure;
-
-        public TestStartupFilter(System.Action onConfigure)
-        {
-            _onConfigure = onConfigure ?? throw new ArgumentNullException(nameof(onConfigure));
-        }
+        private readonly System.Action _onConfigure = onConfigure ?? throw new ArgumentNullException(nameof(onConfigure));
 
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
         {

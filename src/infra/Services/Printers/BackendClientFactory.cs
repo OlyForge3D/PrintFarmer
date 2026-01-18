@@ -145,7 +145,7 @@ public class BackendClientFactory : IBackendClientFactory
             _logger.LogDebug($"✓ Resolved backend client for {backend}: {clientType.Name}");
             return client;
         }
-        catch (Exception ex) when (ex is not ArgumentException && ex is not InvalidOperationException)
+        catch (Exception ex) when (ex is not ArgumentException and not InvalidOperationException)
         {
             _logger.LogError($"✗ Error resolving backend client for {backend} (type: {clientType.Name}): {ex.Message}");
             throw new InvalidOperationException($"Error resolving backend client for {backend}: {ex.Message}", ex);

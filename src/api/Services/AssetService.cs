@@ -63,19 +63,10 @@ namespace Farm.Web.Api.Services
     /// Service implementation for OrcaSlicer asset management
     /// Loads assets from the React app's public folder and provides access to asset URLs
     /// </summary>
-    public sealed class AssetService : IAssetService
+    public sealed class AssetService(ILogger<AssetService> logger) : IAssetService
     {
-        private readonly ILogger<AssetService> _logger;
-        private readonly string _manifestPath;
-
-        public AssetService(ILogger<AssetService> logger)
-        {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-            // Manifest is served from React app public assets
-            // For API usage, we'll reference URLs only (no file I/O in API)
-            _manifestPath = "/assets/orcaslicer/manifest.json";
-        }
+        private readonly ILogger<AssetService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly string _manifestPath = "/assets/orcaslicer/manifest.json";
 
         /// <summary>
         /// Get the complete asset manifest

@@ -10,16 +10,9 @@ using Farm.Web.Api.Services.Queue;
 
 namespace Farm.Web.Api.Services.PrintJobQueue;
 
-public class PrintJobQueueAdapter : IPrintJobQueueService
+public class PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService, IUnifiedLoggingService logger) : IPrintJobQueueService
 {
-    private readonly Services.Queue.IJobQueueService _jobQueueService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService, IUnifiedLoggingService logger)
-    {
-        _jobQueueService = jobQueueService;
-        _logger = logger;
-    }
+    private readonly Services.Queue.IJobQueueService _jobQueueService = jobQueueService;
 
     public async Task<IEnumerable<PrintJobDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {

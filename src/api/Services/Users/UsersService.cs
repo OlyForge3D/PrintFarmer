@@ -22,32 +22,23 @@ namespace Farm.Web.Api.Services.Users
     /// - Logging of all user-related operations for audit trails
     /// All user operations are logged through IUnifiedLoggingService for observability.
     /// </remarks>
-    public class UsersService : IUsersService
+    /// <remarks>
+    /// Initializes a new instance of the UsersService with required dependencies.
+    /// </remarks>
+    /// <param name="users">Repository for user data persistence and retrieval</param>
+    /// <param name="authService">Service for authentication operations and token management</param>
+    /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
+    /// <param name="logger">Unified logging service for audit trails and operation tracking</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+    public class UsersService(
+        IUsersRepository users,
+        IAuthenticationService authService,
+        IPasswordHashingService passwordHashingService,
+        IUnifiedLoggingService logger) : IUsersService
     {
-        private readonly IUsersRepository _users;
-        private readonly IAuthenticationService _authService;
-        private readonly IPasswordHashingService _passwordHashingService;
-        private readonly IUnifiedLoggingService _logger;
-
-        /// <summary>
-        /// Initializes a new instance of the UsersService with required dependencies.
-        /// </summary>
-        /// <param name="users">Repository for user data persistence and retrieval</param>
-        /// <param name="authService">Service for authentication operations and token management</param>
-        /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
-        /// <param name="logger">Unified logging service for audit trails and operation tracking</param>
-        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
-        public UsersService(
-            IUsersRepository users,
-            IAuthenticationService authService,
-            IPasswordHashingService passwordHashingService,
-            IUnifiedLoggingService logger)
-        {
-            _users = users ?? throw new ArgumentNullException(nameof(users));
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IUsersRepository _users = users ?? throw new ArgumentNullException(nameof(users));
+        private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
 
         /// <summary>
         /// Retrieves all user accounts from the system.

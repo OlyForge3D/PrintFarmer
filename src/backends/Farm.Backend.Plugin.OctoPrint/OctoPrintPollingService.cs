@@ -423,20 +423,13 @@ public sealed class OctoPrintPollingService(
     {
         if (ex is HttpRequestException httpEx)
         {
-            if (httpEx.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                httpEx.StatusCode == System.Net.HttpStatusCode.Forbidden)
-            {
-                return "authFail";
-            }
-            return "noResponse";
+            return httpEx.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                httpEx.StatusCode == System.Net.HttpStatusCode.Forbidden
+                ? "authFail"
+                : "noResponse";
         }
 
-        if (ex is OperationCanceledException)
-        {
-            return "noResponse";
-        }
-
-        return "noResponse";
+        return ex is OperationCanceledException ? "noResponse" : "noResponse";
     }
 
     /// <summary>

@@ -14,13 +14,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts
 {
-    public class ArtifactsControllerKindValidationTests : IClassFixture<CustomWebApplicationFactory>
+    public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
     {
-        private readonly CustomWebApplicationFactory _factory;
-        public ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory)
-        {
-            _factory = factory;
-        }
+        private readonly CustomWebApplicationFactory _factory = factory;
 
         [Fact(DisplayName = "Unsupported kind returns 400 with allowedKinds (controller direct)")]
         public async Task Unsupported_Kind_Returns_BadRequest_With_Allowed_List()
@@ -37,23 +33,16 @@ namespace Farm.Web.Api.Tests.Artifacts
             _ = bad.Value!.ToString()!.Should().Contain("allowedKinds");
         }
 
-        private sealed class TestFormFile : IFormFile
+        private sealed class TestFormFile(byte[] d, string name, string ct) : IFormFile
         {
-            private readonly byte[] _data;
-            public TestFormFile(byte[] d, string name, string ct)
-            {
-                _data = d;
-                FileName = name;
-                ContentType = ct;
-                Name = "file";
-                Length = d.Length;
-            }
-            public string ContentType { get; }
+            private readonly byte[] _data = d;
+
+            public string ContentType { get; } = ct;
             public string ContentDisposition { get; set; } = string.Empty;
             public IHeaderDictionary Headers { get; } = new HeaderDictionary();
-            public long Length { get; }
-            public string Name { get; }
-            public string FileName { get; }
+            public long Length { get; } = d.Length;
+            public string Name { get; } = "file";
+            public string FileName { get; } = name;
             public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
             public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
             {

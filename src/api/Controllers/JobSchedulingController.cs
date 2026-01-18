@@ -134,12 +134,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     public async Task<ActionResult<ScheduledJobDto>> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var result = await _schedulingService.GetScheduledJobAsync(jobId, cancellationToken);
-        if (result == null)
-        {
-            return NotFound(new { error = $"No scheduling found for job '{jobId}'" });
-        }
-
-        return Ok(result);
+        return result == null ? NotFound(new { error = $"No scheduling found for job '{jobId}'" }) : Ok(result);
     }
 
     /// <summary>

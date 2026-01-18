@@ -52,12 +52,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         try
         {
             GcodeFileDto? dto = await gcodeService.GetFileAsync(id, CancellationToken.None);
-            if (dto is null)
-            {
-                return NotFound($"G-code file with ID {id} not found");
-            }
-
-            return Ok(dto);
+            return dto is null ? NotFound($"G-code file with ID {id} not found") : Ok(dto);
         }
         catch (Exception ex)
         {
@@ -123,12 +118,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
             }
             // Delegate update entirely to the service
             GcodeFileDto updated = await gcodeService.UpdateFileAsync(id, request, CancellationToken.None);
-            if (updated == null)
-            {
-                return NotFound($"G-code file with ID {id} not found");
-            }
-
-            return Ok(updated);
+            return updated == null ? NotFound($"G-code file with ID {id} not found") : Ok(updated);
         }
         catch (Exception ex)
         {
@@ -151,12 +141,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         {
             // Let service decide if file exists or is deletable
             bool ok = await gcodeService.DeleteFileAsync(id, CancellationToken.None);
-            if (!ok)
-            {
-                return BadRequest("Cannot delete file (may be used by active jobs or missing)");
-            }
-
-            return NoContent();
+            return !ok ? BadRequest("Cannot delete file (may be used by active jobs or missing)") : NoContent();
         }
         catch (Exception ex)
         {
@@ -183,12 +168,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
             }
 
             byte[]? bytes = await gcodeService.DownloadFileAsync(id, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
-            if (bytes == null)
-            {
-                return NotFound("Physical file not found on disk");
-            }
-
-            return File(bytes, "application/octet-stream", dto.FileName);
+            return bytes == null ? NotFound("Physical file not found on disk") : File(bytes, "application/octet-stream", dto.FileName);
         }
         catch (Exception ex)
         {

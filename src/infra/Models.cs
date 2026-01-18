@@ -377,7 +377,7 @@ public class CreatePrinterDto : PrinterInfoDto
         Guid? modelId = null,
         string? newManufacturerName = null,
         string? newModelName = null) =>
-        new CreatePrinterDto
+        new()
         {
             Name = discovered.Name,
             ServerUrl = discovered.ServerUrl,
@@ -779,7 +779,7 @@ public class DiscoveredPrinterDto : PrinterInfoDto
         string? model = null,
         string? cameraStreamUrl = null,
         string? cameraSnapshotUrl = null) =>
-        new DiscoveredPrinterDto
+        new()
         {
             IpAddress = ipAddress,
             ServerUrl = serverUrl,
@@ -823,7 +823,7 @@ public class RegisterDiscoveredPrinterDto
 
     /// <summary>Convert to PrinterInfoDto (preferred modern format)</summary>
     public PrinterInfoDto ToPrinterInfoDto() =>
-        new PrinterInfoDto
+        new()
         {
             Name = FriendlyName ?? Hostname,
             IpAddress = IpAddress,

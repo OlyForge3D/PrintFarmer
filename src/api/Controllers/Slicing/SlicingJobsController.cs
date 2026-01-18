@@ -39,12 +39,7 @@ public class SlicingJobsController(
     public async Task<IActionResult> GetJobStatusAsync(Guid jobId)
     {
         SlicingJobStatusResponse? status = await _orchestrator.GetJobStatusAsync(jobId);
-        if (status == null)
-        {
-            return NotFound();
-        }
-
-        return Ok(status);
+        return status == null ? NotFound() : Ok(status);
     }
 
     // Canonical plural route
@@ -166,11 +161,6 @@ public class SlicingJobsController(
         }
         // At this point 'path' is reconstructed from a trusted root + sanitized filename (.gcode enforced, traversal rejected).
         // Suppress analyzer warning: path cannot be influenced directly by user input beyond GUID lookup.
-        if (!System.IO.File.Exists(path))
-        {
-            return NotFound();
-        }
-
-        return PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");
+        return !System.IO.File.Exists(path) ? NotFound() : PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");
     }
 }

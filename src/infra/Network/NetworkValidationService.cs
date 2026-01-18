@@ -58,12 +58,12 @@ public static class NetworkValidationService
         }
 
         // Additional validation
-        if (settings.ClientTimeoutMs < 100 || settings.ClientTimeoutMs > 30000)
+        if (settings.ClientTimeoutMs is < 100 or > 30000)
         {
             result._errors.Add("Discovery timeout must be between 100ms and 30,000ms");
         }
 
-        if (settings.MaxConcurrentRequests < 1 || settings.MaxConcurrentRequests > 100)
+        if (settings.MaxConcurrentRequests is < 1 or > 100)
         {
             result._errors.Add("Max concurrent requests must be between 1 and 100");
         }

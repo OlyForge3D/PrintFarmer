@@ -8,226 +8,218 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Infrastructure.Repositories.Catalog
+namespace Farm.Infrastructure.Repositories.Catalog;
+
+// Implementation of catalog data access. Does not implement the API interface here
+// to avoid a cross-project dependency from infra -> api. The interface will be moved
+// to a shared contract (or infra) in a follow-up step and this class can then implement it.
+public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 {
-    // Implementation of catalog data access. Does not implement the API interface here
-    // to avoid a cross-project dependency from infra -> api. The interface will be moved
-    // to a shared contract (or infra) in a follow-up step and this class can then implement it.
-    public class EfCatalogRepository : ICatalogRepository
+    private readonly AppDbContext _db = db;
+
+    public async Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default)
     {
-        private readonly AppDbContext _db;
+        var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name, m.Url, m.Description }).ToListAsync(ct);
+        return rows.Select(r => (r.Id, r.Name, r.Url, r.Description)).ToList();
+    }
 
-        public EfCatalogRepository(AppDbContext db)
+    public async Task<(Guid Id, string Name, string? Url, string? Description)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        return m is null ? null : (m.Id, m.Name, m.Url, m.Description);
+    }
+
+    public async Task AddManufacturerAsync(Guid id, string name, string? url, string? description, CancellationToken ct = default)
+    {
+        _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name, Url = url, Description = description });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<bool> ManufacturerExistsAsync(Guid id, CancellationToken ct = default)
+    {
+        return _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == id, ct);
+    }
+
+    public Task SaveChangesAsync(CancellationToken ct = default)
+    {
+        return _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default)
+    {
+        return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).FirstOrDefaultAsync(m => m.Id == id, ct);
+    }
+
+    public async Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default)
+    {
+        PrinterModel? model = await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == modelId, ct);
+        if (model is null)
         {
-            _db = db;
+            return;
+        }
+        // Remove existing
+        _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
+        // Add new
+        foreach (Guid filamentTypeId in filamentTypeIds)
+        {
+            _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
+        }
+    }
+
+    public async Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default)
+    {
+        IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+        if (manufacturerId.HasValue)
+        {
+            q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
+        }
+        List<PrinterModel> models = await q.ToListAsync(ct);
+        List<PrinterModelDto> list = models.Select(m => new PrinterModelDto(
+            m.Id,
+            m.Name,
+            m.ManufacturerId,
+            m.MotionType.HasValue ? (MotionType?)m.MotionType.Value : null,
+            m.MaxX,
+            m.MaxY,
+            m.MaxZ,
+            m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
+            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()
+        )).ToList();
+        return list;
+    }
+
+    public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        PrinterModel? model = await _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .FirstOrDefaultAsync(m => m.Id == id, ct);
+        return model is null
+            ? null
+            : new PrinterModelDto(model.Id,
+            model.Name,
+            model.ManufacturerId,
+            model.MotionType.HasValue ? (MotionType?)model.MotionType.Value : null,
+            model.MaxX,
+            model.MaxY,
+            model.MaxZ,
+            model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
+            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
+    }
+
+    public async Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
+    {
+        _ = _db.PrinterModels.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IEnumerable<Guid>> GetValidFilamentTypeIdsAsync(Guid[] ids, CancellationToken ct = default)
+    {
+        return await _db.FilamentTypes.AsNoTracking().Where(f => ids.Contains(f.Id)).Select(f => f.Id).ToListAsync(ct);
+    }
+
+    public async Task<PrinterModelDto?> GetModelWithFilamentNamesAsync(Guid id, CancellationToken ct = default)
+    {
+        return await GetModelByIdAsync(id, ct);
+    }
+
+    public async Task<Guid?> GetUnknownManufacturerIdAsync(CancellationToken ct = default)
+    {
+        Manufacturer? unknown = await _db.Manufacturers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Name == "Unknown", ct);
+        return unknown?.Id;
+    }
+
+    public async Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default)
+    {
+        Guid? unknownMfgId = await GetUnknownManufacturerIdAsync(ct);
+        if (!unknownMfgId.HasValue)
+        {
+            return null;
         }
 
-        public async Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default)
-        {
-            var rows = await _db.Manufacturers.AsNoTracking().Select(m => new { m.Id, m.Name, m.Url, m.Description }).ToListAsync(ct);
-            return rows.Select(r => (r.Id, r.Name, r.Url, r.Description)).ToList();
-        }
+        PrinterModel? unknownModel = await _db.PrinterModels
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.ManufacturerId == unknownMfgId.Value && m.Name == "Unknown Model", ct);
+        return unknownModel?.Id;
+    }
 
-        public async Task<(Guid Id, string Name, string? Url, string? Description)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
+    public async Task RemoveModelAsync(Guid id, CancellationToken ct = default)
+    {
+        PrinterModel? model = await _db.PrinterModels.FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (model is not null)
         {
-            Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            return m is null ? null : (m.Id, m.Name, m.Url, m.Description);
+            _ = _db.PrinterModels.Remove(model);
         }
+    }
 
-        public async Task AddManufacturerAsync(Guid id, string name, string? url, string? description, CancellationToken ct = default)
-        {
-            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name, Url = url, Description = description });
-            await _db.SaveChangesAsync(ct);
-        }
+    /// <summary>
+    /// Finds a manufacturer by exact name match for import/lookup purposes (read-only, no creation).
+    /// Returns the Manufacturer entity if found, null otherwise.
+    /// </summary>
+    public async Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default)
+    {
+        return await _db.Manufacturers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Name == name, ct);
+    }
 
-        public Task<bool> ManufacturerExistsAsync(Guid id, CancellationToken ct = default)
-        {
-            return _db.Manufacturers.AsNoTracking().AnyAsync(m => m.Id == id, ct);
-        }
+    /// <summary>
+    /// Finds a printer model by exact name match within a specific manufacturer for import/lookup purposes (read-only, no creation).
+    /// Returns the PrinterModel entity if found, null otherwise.
+    /// </summary>
+    public async Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default)
+    {
+        return await _db.PrinterModels
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Name == name && m.ManufacturerId == manufacturerId, ct);
+    }
 
-        public Task SaveChangesAsync(CancellationToken ct = default)
-        {
-            return _db.SaveChangesAsync(ct);
-        }
+    public async Task<List<Domain.PrinterModelAlias>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
+    {
+        return await _db.PrinterModelAliases
+            .Where(a => a.PrinterModelId == modelId)
+            .AsNoTracking()
+            .ToListAsync(ct);
+    }
 
-        public async Task<PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default)
-        {
-            return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).FirstOrDefaultAsync(m => m.Id == id, ct);
-        }
+    public async Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default)
+    {
+        // Remove all existing aliases for this model
+        var existingAliases = await _db.PrinterModelAliases
+            .Where(a => a.PrinterModelId == modelId)
+            .ToListAsync(ct);
+        _db.PrinterModelAliases.RemoveRange(existingAliases);
 
-        public async Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default)
+        // Add new OrcaSlicer aliases
+        foreach (var name in orcaSlicerNames ?? new List<string>())
         {
-            PrinterModel? model = await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == modelId, ct);
-            if (model is null)
+            _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
-                return;
-            }
-            // Remove existing
-            _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
-            // Add new
-            foreach (Guid filamentTypeId in filamentTypeIds)
+                Id = Guid.NewGuid(),
+                PrinterModelId = modelId,
+                SlicerModelName = name,
+                SlicerType = "OrcaSlicer",
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        // Add new PrusaSlicer aliases
+        foreach (var name in prusaSlicerNames ?? new List<string>())
+        {
+            _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
-                _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
-            }
+                Id = Guid.NewGuid(),
+                PrinterModelId = modelId,
+                SlicerModelName = name,
+                SlicerType = "PrusaSlicer",
+                CreatedAt = DateTime.UtcNow
+            });
         }
 
-        public async Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default)
-        {
-            IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
-            if (manufacturerId.HasValue)
-            {
-                q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
-            }
-            List<PrinterModel> models = await q.ToListAsync(ct);
-            List<PrinterModelDto> list = models.Select(m => new PrinterModelDto(
-                m.Id,
-                m.Name,
-                m.ManufacturerId,
-                m.MotionType.HasValue ? (MotionType?)m.MotionType.Value : null,
-                m.MaxX,
-                m.MaxY,
-                m.MaxZ,
-                m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
-                m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()
-            )).ToList();
-            return list;
-        }
-
-        public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
-        {
-            PrinterModel? model = await _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
-                .FirstOrDefaultAsync(m => m.Id == id, ct);
-            if (model is null)
-            {
-                return null;
-            }
-            return new PrinterModelDto(model.Id,
-                model.Name,
-                model.ManufacturerId,
-                model.MotionType.HasValue ? (MotionType?)model.MotionType.Value : null,
-                model.MaxX,
-                model.MaxY,
-                model.MaxZ,
-                model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
-                model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
-        }
-
-        public async Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
-        {
-            _ = _db.PrinterModels.Add(model);
-            await _db.SaveChangesAsync(ct);
-        }
-
-        public async Task<IEnumerable<Guid>> GetValidFilamentTypeIdsAsync(Guid[] ids, CancellationToken ct = default)
-        {
-            return await _db.FilamentTypes.AsNoTracking().Where(f => ids.Contains(f.Id)).Select(f => f.Id).ToListAsync(ct);
-        }
-
-        public async Task<PrinterModelDto?> GetModelWithFilamentNamesAsync(Guid id, CancellationToken ct = default)
-        {
-            return await GetModelByIdAsync(id, ct);
-        }
-
-        public async Task<Guid?> GetUnknownManufacturerIdAsync(CancellationToken ct = default)
-        {
-            Manufacturer? unknown = await _db.Manufacturers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m => m.Name == "Unknown", ct);
-            return unknown?.Id;
-        }
-
-        public async Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default)
-        {
-            Guid? unknownMfgId = await GetUnknownManufacturerIdAsync(ct);
-            if (!unknownMfgId.HasValue)
-            {
-                return null;
-            }
-
-            PrinterModel? unknownModel = await _db.PrinterModels
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m => m.ManufacturerId == unknownMfgId.Value && m.Name == "Unknown Model", ct);
-            return unknownModel?.Id;
-        }
-
-        public async Task RemoveModelAsync(Guid id, CancellationToken ct = default)
-        {
-            PrinterModel? model = await _db.PrinterModels.FirstOrDefaultAsync(m => m.Id == id, ct);
-            if (model is not null)
-            {
-                _ = _db.PrinterModels.Remove(model);
-            }
-        }
-
-        /// <summary>
-        /// Finds a manufacturer by exact name match for import/lookup purposes (read-only, no creation).
-        /// Returns the Manufacturer entity if found, null otherwise.
-        /// </summary>
-        public async Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default)
-        {
-            return await _db.Manufacturers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m => m.Name == name, ct);
-        }
-
-        /// <summary>
-        /// Finds a printer model by exact name match within a specific manufacturer for import/lookup purposes (read-only, no creation).
-        /// Returns the PrinterModel entity if found, null otherwise.
-        /// </summary>
-        public async Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default)
-        {
-            return await _db.PrinterModels
-                .AsNoTracking()
-                .FirstOrDefaultAsync(m => m.Name == name && m.ManufacturerId == manufacturerId, ct);
-        }
-
-        public async Task<List<Domain.PrinterModelAlias>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
-        {
-            return await _db.PrinterModelAliases
-                .Where(a => a.PrinterModelId == modelId)
-                .AsNoTracking()
-                .ToListAsync(ct);
-        }
-
-        public async Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default)
-        {
-            // Remove all existing aliases for this model
-            var existingAliases = await _db.PrinterModelAliases
-                .Where(a => a.PrinterModelId == modelId)
-                .ToListAsync(ct);
-            _db.PrinterModelAliases.RemoveRange(existingAliases);
-
-            // Add new OrcaSlicer aliases
-            foreach (var name in orcaSlicerNames ?? new List<string>())
-            {
-                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
-                {
-                    Id = Guid.NewGuid(),
-                    PrinterModelId = modelId,
-                    SlicerModelName = name,
-                    SlicerType = "OrcaSlicer",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // Add new PrusaSlicer aliases
-            foreach (var name in prusaSlicerNames ?? new List<string>())
-            {
-                _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
-                {
-                    Id = Guid.NewGuid(),
-                    PrinterModelId = modelId,
-                    SlicerModelName = name,
-                    SlicerType = "PrusaSlicer",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // Return the updated list
-            return await _db.PrinterModelAliases
-                .Where(a => a.PrinterModelId == modelId)
-                .ToListAsync(ct);
-        }
+        // Return the updated list
+        return await _db.PrinterModelAliases
+            .Where(a => a.PrinterModelId == modelId)
+            .ToListAsync(ct);
     }
 }
 

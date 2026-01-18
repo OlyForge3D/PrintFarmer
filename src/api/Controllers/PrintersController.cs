@@ -134,12 +134,7 @@ public class PrintersController(
         try
         {
             var capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
-            if (capabilities == null)
-            {
-                return NotFound($"Printer with ID {printerId} not found");
-            }
-
-            return Ok(capabilities);
+            return capabilities == null ? NotFound($"Printer with ID {printerId} not found") : Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -757,11 +752,7 @@ public class PrintersController(
         try
         {
             PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
-            if (result == null)
-            {
-                return NotFound();
-            }
-            return Ok(result);
+            return result == null ? NotFound() : Ok(result);
         }
         catch (Exception ex)
         {
@@ -1125,11 +1116,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendHomeAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1148,11 +1135,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeXYAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1171,11 +1154,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeZAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/temps")]
@@ -1190,11 +1169,7 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/move")]
@@ -1209,11 +1184,7 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/moveto")]
@@ -1228,11 +1199,7 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/pause")]
@@ -1242,11 +1209,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.PauseAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/resume")]
@@ -1256,11 +1219,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.ResumeAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/emergency-stop")]
@@ -1270,11 +1229,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.EmergencyStopAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1320,11 +1275,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.FirmwareRestartAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1347,11 +1298,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableMotorsAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     // Camera control endpoints
@@ -1375,11 +1322,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.EnableCameraAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1402,11 +1345,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableCameraAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
@@ -1428,11 +1367,7 @@ public class PrintersController(
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
-        if (streamUrl == null && snapshotUrl == null)
-        {
-            return NotFound();
-        }
-        return new CameraUrlResult(streamUrl, snapshotUrl);
+        return streamUrl == null && snapshotUrl == null ? NotFound() : new CameraUrlResult(streamUrl, snapshotUrl);
     }
 
     [HttpPost("{id:guid}/files/upload")]
@@ -1457,12 +1392,7 @@ public class PrintersController(
             await using Stream fileStream = file.OpenReadStream();
             bool success = await _printersService.UploadGcodeAsync(id, file.FileName, fileStream, ct);
 
-            if (!success)
-            {
-                return NotFound();
-            }
-
-            return Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
+            return !success ? NotFound() : Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
         }
         catch (Exception ex)
         {
@@ -1558,11 +1488,9 @@ public class PrintersController(
         try
         {
             bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
-            if (!success)
-            {
-                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
-            }
-            return Ok(new CommandResult(true, "Print started successfully"));
+            return !success
+                ? Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"))
+                : Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
@@ -1583,11 +1511,9 @@ public class PrintersController(
         try
         {
             bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
-            if (!success)
-            {
-                return Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"));
-            }
-            return Ok(new CommandResult(true, "File deleted successfully"));
+            return !success
+                ? Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"))
+                : Ok(new CommandResult(true, "File deleted successfully"));
         }
         catch (Exception ex)
         {

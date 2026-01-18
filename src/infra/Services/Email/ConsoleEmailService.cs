@@ -2,14 +2,9 @@
 
 namespace Farm.Infrastructure.Services.Email;
 
-public sealed class ConsoleEmailService : IEmailService
+public sealed class ConsoleEmailService(IUnifiedLoggingService logger) : IEmailService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public ConsoleEmailService(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public Task<EmailDispatchResult> SendAsync(EmailMessage message, CancellationToken ct = default)
     {

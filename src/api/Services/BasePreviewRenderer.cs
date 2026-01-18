@@ -492,12 +492,7 @@ public abstract class BasePreviewRenderer
                 throw new InvalidOperationException("No mesh objects found in 3MF file.");
             }
 
-            if (mesh.Vertices.Count == 0)
-            {
-                throw new InvalidOperationException("Failed to extract vertices from 3MF file.");
-            }
-
-            return mesh;
+            return mesh.Vertices.Count == 0 ? throw new InvalidOperationException("Failed to extract vertices from 3MF file.") : mesh;
         }
         catch (Exception ex)
         {

@@ -9,14 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Farm.Web.Api.Data.Repositories
 {
     // Adapter that implements the API-layer IApiKeyRepository using AppDbContext directly
-    public class EfApiKeyRepositoryAdapter : IApiKeyRepository
+    public class EfApiKeyRepositoryAdapter(AppDbContext db) : IApiKeyRepository
     {
-        private readonly AppDbContext _db;
-
-        public EfApiKeyRepositoryAdapter(AppDbContext db)
-        {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
-        }
+        private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
         public async Task AddAsync(ApiKey key)
         {

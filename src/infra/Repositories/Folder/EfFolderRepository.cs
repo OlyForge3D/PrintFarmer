@@ -11,14 +11,9 @@ namespace Farm.Infrastructure.Repositories.Folder;
 /// <summary>
 /// Entity Framework implementation of IFolderRepository
 /// </summary>
-public class EfFolderRepository : IFolderRepository
+public class EfFolderRepository(AppDbContext db) : IFolderRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfFolderRepository(AppDbContext db)
-    {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
-    }
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <summary>
     /// Get an existing folder or create it if it doesn't exist.

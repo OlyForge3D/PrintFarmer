@@ -11,14 +11,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
-public class SliceJobTimeoutScannerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact]
     public async Task Scanner_Requeues_ExpiredLease_And_IncrementsMetrics()

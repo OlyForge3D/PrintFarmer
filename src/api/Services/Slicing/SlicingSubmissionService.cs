@@ -16,30 +16,20 @@ namespace Farm.Web.Api.Services.Slicing;
 /// <summary>
 /// Service for handling slicing job submissions
 /// </summary>
-public class SlicingSubmissionService : ISlicingSubmissionService
+public class SlicingSubmissionService(
+    IUnitOfWork unitOfWork,
+    ISlicerFileStorage fileStorage,
+    ISlicerOrchestrator orchestrator,
+    IHostEnvironment env,
+    IUnifiedLoggingService logger,
+    IStoredFileOperationsService fileOperations) : ISlicingSubmissionService
 {
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly ISlicerFileStorage _fileStorage;
-    private readonly ISlicerOrchestrator _orchestrator;
-    private readonly IHostEnvironment _env;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IStoredFileOperationsService _fileOperations;
-
-    public SlicingSubmissionService(
-        IUnitOfWork unitOfWork,
-        ISlicerFileStorage fileStorage,
-        ISlicerOrchestrator orchestrator,
-        IHostEnvironment env,
-        IUnifiedLoggingService logger,
-        IStoredFileOperationsService fileOperations)
-    {
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
-        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-    }
+    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
+    private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+    private readonly IHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
     public async Task<SlicingSubmissionResult> SubmitSlicingJobAsync(
         IFormFile modelFile,

@@ -5,14 +5,9 @@ using System.Threading.Tasks;
 
 namespace Farm.Web.Api.Tests.TestHelpers;
 
-public sealed class FakeHttpMessageHandler : HttpMessageHandler
+public sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage>? responder = null) : HttpMessageHandler
 {
-    private readonly Func<HttpRequestMessage, HttpResponseMessage> responder;
-
-    public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
-    {
-        this.responder = responder ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound));
-    }
+    private readonly Func<HttpRequestMessage, HttpResponseMessage> responder = responder ?? (_ => new HttpResponseMessage(HttpStatusCode.NotFound));
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

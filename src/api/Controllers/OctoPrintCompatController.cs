@@ -14,27 +14,17 @@ namespace Farm.Web.Api.Controllers
 {
     [ApiController]
     [Route("api")]
-    public class OctoPrintCompatController : ControllerBase
+    public class OctoPrintCompatController(
+        ILogger<OctoPrintCompatController> logger,
+        IOctoPrintAuthService authService,
+        IOptions<OctoPrintSettings> settings,
+        IGcodeFilesService gcodeFilesService,
+        IPrintJobQueueService printJobQueueService) : ControllerBase
     {
-        private readonly ILogger<OctoPrintCompatController> _logger;
-        private readonly IOctoPrintAuthService _authService;
-        private readonly OctoPrintSettings _settings;
-        private readonly IGcodeFilesService _gcodeFilesService;
-        private readonly IPrintJobQueueService _printJobQueueService;
-
-        public OctoPrintCompatController(
-            ILogger<OctoPrintCompatController> logger,
-            IOctoPrintAuthService authService,
-            IOptions<OctoPrintSettings> settings,
-            IGcodeFilesService gcodeFilesService,
-            IPrintJobQueueService printJobQueueService)
-        {
-            _logger = logger;
-            _authService = authService;
-            _settings = settings.Value;
-            _gcodeFilesService = gcodeFilesService;
-            _printJobQueueService = printJobQueueService;
-        }
+        private readonly ILogger<OctoPrintCompatController> _logger = logger;
+        private readonly IOctoPrintAuthService _authService = authService;
+        private readonly OctoPrintSettings _settings = settings.Value;
+        private readonly IGcodeFilesService _gcodeFilesService = gcodeFilesService;
 
         [HttpPost("files/local")]
         [AllowAnonymous]
@@ -80,7 +70,11 @@ namespace Farm.Web.Api.Controllers
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
                 var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
                 var uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
-                _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
+
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
+                }
 
                 // Simple response: always return the file. Ignore print parameter.
                 // User can queue from the dashboard UI if desired.

@@ -29,21 +29,12 @@ namespace Farm.Web.Api.Services.SignalR
     /// Listens to SignalR PrinterHub for "printerupdated" events and updates the status cache.
     /// Allows the API to receive and cache real-time status updates from backend services.
     /// </summary>
-    public sealed class PrinterStatusHubListener : IPrinterStatusHubListener
+    public sealed class PrinterStatusHubListener(
+        IHubContext<PrinterHub> hubContext,
+        Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader cache,
+        IUnifiedLoggingService logger) : IPrinterStatusHubListener
     {
-        private readonly IHubContext<PrinterHub> _hubContext;
-        private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _cache;
-        private readonly IUnifiedLoggingService _logger;
-
-        public PrinterStatusHubListener(
-            IHubContext<PrinterHub> hubContext,
-            Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader cache,
-            IUnifiedLoggingService logger)
-        {
-            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         public async Task StartListeningAsync()
         {

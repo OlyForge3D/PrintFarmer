@@ -144,7 +144,7 @@ public class DistributedSlicingJob : SlicingJobDto
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(envelope);
 
-        DistributedSlicingJob job = new DistributedSlicingJob
+        DistributedSlicingJob job = new()
         {
             Id = envelope.JobId,
             UserId = request.UserId,
@@ -290,7 +290,8 @@ public class SlicerWorkerConfiguration
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
     {
-        SlicerWorkerConfiguration cfg = new SlicerWorkerConfiguration { TempDirectory = tempRoot };
+        SlicerWorkerConfiguration cfg = new()
+        { TempDirectory = tempRoot };
         configure?.Invoke(cfg);
         return cfg;
     }

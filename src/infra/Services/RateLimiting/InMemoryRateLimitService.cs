@@ -3,21 +3,15 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.RateLimiting;
 
-public class InMemoryRateLimitService : IRateLimitService
+public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger) : IRateLimitService
 {
-    private readonly RateLimitOptions _options;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly RateLimitOptions _options = options;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly ConcurrentDictionary<string, List<DateTime>> _passwordResetAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _emailConfirmationAttempts = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _registerAttempts = new();
-
-    public InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger)
-    {
-        _options = options;
-        _logger = logger;
-    }
 
     public Task<RateLimitResult> CheckPasswordResetLimitAsync(string email, CancellationToken ct = default)
     {

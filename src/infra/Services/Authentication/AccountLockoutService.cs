@@ -62,7 +62,7 @@ public class AccountLockoutService : IAccountLockoutService
         if (user == null)
         {
             // Record attempt for non-existent user (for auditing)
-            FailedLoginAttempt attempt = new FailedLoginAttempt
+            FailedLoginAttempt attempt = new()
             {
                 Identifier = identifier,
                 IpAddress = ipAddress,
@@ -79,7 +79,7 @@ public class AccountLockoutService : IAccountLockoutService
         user.LastFailedLogin = DateTime.UtcNow;
 
         // Record the failed attempt in audit log
-        FailedLoginAttempt failedAttempt = new FailedLoginAttempt
+        FailedLoginAttempt failedAttempt = new()
         {
             Identifier = identifier,
             IpAddress = ipAddress,
@@ -115,7 +115,7 @@ public class AccountLockoutService : IAccountLockoutService
         else
         {
             // Record attempt for non-existent username (for auditing)
-            FailedLoginAttempt attempt = new FailedLoginAttempt
+            FailedLoginAttempt attempt = new()
             {
                 Identifier = username,
                 IpAddress = ipAddress,

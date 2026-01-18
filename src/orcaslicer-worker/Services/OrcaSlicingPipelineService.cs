@@ -173,11 +173,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             throw new InvalidOperationException($"OrcaSlicer failed with exit code {process.ExitCode}: {error}");
         }
-        if (!File.Exists(gcodeFilePath))
-        {
-            throw new InvalidOperationException("OrcaSlicer completed but no G-code produced");
-        }
-        return gcodeFilePath;
+        return !File.Exists(gcodeFilePath)
+            ? throw new InvalidOperationException("OrcaSlicer completed but no G-code produced")
+            : gcodeFilePath;
     }
 #pragma warning restore S1172
 

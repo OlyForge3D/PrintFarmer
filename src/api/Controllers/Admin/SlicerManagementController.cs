@@ -38,11 +38,7 @@ public class SlicerManagementController(ISlicersService service, ILogger<SlicerM
         _logger.LogWarning("Admin forcing API key rotation for slicer service {ServiceId}", id);
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         string? newApiKey = await _service.RotateApiKeyAsync(id, ct, isAdminForced: true);
-        if (newApiKey == null)
-        {
-            return NotFound();
-        }
-        return Ok(new { id, apiKey = newApiKey, message = "API key forcibly rotated by administrator" });
+        return newApiKey == null ? NotFound() : Ok(new { id, apiKey = newApiKey, message = "API key forcibly rotated by administrator" });
     }
 
     /// <summary>
@@ -54,10 +50,6 @@ public class SlicerManagementController(ISlicersService service, ILogger<SlicerM
         _logger.LogWarning("Admin forcibly deregistering slicer service {ServiceId}", id);
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         bool ok = await _service.DeregisterAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return NoContent();
+        return !ok ? NotFound() : NoContent();
     }
 }

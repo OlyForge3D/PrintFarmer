@@ -88,12 +88,9 @@ namespace Farm.Backend.Plugin.Sdcp
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
 
-                if (status == null)
-                {
-                    throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
-                }
-
-                return await _client.CreatePrinterDtoAsync(printer, status, ct);
+                return status == null
+                    ? throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}")
+                    : await _client.CreatePrinterDtoAsync(printer, status, ct);
             }
             catch (Exception ex)
             {

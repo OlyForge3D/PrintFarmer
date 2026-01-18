@@ -82,24 +82,17 @@ namespace Farm.Web.Api.Services.Queue
     /// - Enables proper testing through mockable dependencies
     /// - Provides comprehensive logging for operation tracking
     /// </remarks>
-    public class QueueDataService : IQueueDataService
+    /// <remarks>
+    /// Initializes a new instance of the QueueDataService with required dependencies.
+    /// </remarks>
+    /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
+    /// <param name="logger">Unified logging service for operation tracking and debugging</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+    public class QueueDataService(
+        IUnitOfWork unitOfWork,
+        IUnifiedLoggingService logger) : IQueueDataService
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IUnifiedLoggingService _logger;
-
-        /// <summary>
-        /// Initializes a new instance of the QueueDataService with required dependencies.
-        /// </summary>
-        /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
-        /// <param name="logger">Unified logging service for operation tracking and debugging</param>
-        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
-        public QueueDataService(
-            IUnitOfWork unitOfWork,
-            IUnifiedLoggingService logger)
-        {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 
         /// <summary>
         /// Gets all printers that are available for print job assignment.

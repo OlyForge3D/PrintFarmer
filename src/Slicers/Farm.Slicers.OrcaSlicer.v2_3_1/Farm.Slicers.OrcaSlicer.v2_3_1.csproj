@@ -17,16 +17,6 @@
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 
-  <!-- Test dependencies -->
-  <ItemGroup>
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="FluentAssertions" Version="8.8.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
-
   <!-- Embed assets as resources -->
   <ItemGroup>
     <EmbeddedResource Include="lib/Assets/**/*">

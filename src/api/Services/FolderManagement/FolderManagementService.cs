@@ -23,22 +23,15 @@ namespace Farm.Web.Api.Services.FolderManagement
     /// All operations use IUnitOfWork to ensure consistency across folder and file operations
     /// through shared DbContext, preventing foreign key constraint violations.
     /// </remarks>
-    public class FolderManagementService : IFolderManagementService
+    /// <remarks>
+    /// Initializes a new instance of the FolderManagementService with required dependencies.
+    /// </remarks>
+    /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
+    /// <param name="logger">Unified logging service for operation tracking and debugging</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+    public class FolderManagementService(IUnitOfWork unitOfWork, IUnifiedLoggingService logger) : IFolderManagementService
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IUnifiedLoggingService _logger;
-
-        /// <summary>
-        /// Initializes a new instance of the FolderManagementService with required dependencies.
-        /// </summary>
-        /// <param name="unitOfWork">Unit of Work providing coordinated access to all repositories with shared DbContext</param>
-        /// <param name="logger">Unified logging service for operation tracking and debugging</param>
-        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
-        public FolderManagementService(IUnitOfWork unitOfWork, IUnifiedLoggingService logger)
-        {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
 
         /// <summary>
         /// Get an existing folder or create it if it doesn't exist.

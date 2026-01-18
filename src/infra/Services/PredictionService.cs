@@ -271,24 +271,21 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         CancellationToken cancellationToken = default)
     {
         var stats = await repository.GetByJobIdAsync(jobId, cancellationToken);
-        if (stats == null)
-        {
-            return null;
-        }
-
-        return new PrintJobStatisticsDto
-        {
-            JobId = jobId.ToString(),
-            ActualDurationMs = stats.ActualDurationMs,
-            EstimatedDurationMs = stats.EstimatedDurationMs,
-            Material = stats.Material,
-            NozzleTemperature = stats.NozzleTemperature,
-            BedTemperature = stats.BedTemperature,
-            SpeedPercentage = stats.SpeedPercentage,
-            IsSuccess = stats.IsSuccess,
-            FailureReason = stats.FailureReason,
-            CompletedAtUtc = stats.CompletedAtUtc
-        };
+        return stats == null
+            ? null
+            : new PrintJobStatisticsDto
+            {
+                JobId = jobId.ToString(),
+                ActualDurationMs = stats.ActualDurationMs,
+                EstimatedDurationMs = stats.EstimatedDurationMs,
+                Material = stats.Material,
+                NozzleTemperature = stats.NozzleTemperature,
+                BedTemperature = stats.BedTemperature,
+                SpeedPercentage = stats.SpeedPercentage,
+                IsSuccess = stats.IsSuccess,
+                FailureReason = stats.FailureReason,
+                CompletedAtUtc = stats.CompletedAtUtc
+            };
     }
 
     /// <summary>

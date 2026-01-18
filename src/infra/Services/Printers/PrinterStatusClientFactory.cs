@@ -166,12 +166,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 
             // Activate the status client with its dependencies resolved from the scope
             // Use ActivatorUtilities which automatically resolves constructor dependencies
-            var statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType);
-
-            if (statusClient == null)
-            {
-                throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
-            }
+            var statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType) ?? throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
 
             // Verify it's assignable to IPrinterStatusClient
             // (don't use explicit cast due to potential assembly loading issues)

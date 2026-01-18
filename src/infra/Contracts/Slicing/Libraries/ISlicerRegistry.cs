@@ -74,11 +74,9 @@ public class SlicerRegistry : ISlicerRegistry
 
     public ISlicerLibrary? GetLibrary(string slicerName, string version)
     {
-        if (_librariesByName.TryGetValue(slicerName, out List<ISlicerLibrary>? libs))
-        {
-            return libs.FirstOrDefault(l => l.SlicerVersion == version);
-        }
-        return null;
+        return _librariesByName.TryGetValue(slicerName, out List<ISlicerLibrary>? libs)
+            ? libs.FirstOrDefault(l => l.SlicerVersion == version)
+            : (ISlicerLibrary?)null;
     }
 
     public IEnumerable<ISlicerLibrary> GetLibraries(string slicerName)

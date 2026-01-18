@@ -4,14 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.SchemaHealth;
 
-public class SchemaHealthRepository : ISchemaHealthRepository
+public class SchemaHealthRepository(AppDbContext db) : ISchemaHealthRepository
 {
-    private readonly AppDbContext _db;
-
-    public SchemaHealthRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<bool> PrintersTableExistsAsync(CancellationToken ct = default)
     {

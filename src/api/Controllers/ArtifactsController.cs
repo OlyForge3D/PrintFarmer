@@ -209,12 +209,7 @@ public class ArtifactsController(
         }
 
         // Authorization: only job owner or admin can access
-        if (!await CanAccessArtifactAsync(a.JobId, ct))
-        {
-            return Forbid();
-        }
-
-        return Ok(Map(a));
+        return !await CanAccessArtifactAsync(a.JobId, ct) ? Forbid() : Ok(Map(a));
     }
 
     /// <summary>

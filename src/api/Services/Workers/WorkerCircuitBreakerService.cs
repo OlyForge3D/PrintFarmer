@@ -13,19 +13,13 @@ namespace Farm.Web.Api.Services.Workers;
 /// Circuit breaker service that tracks worker failure patterns and temporarily disables
 /// workers that consistently fail jobs to prevent wasted dispatch cycles.
 /// </summary>
-public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
+public class WorkerCircuitBreakerService(
+    ILogger<WorkerCircuitBreakerService> logger,
+    IOptions<CircuitBreakerSettings> settings) : IWorkerCircuitBreakerService
 {
-    private readonly ILogger<WorkerCircuitBreakerService> _logger;
-    private readonly CircuitBreakerSettings _settings;
+    private readonly ILogger<WorkerCircuitBreakerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly CircuitBreakerSettings _settings = settings?.Value ?? new CircuitBreakerSettings();
     private readonly ConcurrentDictionary<Guid, WorkerCircuitState> _circuitStates = new();
-
-    public WorkerCircuitBreakerService(
-        ILogger<WorkerCircuitBreakerService> logger,
-        IOptions<CircuitBreakerSettings> settings)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _settings = settings?.Value ?? new CircuitBreakerSettings();
-    }
 
     /// <summary>
     /// Record a job failure for a worker. Opens circuit if failure threshold exceeded.

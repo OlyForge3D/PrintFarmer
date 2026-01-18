@@ -8,16 +8,10 @@ namespace Farm.Web.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class PrintApprovalsController : ControllerBase
+    public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? repo = null) : ControllerBase
     {
-        private readonly IPrintApprovalService _approvalService;
-        private readonly Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? _repo;
-
-        public PrintApprovalsController(IPrintApprovalService approvalService, Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? repo = null)
-        {
-            _approvalService = approvalService;
-            _repo = repo;
-        }
+        private readonly IPrintApprovalService _approvalService = approvalService;
+        private readonly Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? _repo = repo;
 
         [HttpGet]
         public async Task<IActionResult> GetPendingAsync()
@@ -36,12 +30,7 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> ApproveAsync([FromRoute] Guid id)
         {
             var ok = await _approvalService.ApproveAsync(id, User?.Identity?.Name);
-            if (!ok)
-            {
-                return NotFound();
-            }
-
-            return NoContent();
+            return !ok ? NotFound() : NoContent();
         }
 
         [HttpPost("{id:guid}/reject")]

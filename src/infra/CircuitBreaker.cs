@@ -3,25 +3,17 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure;
 
-public class CircuitBreaker
+public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, IUnifiedLoggingService? logger = null)
 {
-    private readonly int _failureThreshold;
-    private readonly TimeSpan _timeout;
-    private readonly TimeSpan _retryDelay;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly int _failureThreshold = failureThreshold;
+    private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromMinutes(1);
+    private readonly TimeSpan _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
+    private readonly IUnifiedLoggingService _logger = logger ?? new NullLoggingService();
 
     private int _failureCount;
     private DateTime _lastFailureTime;
     private CircuitState _state = CircuitState.Closed;
     private readonly object _lock = new();
-
-    public CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, TimeSpan? retryDelay = null, IUnifiedLoggingService? logger = null)
-    {
-        _failureThreshold = failureThreshold;
-        _timeout = timeout ?? TimeSpan.FromMinutes(1);
-        _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
-        _logger = logger ?? new NullLoggingService();
-    }
 
     public string Name { get; set; } = "CircuitBreaker";
     public CircuitState State => _state;
@@ -125,7 +117,7 @@ public class CircuitBreaker
         }
     }
 
-    public CircuitBreakerMetrics Metrics => new CircuitBreakerMetrics
+    public CircuitBreakerMetrics Metrics => new()
     {
         Name = Name,
         State = _state,
@@ -158,15 +150,10 @@ public record CircuitBreakerMetrics
     public int FailureThreshold { get; init; }
 }
 
-public class CircuitBreakerService : ICircuitBreakerService
+public class CircuitBreakerService(IUnifiedLoggingService logger) : ICircuitBreakerService
 {
     private readonly ConcurrentDictionary<string, CircuitBreaker> _circuitBreakers = new();
-    private readonly IUnifiedLoggingService _logger;
-
-    public CircuitBreakerService(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null)
     {

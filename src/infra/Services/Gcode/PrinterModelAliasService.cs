@@ -25,14 +25,9 @@ public interface IPrinterModelAliasService
 /// <summary>
 /// Default implementation of printer model alias resolution.
 /// </summary>
-public class PrinterModelAliasService : IPrinterModelAliasService
+public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAliasService
 {
-    private readonly AppDbContext _dbContext;
-
-    public PrinterModelAliasService(AppDbContext dbContext)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    }
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
     /// <summary>
     /// Resolves a slicer model name to its canonical PrinterModel ID.

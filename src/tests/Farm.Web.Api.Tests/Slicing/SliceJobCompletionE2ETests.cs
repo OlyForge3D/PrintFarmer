@@ -15,10 +15,9 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// End-to-end test validating complete slice job lifecycle: queue, claim, bulk artifact upload, inline log, completion, authorization.
 /// </summary>
-public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobCompletionE2ETests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-    public SliceJobCompletionE2ETests(CustomWebApplicationFactory factory) => _factory = factory;
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact(DisplayName = "Complete E2E flow: queue, artifacts, log, completion, ownership verification")]
     public async Task SliceJob_E2E_Completion_Flow_With_Authorization()
@@ -104,23 +103,16 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         }
     }
 
-    private sealed class TestFormFile : Microsoft.AspNetCore.Http.IFormFile
+    private sealed class TestFormFile(byte[] data, string fileName, string contentType) : Microsoft.AspNetCore.Http.IFormFile
     {
-        private readonly byte[] _data;
-        public TestFormFile(byte[] data, string fileName, string contentType)
-        {
-            _data = data;
-            FileName = fileName;
-            ContentType = contentType;
-            Name = "file";
-            Length = data.Length;
-        }
-        public string ContentType { get; }
+        private readonly byte[] _data = data;
+
+        public string ContentType { get; } = contentType;
         public string ContentDisposition { get; set; } = string.Empty;
         public Microsoft.AspNetCore.Http.IHeaderDictionary Headers { get; } = new Microsoft.AspNetCore.Http.HeaderDictionary();
-        public long Length { get; }
-        public string Name { get; }
-        public string FileName { get; }
+        public long Length { get; } = data.Length;
+        public string Name { get; } = "file";
+        public string FileName { get; } = fileName;
         public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
         public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {

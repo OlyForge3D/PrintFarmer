@@ -43,11 +43,7 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
             return (PrinterBackend)num;
         }
         // case-insensitive name match
-        if (Enum.TryParse(value, ignoreCase: true, out PrinterBackend parsed))
-        {
-            return parsed;
-        }
-        return PrinterBackend.Moonraker;
+        return Enum.TryParse(value, ignoreCase: true, out PrinterBackend parsed) ? parsed : PrinterBackend.Moonraker;
     }
 
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
@@ -83,20 +79,11 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
 
     private static PrintJobStatus ParseString(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return PrintJobStatus.Queued;
-        }
-
-        if (int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrintJobStatus), num))
-        {
-            return (PrintJobStatus)num;
-        }
-        if (Enum.TryParse(value, ignoreCase: true, out PrintJobStatus parsed))
-        {
-            return parsed;
-        }
-        return PrintJobStatus.Queued;
+        return string.IsNullOrWhiteSpace(value)
+            ? PrintJobStatus.Queued
+            : int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrintJobStatus), num)
+            ? (PrintJobStatus)num
+            : Enum.TryParse(value, ignoreCase: true, out PrintJobStatus parsed) ? parsed : PrintJobStatus.Queued;
     }
 
     public override void Write(Utf8JsonWriter writer, PrintJobStatus value, JsonSerializerOptions options)
@@ -133,12 +120,9 @@ public sealed class StringToBoolJsonConverter : JsonConverter<bool>
 
     private static bool ParseString(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+        return string.IsNullOrWhiteSpace(value)
+            ? false
+            : value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("1", StringComparison.Ordinal) ||
                value.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }

@@ -8,11 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 
-public class EfPrintersRepository : IPrintersRepository
+public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfPrintersRepository(AppDbContext db) => _db = db;
+    private readonly AppDbContext _db = db;
 
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().ToListAsync(ct);
 

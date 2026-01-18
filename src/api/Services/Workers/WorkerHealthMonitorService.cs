@@ -9,20 +9,14 @@ namespace Farm.Web.Api.Services.Workers;
 /// <summary>
 /// Background service for monitoring worker health and updating status
 /// </summary>
-public class WorkerHealthMonitorService : BackgroundService
+public class WorkerHealthMonitorService(
+    IServiceProvider serviceProvider,
+    IUnifiedLoggingService logger) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _heartbeatTimeout = TimeSpan.FromMinutes(2);
-
-    public WorkerHealthMonitorService(
-        IServiceProvider serviceProvider,
-        IUnifiedLoggingService logger)
-    {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

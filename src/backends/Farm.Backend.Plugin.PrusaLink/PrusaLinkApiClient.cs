@@ -446,12 +446,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        return await response.Content.ReadAsByteArrayAsync(ct);
+        return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
     }
 
     public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, string? apiKey = null, CancellationToken ct = default)

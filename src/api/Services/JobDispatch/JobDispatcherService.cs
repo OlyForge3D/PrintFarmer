@@ -31,37 +31,26 @@ public interface IJobDispatcherService
     Task<Worker?> FindBestWorkerForJobAsync(SliceJob job, CancellationToken cancellationToken = default);
 }
 
-public class JobDispatcherService : IJobDispatcherService
+public class JobDispatcherService(
+    ISliceJobRepository jobRepository,
+    IWorkerRepository workerRepository,
+    ISliceJobEventService eventService,
+    IUnifiedLoggingService logger,
+    IHttpClientFactory httpClientFactory,
+    RetryOptions retryOptions) : IJobDispatcherService
 {
-    private readonly ISliceJobRepository _jobRepository;
-    private readonly IWorkerRepository _workerRepository;
-    private readonly ISliceJobEventService _eventService;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly RetryOptions _retryOptions;
+    private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+    private readonly ISliceJobEventService _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly RetryOptions _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
 
     private static volatile int _lastAvailableWorkers;
     private static readonly System.Diagnostics.Metrics.Meter _meter = new("PrintFarmer.Slicing", "1.0.0");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatched = _meter.CreateCounter<int>("slicing_jobs_dispatched");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatchFailed = _meter.CreateCounter<int>("slicing_jobs_dispatch_failed");
     private static readonly System.Diagnostics.Metrics.Histogram<double> _dispatchDurationMs = _meter.CreateHistogram<double>("slicing_job_dispatch_duration_ms", unit: "ms", description: "Duration of job dispatch attempts");
-    //private static readonly System.Diagnostics.Metrics.ObservableGauge<int> _availableWorkersGauge = _meter.CreateObservableGauge("slicing_available_workers", () => new System.Diagnostics.Metrics.Measurement<int>(_lastAvailableWorkers));
-
-    public JobDispatcherService(
-        ISliceJobRepository jobRepository,
-        IWorkerRepository workerRepository,
-        ISliceJobEventService eventService,
-        IUnifiedLoggingService logger,
-        IHttpClientFactory httpClientFactory,
-        RetryOptions retryOptions)
-    {
-        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
-        _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
-        _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
-    }
 
     public async Task<bool> DispatchNextJobAsync(CancellationToken cancellationToken = default)
     {

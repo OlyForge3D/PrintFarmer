@@ -7,23 +7,15 @@ namespace PrinterDiscovery.BackgroundServices;
 /// Allows API to track if discovery service is actively running
 /// Heartbeat updates the LastHeartbeat timestamp in NetworkDiscoverySettings
 /// </summary>
-public class HeartbeatBackgroundService : BackgroundService
+public class HeartbeatBackgroundService(
+    HttpClient httpClient,
+    ILogger<HeartbeatBackgroundService> logger,
+    IConfiguration config) : BackgroundService
 {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<HeartbeatBackgroundService> _logger;
-    private readonly string _apiBaseUrl;
-    private readonly int _heartbeatIntervalSeconds;
-
-    public HeartbeatBackgroundService(
-        HttpClient httpClient,
-        ILogger<HeartbeatBackgroundService> logger,
-        IConfiguration config)
-    {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
-        _heartbeatIntervalSeconds = config.GetValue("Discovery:HeartbeatIntervalSeconds", 30);
-    }
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly ILogger<HeartbeatBackgroundService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string _apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
+    private readonly int _heartbeatIntervalSeconds = config.GetValue("Discovery:HeartbeatIntervalSeconds", 30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

@@ -17,27 +17,19 @@ namespace Farm.Web.Api.Services.FileManagement;
 /// Implementation of chunked upload state management.
 /// Maintains in-memory session state with optional persistence for recovery.
 /// </summary>
-public sealed class ChunkedUploadService : IChunkedUploadService
+public sealed class ChunkedUploadService(
+    IFileManagementService fileManagementService,
+    IGcodeThumbnailExtractorService thumbnailExtractor,
+    IGcodeMetadataExtractorService metadataExtractor,
+    IUnifiedLoggingService logger) : IChunkedUploadService
 {
     private const int DefaultRecommendedChunkSize = 1 * 1024 * 1024; // 1 MB
 
     private readonly ConcurrentDictionary<string, InternalUploadState> _uploadStates = new();
-    private readonly IFileManagementService _fileManagementService;
-    private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
-    private readonly IGcodeMetadataExtractorService _metadataExtractor;
-    private readonly IUnifiedLoggingService _logger;
-
-    public ChunkedUploadService(
-        IFileManagementService fileManagementService,
-        IGcodeThumbnailExtractorService thumbnailExtractor,
-        IGcodeMetadataExtractorService metadataExtractor,
-        IUnifiedLoggingService logger)
-    {
-        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-        _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
-        _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+    private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
+    private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Initializes a new chunked upload session for large file uploads.
@@ -362,12 +354,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return null;
         }
 
-        if (_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
-        {
-            return state.VirtualDirectory;
-        }
-
-        return null;
+        return _uploadStates.TryGetValue(uploadId, out InternalUploadState? state) ? state.VirtualDirectory : null;
     }
 
     /// <summary>
@@ -670,12 +657,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             using StreamReader reader = new(filePath, Encoding.UTF8);
             string gcodeContent = await reader.ReadToEndAsync(ct);
 
-            if (string.IsNullOrWhiteSpace(gcodeContent))
-            {
-                return null;
-            }
-
-            return await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+            return string.IsNullOrWhiteSpace(gcodeContent) ? null : await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
         }
         catch (Exception ex)
         {

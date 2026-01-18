@@ -362,15 +362,13 @@ public class GcodeFilesController(
         catch (InvalidOperationException ex) when (ex.Message.Contains("paused"))
         {
             ChunkedUploadStatus? status = chunkedUploadService.GetOrResumeUpload(uploadId);
-            if (status != null)
-            {
-                return StatusCode(StatusCodes.Status423Locked, new
+            return status != null
+                ? StatusCode(StatusCodes.Status423Locked, new
                 {
                     error = "upload_paused",
                     status = new ChunkStatusResponse(status.UploadId, status.SafeFileName, status.UploadedBytes, status.TotalSize, status.IsCompleted, status.FinalHash, status.IsPaused, status.ThumbnailPath, null)
-                });
-            }
-            return NotFound();
+                })
+                : NotFound();
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("quota"))
         {
@@ -407,12 +405,9 @@ public class GcodeFilesController(
         {
             // Delegate to service - it handles both in-memory and recovery from metadata
             ChunkedUploadStatus? status = chunkedUploadService.GetOrResumeUpload(uploadId);
-            if (status == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(new ChunkStatusResponse(
+            return status == null
+                ? NotFound()
+                : Ok(new ChunkStatusResponse(
                 status.UploadId,
                 status.SafeFileName,
                 status.UploadedBytes,
@@ -448,12 +443,9 @@ public class GcodeFilesController(
         {
             // Delegate to service
             ChunkedUploadStatus? status = chunkedUploadService.PauseUpload(uploadId);
-            if (status == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(new ChunkStatusResponse(
+            return status == null
+                ? NotFound()
+                : Ok(new ChunkStatusResponse(
                 status.UploadId,
                 status.SafeFileName,
                 status.UploadedBytes,
@@ -484,12 +476,9 @@ public class GcodeFilesController(
         {
             // Delegate to service
             ChunkedUploadStatus? status = chunkedUploadService.ResumeUpload(uploadId);
-            if (status == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(new ChunkStatusResponse(
+            return status == null
+                ? NotFound()
+                : Ok(new ChunkStatusResponse(
                 status.UploadId,
                 status.SafeFileName,
                 status.UploadedBytes,
@@ -547,11 +536,7 @@ public class GcodeFilesController(
         try
         {
             bool success = await gcodeFilesService.DeleteFilesAsync(new[] { id }, HttpContext.RequestAborted);
-            if (!success)
-            {
-                return NotFound(new { message = "File not found", fileId = id });
-            }
-            return NoContent();
+            return !success ? NotFound(new { message = "File not found", fileId = id }) : NoContent();
         }
         catch (Exception ex)
         {
@@ -943,11 +928,9 @@ public class GcodeFilesController(
     /// </summary>
     private static string GetUploadFilePath(ChunkedUploadStatus status)
     {
-        if (string.IsNullOrWhiteSpace(status.FinalFilePath))
-        {
-            throw new InvalidOperationException("Upload has not completed - no final file path available");
-        }
-        return status.FinalFilePath;
+        return string.IsNullOrWhiteSpace(status.FinalFilePath)
+            ? throw new InvalidOperationException("Upload has not completed - no final file path available")
+            : status.FinalFilePath;
     }
 
     // Note: ToHex has been moved to IFileManagementService.ToHex() - use that instead
