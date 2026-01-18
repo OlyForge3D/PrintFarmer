@@ -8,8 +8,10 @@ import Select from '@/common/components/ui/Select';
 import { toast } from 'sonner';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
+import { FileIcon } from '@/common/components/icons/MdiIcons';
 import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface ImportExportModalProps {
   isOpen: boolean;
@@ -20,7 +22,16 @@ interface ImportExportModalProps {
 type ImportProgressItem = PrinterImportProgress;
 
 export default function ImportExportModal({ isOpen, onClose, onComplete }: ImportExportModalProps) {
-  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const queryClient = useQueryClient();
+  
+  // Fetch printer count directly so it updates after import
+  const { data: printers } = useQuery({
+    queryKey: ['printers'],
+    queryFn: () => apiClient.getPrinters(),
+    enabled: isOpen, // Only fetch when modal is open
+  });
+  const printerCount = printers?.length ?? 0;
+
   const [fileName, setFileName] = React.useState('');
   const [totalCount, setTotalCount] = React.useState(0);
   const [isImporting, setIsImporting] = React.useState(false);
@@ -37,7 +48,9 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
   const countPrintersInFile = async (f: File) => {
     try {
-      const text = await f.text();
+      // Clone the file using slice() to avoid consuming the original stream
+      const clone = f.slice(0, f.size, f.type);
+      const text = await clone.text();
       const ext = f.name.split('.').pop()?.toLowerCase();
       if (ext === 'json') {
         const data = JSON.parse(text);
@@ -53,12 +66,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
     }
   };
 
-  const startImport = async () => {
-    if (!selectedFile) return toast.error('Select a file to import');
-    const count = await countPrintersInFile(selectedFile);
+  const startImport = async (file: File) => {
+    const count = await countPrintersInFile(file);
     if (count === 0) return toast.error('No printers found in file');
     
-    setFileName(selectedFile.name);
+    setFileName(file.name);
     setTotalCount(count);
     setIsImporting(true);
     setIsImportComplete(false);
@@ -108,6 +120,8 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
             clearInterval(checkCompletion);
             unsubscribe();
             setIsImportComplete(true);
+            // Refresh printer count so Export tab shows updated count
+            queryClient.invalidateQueries({ queryKey: ['printers'] });
           }
           return prevItems;
         });
@@ -115,7 +129,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
       // NOW that SignalR is connected and listening, trigger the import
       const form = new FormData();
-      form.append('file', selectedFile);
+      form.append('file', file);
       try {
         await apiClient.uploadPrinterImport(form);
       } catch (err: unknown) {
@@ -149,6 +163,12 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
     }
   };
 
+  const handleFileSelect = (files: FileList | null) => {
+    if (files && files.length > 0) {
+      startImport(files[0]);
+    }
+  };
+
   const handleCloseModal = () => {
     if (isImporting && !isImportComplete) {
       setShowCloseConfirm(true);
@@ -158,7 +178,6 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const doClose = () => {
-    setSelectedFile(null);
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);
@@ -167,7 +186,6 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const handleImportComplete = () => {
-    setSelectedFile(null);
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);
@@ -200,12 +218,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
             <Tabs.Panel id="import">
               <div className="space-y-3">
                 {!isImporting ? (
-                  <>
-                    <FileUpload onChange={(files) => setSelectedFile(files && files.length > 0 ? files[0] : null)} accept=".json,.csv" buttonText={selectedFile ? `Selected: ${selectedFile.name}` : 'Select file'} buttonVariant="primary" />
-                    <div className="flex justify-end gap-2">
-                      <Button onClick={startImport} disabled={!selectedFile} size="sm">Start Import</Button>
-                    </div>
-                  </>
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <p className="text-sm text-pf-text-secondary">Select a JSON or CSV file to import printers</p>
+                    <FileUpload onChange={handleFileSelect} accept=".json,.csv" buttonText="Select File to Import" buttonIcon={<FileIcon className="w-4 h-4" />} buttonVariant="primary" />
+                  </div>
                 ) : (
                   <ImportProgressTable
                     items={progressItems}
@@ -219,23 +235,44 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
             </Tabs.Panel>
 
             <Tabs.Panel id="export">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <label className="text-sm">Format:</label>
-                  <Select value={exportFormat} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExportFormat(e.target.value as 'json' | 'csv')}>
-                    <option value="json">JSON</option>
-                    <option value="csv">CSV</option>
-                  </Select>
+              <div className="flex flex-col items-center gap-4 py-6">
+                <p className="text-sm text-pf-text-secondary">
+                  Export your printer configurations to back up or share with others
+                </p>
+                
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium">Format:</label>
+                    <Select value={exportFormat} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setExportFormat(e.target.value as 'json' | 'csv')}>
+                      <option value="json">JSON</option>
+                      <option value="csv">CSV</option>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-pf-text-tertiary max-w-sm text-center">
+                    {exportFormat === 'json' 
+                      ? 'JSON preserves all settings and is best for backups or importing into PrintFarmer'
+                      : 'CSV is spreadsheet-friendly and easy to edit in Excel or Google Sheets'}
+                  </p>
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button onClick={startExport} disabled={exporting} size="sm">{exporting ? 'Exporting…' : 'Export Printers'}</Button>
-                </div>
+
+                {printerCount > 0 ? (
+                  <p className="text-sm text-pf-text-secondary">
+                    {printerCount} printer{printerCount !== 1 ? 's' : ''} will be exported
+                  </p>
+                ) : (
+                  <p className="text-sm text-pf-text-tertiary">No printers to export</p>
+                )}
+
+                <Button onClick={startExport} disabled={exporting || printerCount === 0} variant="primary">
+                  {exporting ? 'Exporting…' : 'Export Printers'}
+                </Button>
+
                 {exportProgress !== null && (
-                  <div className="mt-2">
+                  <div className="w-full max-w-xs">
                     <div className="w-full bg-pf-bg-2 rounded-full h-2">
-                      <div className="bg-pf-accent h-2 rounded-full" style={{ width: `${Math.max(0, Math.min(100, exportProgress ?? 0))}%` }} />
+                      <div className="bg-pf-accent h-2 rounded-full transition-all duration-300" style={{ width: `${Math.max(0, Math.min(100, exportProgress ?? 0))}%` }} />
                     </div>
-                    <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
+                    <div className="text-xs text-pf-text-tertiary mt-1 text-center">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
                   </div>
                 )}
               </div>

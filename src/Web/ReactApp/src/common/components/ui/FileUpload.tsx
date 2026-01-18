@@ -219,8 +219,10 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
             className={buttonVariantClasses[buttonVariant]}
             aria-label={`${buttonText} (file upload)`}
           >
-            {buttonIcon && <span className="inline-block mr-2">{buttonIcon}</span>}
-            {buttonText}
+            <span className="flex items-center gap-2">
+              {buttonIcon}
+              {buttonText}
+            </span>
           </Button>
         )}
 
