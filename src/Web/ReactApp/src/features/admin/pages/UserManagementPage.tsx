@@ -13,6 +13,7 @@ import {
 import { apiClient } from '@/services/api';
 import { DeleteIcon, SearchIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/common/components/ui';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { User, Role } from '@/types/admin';
@@ -95,6 +96,7 @@ export function UserManagementPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const { data: passwordPolicy } = usePasswordPolicy();
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
@@ -465,16 +467,7 @@ export function UserManagementPage() {
                         type="button"
                         variant="subtle"
                         size="sm"
-                        onClick={() => {
-                          if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
-                            // TODO: Implement delete user
-                            if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.userManagementPage) {
-                              if (typeof window !== 'undefined' && (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.userManagementPage) {
-                                console.log('Delete user:', user.id);
-                              }
-                            }
-                          }
-                        }}
+                        onClick={() => setUserToDelete(user)}
                         className="!p-2 !h-auto hover:text-red-500"
                         title="Delete user"
                       >
@@ -966,6 +959,35 @@ export function UserManagementPage() {
             </div>
           </Modal>
         )}
+
+        {/* Delete User Confirmation Modal */}
+        <ConfirmationModal
+          isOpen={!!userToDelete}
+          title="Delete User?"
+          message={`Are you sure you want to delete user "${userToDelete?.username}"? This action cannot be undone.`}
+          confirmButtonText="Delete User"
+          cancelButtonText="Cancel"
+          isDangerous
+          onConfirm={async () => {
+            if (!userToDelete) return;
+            try {
+              // TODO: Implement actual user deletion API call
+              // await apiClient.deleteUser(userToDelete.id);
+              if (window.PrintFarmerDebug?.userManagementPage) {
+                console.log('Delete user:', userToDelete.id);
+              }
+              toast.success(`User "${userToDelete.username}" deleted`);
+              setUserToDelete(null);
+              loadUsers();
+            } catch (err) {
+              const error = err as { response?: { data?: Record<string, unknown> } };
+              const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to delete user';
+              toast.error(message);
+              setUserToDelete(null);
+            }
+          }}
+          onCancel={() => setUserToDelete(null)}
+        />
       </div>
     </PageTemplate>
   );

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import Tabs from '@/common/components/ui/Tabs';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 import Button from '@/common/components/ui/Button';
@@ -29,6 +30,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   const [exportFormat, setExportFormat] = React.useState<'json' | 'csv'>('json');
   const [exporting, setExporting] = React.useState(false);
   const [exportProgress, setExportProgress] = React.useState<number | null>(null);
+
+  // State for confirmation modals
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const countPrintersInFile = async (f: File) => {
     try {
@@ -146,12 +151,18 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
   const handleCloseModal = () => {
     if (isImporting && !isImportComplete) {
-      if (!window.confirm('Import in progress. Close anyway?')) return;
+      setShowCloseConfirm(true);
+      return;
     }
+    doClose();
+  };
+
+  const doClose = () => {
     setSelectedFile(null);
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);
+    setShowCloseConfirm(false);
     onClose();
   };
 
@@ -165,7 +176,15 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const handleCancelImport = () => {
-    if (!isImportComplete && !window.confirm('Cancel import in progress?')) return;
+    if (!isImportComplete) {
+      setShowCancelConfirm(true);
+      return;
+    }
+    handleImportComplete();
+  };
+
+  const confirmCancelImport = () => {
+    setShowCancelConfirm(false);
     handleImportComplete();
   };
 
@@ -224,6 +243,30 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
           </Tabs.Panels>
         </Tabs>
       </div>
+
+      {/* Close during import confirmation */}
+      <ConfirmationModal
+        isOpen={showCloseConfirm}
+        title="Close During Import?"
+        message="Import is in progress. Are you sure you want to close? The import may continue in the background."
+        confirmButtonText="Close Anyway"
+        cancelButtonText="Continue Importing"
+        isDangerous
+        onConfirm={doClose}
+        onCancel={() => setShowCloseConfirm(false)}
+      />
+
+      {/* Cancel import confirmation */}
+      <ConfirmationModal
+        isOpen={showCancelConfirm}
+        title="Cancel Import?"
+        message="Are you sure you want to cancel the import in progress?"
+        confirmButtonText="Cancel Import"
+        cancelButtonText="Continue"
+        isDangerous
+        onConfirm={confirmCancelImport}
+        onCancel={() => setShowCancelConfirm(false)}
+      />
     </Modal>
   );
 }

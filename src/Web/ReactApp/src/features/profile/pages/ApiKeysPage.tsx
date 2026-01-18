@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -41,6 +42,10 @@ export function ApiKeysPage() {
     apiKeys,
     (state, deletedKeyId) => state.filter(k => k.id !== deletedKeyId)
   );
+
+  // State for confirmation modals
+  const [keyToDelete, setKeyToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [keyToRotate, setKeyToRotate] = useState<{ id: string; name: string } | null>(null);
 
   // Create API key mutation
   const createMutation = useMutation({
@@ -116,29 +121,41 @@ export function ApiKeysPage() {
   };
 
   const handleDelete = (keyId: string, keyName: string) => {
-    if (confirm(`Are you sure you want to delete API key "${keyName}"? This cannot be undone.`)) {
-      // React 19: Use startTransition for optimistic deletion
-      startTransition(async () => {
-        try {
-          // Optimistically remove the key immediately
-          addOptimisticDelete(keyId);
-          
-          // Execute deletion in background
-          await deleteMutation.mutateAsync({ keyId });
-        } catch (error) {
-          // State rolls back automatically via useOptimistic on error
-          if (window.PrintFarmerDebug?.profile) {
-            console.error('Failed to delete API key:', error);
-          }
+    setKeyToDelete({ id: keyId, name: keyName });
+  };
+
+  const confirmDelete = () => {
+    if (!keyToDelete) return;
+
+    const keyId = keyToDelete.id;
+    setKeyToDelete(null);
+
+    // React 19: Use startTransition for optimistic deletion
+    startTransition(async () => {
+      try {
+        // Optimistically remove the key immediately
+        addOptimisticDelete(keyId);
+        
+        // Execute deletion in background
+        await deleteMutation.mutateAsync({ keyId });
+      } catch (error) {
+        // State rolls back automatically via useOptimistic on error
+        if (window.PrintFarmerDebug?.profile) {
+          console.error('Failed to delete API key:', error);
         }
-      });
-    }
+      }
+    });
   };
 
   const handleRotate = (keyId: string, keyName: string) => {
-    if (confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
-      rotateMutation.mutate({ keyId });
-    }
+    setKeyToRotate({ id: keyId, name: keyName });
+  };
+
+  const confirmRotate = () => {
+    if (!keyToRotate) return;
+
+    rotateMutation.mutate({ keyId: keyToRotate.id });
+    setKeyToRotate(null);
   };
 
   const copyToClipboard = (text: string) => {
@@ -324,6 +341,29 @@ export function ApiKeysPage() {
           </p>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={!!keyToDelete}
+        title="Delete API Key?"
+        message={`Are you sure you want to delete API key "${keyToDelete?.name}"? This cannot be undone.`}
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={confirmDelete}
+        onCancel={() => setKeyToDelete(null)}
+      />
+
+      {/* Rotate Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={!!keyToRotate}
+        title="Rotate API Key?"
+        message={`Are you sure you want to rotate API key "${keyToRotate?.name}"? The old key will stop working immediately.`}
+        confirmButtonText="Rotate Key"
+        cancelButtonText="Cancel"
+        onConfirm={confirmRotate}
+        onCancel={() => setKeyToRotate(null)}
+      />
     </PageTemplate>
   );
 }
