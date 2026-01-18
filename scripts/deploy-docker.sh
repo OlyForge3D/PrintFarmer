@@ -210,6 +210,20 @@ test_image_exists() {
     return 1
 }
 
+# Resolve image tag to use upgraded version if available
+# Returns the tag with -upgraded suffix if that image exists, otherwise returns original tag
+resolve_image_tag() {
+    local image_prefix="$1"  # e.g., "mcr.microsoft.com/dotnet/sdk"
+    local base_tag="$2"      # e.g., "10.0-noble"
+    local upgraded_tag="${base_tag}-upgraded"
+    
+    if test_image_exists "${image_prefix}:${upgraded_tag}"; then
+        echo "$upgraded_tag"
+    else
+        echo "$base_tag"
+    fi
+}
+
 # Find cached Docker images in common locations
 find_cached_images_dir() {
     local search_paths=(
@@ -4016,11 +4030,12 @@ ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 # Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
 # If not set by config file, these defaults are used
 # Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
-SDK_TAG=${SDK_TAG:-10.0-noble}
-ASPNET_TAG=${ASPNET_TAG:-10.0-noble}
-NODE_TAG=${NODE_TAG:-22-alpine}
-NGINX_TAG=${NGINX_TAG:-alpine}
-UBUNTU_TAG=${UBUNTU_TAG:-24.04}
+# Check for upgraded images and use them if available (appends -upgraded suffix)
+SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "${SDK_TAG:-10.0-noble}")
+ASPNET_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/aspnet" "${ASPNET_TAG:-10.0-noble}")
+NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-22-alpine}")
+NGINX_TAG=$(resolve_image_tag "nginx" "${NGINX_TAG:-alpine}")
+UBUNTU_TAG=$(resolve_image_tag "ubuntu" "${UBUNTU_TAG:-24.04}")
 
 # Standalone Service Image Tags (override compose template defaults for normal deployments)
 NGINX_IMAGE=nginx:alpine
