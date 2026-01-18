@@ -13,7 +13,7 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
     private int _failureCount;
     private DateTime _lastFailureTime;
     private CircuitState _state = CircuitState.Closed;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     public string Name { get; set; } = "CircuitBreaker";
     public CircuitState State => _state;

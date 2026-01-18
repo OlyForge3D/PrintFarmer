@@ -6,7 +6,7 @@
 public class BackendPluginRegistry : IBackendPluginRegistry
 {
     private readonly Dictionary<string, IBackendClientPlugin> _plugins = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     /// <summary>
     /// Registers a backend client plugin.

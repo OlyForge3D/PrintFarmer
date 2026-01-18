@@ -57,7 +57,7 @@ public sealed class TestTimingAttribute(string category = "DbHeavy") : BeforeAft
 /// </summary>
 internal static class TestTimingLog
 {
-    private static readonly object _lock = new();
+    private static readonly Lock _lock = new();
     private static readonly string _logPath = Path.Combine(AppContext.BaseDirectory, "test-timings.csv");
     private static volatile bool _initialized;
 

@@ -32,17 +32,17 @@ public class OrcaProfilesService : ISlicerProfilesService
     // Cache for loaded profile JSON as strings to minimize disk I/O
     // Key: full file path, Value: JSON string
     private readonly Dictionary<string, string> _profileJsonCache = new();
-    private readonly object _cacheLock = new();
+    private readonly Lock _cacheLock = new();
 
     // Cache for machines by manufacturer to support compatible_printers_condition evaluation
     private Dictionary<string, List<MachineProfileDto>>? _machinesByManufacturerCache;
-    private readonly object _machineCacheLock = new();
+    private readonly Lock _machineCacheLock = new();
 
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
     private List<MachineProfileDto>? _allMachineProfilesCache;
     private List<FilamentProfileDto>? _allFilamentProfilesCache;
     private List<ProcessProfileDto>? _allProcessProfilesCache;
-    private readonly object _profilesCacheLock = new();
+    private readonly Lock _profilesCacheLock = new();
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {

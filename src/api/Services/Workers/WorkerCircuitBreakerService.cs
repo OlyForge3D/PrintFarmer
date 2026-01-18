@@ -194,7 +194,7 @@ public class WorkerCircuitBreakerService(
         public List<DateTime> RecentFailures { get; } = new();
         public int RecentSuccesses { get; set; }
         public DateTime OpenedAt { get; set; }
-        public object Lock { get; } = new();
+        public Lock Lock { get; } = new();
     }
 }
 

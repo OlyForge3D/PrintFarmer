@@ -48,7 +48,7 @@ public class WorkerState
 public class WorkerStateService : IWorkerStateService
 {
     private readonly WorkerState _state = new();
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     public WorkerState GetWorkerState()
     {
         lock (_lock)

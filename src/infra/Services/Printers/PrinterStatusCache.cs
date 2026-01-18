@@ -31,7 +31,7 @@ public interface IPrinterStatusCacheReader
 public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCacheWriter
 {
     private readonly Dictionary<Guid, PrinterStatusDto> _cache = new();
-    private readonly object _lockObj = new();
+    private readonly Lock _lockObj = new();
 
     public PrinterStatusDto? GetStatus(Guid printerId)
     {
