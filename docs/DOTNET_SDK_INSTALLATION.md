@@ -35,7 +35,7 @@ When you run the deployment script, it checks for .NET SDK:
 ### Scenario 1: .NET SDK Found
 
 ```
-✅ .NET SDK found: 9.0.100
+✅ .NET SDK found: 10.0.102
 ✅ .NET SDK version is compatible
 ```
 
@@ -56,15 +56,15 @@ Would you like to install .NET SDK now? [y/N]:
 📦 Installing .NET SDK
 ℹ️  Downloading .NET installation script...
 ✅ Installation script downloaded
-ℹ️  Installing .NET SDK 9.0...
+ℹ️  Installing .NET SDK 10.0...
 ℹ️  This may take a few minutes...
-✅ .NET SDK 9.0 installed successfully
+✅ .NET SDK 10.0 installed successfully
 
 ℹ️  To make .NET available in future sessions, add to your shell profile:
   echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc
   echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> ~/.zshrc
 
-✅ Verified: .NET SDK 9.0.100 is now available
+✅ Verified: .NET SDK 10.0.102 is now available
 ```
 
 **If you answer no:**
@@ -93,7 +93,7 @@ Script continues with deployment.
 
 ### What Gets Installed
 
-- **Version:** .NET SDK 9.0 (required by PrintFarmer)
+- **Version:** .NET SDK 10.0 (required by PrintFarmer)
 - **Location:** `$HOME/.dotnet` (user-specific, no sudo required)
 - **Components:** SDK, runtime, and development tools
 - **Size:** ~200-300 MB download
@@ -101,7 +101,7 @@ Script continues with deployment.
 ### Installation Steps
 
 1. **Download** official Microsoft installation script
-2. **Execute** script with channel 9.0 parameter
+2. **Execute** script with channel 10.0 parameter
 3. **Install** to `$HOME/.dotnet` directory
 4. **Verify** installation successful
 5. **Add** to PATH for current session
@@ -151,7 +151,7 @@ source ~/.zshrc
 ```bash
 # Check .NET is available
 dotnet --version
-# Should show: 9.0.100 (or similar)
+# Should show: 10.0.102 (or similar)
 
 # Check location
 which dotnet
@@ -164,25 +164,25 @@ which dotnet
 
 ### Minimum Version
 
-PrintFarmer requires **.NET SDK 9.0 or later**
+PrintFarmer requires **.NET SDK 10.0 or later**
 
 ### Version Compatibility
 
 | Version | Status | Notes |
 |---------|--------|-------|
-| 9.0+ | ✅ Fully supported | Recommended |
-| 8.0 | ⚠️ May work | Not tested |
-| 7.0 or earlier | ❌ Not supported | Will fail to build |
+| 10.0+ | ✅ Fully supported | Recommended |
+| 9.0 | ⚠️ May work | Not tested |
+| 8.0 or earlier | ❌ Not supported | Will fail to build |
 
 ### Checking Your Version
 
 ```bash
 dotnet --version
-# Example output: 9.0.100
+# Example output: 10.0.102
 
 dotnet --list-sdks
 # Example output:
-# 9.0.100 [/home/user/.dotnet/sdk]
+# 10.0.102 [/home/user/.dotnet/sdk]
 ```
 
 ---
@@ -195,7 +195,7 @@ If automatic installation fails or you prefer manual installation:
 
 **Download from:** https://dotnet.microsoft.com/download
 
-1. Select **.NET 9.0**
+1. Select **.NET 10.0**
 2. Choose **SDK** (not just Runtime)
 3. Download for your OS
 4. Run installer
@@ -477,8 +477,8 @@ A: Only if you answer "yes" when prompted in interactive mode. Non-interactive m
 **Q: Can I install .NET later?**  
 A: Yes! You can install manually anytime from https://dotnet.microsoft.com/download
 
-**Q: What if I already have .NET 8.0?**  
-A: The script will warn you but continue. You can install .NET 9.0 alongside.
+**Q: What if I already have .NET 9.0?**  
+A: The script will warn you but continue. You can install .NET 10.0 alongside.
 
 **Q: Does this require admin/sudo?**  
 A: No! Installation goes to `$HOME/.dotnet` (user directory).
@@ -487,7 +487,7 @@ A: No! Installation goes to `$HOME/.dotnet` (user directory).
 A: No! User installation is isolated. System .NET (if any) remains unchanged.
 
 **Q: Can I use the system-wide .NET instead?**  
-A: Yes! If .NET 9.0+ is already installed system-wide, the script will detect and use it.
+A: Yes! If .NET 10.0+ is already installed system-wide, the script will detect and use it.
 
 **Q: What about Windows?**  
 A: Automatic installation not supported. Download installer from Microsoft's website.

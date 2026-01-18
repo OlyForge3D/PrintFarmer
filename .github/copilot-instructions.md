@@ -4,12 +4,12 @@
 
 **PrintFarmer** is a React TypeScript dashboard for managing multiple 3D printers. It supports Moonraker and PrusaLink backends, normalizes camera URLs, resolves hostnames to IPs, and provides live printer status via SignalR real-time updates.
 
-- **Languages**: C# with .NET 9 (API), TypeScript with React 19 (Frontend)
-- **Framework**: ASP.NET Core API backend + React TypeScript frontend (migrated from Blazor WebAssembly)
+- **Languages**: C# with .NET 10 (API), TypeScript with React 19 (Frontend)
+- **Framework**: ASP.NET Core API backend + React TypeScript frontend
 - **Database**: Multi-provider support (SQLite default, SQL Server, PostgreSQL, MySQL)
 - **Real-time**: SignalR hubs for live printer status
 - **Testing**: xUnit with integration tests (API), Vitest with React Testing Library (Frontend)
-- **Repository size**: Medium project with comprehensive React migration in progress
+- **Repository size**: Medium project
 
 **Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.**
 
@@ -32,16 +32,16 @@
 ```
 
 ### Prerequisites
-- .NET SDK 9.0 or later (verified working with 9.0.304) - for API backend
+- .NET SDK 10.0 or later (verified working with 10.0.102) - for API backend
 - Node.js 18+ and npm - for React frontend
 - Windows/macOS/Linux supported
 
-**CRITICAL**: If .NET 9 SDK is not installed, install it first:
+**CRITICAL**: If .NET 10 SDK is not installed, install it first:
 ```bash
-# Download .NET 9.0.302 SDK (exact version required by global.json)
+# Download .NET 10.0.102 SDK (exact version required by global.json)
 wget https://dot.net/v1/dotnet-install.sh
 chmod +x dotnet-install.sh
-./dotnet-install.sh --version 9.0.302
+./dotnet-install.sh --version 10.0.102
 export PATH="$HOME/.dotnet:$PATH"
 ```
 
@@ -268,7 +268,7 @@ npm run dev
 
 **Legacy Issues (Still apply):**
 
-5. **.NET Version Mismatch**: Project requires .NET 9.0 SDK. If you get "NETSDK1045" errors about unsupported .NET 9.0, install .NET 9 SDK from https://dot.net/download.
+5. **.NET Version Mismatch**: Project requires .NET 10.0 SDK. If you get "NETSDK1045" errors about unsupported .NET 10.0, install .NET 10 SDK from https://dot.net/download.
 
 6. **Docker Build Issues**: The main Dockerfile may reference outdated "server" directory paths. The current structure uses "api" directory. If Docker build fails with "server: not found", the Dockerfile needs updating to reference "api" instead of "server".
 
@@ -293,7 +293,7 @@ npm run dev
 
 ## Project Architecture & Layout
 
-**IMPORTANT**: This is a separate API + React frontend architecture (migrated from Blazor WebAssembly).
+**IMPORTANT**: This is a separate API + React frontend architecture.
 
 **🔥 LOCAL DEVELOPMENT SETUP - NO DOCKER CONTAINERS:**
 - **API Backend**: Run natively with `dotnet run` (NOT in Docker)
@@ -306,10 +306,11 @@ npm run dev
 /
 ├── CONTRIBUTING.md          # Detailed contributor guidelines
 ├── README.md               # Basic project overview
-├── REACT_MIGRATION_README.md # Comprehensive React migration plan and documentation
-├── global.json             # .NET SDK version (9.0.302)
+├── global.json             # .NET SDK version (10.0.102)
 ├── docker-compose.yml      # Multi-container deployment
-├── test-providers.sh       # Database provider testing script
+├── docs/                   # Documentation
+├── scripts/                # Build, deploy, and utility scripts
+├── dockerfiles/            # Dockerfile definitions for all services
 └── src/                    # ⚠️ WORKING DIRECTORY FOR ALL COMMANDS
     ├── farm-web.sln        # .NET Solution file
     ├── api/                # ASP.NET Core API server (STANDALONE backend)
@@ -317,7 +318,6 @@ npm run dev
     │   ├── Services/       # Background services, HTTP clients
     │   ├── Hubs/           # SignalR hubs
     │   ├── Data/           # EF Core DbContext
-    │   ├── Migrations/     # EF Core migrations
     │   ├── Properties/launchSettings.json  # Launch configuration (ports 5245/7281)
     │   ├── appsettings.json # App configuration
     │   └── Program.cs      # Server entry point + startup (API-only, no static files)
@@ -331,8 +331,14 @@ npm run dev
     │   ├── INetworkDiscoveryProbe.cs       # Interface for discovery probes
     │   ├── BaseDiscoveryProbe.cs           # Abstract base for HTTP probes
     │   └── NetworkDiscoveryService.cs      # Service coordinating all discovery
-    ├── Web/                # React frontend applications
-    │   └── ReactApp/       # React TypeScript application (NEW - replaces Blazor client)
+    ├── infra/              # Infrastructure layer (repositories, services)
+    ├── import/             # Data import functionality
+    ├── shared/             # DTOs and models shared between projects
+    ├── orcaslicer-worker/  # OrcaSlicer slicing worker service
+    ├── prusaslicer-worker/ # PrusaSlicer slicing worker service
+    ├── printer-discovery/  # Printer discovery microservice
+    ├── Web/                # React frontend
+    │   └── ReactApp/       # React TypeScript application
     │       ├── src/
     │       │   ├── components/      # React components
     │       │   ├── contexts/        # React contexts (Auth, etc.)
@@ -344,16 +350,15 @@ npm run dev
     │       ├── package.json         # npm dependencies and scripts
     │       ├── vite.config.ts       # Vite configuration
     │       └── tsconfig.json        # TypeScript configuration
-    ├── client/             # Blazor WebAssembly client (LEGACY - being replaced by React)
-    ├── shared/             # DTOs and models shared between client/server
-    ├── tests/              # Integration tests
-    │   └── Farm.Web.Api.Tests/      # API integration tests (includes discovery probe tests)
+    ├── tests/              # Test projects
+    │   ├── Farm.Web.Api.Tests/          # API integration tests
+    │   ├── Farm.Web.IntegrationTests/   # End-to-end integration tests
+    │   └── Farm.Importing.Tests/        # Import functionality tests
     └── tools/              # Utility tools
-        ├── AdminCli/       # Admin CLI (uses discovery probes from backend plugins)
-        └── IconGen/        # Icon generation utility
+        ├── AdminCli/       # Admin CLI tool
+        ├── IconGen/        # Icon generation utility
+        └── ThumbnailCli/   # Thumbnail generation CLI
 ```
-
-**Migration Status:** The project is actively migrating from Blazor WebAssembly to React TypeScript. The new React application is in `src/Web/ReactApp/` and follows modern React development practices with Vite, TypeScript, and comprehensive tooling.
 
 ### Key Architectural Components
 
@@ -390,7 +395,7 @@ npm run dev
 - `src/api/appsettings.json` - Database connections, logging, multi-provider config
 - `src/api/Properties/launchSettings.json` - Development server settings (ports 5245/7281)
 - `src/farm-web.sln` - Solution configuration
-- `global.json` - .NET SDK version requirement (9.0.302)
+- `global.json` - .NET SDK version requirement (10.0.102)
 - Project files: `*.csproj` in each directory
 
 ### Dependencies & External Services
@@ -735,7 +740,7 @@ npm run lint 2>&1 | head -20
 - **All Tests Passing**: Discovery probe validation tests verify confidence scoring, field detection, and error handling
 
 **Trust These Instructions:**
-These instructions have been thoroughly tested and validated with .NET 9.0.302 as of 2025-12-21. Discovery probe migration completed with all tests passing. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
+These instructions have been thoroughly tested and validated with .NET 10.0.102 as of 2026-01-18. Discovery probe migration completed with all tests passing. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
 
 ## Critical Timeout Settings & Build Times
 
@@ -773,8 +778,8 @@ These instructions have been thoroughly tested and validated with .NET 9.0.302 a
 **Full development workflow from fresh clone (VALIDATED 2025-09-07):**
 
 ```bash
-# 1. Ensure .NET 9.0.302 is installed
-dotnet --info  # Should show 9.0.302
+# 1. Ensure .NET 10.0.102 is installed
+dotnet --info  # Should show 10.0.102
 
 # 2. Ensure Node.js 18+ is installed
 node --version  # Should be 18+

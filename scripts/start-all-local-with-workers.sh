@@ -22,7 +22,7 @@
 #   5. (Deprecated) PrusaSlicer worker support has been removed
 #
 # Requirements:
-#   - .NET SDK 9.0.302+
+#   - .NET SDK 10.0.102+
 #   - Node.js >=20.19
 #   - Docker (for worker containers)
 #   - Docker images: printfarmer/orcaslicer-worker
@@ -265,8 +265,8 @@ fresh_cleanup() {
     warn "Removed main database file: farm.db"
   fi
   
-  if [[ -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db" ]]; then
-    rm -f "$SRC_DIR/api/bin/Debug/net9.0/farm.db"
+  if [[ -f "$SRC_DIR/api/bin/Debug/net10.0/farm.db" ]]; then
+    rm -f "$SRC_DIR/api/bin/Debug/net10.0/farm.db"
     warn "Removed build output database file"
   fi
   
@@ -670,7 +670,7 @@ fi
 info "Bootstrapping dependencies..."
 cd "$SRC_DIR"
 
-if [[ ! -f "$API_DIR/bin/Debug/net9.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]]; then
+if [[ ! -f "$API_DIR/bin/Debug/net10.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]]; then
   info "Restoring .NET dependencies..."
   dotnet restore ./farm-web.sln
   info "Building .NET solution..."

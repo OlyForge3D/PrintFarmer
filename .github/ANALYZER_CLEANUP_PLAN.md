@@ -4,7 +4,7 @@ This document tracks incremental cleanup of analyzer warnings across the solutio
 
 Status baseline (from latest local build/tests):
 - Build: succeeded with 6 warnings (reduced from ~176 in early passes), tests all green
-- Framework: .NET 9, ASP.NET Core API + Blazor WASM
+- Framework: .NET 10, ASP.NET Core API + Blazor WASM
 
 ## Principles
 - Prefer small PRs by rule-family or local feature area

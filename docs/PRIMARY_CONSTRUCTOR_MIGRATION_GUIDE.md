@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide documents the standardization of constructor patterns across the PrintFarmer codebase to use C# 11+ primary constructors consistently. This refactoring improves code clarity, reduces boilerplate, and modernizes the codebase for .NET 9.0.
+This guide documents the standardization of constructor patterns across the PrintFarmer codebase to use C# 11+ primary constructors consistently. This refactoring improves code clarity, reduces boilerplate, and modernizes the codebase for .NET 10.0.
 
 ## What Are Primary Constructors?
 
@@ -402,7 +402,7 @@ When reviewing primary constructor conversions:
 ## References
 
 - [C# 12 Primary Constructors](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-12#primary-constructors)
-- [.NET 9.0 Documentation](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-9)
+- [.NET 10.0 Documentation](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-10)
 - [Dependency Injection in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection)
 
 ## Questions?

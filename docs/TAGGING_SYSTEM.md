@@ -183,7 +183,7 @@ Frontend (React TypeScript)
 ├── GcodeFilesPage (tagged in future)
 └── Navigation/Routing (React Router)
 
-Backend (ASP.NET Core .NET 9)
+Backend (ASP.NET Core .NET 10)
 ├── TagsController (Generic tag management)
 │   ├─ GetAllTagsAsync (get all tags)
 │   ├─ SearchTagsAsync (search/filter tags)
@@ -1806,7 +1806,7 @@ if (model == null)
 
 ### Prerequisites
 
-- **.NET SDK:** 9.0.302 or later
+- **.NET SDK:** 10.0.102 or later
 - **Node.js:** 18+ with npm
 - **Database:** SQLite (default) or other supported provider
 - **API Running:** http://localhost:5245

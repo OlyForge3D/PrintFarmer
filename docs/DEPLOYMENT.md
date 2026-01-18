@@ -34,7 +34,7 @@ cd Web/ReactApp && npm run dev
 - **API Health**: http://localhost:5245/healthz
 
 ### Requirements
-- .NET 9.0.302 SDK
+- .NET 10.0.102 SDK
 - Node.js >=20.19
 - 2GB+ RAM
 

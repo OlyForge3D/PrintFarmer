@@ -1,11 +1,11 @@
 # Contributing to PrintFarmer
 
-Thanks for your interest in contributing! This guide has common, practical instructions for a C#/.NET 9 solution with separate API backend and React frontend.
+Thanks for your interest in contributing! This guide has common, practical instructions for a C#/.NET 10 solution with separate API backend and React frontend.
 
 > If `.soft-freeze` exists at the repo root, a soft freeze is active. Only feature / test / doc changes should be made without an exception. See `SOFT_FREEZE.md` for restricted files and how to request an exception.
 
 ## Prerequisites
-- .NET SDK 9.0 or later
+- .NET SDK 10.0 or later
 - Git + a code editor (VS Code recommended)
 - Optional (VS Code): Extensions "C#", "C# Dev Kit", and "Razor Language Server"
 

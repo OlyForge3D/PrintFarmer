@@ -171,7 +171,7 @@ PrusaSlicer worker image size: 498 MB
 **Historical Tracking**: Compare sizes across commits to detect regressions.
 
 **Size Budgets** (recommended targets based on current architecture):
-- **slicer-base**: < 300 MB (.NET 9 ASP.NET runtime + GTK/offscreen deps)
+- **slicer-base**: < 300 MB (.NET 10 ASP.NET runtime + GTK/offscreen deps)
 - **OrcaSlicer worker**: < 600 MB (base + .NET worker + OrcaSlicer AppImage)
 - **PrusaSlicer worker**: < 600 MB (base + .NET worker + PrusaSlicer AppImage or Flatpak)
 
