@@ -40,7 +40,9 @@ public class PrintersController(
     Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
     IValidator<CreatePrinterDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
-    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService)
+    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
+    Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
+    IHttpClientFactory httpClientFactory)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -50,6 +52,10 @@ public class PrintersController(
     private readonly IValidator<CreatePrinterDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+#pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
+    private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
+#pragma warning restore IDE0052
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -145,6 +151,235 @@ public class PrintersController(
         {
             _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Tests connectivity to a printer backend before adding the printer.
+    /// Validates that the provided URL and credentials can successfully connect to the printer.
+    /// </summary>
+    /// <param name="request">Connection test parameters including URL, backend type, and optional API key</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Connection test result with success status and optional message</returns>
+    /// <response code="200">Connection test completed (check success field for result)</response>
+    /// <response code="400">Invalid request parameters</response>
+    [HttpPost("test-connection")]
+    [ProducesResponseType(typeof(TestConnectionResponse), 200)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<TestConnectionResponse>> TestConnectionAsync(
+        [FromBody] TestConnectionRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.ServerUrl))
+        {
+            return BadRequest(new TestConnectionResponse { Success = false, Message = "Server URL is required" });
+        }
+
+        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
+        }
+
+        _logger.LogInformation($"Testing connection to {request.ServerUrl} with backend {request.Backend}");
+
+        try
+        {
+            var result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Connection test failed: {ex.Message}");
+            return Ok(new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"Connection failed: {ex.Message}"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Tests connection to a printer backend based on the backend type.
+    /// </summary>
+    private async Task<TestConnectionResponse> TestBackendConnectionAsync(
+        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+    {
+        using var httpClient = _httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+        return backend switch
+        {
+            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.SDCP => new TestConnectionResponse
+            {
+                Success = true,
+                Message = "SDCP uses UDP broadcast discovery. Manual connection test not available."
+            },
+            _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
+        };
+    }
+
+    /// <summary>
+    /// Tests Moonraker connection by hitting /printer/info endpoint.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, int backendPort, CancellationToken ct)
+    {
+        // Build URL with backend port (default 7125 for Moonraker API)
+        var builder = new UriBuilder(serverUrl)
+        {
+            Port = backendPort,
+            Path = "/printer/info"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+
+        try
+        {
+            var response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync(ct);
+                // Moonraker responses are wrapped in "result"
+                if (content.Contains("\"result\"") || content.Contains("hostname"))
+                {
+                    return new TestConnectionResponse
+                    {
+                        Success = true,
+                        Message = "Successfully connected to Moonraker printer"
+                    };
+                }
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"Moonraker returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with API key.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers" };
+        }
+
+        var builder = new UriBuilder(serverUrl)
+        {
+            Path = "/api/v1/status"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        request.Headers.Add("X-Api-Key", apiKey);
+
+        try
+        {
+            var response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = true,
+                    Message = "Successfully connected to PrusaLink printer"
+                };
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "Invalid API key - authentication failed"
+                };
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"PrusaLink returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Tests OctoPrint connection by hitting /api/version endpoint with API key.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestOctoPrintConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new TestConnectionResponse { Success = false, Message = "API Key is required for OctoPrint printers" };
+        }
+
+        var builder = new UriBuilder(serverUrl)
+        {
+            Path = "/api/version"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        request.Headers.Add("X-Api-Key", apiKey);
+
+        try
+        {
+            var response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = true,
+                    Message = "Successfully connected to OctoPrint server"
+                };
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "Invalid API key - authentication failed"
+                };
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"OctoPrint returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
         }
     }
 

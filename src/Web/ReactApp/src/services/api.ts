@@ -39,6 +39,8 @@ import {
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
   TempTargets,
+  TestConnectionRequest,
+  TestConnectionResponse,
   UpdateFilamentTypeRequest,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
@@ -417,6 +419,15 @@ export class ApiClient {
 
   async createPrinter(printer: CreatePrinterDto): Promise<Printer> {
     const response = await this.client.post<Printer>("/printers", printer);
+    return response.data;
+  }
+
+  /**
+   * Test connectivity to a printer backend before adding the printer.
+   * Returns success/failure with a human-readable message.
+   */
+  async testConnection(request: TestConnectionRequest): Promise<TestConnectionResponse> {
+    const response = await this.client.post<TestConnectionResponse>("/printers/test-connection", request);
     return response.data;
   }
 

@@ -316,6 +316,19 @@ export interface CreatePrinterDto {
   frontendPort?: number;
 }
 
+// Test connection request/response for verifying printer connectivity
+export interface TestConnectionRequest {
+  serverUrl: string;
+  backend: PrinterBackend;
+  apiKey?: string;
+  backendPort?: number;
+}
+
+export interface TestConnectionResponse {
+  success: boolean;
+  message?: string;
+}
+
 // Bulk import result item returned by /printers/bulk
 export interface BulkImportResultItem {
   index: number;

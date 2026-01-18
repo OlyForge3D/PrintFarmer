@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
-import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto } from '@/types/api';
+import { LoadingIcon, CheckIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto, TestConnectionResponse } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { BackendSelector } from '@/common/components/BackendSelector';
@@ -49,6 +49,10 @@ function AddPrinterModalContent({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+  
+  // Test connection state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
@@ -67,6 +71,58 @@ function AddPrinterModalContent({
         delete newErrors[field];
         return newErrors;
       });
+    }
+    // Clear test result when server URL or backend type changes
+    if (field === 'serverUrl' || field === 'backend' || field === 'apiKey' || field === 'backendPort') {
+      setTestResult(null);
+    }
+  };
+
+  /**
+   * Tests connectivity to the printer before adding it.
+   * Uses backend-specific test methods (Moonraker, PrusaLink, OctoPrint).
+   */
+  const handleTestConnection = async () => {
+    // Validate required fields for test
+    if (!formData.serverUrl.trim()) {
+      setTestResult({ success: false, message: 'Server URL is required' });
+      return;
+    }
+
+    try {
+      new URL(formData.serverUrl);
+    } catch {
+      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
+      return;
+    }
+
+    // Check API key for backends that require it
+    if ((formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && !formData.apiKey?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: `API Key is required for ${formData.backend === PrinterBackend.OctoPrint ? 'OctoPrint' : 'PrusaLink'} printers` 
+      });
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      const result = await apiClient.testConnection({
+        serverUrl: formData.serverUrl,
+        backend: formData.backend,
+        apiKey: formData.apiKey,
+        backendPort: formData.backendPort,
+      });
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ 
+        success: false, 
+        message: err instanceof Error ? err.message : 'Connection test failed' 
+      });
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -142,6 +198,8 @@ function AddPrinterModalContent({
     });
     setValidationErrors({});
     setError('');
+    setTestResult(null);
+    setIsTesting(false);
     onClose();
   }, [onClose]);
 
@@ -162,25 +220,47 @@ function AddPrinterModalContent({
   if (!isOpen) return null;
 
   const modalFooter = (
-    <div className="flex gap-3">
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={handleClose}
-        className="flex-1"
-      >
-        Cancel
-      </Button>
-      <Button
-        type="submit"
-        form="add-printer-form"
-        variant="success"
-        disabled={isLoading}
-        className="flex-1"
-        iconLeft={isLoading ? <LoadingIcon className="w-4 h-4" /> : <CheckIcon className="w-4 h-4" />}
-      >
-        {isLoading ? 'Adding...' : 'Add Printer'}
-      </Button>
+    <div className="space-y-3">
+      {/* Test Connection Result */}
+      {testResult && (
+        <Alert 
+          type={testResult.success ? 'success' : 'error'} 
+          className="mb-0"
+        >
+          {testResult.message}
+        </Alert>
+      )}
+      
+      {/* Buttons */}
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleClose}
+          className="flex-1"
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="default"
+          onClick={handleTestConnection}
+          disabled={isTesting || !formData.serverUrl.trim()}
+          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+        >
+          {isTesting ? 'Testing...' : 'Test'}
+        </Button>
+        <Button
+          type="submit"
+          form="add-printer-form"
+          variant="success"
+          disabled={isLoading}
+          className="flex-1"
+          iconLeft={isLoading ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <CheckIcon className="w-4 h-4" />}
+        >
+          {isLoading ? 'Adding...' : 'Add Printer'}
+        </Button>
+      </div>
     </div>
   );
 
