@@ -357,7 +357,6 @@ public class CatalogController(
     }
 
     // ============ Component Model CRUD Endpoints ============
-
     #region Hotend Model CRUD
 
     /// <summary>

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 // ============================================================================
 // COMPONENT MODEL CREATE/UPDATE DTOs

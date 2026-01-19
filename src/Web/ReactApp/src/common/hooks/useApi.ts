@@ -45,6 +45,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
 
+// Type alias for query options that omit queryKey and queryFn (already provided by hooks)
+type QueryOptions<TData, TError = ApiError> = Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'>;
+
 // ============ Query Keys ============
 export const queryKeys = {
   printers: ['printers'] as const,
@@ -79,7 +82,7 @@ export const queryKeys = {
 
 // ============ Printer Hooks ============
 
-export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
+export function usePrinters(options?: QueryOptions<Printer[]>) {
   return useQuery({
     queryKey: queryKeys.printers,
     queryFn: () => apiClient.getPrinters(),
@@ -88,7 +91,7 @@ export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
   });
 }
 
-export function usePrintersFast(includeDisabled = false, options?: UseQueryOptions<PrinterFast[], ApiError>) {
+export function usePrintersFast(includeDisabled = false, options?: QueryOptions<PrinterFast[]>) {
   const queryKey = includeDisabled
     ? [...queryKeys.printers, 'fast', 'include-disabled']
     : [...queryKeys.printers, 'fast'];
@@ -100,7 +103,7 @@ export function usePrintersFast(includeDisabled = false, options?: UseQueryOptio
   });
 }
 
-export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls[], ApiError>) {
+export function usePrinterCameraUrls(options?: QueryOptions<PrinterCameraUrls[]>) {
   return useQuery({
     queryKey: [...queryKeys.printers, 'camera-urls'],
     queryFn: () => apiClient.getPrinterCameraUrls(),
@@ -109,7 +112,7 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
-export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterBackendCapabilitiesDto[], ApiError>) {
+export function usePrinterBackendCapabilities(options?: QueryOptions<PrinterBackendCapabilitiesDto[]>) {
   return useQuery({
     queryKey: [...queryKeys.printers, 'backend-capabilities'],
     queryFn: () => apiClient.getPrinterBackendCapabilities(),
@@ -118,7 +121,7 @@ export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterB
   });
 }
 
-export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: UseQueryOptions<PrinterBackendCapabilitiesDto, ApiError>) {
+export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: QueryOptions<PrinterBackendCapabilitiesDto>) {
   return useQuery({
     queryKey: [...queryKeys.printers, printerId, 'backend-capabilities'],
     queryFn: () => {
@@ -189,7 +192,7 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
   }, [printersQuery.data, printersQuery.refetch, printersQuery.isLoading, printersQuery.isError, printersQuery.error, printersQuery.isSuccess, printersQuery.isFetching]);
 }
 
-export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {
+export function usePrinter(id: string, options?: QueryOptions<Printer>) {
   return useQuery({
     queryKey: queryKeys.printer(id),
     queryFn: () => apiClient.getPrinter(id),
@@ -199,7 +202,7 @@ export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiErr
   });
 }
 
-export function usePrinterDetails(id: string, options?: UseQueryOptions<PrinterDetails, ApiError>) {
+export function usePrinterDetails(id: string, options?: QueryOptions<PrinterDetails>) {
   return useQuery({
     queryKey: queryKeys.printerDetails(id),
     queryFn: () => apiClient.getPrinterDetails(id),
@@ -364,7 +367,7 @@ export function useCancelDiscoveryStream() {
 
 // ============ Catalog Hooks ============
 
-export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], ApiError>) {
+export function useManufacturers(options?: QueryOptions<ManufacturerDto[]>) {
   return useQuery({
     queryKey: queryKeys.manufacturers,
     queryFn: () => apiClient.getManufacturers(),
@@ -406,7 +409,7 @@ export function useCreateManufacturer() {
   });
 }
 
-export function useModels(manufacturerId?: string, options?: UseQueryOptions<PrinterModelDto[], ApiError>) {
+export function useModels(manufacturerId?: string, options?: QueryOptions<PrinterModelDto[]>) {
   return useQuery({
     queryKey: queryKeys.models(manufacturerId),
     queryFn: () => apiClient.getModels(manufacturerId),
@@ -415,7 +418,7 @@ export function useModels(manufacturerId?: string, options?: UseQueryOptions<Pri
   });
 }
 
-export function useModelDefaultCapabilities(modelId?: string, options?: UseQueryOptions<PrinterCapabilitiesDto | null, ApiError>) {
+export function useModelDefaultCapabilities(modelId?: string, options?: QueryOptions<PrinterCapabilitiesDto | null>) {
   return useQuery({
     queryKey: ['model-default-capabilities', modelId],
     queryFn: () => modelId ? apiClient.getModelDefaultCapabilities(modelId) : Promise.resolve(null),
@@ -464,7 +467,7 @@ export function useCreateModel() {
 
 // ============ Component Model Hooks ============
 
-export function useHotendModels(options?: UseQueryOptions<HotendModelDefinition[], ApiError>) {
+export function useHotendModels(options?: QueryOptions<HotendModelDefinition[]>) {
   return useQuery({
     queryKey: queryKeys.hotendModels,
     queryFn: () => apiClient.getHotendModels(),
@@ -473,7 +476,7 @@ export function useHotendModels(options?: UseQueryOptions<HotendModelDefinition[
   });
 }
 
-export function useExtruderModels(options?: UseQueryOptions<ExtruderModelDefinition[], ApiError>) {
+export function useExtruderModels(options?: QueryOptions<ExtruderModelDefinition[]>) {
   return useQuery({
     queryKey: queryKeys.extruderModels,
     queryFn: () => apiClient.getExtruderModels(),
@@ -482,7 +485,7 @@ export function useExtruderModels(options?: UseQueryOptions<ExtruderModelDefinit
   });
 }
 
-export function useToolheadModels(options?: UseQueryOptions<ToolheadModelDefinition[], ApiError>) {
+export function useToolheadModels(options?: QueryOptions<ToolheadModelDefinition[]>) {
   return useQuery({
     queryKey: queryKeys.toolheadModels,
     queryFn: () => apiClient.getToolheadModels(),
@@ -491,7 +494,7 @@ export function useToolheadModels(options?: UseQueryOptions<ToolheadModelDefinit
   });
 }
 
-export function useNozzleModels(options?: UseQueryOptions<NozzleModelDefinition[], ApiError>) {
+export function useNozzleModels(options?: QueryOptions<NozzleModelDefinition[]>) {
   return useQuery({
     queryKey: queryKeys.nozzleModels,
     queryFn: () => apiClient.getNozzleModels(),
@@ -681,7 +684,7 @@ export function useDeleteNozzleModel() {
 // Contextual Manufacturer query
 export function useManufacturersByContext(
   context: CatalogContext,
-  options?: UseQueryOptions<ManufacturersByContext, ApiError>
+  options?: QueryOptions<ManufacturersByContext>
 ) {
   return useQuery({
     queryKey: ['manufacturers', 'by-context', context],
@@ -693,7 +696,7 @@ export function useManufacturersByContext(
 
 // ============ Settings Hooks ============
 
-export function useFilamentTypes(options?: UseQueryOptions<FilamentTypeDto[], ApiError>) {
+export function useFilamentTypes(options?: QueryOptions<FilamentTypeDto[]>) {
   return useQuery({
     queryKey: queryKeys.filamentTypes,
     queryFn: () => apiClient.getFilamentTypes(),
@@ -702,7 +705,7 @@ export function useFilamentTypes(options?: UseQueryOptions<FilamentTypeDto[], Ap
   });
 }
 
-export function useFilamentPresets(options?: UseQueryOptions<FilamentPresets, ApiError>) {
+export function useFilamentPresets(options?: QueryOptions<FilamentPresets>) {
   return useQuery({
     queryKey: queryKeys.filamentPresets,
     queryFn: () => apiClient.getFilamentPresets(),
@@ -737,7 +740,7 @@ export function useImportFilamentTypesFromSpoolman() {
 
 // ============ G-code Library Hooks ============
 
-export function useGcodeFiles(page = 1, pageSize = 50, options?: UseQueryOptions<GcodeFile[], ApiError>) {
+export function useGcodeFiles(page = 1, pageSize = 50, options?: QueryOptions<GcodeFile[]>) {
   return useQuery({
     queryKey: queryKeys.gcodeFiles(page, pageSize),
     queryFn: async () => {
@@ -749,7 +752,7 @@ export function useGcodeFiles(page = 1, pageSize = 50, options?: UseQueryOptions
   });
 }
 
-export function useGcodeFile(id: string, options?: UseQueryOptions<GcodeFile, ApiError>) {
+export function useGcodeFile(id: string, options?: QueryOptions<GcodeFile>) {
   return useQuery({
     queryKey: queryKeys.gcodeFile(id),
     queryFn: () => apiClient.getGcodeFile(id),
@@ -785,7 +788,7 @@ export function useDeleteGcodeFile() {
 
 // ============ Harvest Operations Hooks ============
 
-export function useHarvestOperations(printerId?: string, options?: UseQueryOptions<GcodeHarvestOperation[], ApiError>) {
+export function useHarvestOperations(printerId?: string, options?: QueryOptions<GcodeHarvestOperation[]>) {
   return useQuery({
     queryKey: queryKeys.harvestOperations(printerId),
     queryFn: () => apiClient.getHarvestOperations(printerId),
@@ -794,7 +797,7 @@ export function useHarvestOperations(printerId?: string, options?: UseQueryOptio
   });
 }
 
-export function useHarvestOperation(id: string, options?: UseQueryOptions<GcodeHarvestOperation, ApiError>) {
+export function useHarvestOperation(id: string, options?: QueryOptions<GcodeHarvestOperation>) {
   return useQuery({
     queryKey: queryKeys.harvestOperation(id),
     queryFn: () => apiClient.getHarvestOperation(id),
@@ -844,7 +847,7 @@ export function useRestartHarvestDiscovery() {
 
 // ============ Job Queue Hooks ============
 
-export function useJobQueue(printerId?: string, options?: UseQueryOptions<JobQueuePrintJob[], ApiError>) {
+export function useJobQueue(printerId?: string, options?: QueryOptions<JobQueuePrintJob[]>) {
   return useQuery({
     queryKey: queryKeys.jobQueue(printerId),
     queryFn: () => apiClient.getJobQueue(printerId),
@@ -989,7 +992,7 @@ export function useStartPrintFromFile() {
 
 // ============ Health Check Hooks ============
 
-export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError>) {
+export function useHealthStatus(options?: QueryOptions<HealthStatus>) {
   return useQuery({
     queryKey: queryKeys.health,
     queryFn: async () => {
@@ -1024,7 +1027,7 @@ export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError
   });
 }
 
-export function useBasicHealth(options?: UseQueryOptions<BasicHealthStatus, ApiError>) {
+export function useBasicHealth(options?: QueryOptions<BasicHealthStatus>) {
   return useQuery({
     queryKey: ['health', 'basic'],
     queryFn: async () => {
@@ -1051,7 +1054,7 @@ export function usePrinterHistory(
     before?: Date;
     order?: string;
   },
-  queryOptions?: UseQueryOptions<HistoryListResponse, ApiError>
+  queryOptions?: QueryOptions<HistoryListResponse>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistory(printerId, options),
@@ -1065,7 +1068,7 @@ export function usePrinterHistory(
 export function usePrinterHistoryJob(
   printerId: string, 
   jobId: string, 
-  queryOptions?: UseQueryOptions<HistoryJob, ApiError>
+  queryOptions?: QueryOptions<HistoryJob>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistoryJob(printerId, jobId),
@@ -1078,7 +1081,7 @@ export function usePrinterHistoryJob(
 
 export function usePrinterHistoryTotals(
   printerId: string,
-  queryOptions?: UseQueryOptions<HistoryTotals, ApiError>
+  queryOptions?: QueryOptions<HistoryTotals>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistoryTotals(printerId),
@@ -1091,7 +1094,7 @@ export function usePrinterHistoryTotals(
 
 // ============ File Consistency Hooks ============
 
-export function useFileHealthSummary(options?: UseQueryOptions<FileHealthSummaryDto, ApiError>) {
+export function useFileHealthSummary(options?: QueryOptions<FileHealthSummaryDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.health,
     queryFn: () => apiClient.getFileHealthSummary(),
@@ -1102,7 +1105,7 @@ export function useFileHealthSummary(options?: UseQueryOptions<FileHealthSummary
 
 export function useFileAuditHistory(
   pageSize: number = 20,
-  options?: UseQueryOptions<FileHealthAuditDto[], ApiError>
+  options?: QueryOptions<FileHealthAuditDto[]>
 ) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.auditHistory(pageSize),
@@ -1112,7 +1115,7 @@ export function useFileAuditHistory(
   });
 }
 
-export function useFilesWithIssues(options?: UseQueryOptions<FileIssuesSummaryDto, ApiError>) {
+export function useFilesWithIssues(options?: QueryOptions<FileIssuesSummaryDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.filesWithIssues,
     queryFn: () => apiClient.getFilesWithIssues(),
@@ -1121,7 +1124,7 @@ export function useFilesWithIssues(options?: UseQueryOptions<FileIssuesSummaryDt
   });
 }
 
-export function useModel3DHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+export function useModel3DHealth(id: string, options?: QueryOptions<FileHealthDetailDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.model3DHealth(id),
     queryFn: () => apiClient.getModel3DHealth(id),
@@ -1131,7 +1134,7 @@ export function useModel3DHealth(id: string, options?: UseQueryOptions<FileHealt
   });
 }
 
-export function useGcodeFileHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+export function useGcodeFileHealth(id: string, options?: QueryOptions<FileHealthDetailDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.gcodeFileHealth(id),
     queryFn: () => apiClient.getGcodeFileHealth(id),

@@ -585,17 +585,20 @@ public class CatalogService(
     }
 
     // ============ Component Model CRUD Methods ============
-
     #region Hotend Model CRUD
 
     public async Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             throw new ArgumentException("Name is required", nameof(dto));
+        }
 
         bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
         if (!mfgExists)
+        {
             throw new KeyNotFoundException("Manufacturer not found");
+        }
 
         Domain.HotendModelDefinition model = new()
         {
@@ -623,20 +626,45 @@ public class CatalogService(
     {
         Domain.HotendModelDefinition? model = await _repo.GetHotendModelByIdAsync(id, ct);
         if (model is null)
+        {
             return null;
+        }
 
-        if (dto.Name is not null) model.Name = dto.Name.Trim();
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
         if (dto.ManufacturerId.HasValue)
         {
             bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
             if (!mfgExists)
+            {
                 throw new KeyNotFoundException("Manufacturer not found");
+            }
+
             model.ManufacturerId = dto.ManufacturerId.Value;
         }
-        if (dto.MaxTemp.HasValue) model.MaxTemp = dto.MaxTemp;
-        if (dto.IsHighFlow.HasValue) model.IsHighFlow = dto.IsHighFlow.Value;
-        if (dto.Description is not null) model.Description = dto.Description;
-        if (dto.Url is not null) model.Url = dto.Url;
+
+        if (dto.MaxTemp.HasValue)
+        {
+            model.MaxTemp = dto.MaxTemp;
+        }
+
+        if (dto.IsHighFlow.HasValue)
+        {
+            model.IsHighFlow = dto.IsHighFlow.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
 
         await _repo.SaveChangesAsync(ct);
         _logger.LogInformation($"Updated hotend model '{model.Name}' with ID {model.Id}");
@@ -663,11 +691,15 @@ public class CatalogService(
     public async Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             throw new ArgumentException("Name is required", nameof(dto));
+        }
 
         bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
         if (!mfgExists)
+        {
             throw new KeyNotFoundException("Manufacturer not found");
+        }
 
         Domain.ExtruderModelDefinition model = new()
         {
@@ -694,20 +726,45 @@ public class CatalogService(
     {
         Domain.ExtruderModelDefinition? model = await _repo.GetExtruderModelByIdAsync(id, ct);
         if (model is null)
+        {
             return null;
+        }
 
-        if (dto.Name is not null) model.Name = dto.Name.Trim();
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
         if (dto.ManufacturerId.HasValue)
         {
             bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
             if (!mfgExists)
+            {
                 throw new KeyNotFoundException("Manufacturer not found");
+            }
+
             model.ManufacturerId = dto.ManufacturerId.Value;
         }
-        if (dto.GearRatio is not null) model.GearRatio = dto.GearRatio;
-        if (dto.IsDirectDrive.HasValue) model.IsDirectDrive = dto.IsDirectDrive.Value;
-        if (dto.Description is not null) model.Description = dto.Description;
-        if (dto.Url is not null) model.Url = dto.Url;
+
+        if (dto.GearRatio is not null)
+        {
+            model.GearRatio = dto.GearRatio;
+        }
+
+        if (dto.IsDirectDrive.HasValue)
+        {
+            model.IsDirectDrive = dto.IsDirectDrive.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
 
         await _repo.SaveChangesAsync(ct);
         _logger.LogInformation($"Updated extruder model '{model.Name}' with ID {model.Id}");
@@ -734,11 +791,15 @@ public class CatalogService(
     public async Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             throw new ArgumentException("Name is required", nameof(dto));
+        }
 
         bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
         if (!mfgExists)
+        {
             throw new KeyNotFoundException("Manufacturer not found");
+        }
 
         Domain.ToolheadModelDefinition model = new()
         {
@@ -762,18 +823,35 @@ public class CatalogService(
     {
         Domain.ToolheadModelDefinition? model = await _repo.GetToolheadModelByIdAsync(id, ct);
         if (model is null)
+        {
             return null;
+        }
 
-        if (dto.Name is not null) model.Name = dto.Name.Trim();
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
         if (dto.ManufacturerId.HasValue)
         {
             bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
             if (!mfgExists)
+            {
                 throw new KeyNotFoundException("Manufacturer not found");
+            }
+
             model.ManufacturerId = dto.ManufacturerId.Value;
         }
-        if (dto.Description is not null) model.Description = dto.Description;
-        if (dto.Url is not null) model.Url = dto.Url;
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
 
         await _repo.SaveChangesAsync(ct);
         _logger.LogInformation($"Updated toolhead model '{model.Name}' with ID {model.Id}");
@@ -799,11 +877,15 @@ public class CatalogService(
     public async Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             throw new ArgumentException("Name is required", nameof(dto));
+        }
 
         bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
         if (!mfgExists)
+        {
             throw new KeyNotFoundException("Manufacturer not found");
+        }
 
         Domain.NozzleModelDefinition model = new()
         {
@@ -830,20 +912,45 @@ public class CatalogService(
     {
         Domain.NozzleModelDefinition? model = await _repo.GetNozzleModelByIdAsync(id, ct);
         if (model is null)
+        {
             return null;
+        }
 
-        if (dto.Name is not null) model.Name = dto.Name.Trim();
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
         if (dto.ManufacturerId.HasValue)
         {
             bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
             if (!mfgExists)
+            {
                 throw new KeyNotFoundException("Manufacturer not found");
+            }
+
             model.ManufacturerId = dto.ManufacturerId.Value;
         }
-        if (dto.MaxTemp.HasValue) model.MaxTemp = dto.MaxTemp;
-        if (dto.IsHardened.HasValue) model.IsHardened = dto.IsHardened.Value;
-        if (dto.Description is not null) model.Description = dto.Description;
-        if (dto.Url is not null) model.Url = dto.Url;
+
+        if (dto.MaxTemp.HasValue)
+        {
+            model.MaxTemp = dto.MaxTemp;
+        }
+
+        if (dto.IsHardened.HasValue)
+        {
+            model.IsHardened = dto.IsHardened.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
 
         await _repo.SaveChangesAsync(ct);
         _logger.LogInformation($"Updated nozzle model '{model.Name}' with ID {model.Id}");
@@ -888,9 +995,13 @@ public class CatalogService(
 
             ManufacturerWithCountDto dto = new(mfg.Id, mfg.Name, count);
             if (count > 0)
+            {
                 withItems.Add(dto);
+            }
             else
+            {
                 withoutItems.Add(dto);
+            }
         }
 
         return new ManufacturersByContextDto(withItems, withoutItems);

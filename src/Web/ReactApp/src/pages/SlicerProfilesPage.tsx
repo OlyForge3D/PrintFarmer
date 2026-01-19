@@ -81,16 +81,6 @@ export const SlicerProfilesPage: React.FC = () => {
     staleTime: 10_000
   });
 
-  // Flatten all profiles for certain operations
-  const allProfiles = useMemo(() => {
-    if (!profilesData) return [];
-    return [
-      ...profilesData.processProfiles,
-      ...profilesData.filamentProfiles,
-      ...profilesData.machineProfiles
-    ];
-  }, [profilesData]);
-
   const importMutation = useMutation<SlicerProfileExtended, Error, ImportSlicerProfileRequest>({
     mutationFn: async (payload) => {
       return slicerProfilesService.importProfile(payload);
@@ -409,7 +399,7 @@ export const SlicerProfilesPage: React.FC = () => {
                 type="text"
                 placeholder="Profile name"
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
               />
             </FormField>
             <FormField label="Description">
@@ -417,14 +407,14 @@ export const SlicerProfilesPage: React.FC = () => {
                 type="text"
                 placeholder="Description"
                 value={description}
-                onChange={e => setDescription(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
               />
             </FormField>
             <FormField label="Slicer Engine" required>
               <Select
                 aria-label="Slicer engine"
                 value={slicerType}
-                onChange={e => setSlicerType(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSlicerType(e.target.value)}
               >
                 {slicerNames.map(s => <option key={s}>{s}</option>)}
               </Select>
@@ -481,7 +471,7 @@ export const SlicerProfilesPage: React.FC = () => {
                     <label className="block text-sm font-medium mb-1">Engine</label>
                     <Select
                       value={filterEngine}
-                      onChange={(e) => setFilterEngine(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterEngine(e.target.value)}
                       aria-label="Filter by engine"
                     >
                       <option value="all">All Engines</option>
@@ -492,7 +482,7 @@ export const SlicerProfilesPage: React.FC = () => {
                     <label className="block text-sm font-medium mb-1">Source</label>
                     <Select
                       value={filterSource}
-                      onChange={(e) => setFilterSource(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterSource(e.target.value)}
                       aria-label="Filter by source"
                     >
                       <option value="all">All Sources</option>
@@ -506,7 +496,7 @@ export const SlicerProfilesPage: React.FC = () => {
                     <label className="block text-sm font-medium mb-1">Machine (for Process profiles)</label>
                     <Select
                       value={selectedMachine}
-                      onChange={(e) => setSelectedMachine(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedMachine(e.target.value)}
                       aria-label="Filter process profiles by machine"
                     >
                       <option value="">All Machines</option>

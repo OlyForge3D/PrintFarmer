@@ -3,7 +3,7 @@ import { Modal, Button, Input, FormField, Textarea } from '@/common/components/u
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ToolheadModelCardData } from '@/common/components/ComponentModelCard';
 import { useToolheadModels, useCreateToolheadModel, useUpdateToolheadModel, useDeleteToolheadModel } from '@/common/hooks/useApi';
-import { CatalogContext, type ToolheadModelDefinition, type CreateToolheadModelDto, type UpdateToolheadModelDto } from '@/types/api';
+import { CatalogContext, type ToolheadModelDefinition, type CreateToolheadModelDto, type UpdateToolheadModelDefDto } from '@/types/api';
 import { PlusIcon } from '@/common/components/icons/MdiIcons';
 
 /**
@@ -153,7 +153,7 @@ export function ToolheadsCatalog() {
   const handleUpdate = useCallback(async () => {
     if (!editingModel || !validateForm()) return;
 
-    const dto: UpdateToolheadModelDto = {
+    const dto: UpdateToolheadModelDefDto = {
       name: formState.name.trim(),
       manufacturerId: formState.manufacturerId,
       description: formState.description.trim() || undefined,

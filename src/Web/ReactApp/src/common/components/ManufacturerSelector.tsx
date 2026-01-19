@@ -102,9 +102,8 @@ export function ManufacturerSelector({
   const isError = context ? contextualQuery.isError : allManufacturersQuery.isError;
 
   // Build the grouped or flat options list
-  const { options, selectedName } = useMemo(() => {
-    let opts: { value: string; label: string; group?: string }[] = [];
-    let selName: string | undefined;
+  const options = useMemo(() => {
+    const opts: { value: string; label: string; group?: string }[] = [];
 
     if (context && contextualQuery.data) {
       // Contextual mode: group by "With Items" and "All Others"
@@ -118,7 +117,6 @@ export function ManufacturerSelector({
             label: `${m.name} (${m.itemCount})`,
             group: 'With Items',
           });
-          if (m.id === value) selName = m.name;
         });
       }
 
@@ -130,7 +128,6 @@ export function ManufacturerSelector({
             label: m.name,
             group: 'All Others',
           });
-          if (m.id === value) selName = m.name;
         });
       }
     } else if (!context && allManufacturersQuery.data) {
@@ -140,12 +137,11 @@ export function ManufacturerSelector({
           value: m.id,
           label: m.name,
         });
-        if (m.id === value) selName = m.name;
       });
     }
 
-    return { options: opts, selectedName: selName };
-  }, [context, contextualQuery.data, allManufacturersQuery.data, value]);
+    return opts;
+  }, [context, contextualQuery.data, allManufacturersQuery.data]);
 
   // Handle selection change
   const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {

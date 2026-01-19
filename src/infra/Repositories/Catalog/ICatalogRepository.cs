@@ -60,26 +60,39 @@ public interface ICatalogRepository
 
     // Component model methods - Get By Id
     Task<Domain.HotendModelDefinition?> GetHotendModelByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<Domain.ExtruderModelDefinition?> GetExtruderModelByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<Domain.ToolheadModelDefinition?> GetToolheadModelByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<Domain.NozzleModelDefinition?> GetNozzleModelByIdAsync(Guid id, CancellationToken ct = default);
 
     // Component model methods - Create
     Task AddHotendModelAsync(Domain.HotendModelDefinition model, CancellationToken ct = default);
+
     Task AddExtruderModelAsync(Domain.ExtruderModelDefinition model, CancellationToken ct = default);
+
     Task AddToolheadModelAsync(Domain.ToolheadModelDefinition model, CancellationToken ct = default);
+
     Task AddNozzleModelAsync(Domain.NozzleModelDefinition model, CancellationToken ct = default);
 
     // Component model methods - Delete
     Task RemoveHotendModelAsync(Guid id, CancellationToken ct = default);
+
     Task RemoveExtruderModelAsync(Guid id, CancellationToken ct = default);
+
     Task RemoveToolheadModelAsync(Guid id, CancellationToken ct = default);
+
     Task RemoveNozzleModelAsync(Guid id, CancellationToken ct = default);
 
     // Contextual manufacturer queries
     Task<int> CountPrinterModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
     Task<int> CountHotendModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
     Task<int> CountExtruderModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
     Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
     Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
 }
