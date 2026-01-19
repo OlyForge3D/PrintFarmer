@@ -49,7 +49,7 @@ public interface ICatalogRepository
 
     Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default);
 
-    // Component model methods
+    // Component model methods - Get
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)>> GetExtruderModelsAsync(CancellationToken ct = default);
@@ -57,4 +57,29 @@ public interface ICatalogRepository
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)>> GetToolheadModelsAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
+
+    // Component model methods - Get By Id
+    Task<Domain.HotendModelDefinition?> GetHotendModelByIdAsync(Guid id, CancellationToken ct = default);
+    Task<Domain.ExtruderModelDefinition?> GetExtruderModelByIdAsync(Guid id, CancellationToken ct = default);
+    Task<Domain.ToolheadModelDefinition?> GetToolheadModelByIdAsync(Guid id, CancellationToken ct = default);
+    Task<Domain.NozzleModelDefinition?> GetNozzleModelByIdAsync(Guid id, CancellationToken ct = default);
+
+    // Component model methods - Create
+    Task AddHotendModelAsync(Domain.HotendModelDefinition model, CancellationToken ct = default);
+    Task AddExtruderModelAsync(Domain.ExtruderModelDefinition model, CancellationToken ct = default);
+    Task AddToolheadModelAsync(Domain.ToolheadModelDefinition model, CancellationToken ct = default);
+    Task AddNozzleModelAsync(Domain.NozzleModelDefinition model, CancellationToken ct = default);
+
+    // Component model methods - Delete
+    Task RemoveHotendModelAsync(Guid id, CancellationToken ct = default);
+    Task RemoveExtruderModelAsync(Guid id, CancellationToken ct = default);
+    Task RemoveToolheadModelAsync(Guid id, CancellationToken ct = default);
+    Task RemoveNozzleModelAsync(Guid id, CancellationToken ct = default);
+
+    // Contextual manufacturer queries
+    Task<int> CountPrinterModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+    Task<int> CountHotendModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+    Task<int> CountExtruderModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+    Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+    Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
 }

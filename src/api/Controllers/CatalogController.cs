@@ -355,4 +355,325 @@ public class CatalogController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve nozzle models" });
         }
     }
+
+    // ============ Component Model CRUD Endpoints ============
+
+    #region Hotend Model CRUD
+
+    /// <summary>
+    /// Creates a new hotend model definition.
+    /// </summary>
+    [HttpPost("hotends")]
+    [ProducesResponseType(typeof(HotendModelDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<HotendModelDto>> CreateHotendAsync([FromBody] CreateHotendModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            HotendModelDto created = await _catalogService.CreateHotendModelAsync(dto, ct);
+            return CreatedAtAction(nameof(GetHotendsAsync), new { }, created);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateHotendAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create hotend model" });
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing hotend model definition.
+    /// </summary>
+    [HttpPut("hotends/{id:guid}")]
+    [ProducesResponseType(typeof(HotendModelDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<HotendModelDto>> UpdateHotendAsync(Guid id, [FromBody] UpdateHotendModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            HotendModelDto? updated = await _catalogService.UpdateHotendModelAsync(id, dto, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateHotendAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update hotend model" });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a hotend model definition.
+    /// </summary>
+    [HttpDelete("hotends/{id:guid}")]
+    [ProducesResponseType(204)]
+    public async Task<ActionResult> DeleteHotendAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteHotendModelAsync(id, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteHotendAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete hotend model" });
+        }
+    }
+
+    #endregion
+
+    #region Extruder Model CRUD
+
+    /// <summary>
+    /// Creates a new extruder model definition.
+    /// </summary>
+    [HttpPost("extruders")]
+    [ProducesResponseType(typeof(ExtruderModelDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<ExtruderModelDto>> CreateExtruderAsync([FromBody] CreateExtruderModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            ExtruderModelDto created = await _catalogService.CreateExtruderModelAsync(dto, ct);
+            return CreatedAtAction(nameof(GetExtrudersAsync), new { }, created);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateExtruderAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create extruder model" });
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing extruder model definition.
+    /// </summary>
+    [HttpPut("extruders/{id:guid}")]
+    [ProducesResponseType(typeof(ExtruderModelDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<ExtruderModelDto>> UpdateExtruderAsync(Guid id, [FromBody] UpdateExtruderModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            ExtruderModelDto? updated = await _catalogService.UpdateExtruderModelAsync(id, dto, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateExtruderAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update extruder model" });
+        }
+    }
+
+    /// <summary>
+    /// Deletes an extruder model definition.
+    /// </summary>
+    [HttpDelete("extruders/{id:guid}")]
+    [ProducesResponseType(204)]
+    public async Task<ActionResult> DeleteExtruderAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteExtruderModelAsync(id, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteExtruderAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete extruder model" });
+        }
+    }
+
+    #endregion
+
+    #region Toolhead Model CRUD
+
+    /// <summary>
+    /// Creates a new toolhead model definition.
+    /// </summary>
+    [HttpPost("toolheads")]
+    [ProducesResponseType(typeof(ToolheadModelDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<ToolheadModelDto>> CreateToolheadAsync([FromBody] CreateToolheadModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            ToolheadModelDto created = await _catalogService.CreateToolheadModelAsync(dto, ct);
+            return CreatedAtAction(nameof(GetToolheadsAsync), new { }, created);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateToolheadAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create toolhead model" });
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing toolhead model definition.
+    /// </summary>
+    [HttpPut("toolheads/{id:guid}")]
+    [ProducesResponseType(typeof(ToolheadModelDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<ToolheadModelDto>> UpdateToolheadAsync(Guid id, [FromBody] UpdateToolheadModelDefDto dto, CancellationToken ct)
+    {
+        try
+        {
+            ToolheadModelDto? updated = await _catalogService.UpdateToolheadModelAsync(id, dto, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateToolheadAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update toolhead model" });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a toolhead model definition.
+    /// </summary>
+    [HttpDelete("toolheads/{id:guid}")]
+    [ProducesResponseType(204)]
+    public async Task<ActionResult> DeleteToolheadAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteToolheadModelAsync(id, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteToolheadAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete toolhead model" });
+        }
+    }
+
+    #endregion
+
+    #region Nozzle Model CRUD
+
+    /// <summary>
+    /// Creates a new nozzle model definition.
+    /// </summary>
+    [HttpPost("nozzles")]
+    [ProducesResponseType(typeof(NozzleModelDto), 201)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<NozzleModelDto>> CreateNozzleAsync([FromBody] CreateNozzleModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            NozzleModelDto created = await _catalogService.CreateNozzleModelAsync(dto, ct);
+            return CreatedAtAction(nameof(GetNozzlesAsync), new { }, created);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] CreateNozzleAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create nozzle model" });
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing nozzle model definition.
+    /// </summary>
+    [HttpPut("nozzles/{id:guid}")]
+    [ProducesResponseType(typeof(NozzleModelDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<NozzleModelDto>> UpdateNozzleAsync(Guid id, [FromBody] UpdateNozzleModelDto dto, CancellationToken ct)
+    {
+        try
+        {
+            NozzleModelDto? updated = await _catalogService.UpdateNozzleModelAsync(id, dto, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] UpdateNozzleAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update nozzle model" });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a nozzle model definition.
+    /// </summary>
+    [HttpDelete("nozzles/{id:guid}")]
+    [ProducesResponseType(204)]
+    public async Task<ActionResult> DeleteNozzleAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteNozzleModelAsync(id, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteNozzleAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete nozzle model" });
+        }
+    }
+
+    #endregion
+
+    #region Contextual Manufacturer Query
+
+    /// <summary>
+    /// Gets manufacturers grouped by whether they have items in the specified catalog context.
+    /// </summary>
+    /// <param name="context">The catalog context (Printers, Hotends, Extruders, Toolheads, Nozzles)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Manufacturers split into with-items and without-items groups</returns>
+    [HttpGet("manufacturers/by-context/{context}")]
+    [ProducesResponseType(typeof(ManufacturersByContextDto), 200)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<ManufacturersByContextDto>> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
+    {
+        try
+        {
+            ManufacturersByContextDto result = await _catalogService.GetManufacturersByContextAsync(context, ct);
+            return Ok(result);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(new { error = $"Invalid catalog context: {ex.Message}" });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersByContextAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers by context" });
+        }
+    }
+
+    #endregion
 }

@@ -1,55 +1,71 @@
-# Copilot Processing: HardwareModel Base Class & UI Integration
+# Copilot Processing: Catalog UI Redesign - Phase 4 Complete
 
-**Session Start**: Refactoring component models to use abstract base class and wiring up UI
+**Session Start**: Implementing tabbed catalog interface with component catalogs
 **Phase**: ✅ Complete
 
-## 🔄 HARDWARE MODEL REFACTORING & UI INTEGRATION - COMPLETE ✅
+## 🔄 CATALOG UI REDESIGN - PHASE 4 COMPLETE ✅
 
-**Objective**: Extract common properties into HardwareModel abstract base class and wire up component model selection in EditModelModal
+**Objective**: Refactor CatalogPage to use tabbed interface with separate tabs for Printers, Hotends, Extruders, Toolheads, and Nozzles
 **Status**: ✅ COMPLETE
 
 ### Implementation Summary
 
-**Backend Refactoring**:
-- ✅ Created `HardwareModel` abstract base class with: Id, Name, ManufacturerId, Description, Url, Manufacturer navigation
-- ✅ `HotendModelDefinition` now extends HardwareModel (adds: MaxTemp, IsHighFlow)
-- ✅ `ExtruderModelDefinition` now extends HardwareModel (adds: GearRatio, IsDirectDrive)
-- ✅ `ToolheadModelDefinition` now extends HardwareModel (no additional properties)
-- ✅ `NozzleModelDefinition` now extends HardwareModel (adds: MaxTemp, IsHardened)
-- ✅ ManufacturerId is now non-nullable (required) - community designs use "Unknown" manufacturer
-- ✅ Updated ToolheadModelDto to use non-nullable ManufacturerId
-- ✅ Updated ICatalogRepository, EfCatalogRepository, DatabaseInitializer for non-nullable ManufacturerId
-- ✅ Updated TypeScript ToolheadModelDefinition interface to use required manufacturerId
+**New Components Created**:
+- ✅ `PrinterModelsCatalog.tsx` - Extracted from CatalogPage, manages manufacturers and printer models with Master-Detail layout
+- ✅ `HotendsCatalog.tsx` - Full CRUD for hotend models with grid display, Add/Edit/Delete modals
+- ✅ `ExtrudersCatalog.tsx` - Full CRUD for extruder models with gear ratio and direct drive fields
+- ✅ `ToolheadsCatalog.tsx` - Full CRUD for toolhead models
+- ✅ `NozzlesCatalog.tsx` - Full CRUD for nozzle models with max temp and hardened fields
+- ✅ `ManufacturerSelector.tsx` - Reusable grouped dropdown with "With Items" vs "All Others" groups and Add New modal
+- ✅ `ComponentModelCard.tsx` - Generic card component for displaying component models with type-specific badges
 
-**Frontend UI Integration**:
-- ✅ Added useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels hooks to EditModelModal
-- ✅ Replaced read-only Toolhead Model input with Select dropdown populated from toolheadModels
-- ✅ Replaced read-only Extruder input with Select dropdown populated from extruderModels
-- ✅ Replaced read-only Hotend input with Select dropdown populated from hotendModels
-- ✅ Replaced read-only Nozzle Model input with Select dropdown populated from nozzleModels
-- ✅ Dropdowns show "Manufacturer - Name" format with additional info (gear ratio, high flow, hardened)
+**CatalogPage Refactored**:
+- ✅ Now uses Tabs component with 5 tabs: Printers, Hotends, Extruders, Toolheads, Nozzles
+- ✅ Each tab renders its respective catalog component
+- ✅ Clean separation of concerns between page layout and catalog functionality
 
-### Files Modified
+**Backend Enhancements (from previous sessions)**:
+- ✅ All Update DTOs now include optional `ManufacturerId` for manufacturer changes (reduced friction per user request)
+- ✅ CatalogService validates new manufacturer exists before allowing change
+- ✅ Re-fetches model with new manufacturer navigation after update
 
-**Backend**:
-- `src/infra/Domain/ComponentModels.cs` - Extracted HardwareModel base class, all 4 component models extend it
-- `src/infra/Repositories/Catalog/ICatalogRepository.cs` - Changed toolhead ManufacturerId from Guid? to Guid
-- `src/infra/Repositories/Catalog/EfCatalogRepository.cs` - Updated toolhead method signature and ordering
-- `src/infra/Models.cs` - Changed ToolheadModelDto ManufacturerId from Guid? to Guid
-- `src/api/Services/DatabaseInitializer.cs` - Updated toolhead seeding for required ManufacturerId
+### Files Created/Modified
 
-**Frontend**:
-- `src/Web/ReactApp/src/types/api.ts` - Changed ToolheadModelDefinition.manufacturerId from optional to required
-- `src/Web/ReactApp/src/features/models3d/components/EditModelModal.tsx` - Added component model hooks and Select dropdowns
+**Created**:
+1. `src/Web/ReactApp/src/features/catalog/components/PrinterModelsCatalog.tsx` - Master-detail printer/manufacturer management
+2. `src/Web/ReactApp/src/features/catalog/components/HotendsCatalog.tsx` - Hotend model CRUD
+3. `src/Web/ReactApp/src/features/catalog/components/ExtrudersCatalog.tsx` - Extruder model CRUD
+4. `src/Web/ReactApp/src/features/catalog/components/ToolheadsCatalog.tsx` - Toolhead model CRUD
+5. `src/Web/ReactApp/src/features/catalog/components/NozzlesCatalog.tsx` - Nozzle model CRUD
+6. `src/Web/ReactApp/src/features/catalog/components/ManufacturerSelector.tsx` - Reusable manufacturer dropdown
+7. `src/Web/ReactApp/src/features/catalog/components/ComponentModelCard.tsx` - Generic component card
+
+**Modified**:
+1. `src/Web/ReactApp/src/features/catalog/pages/CatalogPage.tsx` - Now tabbed interface using all catalog components
 
 ### Build Status
-✅ **.NET Build**: Passed (0 errors, 0 warnings)
-✅ **React Build**: Passed (10.27s)
-✅ **React Tests**: 474/474 passed
+✅ **React Build**: Passed (10.04s, 3989 modules)
+✅ **React Tests**: 474/474 passed (only Playwright e2e config issues, unrelated to changes)
+✅ **TypeScript**: 0 errors
+
+### User Experience
+
+The new CatalogPage provides:
+- **Printers Tab**: Original master-detail layout with manufacturers on left, printer models on right
+- **Hotends Tab**: Grid of hotend models with filtering, inline add/edit/delete
+- **Extruders Tab**: Grid of extruder models with gear ratio and direct drive indicators
+- **Toolheads Tab**: Grid of toolhead models with manufacturer badges
+- **Nozzles Tab**: Grid of nozzle models with temperature and hardened indicators
+
+Each component catalog supports:
+- Create new models with manufacturer selection
+- Edit existing models (including manufacturer change)
+- Delete models with confirmation
+- View all models or filter by manufacturer
 
 ---
 
-# Previous Session: Component Model API Integration
+# Previous Session: HardwareModel Base Class & UI Integration
 ```typescript
 import { useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 

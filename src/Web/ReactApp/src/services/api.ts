@@ -5,9 +5,14 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  CatalogContext,
   CommandResult,
+  CreateExtruderModelDto,
   CreateFilamentTypeRequest,
+  CreateHotendModelDto,
+  CreateNozzleModelDto,
   CreatePrinterDto,
+  CreateToolheadModelDto,
   DiscoveredPrinterDto,
   ExtruderModelDefinition,
   FilamentPresets,
@@ -24,6 +29,7 @@ import {
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
+  ManufacturersByContext,
   MoveRequest,
   NozzleModelDefinition,
   Printer,
@@ -45,10 +51,14 @@ import {
   TestConnectionRequest,
   TestConnectionResponse,
   ToolheadModelDefinition,
+  UpdateExtruderModelDto,
   UpdateFilamentTypeRequest,
+  UpdateHotendModelDto,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
+  UpdateNozzleModelDto,
   UpdatePrinterDto,
+  UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto,
@@ -763,6 +773,150 @@ export class ApiClient {
   async getNozzleModels(): Promise<NozzleModelDefinition[]> {
     const response = await this.client.get<NozzleModelDefinition[]>(
       "/catalog/nozzles"
+    );
+    return response.data;
+  }
+
+  // ============ Component Model CRUD methods ============
+
+  // Hotend CRUD
+  async createHotendModel(
+    dto: CreateHotendModelDto
+  ): Promise<HotendModelDefinition> {
+    const response = await this.client.post<HotendModelDefinition>(
+      "/catalog/hotends",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateHotendModel(
+    id: string,
+    dto: UpdateHotendModelDto
+  ): Promise<HotendModelDefinition | null> {
+    try {
+      const response = await this.client.put<HotendModelDefinition>(
+        `/catalog/hotends/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteHotendModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/hotends/${id}`);
+  }
+
+  // Extruder CRUD
+  async createExtruderModel(
+    dto: CreateExtruderModelDto
+  ): Promise<ExtruderModelDefinition> {
+    const response = await this.client.post<ExtruderModelDefinition>(
+      "/catalog/extruders",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateExtruderModel(
+    id: string,
+    dto: UpdateExtruderModelDto
+  ): Promise<ExtruderModelDefinition | null> {
+    try {
+      const response = await this.client.put<ExtruderModelDefinition>(
+        `/catalog/extruders/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteExtruderModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/extruders/${id}`);
+  }
+
+  // Toolhead CRUD
+  async createToolheadModel(
+    dto: CreateToolheadModelDto
+  ): Promise<ToolheadModelDefinition> {
+    const response = await this.client.post<ToolheadModelDefinition>(
+      "/catalog/toolheads",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateToolheadModel(
+    id: string,
+    dto: UpdateToolheadModelDefDto
+  ): Promise<ToolheadModelDefinition | null> {
+    try {
+      const response = await this.client.put<ToolheadModelDefinition>(
+        `/catalog/toolheads/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteToolheadModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/toolheads/${id}`);
+  }
+
+  // Nozzle CRUD
+  async createNozzleModel(
+    dto: CreateNozzleModelDto
+  ): Promise<NozzleModelDefinition> {
+    const response = await this.client.post<NozzleModelDefinition>(
+      "/catalog/nozzles",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateNozzleModel(
+    id: string,
+    dto: UpdateNozzleModelDto
+  ): Promise<NozzleModelDefinition | null> {
+    try {
+      const response = await this.client.put<NozzleModelDefinition>(
+        `/catalog/nozzles/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteNozzleModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/nozzles/${id}`);
+  }
+
+  // Contextual Manufacturer Query
+  async getManufacturersByContext(
+    context: CatalogContext
+  ): Promise<ManufacturersByContext> {
+    const response = await this.client.get<ManufacturersByContext>(
+      `/catalog/manufacturers/by-context/${context}`
     );
     return response.data;
   }

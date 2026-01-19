@@ -380,4 +380,97 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Description,
             n.Url)).ToList();
     }
+
+    // ============ Component Model CRUD Methods ============
+
+    // Get By Id
+    public Task<HotendModelDefinition?> GetHotendModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.HotendModelDefinitions.Include(h => h.Manufacturer).FirstOrDefaultAsync(h => h.Id == id, ct);
+
+    public Task<ExtruderModelDefinition?> GetExtruderModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.ExtruderModelDefinitions.Include(e => e.Manufacturer).FirstOrDefaultAsync(e => e.Id == id, ct);
+
+    public Task<ToolheadModelDefinition?> GetToolheadModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.ToolheadModelDefinitions.Include(t => t.Manufacturer).FirstOrDefaultAsync(t => t.Id == id, ct);
+
+    public Task<NozzleModelDefinition?> GetNozzleModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.NozzleModelDefinitions.Include(n => n.Manufacturer).FirstOrDefaultAsync(n => n.Id == id, ct);
+
+    // Add
+    public async Task AddHotendModelAsync(HotendModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.HotendModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddExtruderModelAsync(ExtruderModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.ExtruderModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddToolheadModelAsync(ToolheadModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.ToolheadModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddNozzleModelAsync(NozzleModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.NozzleModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // Remove
+    public async Task RemoveHotendModelAsync(Guid id, CancellationToken ct = default)
+    {
+        HotendModelDefinition? model = await _db.HotendModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.HotendModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveExtruderModelAsync(Guid id, CancellationToken ct = default)
+    {
+        ExtruderModelDefinition? model = await _db.ExtruderModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.ExtruderModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveToolheadModelAsync(Guid id, CancellationToken ct = default)
+    {
+        ToolheadModelDefinition? model = await _db.ToolheadModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.ToolheadModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveNozzleModelAsync(Guid id, CancellationToken ct = default)
+    {
+        NozzleModelDefinition? model = await _db.NozzleModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.NozzleModelDefinitions.Remove(model);
+        }
+    }
+
+    // Contextual manufacturer counts
+    public Task<int> CountPrinterModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.PrinterModels.CountAsync(m => m.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountHotendModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.HotendModelDefinitions.CountAsync(h => h.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountExtruderModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.ExtruderModelDefinitions.CountAsync(e => e.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.ToolheadModelDefinitions.CountAsync(t => t.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.NozzleModelDefinitions.CountAsync(n => n.ManufacturerId == manufacturerId, ct);
 }

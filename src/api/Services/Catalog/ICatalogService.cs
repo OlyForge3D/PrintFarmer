@@ -31,12 +31,29 @@ public interface ICatalogService
 
     Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct);
 
-    // Component model methods
+    // Component model methods - Get
     Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct);
-
     Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct);
-
     Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct);
-
     Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct);
+
+    // Component model methods - CRUD
+    Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct);
+    Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct);
+    Task DeleteHotendModelAsync(Guid id, CancellationToken ct);
+
+    Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct);
+    Task<ExtruderModelDto?> UpdateExtruderModelAsync(Guid id, UpdateExtruderModelDto dto, CancellationToken ct);
+    Task DeleteExtruderModelAsync(Guid id, CancellationToken ct);
+
+    Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct);
+    Task<ToolheadModelDto?> UpdateToolheadModelAsync(Guid id, UpdateToolheadModelDefDto dto, CancellationToken ct);
+    Task DeleteToolheadModelAsync(Guid id, CancellationToken ct);
+
+    Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct);
+    Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct);
+    Task DeleteNozzleModelAsync(Guid id, CancellationToken ct);
+
+    // Contextual manufacturer methods
+    Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct);
 }

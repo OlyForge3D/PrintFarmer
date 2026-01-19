@@ -115,22 +115,58 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
 
     // Component model methods - delegate to core service
     public Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
-    {
-        return _coreCatalogService.GetHotendModelsAsync(ct);
-    }
+        => _coreCatalogService.GetHotendModelsAsync(ct);
 
     public Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
-    {
-        return _coreCatalogService.GetExtruderModelsAsync(ct);
-    }
+        => _coreCatalogService.GetExtruderModelsAsync(ct);
 
     public Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
-    {
-        return _coreCatalogService.GetToolheadModelsAsync(ct);
-    }
+        => _coreCatalogService.GetToolheadModelsAsync(ct);
 
     public Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
-    {
-        return _coreCatalogService.GetNozzleModelsAsync(ct);
-    }
+        => _coreCatalogService.GetNozzleModelsAsync(ct);
+
+    // Component model CRUD - Hotend
+    public Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateHotendModelAsync(dto, ct);
+
+    public Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateHotendModelAsync(id, dto, ct);
+
+    public Task DeleteHotendModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteHotendModelAsync(id, ct);
+
+    // Component model CRUD - Extruder
+    public Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateExtruderModelAsync(dto, ct);
+
+    public Task<ExtruderModelDto?> UpdateExtruderModelAsync(Guid id, UpdateExtruderModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateExtruderModelAsync(id, dto, ct);
+
+    public Task DeleteExtruderModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteExtruderModelAsync(id, ct);
+
+    // Component model CRUD - Toolhead
+    public Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateToolheadModelAsync(dto, ct);
+
+    public Task<ToolheadModelDto?> UpdateToolheadModelAsync(Guid id, UpdateToolheadModelDefDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateToolheadModelAsync(id, dto, ct);
+
+    public Task DeleteToolheadModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteToolheadModelAsync(id, ct);
+
+    // Component model CRUD - Nozzle
+    public Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateNozzleModelAsync(dto, ct);
+
+    public Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateNozzleModelAsync(id, dto, ct);
+
+    public Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteNozzleModelAsync(id, ct);
+
+    // Contextual manufacturer query
+    public Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
+        => _coreCatalogService.GetManufacturersByContextAsync(context, ct);
 }

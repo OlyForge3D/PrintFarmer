@@ -2,7 +2,12 @@ import { apiClient } from '@/services/api';
 import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
 import {
   ApiError,
+  CatalogContext,
+  CreateExtruderModelDto,
+  CreateHotendModelDto,
+  CreateNozzleModelDto,
   CreatePrinterDto,
+  CreateToolheadModelDto,
   ExtruderModelDefinition,
   FilamentPresets,
   FilamentTypeDto,
@@ -15,6 +20,7 @@ import {
   HotendModelDefinition,
   JobQueuePrintJob,
   ManufacturerDto,
+  ManufacturersByContext,
   NozzleModelDefinition,
   PrinterCapabilitiesDto,
   PrinterModelDto,
@@ -24,7 +30,11 @@ import {
   PrinterFast,
   StartDiscoveryRequest,
   ToolheadModelDefinition,
+  UpdateExtruderModelDto,
+  UpdateHotendModelDto,
+  UpdateNozzleModelDto,
   UpdatePrinterDto,
+  UpdateToolheadModelDefDto,
   FileHealthSummaryDto,
   FileHealthAuditDto,
   FileIssuesSummaryDto,
@@ -486,6 +496,197 @@ export function useNozzleModels(options?: UseQueryOptions<NozzleModelDefinition[
     queryKey: queryKeys.nozzleModels,
     queryFn: () => apiClient.getNozzleModels(),
     staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+// ============ Component Model Mutation Hooks ============
+
+// Hotend mutations
+export function useCreateHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateHotendModelDto) => apiClient.createHotendModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create hotend model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateHotendModelDto }) =>
+      apiClient.updateHotendModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update hotend model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteHotendModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete hotend model: ${error.message}`);
+    },
+  });
+}
+
+// Extruder mutations
+export function useCreateExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateExtruderModelDto) => apiClient.createExtruderModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create extruder model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateExtruderModelDto }) =>
+      apiClient.updateExtruderModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update extruder model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteExtruderModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete extruder model: ${error.message}`);
+    },
+  });
+}
+
+// Toolhead mutations
+export function useCreateToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateToolheadModelDto) => apiClient.createToolheadModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create toolhead model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateToolheadModelDefDto }) =>
+      apiClient.updateToolheadModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update toolhead model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteToolheadModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete toolhead model: ${error.message}`);
+    },
+  });
+}
+
+// Nozzle mutations
+export function useCreateNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateNozzleModelDto) => apiClient.createNozzleModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create nozzle model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateNozzleModelDto }) =>
+      apiClient.updateNozzleModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update nozzle model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNozzleModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete nozzle model: ${error.message}`);
+    },
+  });
+}
+
+// Contextual Manufacturer query
+export function useManufacturersByContext(
+  context: CatalogContext,
+  options?: UseQueryOptions<ManufacturersByContext, ApiError>
+) {
+  return useQuery({
+    queryKey: ['manufacturers', 'by-context', context],
+    queryFn: () => apiClient.getManufacturersByContext(context),
+    staleTime: 60000, // 1 minute
     ...options,
   });
 }

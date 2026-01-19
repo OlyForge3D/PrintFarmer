@@ -145,15 +145,58 @@ public interface ICatalogService
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct);
 
+    /// <summary>Creates a new hotend model definition.</summary>
+    Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct);
+
+    /// <summary>Updates an existing hotend model definition.</summary>
+    Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct);
+
+    /// <summary>Deletes a hotend model definition.</summary>
+    Task DeleteHotendModelAsync(Guid id, CancellationToken ct);
+
     /// <summary>Gets all extruder model definitions.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct);
+
+    /// <summary>Creates a new extruder model definition.</summary>
+    Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct);
+
+    /// <summary>Updates an existing extruder model definition.</summary>
+    Task<ExtruderModelDto?> UpdateExtruderModelAsync(Guid id, UpdateExtruderModelDto dto, CancellationToken ct);
+
+    /// <summary>Deletes an extruder model definition.</summary>
+    Task DeleteExtruderModelAsync(Guid id, CancellationToken ct);
 
     /// <summary>Gets all toolhead model definitions.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct);
 
+    /// <summary>Creates a new toolhead model definition.</summary>
+    Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct);
+
+    /// <summary>Updates an existing toolhead model definition.</summary>
+    Task<ToolheadModelDto?> UpdateToolheadModelAsync(Guid id, UpdateToolheadModelDefDto dto, CancellationToken ct);
+
+    /// <summary>Deletes a toolhead model definition.</summary>
+    Task DeleteToolheadModelAsync(Guid id, CancellationToken ct);
+
     /// <summary>Gets all nozzle model definitions.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct);
+
+    /// <summary>Creates a new nozzle model definition.</summary>
+    Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct);
+
+    /// <summary>Updates an existing nozzle model definition.</summary>
+    Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct);
+
+    /// <summary>Deletes a nozzle model definition.</summary>
+    Task DeleteNozzleModelAsync(Guid id, CancellationToken ct);
+
+    // ============ Contextual Manufacturer Methods ============
+
+    /// <summary>Gets manufacturers grouped by whether they have items in the specified catalog context.</summary>
+    /// <param name="context">The catalog context (Printers, Hotends, Extruders, Toolheads, Nozzles).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct);
 }

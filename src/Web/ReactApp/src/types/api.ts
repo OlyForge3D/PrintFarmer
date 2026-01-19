@@ -510,6 +510,130 @@ export interface NozzleModelDefinition {
   url?: string;
 }
 
+// ============== Component Model CRUD DTOs ==============
+
+/**
+ * DTO for creating a new hotend model
+ */
+export interface CreateHotendModelDto {
+  name: string;
+  manufacturerId: string;
+  maxTemp?: number;
+  isHighFlow?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing hotend model
+ */
+export interface UpdateHotendModelDto {
+  name?: string;
+  manufacturerId?: string;
+  maxTemp?: number;
+  isHighFlow?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for creating a new extruder model
+ */
+export interface CreateExtruderModelDto {
+  name: string;
+  manufacturerId: string;
+  gearRatio?: string;
+  isDirectDrive?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing extruder model
+ */
+export interface UpdateExtruderModelDto {
+  name?: string;
+  manufacturerId?: string;
+  gearRatio?: string;
+  isDirectDrive?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for creating a new toolhead model
+ */
+export interface CreateToolheadModelDto {
+  name: string;
+  manufacturerId: string;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing toolhead model
+ */
+export interface UpdateToolheadModelDefDto {
+  name?: string;
+  manufacturerId?: string;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for creating a new nozzle model
+ */
+export interface CreateNozzleModelDto {
+  name: string;
+  manufacturerId: string;
+  maxTemp?: number;
+  isHardened?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing nozzle model
+ */
+export interface UpdateNozzleModelDto {
+  name?: string;
+  manufacturerId?: string;
+  maxTemp?: number;
+  isHardened?: boolean;
+  description?: string;
+  url?: string;
+}
+
+// ============== Contextual Manufacturer Types ==============
+
+/**
+ * Context types for filtering manufacturers by what items they have
+ */
+export enum CatalogContext {
+  Printers = 'Printers',
+  Hotends = 'Hotends',
+  Extruders = 'Extruders',
+  Toolheads = 'Toolheads',
+  Nozzles = 'Nozzles'
+}
+
+/**
+ * Manufacturer with item count for a specific context
+ */
+export interface ManufacturerWithCount {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
+/**
+ * Response DTO grouping manufacturers by whether they have items in a context
+ */
+export interface ManufacturersByContext {
+  withItems: ManufacturerWithCount[];
+  withoutItems: ManufacturerWithCount[];
+}
+
 /**
  * Toolhead template for a printer model
  */
