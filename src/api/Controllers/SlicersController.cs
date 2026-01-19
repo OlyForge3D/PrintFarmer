@@ -8,12 +8,12 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+
 // Registration and list use static key, all others use per-service key
 [RequireSlicerApiKey]
 public class SlicersController(Services.Slicing.ISlicersService service) : ControllerBase
 {
     private readonly Services.Slicing.ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
-
 
     [HttpGet]
     public async Task<IActionResult> ListAsync()
@@ -23,7 +23,6 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
     }
 
     // Registration uses static key
-
     [HttpPost("register")]
     public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
     {
@@ -45,14 +44,13 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
         };
 
         // Simple api key generation - rotate or secure later
-        svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
+        svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
 
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         (Guid id, string? apiKey) = await _service.RegisterAsync(dto, ct);
         string location = $"/api/slicers/{id}";
         return Created(location, new { id, apiKey });
     }
-
 
     [HttpGet("{id}")]
     [RequireSlicerServiceApiKey]
@@ -62,7 +60,6 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
         return svc == null ? NotFound() : Ok(svc);
     }
 
-
     [HttpPost("{id}/heartbeat")]
     [RequireSlicerServiceApiKey]
     public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] HeartbeatDto dto)
@@ -71,7 +68,6 @@ public class SlicersController(Services.Slicing.ISlicersService service) : Contr
         bool ok = await _service.HeartbeatAsync(id, dto, ct);
         return ok ? NoContent() : NotFound();
     }
-
 
     [HttpPost("{id}/deregister")]
     [RequireSlicerServiceApiKey]

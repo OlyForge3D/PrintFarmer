@@ -24,11 +24,11 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             .ToListAsync(ct);
 
         // Apply client-side filtering for case-insensitive search
-        var query = allFiles.AsEnumerable();
+        IEnumerable<GcodeFile> query = allFiles.AsEnumerable();
 
         if (!string.IsNullOrEmpty(search))
         {
-            var searchLower = search.ToLowerInvariant();
+            string searchLower = search.ToLowerInvariant();
             query = query.Where(g =>
                 (g.FileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (g.Description != null && g.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase)));
@@ -100,7 +100,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             .ToListAsync(ct);
     }
 
-    public async Task<(List<GcodeFile> files, int totalCount)> QueryFilesAsync(
+    public async Task<(List<GcodeFile> Files, int TotalCount)> QueryFilesAsync(
         string? path,
         string? search,
         Guid[]? tagIds,
@@ -163,7 +163,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         int totalCount = await filterQuery.CountAsync(ct);
 
         // Apply sorting at database level
-        var sortedQuery = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+        IOrderedQueryable<GcodeFile> sortedQuery = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
         {
             ("size", "desc") => filterQuery.OrderByDescending(g => g.FileSizeBytes),
             ("size", _) => filterQuery.OrderBy(g => g.FileSizeBytes),
@@ -187,10 +187,10 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         var fileIds = paginatedFiles.Select(x => x.Id).ToList();
 
         // Now load the full files WITH includes using the IDs
-        var filesByIdDict = await _db.GcodeFiles
+        Dictionary<Guid, GcodeFile> filesByIdDict = await _db.GcodeFiles
             .AsNoTracking()
             .Where(g => fileIds.Contains(g.Id))
-            .Include(g => g.Tags)  // Use skip-navigation instead of TagMappings
+            .Include(g => g.Tags) // Use skip-navigation instead of TagMappings
             .Include(g => g.PrinterModel)
             .ToDictionaryAsync(g => g.Id, ct);
 
@@ -217,7 +217,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         }
 
         // Get all unique subdirectories from Folder entities for gcode files
-        var subdirs = await _db.Folders
+        List<string> subdirs = await _db.Folders
             .Where(f => f.FolderType == "gcode" && !f.DeletedAt.HasValue && f.Path.StartsWith(normalizedParent))
             .Select(f => f.Path)
             .Distinct()
@@ -225,7 +225,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
         // Filter to only direct children (one level down)
         var directChildren = new HashSet<string>();
-        foreach (var dir in subdirs)
+        foreach (string dir in subdirs)
         {
             // Skip if this is the same as parent (files directly in this directory)
             if (dir == normalizedParent)
@@ -237,7 +237,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             if (string.IsNullOrEmpty(normalizedParent))
             {
                 // Split on both / and \ to handle any path separator
-                var segments = dir.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+                string[] segments = dir.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
                 if (segments.Length > 0)
                 {
                     directChildren.Add(segments[0]);
@@ -252,7 +252,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
                     string relative = dir.Substring(normalizedParent.Length + 1);
 
                     // Get the first segment of the relative path
-                    var segments = relative.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+                    string[] segments = relative.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
                     if (segments.Length > 0)
                     {
                         directChildren.Add(segments[0]);
@@ -315,7 +315,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             .ToListAsync(ct);
 
         var result = new Dictionary<Guid, Guid?>();
-        foreach (var printerId in printerIdList)
+        foreach (Guid printerId in printerIdList)
         {
             var op = latestOps.FirstOrDefault(o => o.PrinterId == printerId);
             result[printerId] = op?.LatestOpId;
@@ -347,7 +347,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
         {
             // Step 1: Try to resolve using PrinterModelAlias (handles slicer-specific names)
             // This allows "COREONEL" (PrusaSlicer) to map to the same PrinterModel as "Prusa CORE One" (OrcaSlicer)
-            var aliasMatch = await _db.PrinterModelAliases
+            Guid aliasMatch = await _db.PrinterModelAliases
                 .Where(a => a.SlicerModelName == extractedModelName)
                 .Select(a => a.PrinterModelId)
                 .FirstOrDefaultAsync(ct);
@@ -358,7 +358,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             }
 
             // Step 2: Try exact match (case-insensitive) on PrinterModel name
-            var exactMatch = await _db.PrinterModels
+            PrinterModel? exactMatch = await _db.PrinterModels
                 .FirstOrDefaultAsync(m => m.Name != null && m.Name.Equals(extractedModelName, StringComparison.OrdinalIgnoreCase), ct);
 
             if (exactMatch != null)
@@ -368,7 +368,7 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
 
             // Step 3: Try partial/contains match (case-insensitive) if exact match fails
             // This handles cases where metadata has "Prusa CORE One" but DB has "Prusa CORE One 0.4mm"
-            var partialMatch = await _db.PrinterModels
+            PrinterModel? partialMatch = await _db.PrinterModels
                 .FirstOrDefaultAsync(m => m.Name != null && m.Name.Contains(extractedModelName, StringComparison.OrdinalIgnoreCase), ct);
 
             return partialMatch != null ? partialMatch.Id : null;

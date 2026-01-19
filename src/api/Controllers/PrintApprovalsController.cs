@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.PrintJobs;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,7 +22,7 @@ namespace Farm.Web.Api.Controllers
                 return Ok(Array.Empty<object>());
             }
 
-            var list = await _repo.ListPendingAsync();
+            IEnumerable<PrintApproval> list = await _repo.ListPendingAsync();
             var dto = list.Select(x => new { approvalId = x.Id, printJobId = x.PrintJobId, printerId = x.PrinterId, requestedBy = x.RequestedBy, createdAt = x.CreatedAt });
             return Ok(dto);
         }
@@ -29,7 +30,7 @@ namespace Farm.Web.Api.Controllers
         [HttpPost("{id:guid}/approve")]
         public async Task<IActionResult> ApproveAsync([FromRoute] Guid id)
         {
-            var ok = await _approvalService.ApproveAsync(id, User?.Identity?.Name);
+            bool ok = await _approvalService.ApproveAsync(id, User?.Identity?.Name);
             return !ok ? NotFound() : NoContent();
         }
 
@@ -41,7 +42,7 @@ namespace Farm.Web.Api.Controllers
                 return NotFound();
             }
 
-            var approval = await _repo.GetAsync(id);
+            PrintApproval? approval = await _repo.GetAsync(id);
             if (approval is null)
             {
                 return NotFound();

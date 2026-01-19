@@ -12,7 +12,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
 {
     private readonly Farm.Infrastructure.Services.Catalog.ICatalogService _coreCatalogService = coreCatalogService ?? throw new ArgumentNullException(nameof(coreCatalogService));
 
-    public Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
+    public Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         return _coreCatalogService.GetManufacturersAsync(ct);
     }
@@ -27,7 +27,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.GetManufacturerByIdAsync(id, ct);
     }
 
-    public Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         return _coreCatalogService.GetModelsAsync(manufacturerId, ct);
     }
@@ -88,28 +88,28 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
     public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
     {
         // Verify model exists
-        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        PrinterModelDto? model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
         if (model == null)
         {
             throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
         }
 
         // Get aliases from the database
-        var aliases = await _coreCatalogService.GetModelAliasesAsync(modelId, ct);
+        IEnumerable<SlicerModelAliasDto> aliases = await _coreCatalogService.GetModelAliasesAsync(modelId, ct);
         return aliases;
     }
 
     public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
     {
         // Verify model exists
-        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        PrinterModelDto? model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
         if (model == null)
         {
             throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
         }
 
         // Update aliases
-        var aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
+        IEnumerable<SlicerModelAliasDto> aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
         return aliases;
     }
 

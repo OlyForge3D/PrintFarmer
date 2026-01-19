@@ -12,6 +12,7 @@ public static class SlicingJobStatusExtensions
     /// <summary>
     /// Check if status indicates job is in progress
     /// </summary>
+    /// <param name="status">The slicing job status to check.</param>
     public static bool IsInProgress(this SlicingJobStatus status)
     {
         return status == SlicingJobStatus.Slicing;
@@ -20,6 +21,7 @@ public static class SlicingJobStatusExtensions
     /// <summary>
     /// Check if status indicates job is complete
     /// </summary>
+    /// <param name="status">The slicing job status to check.</param>
     public static bool IsComplete(this SlicingJobStatus status)
     {
         return status is SlicingJobStatus.Completed or SlicingJobStatus.Error or SlicingJobStatus.Cancelled;
@@ -112,7 +114,7 @@ public class SlicingJobResponse
 }
 
 /// <summary>
-/// Extended slicing job for distributed processing 
+/// Extended slicing job for distributed processing
 /// Builds on existing SlicingJobDto with additional distributed processing fields and envelope support
 /// </summary>
 public class DistributedSlicingJob : SlicingJobDto
@@ -168,9 +170,9 @@ public class DistributedSlicingJob : SlicingJobDto
     /// <summary>
     /// Create distributed job from request with envelope
     /// </summary>
-    /// <param name="request">Slicing job request</param>
-    /// <param name="envelope">Message envelope</param>
-    /// <returns>Distributed slicing job</returns>
+    /// <param name="request">Slicing job request containing job parameters.</param>
+    /// <param name="envelope">Message envelope for idempotency and tracking.</param>
+    /// <returns>Distributed slicing job.</returns>
     public static DistributedSlicingJob FromRequest(SlicingJobRequest request, MessageEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(request);

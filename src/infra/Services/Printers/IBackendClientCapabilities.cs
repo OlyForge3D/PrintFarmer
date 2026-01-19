@@ -148,7 +148,7 @@ public interface ISupportsConfiguredCameraDetection
     /// A tuple containing (streamUrl, snapshotUrl). Both values are null if no cameras are configured.
     /// Only non-null values represent actually configured and accessible cameras.
     /// </returns>
-    Task<(string? streamUrl, string? snapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+    Task<(string? StreamUrl, string? SnapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>

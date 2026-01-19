@@ -46,6 +46,7 @@ public class SpoolmanController(
     }
 
     // Note: Exception categorization was moved into the SpoolmanService Probe implementation.
+
     /// <summary>
     /// Gets the current Spoolman integration configuration.
     /// </summary>
@@ -167,7 +168,7 @@ public class SpoolmanController(
             return StatusCode(StatusCodes.Status500InternalServerError, new[]
             {
                 new SpoolmanDiscoveryResult(
-                    Url: "",
+                    Url: string.Empty,
                     IsAvailable: false,
                     Error: $"Network scan failed: {ex.Message}")
             });

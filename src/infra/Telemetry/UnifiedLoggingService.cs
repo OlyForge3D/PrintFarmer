@@ -165,17 +165,15 @@ public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger)
         }
         else
         {
-            _logger.Log(level,
+            _logger.Log(
+                level,
                 "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}",
                 loggerArgs);
         }
     }
-
 
     public void Dispose()
     {
         _activitySource?.Dispose();
     }
 }
-
-

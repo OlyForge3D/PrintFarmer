@@ -39,6 +39,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Add a new job to the queue
     /// </summary>
+    /// <param name="request">The print job request containing G-code file ID and optional settings.</param>
     [HttpPost]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 201)]
     [ProducesResponseType(400)]
@@ -68,6 +69,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Get a specific job
     /// </summary>
+    /// <param name="id">The unique identifier of the job to retrieve.</param>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(404)]
@@ -89,6 +91,8 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Update job status, priority, or assignment
     /// </summary>
+    /// <param name="id">The unique identifier of the job to update.</param>
+    /// <param name="request">The update request containing new status, priority, or assignment.</param>
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(400)]
@@ -122,6 +126,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Delete a job from the queue
     /// </summary>
+    /// <param name="id">The unique identifier of the job to delete.</param>
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]

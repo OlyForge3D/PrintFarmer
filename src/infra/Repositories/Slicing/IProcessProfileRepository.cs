@@ -129,6 +129,10 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <summary>
     /// Adds a profile if hash not found, otherwise updates existing metadata if permitted.
     /// </summary>
+    /// <param name="imported">The profile to import.</param>
+    /// <param name="allowSystemOverride">Whether to allow overriding system profiles.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The added or updated profile.</returns>
     public async Task<ProcessProfile> AddOrUpdateFromImportAsync(ProcessProfile imported, bool allowSystemOverride, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(imported.Hash))
@@ -170,6 +174,8 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <summary>
     /// Get all system OrcaSlicer process profiles (ordered by Quality, LayerHeight).
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of system OrcaSlicer process profiles.</returns>
     public async Task<IReadOnlyList<ProcessProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default) =>
         await _db.ProcessProfiles
             .AsNoTracking()
@@ -182,6 +188,9 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// Delete all system profiles for a given slicer engine.
     /// Returns the count of profiles deleted.
     /// </summary>
+    /// <param name="engine">The slicer engine type to delete profiles for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The count of profiles deleted.</returns>
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
         List<ProcessProfile> profilesToDelete = await _db.ProcessProfiles

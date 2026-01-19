@@ -173,6 +173,7 @@ public class TokenRevocationService(
         catch (Exception ex)
         {
             _logging.LogError(ex, "[TokenRevocation] Error checking token revocation status");
+
             // On error, allow the token (fail open) - existing JWT validation will still apply
             return false;
         }
@@ -235,13 +236,13 @@ public class TokenRevocationService(
         {
             JsonWebTokenHandler handler = new();
             JsonWebToken jwtToken = handler.ReadJsonWebToken(token);
+
             // Tokens are issued with ClaimTypes.NameIdentifier by AuthenticationService.
             // Also accept common JWT claim names (sub, userId) for compatibility.
             Claim? userIdClaim = jwtToken.Claims.FirstOrDefault(c =>
                 c.Type == System.Security.Claims.ClaimTypes.NameIdentifier ||
                 string.Equals(c.Type, "sub", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Type, "userId", StringComparison.OrdinalIgnoreCase)
-            );
+                string.Equals(c.Type, "userId", StringComparison.OrdinalIgnoreCase));
 
             if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out Guid userId))
             {

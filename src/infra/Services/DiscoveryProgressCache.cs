@@ -13,11 +13,14 @@ public interface IDiscoveryProgressCache
     /// <summary>
     /// Stores a CancellationTokenSource for a discovery session, allowing clients to request cancellation.
     /// </summary>
+    /// <param name="sessionId">The unique identifier for the discovery session.</param>
+    /// <param name="cts">The CancellationTokenSource to associate with the session.</param>
     void SetCancellationSource(string sessionId, CancellationTokenSource cts);
 
     /// <summary>
     /// Attempts to cancel a discovery session by its sessionId.
     /// </summary>
+    /// <param name="sessionId">The unique identifier for the discovery session to cancel.</param>
     bool TryCancel(string sessionId);
 }
 
@@ -41,6 +44,7 @@ public class DiscoveryProgressCache : IDiscoveryProgressCache
     public void Remove(string sessionId)
     {
         _ = _cache.TryRemove(sessionId, out _);
+
         // Also remove and dispose the cancellation source if it exists
         if (_cancellationSources.TryRemove(sessionId, out CancellationTokenSource? cts))
         {

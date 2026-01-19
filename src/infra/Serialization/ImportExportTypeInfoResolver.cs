@@ -19,6 +19,7 @@ public sealed class ImportExportTypeInfoResolver : IJsonTypeInfoResolver
     public JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
     {
         JsonTypeInfo ti = _inner.GetTypeInfo(type, options);
+
         // Ensure we have a JsonTypeInfo (Default resolver should return non-null)
         if (ti == null)
         {

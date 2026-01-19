@@ -17,6 +17,8 @@ public class SignalRPrinterStatusBroadcaster(IHubContext<PrinterHub> hubContext)
     /// <summary>
     /// Broadcasts printer import progress to all connected clients via SignalR.
     /// </summary>
+    /// <param name="result">The import progress result to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     public async Task BroadcastPrinterImportProgressAsync(object result, CancellationToken cancellationToken = default)
     {
         await _hubContext.Clients.All.SendAsync("printerimportprogress", result, cancellationToken);

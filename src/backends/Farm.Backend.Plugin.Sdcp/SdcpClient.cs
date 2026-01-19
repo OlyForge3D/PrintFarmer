@@ -17,9 +17,9 @@ namespace Farm.Backend.Plugin.Sdcp;
 /// <summary>
 /// SDCP (Smart Device Control Protocol) Client for communicating with printers using SDCP 3.0 over WebSockets.
 /// Designed primarily for the Elegoo Centauri Carbon printer but may work with other SDCP-compatible printers.
-/// 
+///
 /// Protocol Documentation: https://github.com/WalkerFrederick/sdcp-centauri-carbon
-/// 
+///
 /// Features:
 /// - Real-time status monitoring (temperatures, coordinates, print progress)
 /// - Print job control (start, pause, resume, cancel)
@@ -31,8 +31,7 @@ namespace Farm.Backend.Plugin.Sdcp;
 public record SdcpMessage<T>(
     string Id,
     SdcpData<T> Data,
-    string Topic
-);
+    string Topic);
 
 public record SdcpData<T>(
     int Cmd,
@@ -40,8 +39,7 @@ public record SdcpData<T>(
     string RequestID,
     string MainboardID,
     long TimeStamp,
-    int From = 1
-);
+    int From = 1);
 
 // SDCP status structures that match the exact JSON from the protocol
 public class SdcpStatusResponse
@@ -150,7 +148,6 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
-
 public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
     ISupportsCamera
@@ -190,16 +187,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             // Send status request (Cmd: 0)
             string requestId = Guid.NewGuid().ToString("N");
             SdcpMessage<object> statusRequest = new(
-                "",
+                string.Empty,
                 new SdcpData<object>(
                     Cmd: 0,
                     Data: new { },
                     RequestID: requestId,
-                    MainboardID: "",
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                ),
-                ""
-            );
+                    MainboardID: string.Empty,
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
 
             string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -230,7 +225,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 }
             }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
             return new PrinterStatus(true, "online");
         }
         catch
@@ -260,16 +255,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             // Send status request to get print info
             string requestId = Guid.NewGuid().ToString("N");
             SdcpMessage<object> statusRequest = new(
-                "",
+                string.Empty,
                 new SdcpData<object>(
                     Cmd: 0,
                     Data: new { },
                     RequestID: requestId,
-                    MainboardID: "",
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                ),
-                ""
-            );
+                    MainboardID: string.Empty,
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
 
             string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -292,12 +285,12 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                     string? jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null :
                                  Path.GetFileName(printInfo.Filename);
 
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
                     return new PrinterJob(state, progress, jobName, null);
                 }
             }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
             return new PrinterJob(null, null, null, null);
         }
         catch
@@ -327,16 +320,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             // Send status request
             string requestId = Guid.NewGuid().ToString("N");
             SdcpMessage<object> statusRequest = new(
-                "",
+                string.Empty,
                 new SdcpData<object>(
                     Cmd: 0,
                     Data: new { },
                     RequestID: requestId,
-                    MainboardID: "",
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                ),
-                ""
-            );
+                    MainboardID: string.Empty,
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
 
             string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -385,7 +376,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         }
                     }
 
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
                     // Get camera URLs if available
                     string? cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
@@ -405,12 +396,11 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         HotendTemp: status.TempOfNozzle,
                         BedTemp: status.TempOfHotbed,
                         HotendTarget: status.TempTargetNozzle,
-                        BedTarget: status.TempTargetHotbed
-                    );
+                        BedTarget: status.TempTargetHotbed);
                 }
             }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
             return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
         }
         catch
@@ -463,8 +453,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
-        );
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
     }
 
     // Print control methods
@@ -708,16 +697,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             // Send file list request (Cmd: 258)
             string requestId = Guid.NewGuid().ToString("N");
             SdcpMessage<object> fileListRequest = new(
-                "",
+                string.Empty,
                 new SdcpData<object>(
                     Cmd: 258,
                     Data: new { },
                     RequestID: requestId,
-                    MainboardID: "",
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                ),
-                ""
-            );
+                    MainboardID: string.Empty,
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
 
             string json = JsonSerializer.Serialize(fileListRequest, JsonOptions);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -734,7 +721,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 return ["placeholder.gcode"]; // Placeholder implementation
             }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
             return [];
         }
         catch
@@ -763,16 +750,14 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
             string requestId = Guid.NewGuid().ToString("N");
             SdcpMessage<T> command = new(
-                "",
+                string.Empty,
                 new SdcpData<T>(
                     Cmd: cmd,
                     Data: data,
                     RequestID: requestId,
-                    MainboardID: "",
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                ),
-                ""
-            );
+                    MainboardID: string.Empty,
+                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                string.Empty);
 
             string json = JsonSerializer.Serialize(command, JsonOptions);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -787,13 +772,13 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 string responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 SdcpAckResponse? ackResponse = JsonSerializer.Deserialize<SdcpAckResponse>(responseJson, JsonOptions);
 
-                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
                 // ACK code 0 = success, anything else is error
                 return ackResponse?.Data?.Data?.Ack == 0;
             }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
             return false;
         }
         catch
@@ -862,7 +847,6 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     // The existing StartPrintAsync method already handles starting prints for SDCP
     // GetFileListAsync method already exists for SDCP
-
     private static string GetHostFromUrl(string baseUrl)
     {
         string normalizedUrl = NormalizeBaseUrl(baseUrl, 80);
@@ -876,12 +860,11 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     }
 
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         // TODO: SDCP file list implementation needs to parse actual response from SDCP protocol
         // Currently returns placeholder data - should extract size and modified timestamp from SDCP response
-        var files = await GetFileListAsync(baseUrl, ct);
+        string[] files = await GetFileListAsync(baseUrl, ct);
         return files?.Select(f => new PrinterFileInfo
         {
             Name = f,
@@ -889,6 +872,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             Size = null,
             Modified = null,
             ThumbnailUrl = null
+
             // Size and Modified should be extracted from SDCP protocol response
             // when proper implementation is added
         }).ToList() ?? new();

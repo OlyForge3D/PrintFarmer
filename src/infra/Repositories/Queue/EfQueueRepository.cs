@@ -16,7 +16,7 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// <remarks>
 /// This repository implements the full contract of IQueueRepository using Entity Framework Core
 /// to interact with the PrintJob, Printer, GcodeFile, and related database tables.
-/// 
+///
 /// Key implementation details:
 /// - Basic CRUD operations (GetAllAsync, FindByIdAsync, AddAsync, RemoveAsync) for individual job management
 /// - Specialized query methods for queue operations with optimized includes and filtering
@@ -25,7 +25,7 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// - AsNoTracking() for read-only queries to improve performance and reduce change tracking overhead
 /// - Supports atomic transactions through shared DbContext from Unit of Work pattern
 /// - Efficient aggregation queries for position tracking and job counting
-/// 
+///
 /// All methods are optimized for the specific query patterns needed by JobQueueService,
 /// QueueDataService, and other queue-related operations. Methods include proper error handling
 /// and support for cancellation tokens throughout for responsive async operations.

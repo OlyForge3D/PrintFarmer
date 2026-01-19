@@ -29,5 +29,4 @@ public sealed record ArtifactDto(
     string Sha256,
     DateTime CreatedAt,
     string DownloadUrl,
-    string? PublicUrl
-);
+    string? PublicUrl);

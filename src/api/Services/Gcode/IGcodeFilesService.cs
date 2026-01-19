@@ -166,7 +166,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// Returns the complete file contents suitable for HTTP response transmission. Filename is suitable
         /// for Content-Disposition header.
         /// </remarks>
-        Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct);
+        Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct);
 
         /// <summary>
         /// Gets the file path for a G-code file by its ID.
@@ -183,7 +183,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// <param name="id">G-code file ID.</param>
         /// <param name="ct">Cancellation token.</param>
         /// <returns>Tuple of (filePath, originalFileName) if found, otherwise null.</returns>
-        Task<(string filePath, string originalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
+        Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
 
         /// <summary>
         /// Gets the thumbnail path for a G-code file by its ID.
@@ -205,7 +205,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// Updates database references without moving physical files (virtual filesystem). Source and destination
         /// must be on the same virtual filesystem.
         /// </remarks>
-        Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct);
+        Task<(bool Ok, string VirtualPath, bool IsDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct);
 
         /// <summary>
         /// Moves a G-code file to a target folder by file ID and target folder path.

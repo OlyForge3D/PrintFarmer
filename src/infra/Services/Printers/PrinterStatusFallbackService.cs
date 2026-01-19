@@ -41,7 +41,7 @@ public class PrinterStatusFallbackService(
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(timeout);
 
-            var result = await operation(timeoutCts.Token).ConfigureAwait(false);
+            TResult result = await operation(timeoutCts.Token).ConfigureAwait(false);
             return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -108,10 +108,10 @@ public class PrinterStatusFallbackService(
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(timeout);
 
-            var result = await breaker.ExecuteAsync(
+            TResult result = await breaker.ExecuteAsync(
                 async ct => await operation(ct).ConfigureAwait(false),
-                timeoutCts.Token
-            ).ConfigureAwait(false);
+                timeoutCts.Token)
+            .ConfigureAwait(false);
 
             return result;
         }
@@ -172,6 +172,7 @@ public class PrinterStatusFallbackService(
         }
 
         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
+
         // Reset by getting a fresh instance - depends on ICircuitBreakerService implementation
         _logger.LogInformation($"Resetting circuit breaker {circuitBreakerKey}");
     }

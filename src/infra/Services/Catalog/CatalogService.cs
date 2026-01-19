@@ -32,7 +32,7 @@ public class CatalogService(
     private Dictionary<string, ManufacturerDto?>? _manufacturerNameCache;
     private Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>? _modelNameCache;
 
-    public async Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
+    public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         try
         {
@@ -103,7 +103,7 @@ public class CatalogService(
         return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name, m.Value.Url, m.Value.Description);
     }
 
-    public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         return await _cacheProvider.GetModelsAsync(manufacturerId, ct);
     }
@@ -357,6 +357,8 @@ public class CatalogService(
     }
 
     /// <summary>Finds a manufacturer by name with caching. Returns null if not found.</summary>
+    /// <param name="name">The manufacturer name to search for</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct)
     {
         // Initialize cache on first use
@@ -366,7 +368,7 @@ public class CatalogService(
         }
 
         // Check cache first
-        if (_manufacturerNameCache.TryGetValue(name, out var cached))
+        if (_manufacturerNameCache.TryGetValue(name, out ManufacturerDto? cached))
         {
             return cached;
         }
@@ -382,6 +384,9 @@ public class CatalogService(
     }
 
     /// <summary>Finds a printer model by name and manufacturer ID with caching. Returns null if not found.</summary>
+    /// <param name="name">The model name to search for</param>
+    /// <param name="manufacturerId">The manufacturer ID to filter by</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<PrinterModelDto?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct)
     {
         // Initialize cache on first use
@@ -390,10 +395,10 @@ public class CatalogService(
             _modelNameCache = new Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>();
         }
 
-        var cacheKey = (manufacturerId, name);
+        (Guid manufacturerId, string name) cacheKey = (manufacturerId, name);
 
         // Check cache first
-        if (_modelNameCache.TryGetValue(cacheKey, out var cached))
+        if (_modelNameCache.TryGetValue(cacheKey, out PrinterModelDto? cached))
         {
             return cached;
         }
@@ -418,6 +423,7 @@ public class CatalogService(
     }
 
     /// <summary>Gets the default (Unknown) manufacturer and model IDs with caching.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct)
     {
         // Return cached values if available
@@ -446,11 +452,13 @@ public class CatalogService(
     }
 
     /// <summary>Gets all slicer model name aliases for a printer model.</summary>
+    /// <param name="modelId">The printer model ID to get aliases for</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
     {
         try
         {
-            var aliases = await _repo.GetModelAliasesAsync(modelId, ct);
+            List<PrinterModelAlias> aliases = await _repo.GetModelAliasesAsync(modelId, ct);
             return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
         }
         catch (Exception ex)
@@ -461,11 +469,15 @@ public class CatalogService(
     }
 
     /// <summary>Updates slicer model name aliases for a printer model.</summary>
+    /// <param name="modelId">The printer model ID to update aliases for</param>
+    /// <param name="orcaSlicerNames">The list of OrcaSlicer model names</param>
+    /// <param name="prusaSlicerNames">The list of PrusaSlicer model names</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
     {
         try
         {
-            var aliases = await _repo.UpdateModelAliasesAsync(modelId, orcaSlicerNames ?? new List<string>(), prusaSlicerNames ?? new List<string>(), ct);
+            List<PrinterModelAlias> aliases = await _repo.UpdateModelAliasesAsync(modelId, orcaSlicerNames ?? new List<string>(), prusaSlicerNames ?? new List<string>(), ct);
             await _repo.SaveChangesAsync(ct);
             return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
         }
@@ -479,11 +491,12 @@ public class CatalogService(
     // ============ Component Model Methods ============
 
     /// <summary>Gets all hotend model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
     {
         try
         {
-            var hotends = await _repo.GetHotendModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)> hotends = await _repo.GetHotendModelsAsync(ct);
             return hotends.Select(h => new HotendModelDto(
                 h.Id,
                 h.Name,
@@ -492,8 +505,7 @@ public class CatalogService(
                 h.MaxTemp,
                 h.IsHighFlow,
                 h.Description,
-                h.Url
-            )).ToList();
+                h.Url)).ToList();
         }
         catch (Exception ex)
         {
@@ -503,11 +515,12 @@ public class CatalogService(
     }
 
     /// <summary>Gets all extruder model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
     {
         try
         {
-            var extruders = await _repo.GetExtruderModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)> extruders = await _repo.GetExtruderModelsAsync(ct);
             return extruders.Select(e => new ExtruderModelDto(
                 e.Id,
                 e.Name,
@@ -516,8 +529,7 @@ public class CatalogService(
                 e.GearRatio,
                 e.IsDirectDrive,
                 e.Description,
-                e.Url
-            )).ToList();
+                e.Url)).ToList();
         }
         catch (Exception ex)
         {
@@ -527,19 +539,19 @@ public class CatalogService(
     }
 
     /// <summary>Gets all toolhead model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
     {
         try
         {
-            var toolheads = await _repo.GetToolheadModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)> toolheads = await _repo.GetToolheadModelsAsync(ct);
             return toolheads.Select(t => new ToolheadModelDto(
                 t.Id,
                 t.Name,
                 t.ManufacturerId,
                 t.ManufacturerName,
                 t.Description,
-                t.Url
-            )).ToList();
+                t.Url)).ToList();
         }
         catch (Exception ex)
         {
@@ -549,11 +561,12 @@ public class CatalogService(
     }
 
     /// <summary>Gets all nozzle model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
     {
         try
         {
-            var nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
                 n.Name,
@@ -562,8 +575,7 @@ public class CatalogService(
                 n.MaxTemp,
                 n.IsHardened,
                 n.Description,
-                n.Url
-            )).ToList();
+                n.Url)).ToList();
         }
         catch (Exception ex)
         {

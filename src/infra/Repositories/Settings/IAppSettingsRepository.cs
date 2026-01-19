@@ -13,7 +13,7 @@ namespace Farm.Infrastructure.Repositories.Settings;
 /// <remarks>
 /// Provides access to AppSettingsEntity records which store system-level configuration,
 /// flags, and state that must persist across application restarts.
-/// 
+///
 /// Common use cases:
 /// - Distributed locks for one-time operations (e.g., system profile seeding)
 /// - Feature flags and configuration toggles
@@ -71,7 +71,7 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
 
     public async Task SetAsync(string key, string value, CancellationToken ct = default)
     {
-        var existing = await GetAsync(key, ct);
+        AppSettingsEntity? existing = await GetAsync(key, ct);
 
         if (existing != null)
         {
@@ -92,7 +92,7 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
 
     public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
     {
-        var existing = await GetAsync(key, ct);
+        AppSettingsEntity? existing = await GetAsync(key, ct);
         if (existing == null)
         {
             return false;

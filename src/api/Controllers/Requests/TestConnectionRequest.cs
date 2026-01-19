@@ -1,7 +1,6 @@
-﻿namespace Farm.Web.Api.Controllers.Requests;
+﻿using Farm.Infrastructure;
 
-using Farm.Infrastructure;
-
+namespace Farm.Web.Api.Controllers.Requests;
 /// <summary>
 /// Request to test connectivity to a printer backend before adding the printer.
 /// </summary>
@@ -13,5 +12,4 @@ public record TestConnectionRequest(
     string ServerUrl,
     PrinterBackend Backend,
     string? ApiKey = null,
-    int? BackendPort = null
-);
+    int? BackendPort = null);

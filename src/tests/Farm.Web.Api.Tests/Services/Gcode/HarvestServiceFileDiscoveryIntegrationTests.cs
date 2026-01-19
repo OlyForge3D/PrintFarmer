@@ -57,7 +57,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
                 });
 
             // IMoonrakerClient extends IBackendClient, so it's safe to return
-            var clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
+            IBackendClient clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
             _mockClientFactory
                 .Setup(f => f.GetClient(PrinterBackend.Moonraker))
                 .Returns(clientAsBackendClient);
@@ -67,7 +67,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             var factory = new BackendCapabilityFactory(_mockClientFactory.Object, _mockLogger.Object, _mockPluginRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out IBackendClient? client);
 
             // Assert
             Assert.True(result, "Factory should successfully get file list client for Moonraker");
@@ -89,19 +89,19 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             // Arrange - Set up mock clients for all backends that support file listing
             var moonrakerMock = new Mock<IMoonrakerClient>();
             moonrakerMock.As<ISupportsFileList>();
-            var moonrakerClient = moonrakerMock.As<IBackendClient>().Object;
+            IBackendClient moonrakerClient = moonrakerMock.As<IBackendClient>().Object;
 
             var prusaLinkMock = new Mock<IPrusaLinkClient>();
             prusaLinkMock.As<ISupportsFileList>();
-            var prusaLinkClient = prusaLinkMock.As<IBackendClient>().Object;
+            IBackendClient prusaLinkClient = prusaLinkMock.As<IBackendClient>().Object;
 
             var octoPrintMock = new Mock<IOctoPrintClient>();
             octoPrintMock.As<ISupportsFileList>();
-            var octoPrintClient = octoPrintMock.As<IBackendClient>().Object;
+            IBackendClient octoPrintClient = octoPrintMock.As<IBackendClient>().Object;
 
             var sdcpMock = new Mock<ISdcpClient>();
             sdcpMock.As<ISupportsFileList>();
-            var sdcpClient = sdcpMock.As<IBackendClient>().Object;
+            IBackendClient sdcpClient = sdcpMock.As<IBackendClient>().Object;
 
             _mockClientFactory
                 .Setup(f => f.GetClient(PrinterBackend.Moonraker)).Returns(moonrakerClient);
@@ -138,7 +138,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
 
             var mockMoonrakerClient = new Mock<IMoonrakerClient>();
             mockMoonrakerClient.As<ISupportsFileList>();
-            var clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
+            IBackendClient clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
 
             _mockClientFactory
                 .Setup(f => f.GetClient(PrinterBackend.Moonraker))
@@ -159,7 +159,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
 
             // Act - Create factory and verify the chain
             var factory = new BackendCapabilityFactory(_mockClientFactory.Object, _mockLogger.Object, _mockPluginRegistry.Object);
-            var result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out var returnedClient);
+            bool result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out IBackendClient? returnedClient);
 
             // Assert
             Assert.True(result, "Capability chain should result in successful file list client retrieval");
@@ -173,7 +173,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             // Arrange - Plugin doesn't declare FileList capability
             var mockMoonrakerClient = new Mock<IMoonrakerClient>();
             // Note: NOT implementing ISupportsFileList
-            var clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
+            IBackendClient clientAsBackendClient = mockMoonrakerClient.As<IBackendClient>().Object;
 
             _mockClientFactory
                 .Setup(f => f.GetClient(PrinterBackend.Moonraker))
@@ -193,7 +193,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             var factory = new BackendCapabilityFactory(_mockClientFactory.Object, _mockLogger.Object, _mockPluginRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out IBackendClient? client);
 
             // Assert
             Assert.False(result, "Should return false when capability is not declared");
@@ -206,7 +206,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
 
         private void AssertFileListClientSupported(BackendCapabilityFactory factory, PrinterBackend backend)
         {
-            var result = factory.TryGetFileListClient(backend, out var client);
+            bool result = factory.TryGetFileListClient(backend, out IBackendClient? client);
             Assert.True(result, $"{backend} should support file listing");
             Assert.NotNull(client);
             Assert.True(client is ISupportsFileList, $"{backend} client should implement ISupportsFileList");

@@ -14,16 +14,28 @@ public interface ISlicerRegistrationClient
     /// <summary>
     /// Register this worker with the API and receive service ID and API key
     /// </summary>
-    Task<(Guid serviceId, string apiKey)> RegisterAsync(CancellationToken cancellationToken = default);
+    /// <param name="cancellationToken">Cancellation token for async operation.</param>
+    /// <returns>Tuple containing the assigned service ID and API key.</returns>
+    Task<(Guid ServiceId, string ApiKey)> RegisterAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Send heartbeat to update capacity and status
     /// </summary>
+    /// <param name="serviceId">The registered service identifier.</param>
+    /// <param name="apiKey">API key for authentication.</param>
+    /// <param name="freeSlots">Number of available job slots.</param>
+    /// <param name="status">Current service status.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation.</param>
+    /// <returns>True if heartbeat was acknowledged; otherwise, false.</returns>
     Task<bool> HeartbeatAsync(Guid serviceId, string apiKey, int freeSlots, string status = "Online", CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deregister from the API (called on shutdown)
     /// </summary>
+    /// <param name="serviceId">The registered service identifier.</param>
+    /// <param name="apiKey">API key for authentication.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation.</param>
+    /// <returns>True if deregistration succeeded; otherwise, false.</returns>
     Task<bool> DeregisterAsync(Guid serviceId, string apiKey, CancellationToken cancellationToken = default);
 }
 
@@ -56,7 +68,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         _apiBaseUrl = _apiBaseUrl.TrimEnd('/');
     }
 
-    public async Task<(Guid serviceId, string apiKey)> RegisterAsync(CancellationToken cancellationToken = default)
+    public async Task<(Guid ServiceId, string ApiKey)> RegisterAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -94,8 +106,12 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 string error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Failed to register with API: {StatusCode} - {Error}", response.StatusCode, error);
                 _logger.LogError("Registration DTO: {RegistrationData}", json);
-                _logger.LogError("API Base URL: {ApiBaseUrl}, Service Name: {ServiceName}, Host: {ServiceHost}",
-                    _apiBaseUrl, _serviceName, _serviceHost);
+                _logger.LogError(
+                    "API Base URL: {ApiBaseUrl}, Service Name: {ServiceName}, Host: {ServiceHost}",
+                    _apiBaseUrl,
+                    _serviceName,
+                    _serviceHost);
+
                 throw new InvalidOperationException($"Registration failed: {response.StatusCode} - {error}");
             }
 

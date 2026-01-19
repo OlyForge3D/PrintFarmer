@@ -36,7 +36,7 @@ public class TagsController(
     {
         try
         {
-            var tags = await _tagService.GetAllTagsAsync(ct);
+            IReadOnlyList<TagDto> tags = await _tagService.GetAllTagsAsync(ct);
             return Ok(tags);
         }
         catch (Exception ex)
@@ -68,7 +68,7 @@ public class TagsController(
                 return Ok(new List<TagSuggestionDto>());
             }
 
-            var results = await _tagService.SearchTagsAsync(q, ct);
+            IReadOnlyList<TagSuggestionDto> results = await _tagService.SearchTagsAsync(q, ct);
             return Ok(results);
         }
         catch (Exception ex)
@@ -100,7 +100,7 @@ public class TagsController(
                 count = 10;
             }
 
-            var tags = await _tagService.GetPopularTagsAsync(count, ct);
+            IReadOnlyList<TagSuggestionDto> tags = await _tagService.GetPopularTagsAsync(count, ct);
             return Ok(tags);
         }
         catch (Exception ex)
@@ -126,7 +126,7 @@ public class TagsController(
     {
         try
         {
-            var analytics = await _tagService.GetAnalyticsAsync(ct);
+            TagAnalyticsDto analytics = await _tagService.GetAnalyticsAsync(ct);
             return Ok(analytics);
         }
         catch (Exception ex)
@@ -159,10 +159,10 @@ public class TagsController(
         {
             if (string.IsNullOrWhiteSpace(q))
             {
-                q = "";
+                q = string.Empty;
             }
 
-            var suggestions = await _tagService.GetTagSuggestionsAsync(q, limit, ct);
+            IReadOnlyList<TagSuggestionDto> suggestions = await _tagService.GetTagSuggestionsAsync(q, limit, ct);
             return Ok(suggestions);
         }
         catch (Exception ex)
@@ -200,7 +200,7 @@ public class TagsController(
                 return BadRequest(new { error = "Tag name is required" });
             }
 
-            var tag = await _tagService.CreateTagAsync(createTagDto, ct);
+            TagDto tag = await _tagService.CreateTagAsync(createTagDto, ct);
             return StatusCode(StatusCodes.Status201Created, tag);
         }
         catch (InvalidOperationException ex)
@@ -236,7 +236,7 @@ public class TagsController(
     {
         try
         {
-            var tag = await _tagService.GetTagByIdAsync(tagId, ct);
+            TagDto? tag = await _tagService.GetTagByIdAsync(tagId, ct);
             return tag == null ? NotFound(new { error = "Tag not found" }) : Ok(tag);
         }
         catch (Exception ex)
@@ -407,7 +407,7 @@ public class TagsController(
                 return BadRequest(new { error = "objectType query parameter is required" });
             }
 
-            var tags = await _tagService.GetObjectTagsAsync(objectId, objectType, ct);
+            IReadOnlyList<TagDto> tags = await _tagService.GetObjectTagsAsync(objectId, objectType, ct);
             return Ok(tags);
         }
         catch (Exception ex)

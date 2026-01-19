@@ -28,8 +28,7 @@ public record GcodeUploadProgressDto(
     List<GcodeUploadFailureSummary>? FailedFiles,
 
     [property: JsonPropertyName("errorMessage")]
-    string? ErrorMessage
-);
+    string? ErrorMessage);
 
 /// <summary>
 /// Represents a single file that failed during upload.
@@ -39,5 +38,4 @@ public record GcodeUploadFailureSummary(
     string FileName,
 
     [property: JsonPropertyName("error")]
-    string Error
-);
+    string Error);

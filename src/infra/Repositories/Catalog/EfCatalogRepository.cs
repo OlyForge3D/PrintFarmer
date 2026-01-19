@@ -60,6 +60,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
         // Remove existing
         _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
+
         // Add new
         foreach (Guid filamentTypeId in filamentTypeIds)
         {
@@ -94,6 +95,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 MaxHotendTemp = th.MaxHotendTemp,
                 MaxFlowRate = th.MaxFlowRate,
                 ToolheadType = th.ToolheadType.HasValue ? (int)th.ToolheadType.Value : null,
+
                 // Component model references (Guids)
                 HotendModelId = th.HotendModelId,
                 ExtruderModelId = th.ExtruderModelId,
@@ -123,8 +125,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MaxY,
             m.MaxZ,
             m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
-            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()
-        )).ToList();
+            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray())).ToList();
         return list;
     }
 
@@ -166,6 +167,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.MaxHotendTemp,
                     t.MaxFlowRate,
                     t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+
                     // Component model references (IDs and names)
                     t.HotendModelId,
                     t.HotendModel?.Name,
@@ -176,8 +178,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.NozzleModelId,
                     t.NozzleModel?.Name,
                     t.SupportedMaterials,
-                    t.IsPrimary
-                )).OrderBy(t => t.Index).ToArray());
+                    t.IsPrimary)).OrderBy(t => t.Index).ToArray());
     }
 
     public async Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
@@ -231,6 +232,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     /// Finds a manufacturer by exact name match for import/lookup purposes (read-only, no creation).
     /// Returns the Manufacturer entity if found, null otherwise.
     /// </summary>
+    /// <param name="name">The exact name of the manufacturer to find.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default)
     {
         return await _db.Manufacturers
@@ -242,6 +245,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     /// Finds a printer model by exact name match within a specific manufacturer for import/lookup purposes (read-only, no creation).
     /// Returns the PrinterModel entity if found, null otherwise.
     /// </summary>
+    /// <param name="name">The exact name of the printer model to find.</param>
+    /// <param name="manufacturerId">The ID of the manufacturer to search within.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default)
     {
         return await _db.PrinterModels
@@ -265,7 +271,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             .ExecuteDeleteAsync(ct);
 
         // Add new OrcaSlicer aliases
-        foreach (var name in orcaSlicerNames ?? new List<string>())
+        foreach (string name in orcaSlicerNames ?? new List<string>())
         {
             _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
@@ -278,7 +284,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         }
 
         // Add new PrusaSlicer aliases
-        foreach (var name in prusaSlicerNames ?? new List<string>())
+        foreach (string name in prusaSlicerNames ?? new List<string>())
         {
             _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
@@ -297,10 +303,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     }
 
     // ============ Component Model Methods ============
-
     public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default)
     {
-        var hotends = await _db.HotendModelDefinitions
+        List<HotendModelDefinition> hotends = await _db.HotendModelDefinitions
             .Include(h => h.Manufacturer)
             .AsNoTracking()
             .OrderBy(h => h.Manufacturer!.Name)
@@ -315,13 +320,12 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             h.MaxTemp,
             h.IsHighFlow,
             h.Description,
-            h.Url
-        )).ToList();
+            h.Url)).ToList();
     }
 
     public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)>> GetExtruderModelsAsync(CancellationToken ct = default)
     {
-        var extruders = await _db.ExtruderModelDefinitions
+        List<ExtruderModelDefinition> extruders = await _db.ExtruderModelDefinitions
             .Include(e => e.Manufacturer)
             .AsNoTracking()
             .OrderBy(e => e.Manufacturer!.Name)
@@ -336,13 +340,12 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             e.GearRatio,
             e.IsDirectDrive,
             e.Description,
-            e.Url
-        )).ToList();
+            e.Url)).ToList();
     }
 
     public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)>> GetToolheadModelsAsync(CancellationToken ct = default)
     {
-        var toolheads = await _db.ToolheadModelDefinitions
+        List<ToolheadModelDefinition> toolheads = await _db.ToolheadModelDefinitions
             .Include(t => t.Manufacturer)
             .AsNoTracking()
             .OrderBy(t => t.Manufacturer!.Name)
@@ -355,13 +358,12 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.ManufacturerId,
             t.Manufacturer?.Name,
             t.Description,
-            t.Url
-        )).ToList();
+            t.Url)).ToList();
     }
 
     public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
-        var nozzles = await _db.NozzleModelDefinitions
+        List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
             .AsNoTracking()
             .OrderBy(n => n.Manufacturer!.Name)
@@ -376,7 +378,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.MaxTemp,
             n.IsHardened,
             n.Description,
-            n.Url
-        )).ToList();
+            n.Url)).ToList();
     }
 }

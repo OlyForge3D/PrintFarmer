@@ -70,7 +70,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                             version = svProp.GetString();
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
 
                     return new SpoolmanProbeResult(true, NormalizedUrl: normalized, EndpointTried: path, StatusCode: (int)resp.StatusCode, Version: version);
                 }
@@ -79,9 +81,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             {
                 if (path == probePaths[^1])
                 {
-                    (string? category, string? message) = CategorizeException(ex);
+                    (string? Category, string? Message) = CategorizeException(ex);
                     logger.LogError(ex, "Probe failed for {Url}", candidateBaseUrl);
-                    return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: message, ErrorCategory: category);
+                    return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: Message, ErrorCategory: Category);
                 }
             }
         }
@@ -123,7 +125,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return new SpoolmanProbeResult(false, NormalizedUrl: baseUrl, Message: "Probe endpoints failed");
     }
 
-    private static (string? category, string? message) CategorizeException(Exception ex)
+    private static (string? Category, string? Message) CategorizeException(Exception ex)
     {
         if (ex is TaskCanceledException or OperationCanceledException)
         {
@@ -235,6 +237,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
     /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
     /// </summary>
+    /// <param name="ct">The cancellation token.</param>
     public async Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -447,8 +450,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                                 Id: 0, // No ID available in string format
                                 Name: materialName,
                                 Density: null,
-                                ColorHex: null
-                            );
+                                ColorHex: null);
                         }
                     }
                     else if (el.ValueKind == JsonValueKind.Object && TryParseMaterialFromJson(el, out SpoolmanMaterialDto objectMaterial))
@@ -466,7 +468,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Check for pagination - Spoolman uses standard HTTP header-based pagination
                 // For materials, we expect a single page usually, but handle pagination if present
                 nextUrl = null;
-                if (currentBatch.Length < 100) // Typical page size - if less than full page, probably last page
+
+                // Typical page size - if less than full page, probably last page
+                if (currentBatch.Length < 100)
                 {
                     break;
                 }
@@ -531,7 +535,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     return null; // HTML, not JSON
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return null;
         }
     }
@@ -616,10 +623,13 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         string? filamentName = TryGetString(el, "filament_name")
                    ?? TryGetStringFromObject(el, ["filament", "profile"], ["name", "filament_name", "display_name"]);
         string? vendor =
+
             // Preferred path per Spoolman: filament.vendor.name
             TryGetStringAtPath(el, "filament", "vendor", "name")
+
             // Common alternative: profile.vendor.name
             ?? TryGetStringAtPath(el, "profile", "vendor", "name")
+
             // Fallbacks
             ?? TryGetStringFromObject(el, ["filament", "profile"], ["vendor", "manufacturer", "brand", "name"])
             ?? TryGetString(el, "vendor", "manufacturer");
@@ -749,6 +759,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         s = s.ToUpperInvariant();
+
         // Expand shorthand RGB like F0A -> FF00AA
         if (s.Length == 3 && s.All(IsHex))
         {
@@ -1000,7 +1011,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
+
         return null;
     }
 
@@ -1029,8 +1043,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 Id: id,
                 Name: name,
                 Density: density,
-                ColorHex: colorHex
-            );
+                ColorHex: colorHex);
             return true;
         }
         catch
@@ -1046,12 +1059,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// Scans the configured network ranges for available Spoolman instances.
     /// Uses the discovery settings to determine which network ranges to scan.
     /// </summary>
+    /// <param name="networkRanges">The network ranges to scan (CIDR notation or IP ranges).</param>
+    /// <param name="ct">The cancellation token.</param>
     public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default)
     {
         List<SpoolmanDiscoveryResult> results = new();
         if (networkRanges == null)
         {
-            results.Add(new SpoolmanDiscoveryResult("", false, "No network subnets configured in discovery settings"));
+            results.Add(new SpoolmanDiscoveryResult(string.Empty, false, "No network subnets configured in discovery settings"));
             return results;
         }
 
@@ -1064,7 +1079,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         results.AddRange(scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error)));
         return results;
     }
-
 
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
@@ -1113,5 +1127,4 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
-
 }

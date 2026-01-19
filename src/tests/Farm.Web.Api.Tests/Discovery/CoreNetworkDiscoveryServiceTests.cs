@@ -61,7 +61,7 @@ public class CoreNetworkDiscoveryServiceTests
     {
         var probe = new StubProbe(PrinterBackend.Moonraker, ip => MakeResult(ip, PrinterBackend.Moonraker, 80, name: $"Printer-{ip}"), "moonraker");
         var service = new CoreNetworkDiscoveryService(new[] { probe });
-        var ips = new[] { "10.0.0.1", "10.0.0.2", "10.0.0.3" };
+        string[] ips = new[] { "10.0.0.1", "10.0.0.2", "10.0.0.3" };
 
         List<DiscoveredPrinterDto> results = await service.DiscoverMultipleAsync(ips, timeoutMs: 500, maxConcurrent: 2);
 

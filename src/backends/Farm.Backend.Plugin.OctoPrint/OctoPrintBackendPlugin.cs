@@ -1,10 +1,10 @@
-﻿namespace Farm.Backend.Plugin.OctoPrint;
-
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+
+namespace Farm.Backend.Plugin.OctoPrint;
 
 /// <summary>
 /// Plugin descriptor for OctoPrint backend client support.
@@ -71,10 +71,10 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
         // Using AddScoped to allow proper dependency resolution
         services.AddScoped<IOctoPrintClient>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            var logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<OctoPrintClient>>();
+            ILogger<OctoPrintClient>? logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<OctoPrintClient>>();
             return new OctoPrintClient(httpClient, logger);
         });
 

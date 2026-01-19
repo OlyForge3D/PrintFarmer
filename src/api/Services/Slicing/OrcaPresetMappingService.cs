@@ -19,7 +19,7 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
         // Load catalog data for matching
         IReadOnlyList<PrinterModelDto> printerModels = await _catalogRepo.GetModelsCachedAsync(null, ct);
 
-        var manufacturerTuples = await _catalogRepo.GetManufacturersAsync(ct);
+        IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)> manufacturerTuples = await _catalogRepo.GetManufacturersAsync(ct);
         Dictionary<Guid, string> manufacturerLookup = manufacturerTuples
             .ToDictionary(m => m.Id, m => m.Name);
 
@@ -87,7 +87,7 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
             }
 
             // Manufacturer match (30% weight)
-            string? manufacturerName = manufacturerLookup.TryGetValue(model.ManufacturerId, out var mfgName) ? mfgName : null;
+            string? manufacturerName = manufacturerLookup.TryGetValue(model.ManufacturerId, out string? mfgName) ? mfgName : null;
             if (manufacturerName != null && !string.IsNullOrWhiteSpace(preset.Manufacturer))
             {
                 double mfgScore = CalculateStringSimilarity(preset.Manufacturer, manufacturerName);
@@ -132,7 +132,7 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
         {
             match.MatchedPrinterModelId = bestMatch.Id;
             match.MatchedPrinterModelName = bestMatch.Name;
-            match.MatchedManufacturerName = manufacturerLookup.TryGetValue(bestMatch.ManufacturerId, out var matchedMfgName) ? matchedMfgName : null;
+            match.MatchedManufacturerName = manufacturerLookup.TryGetValue(bestMatch.ManufacturerId, out string? matchedMfgName) ? matchedMfgName : null;
             match.ConfidenceScore = bestScore;
             match.MatchReasons = reasons;
         }

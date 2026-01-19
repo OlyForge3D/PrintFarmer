@@ -53,6 +53,7 @@ public class ArtifactCleanupHostedService(
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during artifact cleanup cycle");
+
                 // Continue running despite errors
             }
         }

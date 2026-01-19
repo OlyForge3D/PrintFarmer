@@ -29,7 +29,7 @@ public class PrintApprovalsControllerTests : IDisposable
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection)
             .Options;
 
@@ -46,8 +46,8 @@ public class PrintApprovalsControllerTests : IDisposable
     {
         // Arrange
         // Create valid PrintJobs with proper foreign key chain
-        var printJob1 = await CreateValidPrintJobAsync();
-        var printJob2 = await CreateValidPrintJobAsync();
+        PrintJob printJob1 = await CreateValidPrintJobAsync();
+        PrintJob printJob2 = await CreateValidPrintJobAsync();
 
         var approval1 = new PrintApproval
         {
@@ -69,11 +69,11 @@ public class PrintApprovalsControllerTests : IDisposable
         await _repository.AddAsync(approval2);
 
         // Act
-        var result = await _controller.GetPendingAsync();
+        IActionResult result = await _controller.GetPendingAsync();
 
         // Assert
-        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
-        var approvals = okResult.Value.Should().BeAssignableTo<IEnumerable<object>>().Subject;
+        OkObjectResult okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        IEnumerable<object> approvals = okResult.Value.Should().BeAssignableTo<IEnumerable<object>>().Subject;
         approvals.Should().HaveCount(2);
     }
 
@@ -81,11 +81,11 @@ public class PrintApprovalsControllerTests : IDisposable
     public async Task GetPendingAsync_WhenNoApprovals_ShouldReturnEmptyList()
     {
         // Act
-        var result = await _controller.GetPendingAsync();
+        IActionResult result = await _controller.GetPendingAsync();
 
         // Assert
-        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
-        var approvals = okResult.Value.Should().BeAssignableTo<IEnumerable<object>>().Subject;
+        OkObjectResult okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        IEnumerable<object> approvals = okResult.Value.Should().BeAssignableTo<IEnumerable<object>>().Subject;
         approvals.Should().BeEmpty();
     }
 
@@ -97,7 +97,7 @@ public class PrintApprovalsControllerTests : IDisposable
         _service.ApproveResult = true;
 
         // Act
-        var result = await _controller.ApproveAsync(approvalId);
+        IActionResult result = await _controller.ApproveAsync(approvalId);
 
         // Assert
         result.Should().BeOfType<NoContentResult>();
@@ -112,7 +112,7 @@ public class PrintApprovalsControllerTests : IDisposable
         _service.ApproveResult = false;
 
         // Act
-        var result = await _controller.ApproveAsync(approvalId);
+        IActionResult result = await _controller.ApproveAsync(approvalId);
 
         // Assert
         result.Should().BeOfType<NotFoundResult>();
@@ -123,7 +123,7 @@ public class PrintApprovalsControllerTests : IDisposable
     {
         // Arrange
         // Create valid PrintJob with proper foreign key chain
-        var printJob = await CreateValidPrintJobAsync();
+        PrintJob printJob = await CreateValidPrintJobAsync();
 
         var approval = new PrintApproval
         {
@@ -135,11 +135,11 @@ public class PrintApprovalsControllerTests : IDisposable
         await _repository.AddAsync(approval);
 
         // Act
-        var result = await _controller.RejectAsync(approval.Id);
+        IActionResult result = await _controller.RejectAsync(approval.Id);
 
         // Assert
         result.Should().BeOfType<NoContentResult>();
-        var removed = await _repository.GetAsync(approval.Id);
+        PrintApproval? removed = await _repository.GetAsync(approval.Id);
         removed.Should().BeNull();
     }
 
@@ -150,7 +150,7 @@ public class PrintApprovalsControllerTests : IDisposable
         var nonExistentId = Guid.NewGuid();
 
         // Act
-        var result = await _controller.RejectAsync(nonExistentId);
+        IActionResult result = await _controller.RejectAsync(nonExistentId);
 
         // Assert
         result.Should().BeOfType<NotFoundResult>();
@@ -168,7 +168,7 @@ public class PrintApprovalsControllerTests : IDisposable
     private async Task<PrintJob> CreateValidPrintJobAsync()
     {
         // Create FolderNode (required for GcodeFile)
-        var folderPath = $"/test/{Guid.NewGuid()}";
+        string folderPath = $"/test/{Guid.NewGuid()}";
         var folder = new FolderNode
         {
             Id = Guid.NewGuid(),

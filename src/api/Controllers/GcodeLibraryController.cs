@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Web.Api.Controllers;
 
 /// <summary>
-/// Manages the G-code file library
+/// Manages the G-code file library.
 /// </summary>
 [ApiController]
 [Route("api/gcode-library")]
@@ -17,12 +17,17 @@ namespace Farm.Web.Api.Controllers;
 public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
-    /// Get all G-code files in the library
+    /// Get all G-code files in the library.
     /// </summary>
+    /// <param name="search">Optional search term for filtering files by name.</param>
+    /// <param name="material">Optional filter by material type.</param>
+    /// <param name="nozzleDiameter">Optional filter by nozzle diameter.</param>
+    /// <param name="printerModelId">Optional filter by printer model ID.</param>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<GcodeFileDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<GcodeFileDto>>> GetLibraryAsync([
+    public async Task<ActionResult<IEnumerable<GcodeFileDto>>> GetLibraryAsync(
+        [
         FromQuery] string? search = null,
         [FromQuery] string? material = null,
         [FromQuery] double? nozzleDiameter = null,
@@ -41,8 +46,9 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     }
 
     /// <summary>
-    /// Get a specific G-code file
+    /// Get a specific G-code file.
     /// </summary>
+    /// <param name="id">The unique identifier of the G-code file.</param>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(GcodeFileDto), 200)]
     [ProducesResponseType(404)]
@@ -62,8 +68,10 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     }
 
     /// <summary>
-    /// Upload a new G-code file to the library
+    /// Upload a new G-code file to the library.
     /// </summary>
+    /// <param name="file">The G-code file to upload.</param>
+    /// <param name="metadata">Metadata for the G-code file.</param>
     [HttpPost("upload")]
     [ProducesResponseType(typeof(GcodeFileDto), 201)]
     [ProducesResponseType(400)]
@@ -103,8 +111,10 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     }
 
     /// <summary>
-    /// Update G-code file metadata
+    /// Update G-code file metadata.
     /// </summary>
+    /// <param name="id">The unique identifier of the G-code file to update.</param>
+    /// <param name="request">The updated metadata for the G-code file.</param>
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(GcodeFileDto), 200)]
     [ProducesResponseType(400)]
@@ -131,8 +141,9 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     }
 
     /// <summary>
-    /// Delete a G-code file from the library
+    /// Delete a G-code file from the library.
     /// </summary>
+    /// <param name="id">The unique identifier of the G-code file to delete.</param>
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -154,8 +165,9 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     }
 
     /// <summary>
-    /// Download a G-code file
+    /// Download a G-code file.
     /// </summary>
+    /// <param name="id">The unique identifier of the G-code file to download.</param>
     [HttpGet("{id}/download")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(404)]

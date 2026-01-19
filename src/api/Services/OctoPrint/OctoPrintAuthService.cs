@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -44,7 +45,7 @@ namespace Farm.Web.Api.Services.OctoPrint
 
             // Hash the provided key and compare against stored KeyHash
             string hash = ComputeSha256Hash(apiKey);
-            var stored = await _apiKeyRepo.GetByKeyHashAsync(hash);
+            ApiKey? stored = await _apiKeyRepo.GetByKeyHashAsync(hash);
             if (stored is null)
             {
                 _logger.LogWarning("Invalid OctoPrint API key presented (redacted)");

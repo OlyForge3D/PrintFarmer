@@ -15,11 +15,13 @@ public interface IPrinterStatusUpdateReceiver
     /// <summary>
     /// Called when a printer status update is received from a backend service.
     /// </summary>
+    /// <param name="status">The printer status data received from the backend.</param>
     void ReceiveStatusUpdate(PrinterStatusDto status);
 
     /// <summary>
     /// Called when multiple printer statuses are updated at once.
     /// </summary>
+    /// <param name="statuses">The collection of printer status updates.</param>
     void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses);
 }
 
@@ -50,7 +52,7 @@ public class PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, IUnifi
             return;
         }
 
-        foreach (var status in statuses)
+        foreach (PrinterStatusDto status in statuses)
         {
             _cache.UpdateStatus(status);
         }

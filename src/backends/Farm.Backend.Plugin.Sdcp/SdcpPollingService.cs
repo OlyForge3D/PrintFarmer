@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
@@ -110,11 +111,11 @@ public sealed class SdcpPollingService(
                 try
                 {
                     // Get list of SDCP printers from database
-                    var printerIds = await GetSdcpPrinterIdsAsync(ct);
+                    List<Guid> printerIds = await GetSdcpPrinterIdsAsync(ct);
                     _logger.LogDebug($"SdcpPollingService: Found {printerIds.Count} SDCP printers");
 
                     // Ensure polling loops exist for all SDCP printers
-                    foreach (var id in printerIds)
+                    foreach (Guid id in printerIds)
                     {
                         if (!_pollingLoops.ContainsKey(id))
                         {
@@ -128,7 +129,7 @@ public sealed class SdcpPollingService(
 
                     // Remove polling loops for printers that are no longer SDCP
                     var inactiveIds = _pollingLoops.Keys.Except(printerIds).ToList();
-                    foreach (var printerId in inactiveIds)
+                    foreach (Guid printerId in inactiveIds)
                     {
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
@@ -161,7 +162,7 @@ public sealed class SdcpPollingService(
     private async Task PollPrinterAsync(Guid printerId, CancellationToken ct)
     {
 #pragma warning disable S6612 // Capturing printerId in lambda is intentional and safe
-        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState { PrinterId = printerId, LastKnownIsOnline = false });
+        PrinterPollingState state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState { PrinterId = printerId, LastKnownIsOnline = false });
 #pragma warning restore S6612
 
         while (!ct.IsCancellationRequested)
@@ -183,8 +184,8 @@ public sealed class SdcpPollingService(
                 {
                     // Get the SDCP client from a scoped context
                     // (scoped services cannot be injected directly into singletons)
-                    using var scope = _scopeFactory.CreateScope();
-                    var sdcpClient = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
+                    using IServiceScope scope = _scopeFactory.CreateScope();
+                    ISdcpClient sdcpClient = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
 
                     // SDCP uses BackendUrl which combines ServerUrl with BackendPort
                     // The GetCompositeStatusAsync expects the base URL (which it converts to WebSocket URL internally)
@@ -229,8 +230,7 @@ public sealed class SdcpPollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
-                        SpoolInfo: null
-                    );
+                        SpoolInfo: null);
 
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);
@@ -265,8 +265,7 @@ public sealed class SdcpPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(offlineUpdate);
@@ -295,9 +294,9 @@ public sealed class SdcpPollingService(
     /// </summary>
     private async Task<List<Guid>> GetSdcpPrinterIdsAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
-        var printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.SDCP, ct);
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.SDCP, ct);
         return printers.Select(p => p.Id).ToList();
     }
 
@@ -306,8 +305,8 @@ public sealed class SdcpPollingService(
     /// </summary>
     private async Task<Printer?> GetPrinterAsync(Guid printerId, CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
         return await unitOfWork.Printers.FindByIdAsync(printerId, ct);
     }
 }

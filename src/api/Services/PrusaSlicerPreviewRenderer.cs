@@ -17,7 +17,7 @@ public sealed class PrusaPreviewRenderer : BasePreviewRenderer
     // ---------------------------------------------------------------------
     protected override void ApplyStyleDefaults(RenderOptions options)
     {
-        var d = PrusaPreset.Create();
+        RenderOptions d = PrusaPreset.Create();
 
         options.Width = d.Width;
         options.Height = d.Height;
@@ -57,8 +57,7 @@ public sealed class PrusaPreviewRenderer : BasePreviewRenderer
                 new PointF(0, h),
                 GradientRepetitionMode.None,
                 new ColorStop(0f, new Rgba32(245, 245, 248)),
-                new ColorStop(1f, options.BackgroundColor)
-            ));
+                new ColorStop(1f, options.BackgroundColor)));
         });
     }
 
@@ -73,23 +72,21 @@ public sealed class PrusaPreviewRenderer : BasePreviewRenderer
         float lambert = Math.Max(0.2f, Vector3.Dot(normal, lightDir));
         lambert *= 0.85f;
 
-        lambert = lambert * 0.90f + 0.10f;
+        lambert = (lambert * 0.90f) + 0.10f;
 
         if (ao < 1f)
         {
-            lambert *= 1f - (1f - ao) * (options.AmbientOcclusionStrength * 0.55f);
+            lambert *= 1f - ((1f - ao) * (options.AmbientOcclusionStrength * 0.55f));
             lambert = Math.Clamp(lambert, 0.60f, 1f);
         }
 
         lambert = Math.Clamp(lambert, 0f, 1f);
 
-        var baseColor = options.ModelBaseColor;
+        Rgba32 baseColor = options.ModelBaseColor;
 
         return new Rgba32(
             (byte)(baseColor.R * lambert),
             (byte)(baseColor.G * lambert),
-            (byte)(baseColor.B * lambert)
-        );
+            (byte)(baseColor.B * lambert));
     }
 }
-

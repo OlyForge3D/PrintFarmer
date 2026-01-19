@@ -74,6 +74,8 @@ public sealed class ArtifactsMetrics : IDisposable
     /// <summary>
     /// Configure storage alert thresholds.
     /// </summary>
+    /// <param name="warningBytes">The threshold in bytes at which a warning is triggered.</param>
+    /// <param name="criticalBytes">The threshold in bytes at which a critical alert is triggered.</param>
     public void SetThresholds(long warningBytes, long criticalBytes)
     {
         _ = Interlocked.Exchange(ref s_warningThreshold, warningBytes);
@@ -81,6 +83,7 @@ public sealed class ArtifactsMetrics : IDisposable
     }
 
     /// <summary>Record artifact upload metrics (increment counters and update gauge baseline).</summary>
+    /// <param name="sizeBytes">The size of the uploaded artifact in bytes.</param>
     public void RecordUpload(long sizeBytes)
     {
         s_uploadedCount.Add(1);
@@ -140,28 +143,4 @@ public sealed class ArtifactsMetrics : IDisposable
         // be used by other consumers/tests. Keep Dispose a no-op to make it
         // safe to create short-lived instances in unit tests.
     }
-}
-
-/// <summary>
-/// Storage threshold severity levels.
-/// </summary>
-public enum StorageThresholdLevel
-{
-    Normal = 0,
-    Warning = 1,
-    Critical = 2
-}
-
-/// <summary>
-/// Event arguments for storage threshold exceeded events.
-/// </summary>
-public sealed class StorageThresholdEventArgs(StorageThresholdLevel level, long currentBytes, long warningThreshold, long criticalThreshold) : EventArgs
-{
-    public StorageThresholdLevel Level { get; } = level;
-
-    public long CurrentBytes { get; } = currentBytes;
-
-    public long WarningThreshold { get; } = warningThreshold;
-
-    public long CriticalThreshold { get; } = criticalThreshold;
 }

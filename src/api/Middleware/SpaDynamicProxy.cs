@@ -49,6 +49,7 @@ public sealed class SpaDevServerWatcher(SpaProxyActivationState state, IHttpClie
                 if (resp.IsSuccessStatusCode)
                 {
                     _state.Activate();
+
                     // Logging moved to method injection if needed
                     break;
                 }
@@ -87,6 +88,7 @@ public sealed class SpaDynamicProxyMiddleware(RequestDelegate next, SpaProxyActi
             {
                 using HttpRequestMessage req = new(HttpMethod.Get, target);
                 CopyHeaders(context, req);
+
                 // Propagate correlationId header if present
                 string? correlationId = context.Items["CorrelationId"] as string ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(correlationId))

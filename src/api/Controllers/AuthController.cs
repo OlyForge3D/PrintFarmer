@@ -77,8 +77,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 Token: null,
                 ExpiresAt: null,
                 User: result.User,
-                Error: "Registration successful. Your account requires admin approval before you can log in."
-            ));
+                Error: "Registration successful. Your account requires admin approval before you can log in."));
         }
 
         return result.Success ? Ok(result) : BadRequest(result);
@@ -199,6 +198,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing forgot password request");
+
             // Return generic success message even on error to prevent email enumeration
             return Ok(new ForgotPasswordResponse
             {
@@ -242,8 +242,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 request.Token,
                 request.Email,
                 request.NewPassword,
-                HttpContext.Connection.RemoteIpAddress?.ToString()
-            );
+                HttpContext.Connection.RemoteIpAddress?.ToString());
 
             return success
                 ? Ok(new ResetPasswordResponse

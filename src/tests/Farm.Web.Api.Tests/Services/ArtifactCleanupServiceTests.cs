@@ -42,7 +42,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         ArtifactCleanupService cleanupService = new ArtifactCleanupService(artifactsRepo, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago)
-        using (var db = dbFactory.CreateDbContext())
+        using (AppDbContext db = dbFactory.CreateDbContext())
         {
             Artifact oldArtifact = new Artifact
             {
@@ -67,7 +67,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         _ = deletedCount.Should().Be(1, "one artifact should be identified for cleanup");
 
         // Verify artifact still exists (dry-run didn't delete)
-        using (var db = dbFactory.CreateDbContext())
+        using (AppDbContext db = dbFactory.CreateDbContext())
         {
             Artifact? stillExists = await db.Artifacts.FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/test.gcode");
             _ = stillExists.Should().NotBeNull("dry-run mode should not delete artifacts");
@@ -95,7 +95,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         ArtifactCleanupService cleanupService = new ArtifactCleanupService(artifactsRepo, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago) and a new one (today)
-        using (var db = dbFactory.CreateDbContext())
+        using (AppDbContext db = dbFactory.CreateDbContext())
         {
             Artifact oldArtifact = new Artifact
             {
@@ -134,7 +134,7 @@ public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : 
         _ = deletedCount.Should().Be(1, "one old artifact should be deleted");
 
         // Verify old artifact is gone, new one remains
-        using (var db = dbFactory.CreateDbContext())
+        using (AppDbContext db = dbFactory.CreateDbContext())
         {
             Artifact? oldStillExists = await db.Artifacts.FirstOrDefaultAsync(a => a.RelativePath == "2023/01/01/old.gcode");
             _ = oldStillExists.Should().BeNull("old artifact should be deleted");

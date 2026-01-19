@@ -57,14 +57,17 @@ public class SettingPropertyMetadata
     /// The name of the property.
     /// </summary>
     public string Name { get; set; } = string.Empty;
+
     /// <summary>
     /// The type of the property (C# type name).
     /// </summary>
     public string Type { get; set; } = string.Empty;
+
     /// <summary>
     /// List of attribute names applied to the property.
     /// </summary>
     public ReadOnlyCollection<string> Attributes { get; set; } = new ReadOnlyCollection<string>(Array.Empty<string>());
+
     /// <summary>
     /// Optional display metadata for the property.
     /// </summary>

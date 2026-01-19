@@ -1,17 +1,12 @@
 ﻿#nullable disable
 
-#pragma warning disable CA1401 // P/Invoke methods should not be visible
-#pragma warning disable CA5392 // P/Invoke should not use DefaultDllImportSearchPaths attribute
-#pragma warning disable CA1806 // Dispose calls but doesn't use HRESULT
-#pragma warning disable CA1024 // Use properties where appropriate
-#pragma warning disable CA2201 // Exception type is not sufficiently specific
-#pragma warning disable CA1065 // Exceptions should not be raised in Equals/GetHashCode
-#pragma warning disable IDISP005 // Return type should indicate value should be disposed
-#pragma warning disable CS0108 // Member hides inherited member
-#pragma warning disable CA1008 // Enum should have member with value zero
-#pragma warning disable CA1051 // Do not declare visible instance fields
-#pragma warning disable CA1066 // Type should implement IEquatable
-#pragma warning disable CA1815 // Override equality operators
+// Suppress all warnings - this is auto-generated third-party code from 3MF Consortium
+#pragma warning disable
+
+/*
+ * Original specific suppressions kept for reference:
+ * CA1401, CA5392, CA1806, CA1024, CA2201, CA1065, IDISP005, CS0108, CA1008, CA1051, CA1066, CA1815
+ */
 
 /*++
 
@@ -676,7 +671,6 @@ namespace Lib3MF
         }
     }
 
-
     namespace Internal
     {
 
@@ -914,7 +908,6 @@ namespace Lib3MF
         {
             [FieldOffset(0)] public fixed Double Field[16];
         }
-
 
         public static class Lib3MFWrapper
         {
@@ -3525,10 +3518,8 @@ namespace Lib3MF
 
                 return Object;
             }
-
         }
     }
-
 
     public class CBase(IntPtr NewHandle) : IDisposable
     {
@@ -3552,6 +3543,7 @@ namespace Lib3MF
         {
             // Dispose of unmanaged resources.
             Dispose(true);
+
             // Suppress finalization.
             GC.SuppressFinalize(this);
         }
@@ -3578,7 +3570,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Base_ClassTypeId(Handle, out resultClassTypeId));
             return resultClassTypeId;
         }
-
     }
 
     public class CWriter(IntPtr NewHandle) : CBase(NewHandle)
@@ -3648,7 +3639,7 @@ namespace Lib3MF
             Byte resultStrictModeActive = 0;
 
             CheckError(Internal.Lib3MFWrapper.Writer_GetStrictModeActive(Handle, out resultStrictModeActive));
-            return (resultStrictModeActive != 0);
+            return resultStrictModeActive != 0;
         }
 
         public String GetWarning(UInt32 AIndex, out UInt32 AErrorCode)
@@ -3685,7 +3676,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Writer_SetContentEncryptionCallback(Handle, ATheCallback, AUserData));
         }
-
     }
 
     public class CReader(IntPtr NewHandle) : CBase(NewHandle)
@@ -3742,7 +3732,7 @@ namespace Lib3MF
             Byte resultStrictModeActive = 0;
 
             CheckError(Internal.Lib3MFWrapper.Reader_GetStrictModeActive(Handle, out resultStrictModeActive));
-            return (resultStrictModeActive != 0);
+            return resultStrictModeActive != 0;
         }
 
         public String GetWarning(UInt32 AIndex, out UInt32 AErrorCode)
@@ -3779,7 +3769,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Reader_SetContentEncryptionCallback(Handle, ATheCallback, AUserData));
         }
-
     }
 
     public class CPackagePart(IntPtr NewHandle) : CBase(NewHandle)
@@ -3804,7 +3793,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.PackagePart_SetPath(Handle, bytePath));
         }
-
     }
 
     public class CResource(IntPtr NewHandle) : CBase(NewHandle)
@@ -3851,7 +3839,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Resource_GetModelResourceID(Handle, out resultModelResourceId));
             return resultModelResourceId;
         }
-
     }
 
     public class CResourceIterator(IntPtr NewHandle) : CBase(NewHandle)
@@ -3861,7 +3848,7 @@ namespace Lib3MF
             Byte resultHasNext = 0;
 
             CheckError(Internal.Lib3MFWrapper.ResourceIterator_MoveNext(Handle, out resultHasNext));
-            return (resultHasNext != 0);
+            return resultHasNext != 0;
         }
 
         public bool MovePrevious()
@@ -3869,7 +3856,7 @@ namespace Lib3MF
             Byte resultHasPrevious = 0;
 
             CheckError(Internal.Lib3MFWrapper.ResourceIterator_MovePrevious(Handle, out resultHasPrevious));
-            return (resultHasPrevious != 0);
+            return resultHasPrevious != 0;
         }
 
         public CResource GetCurrent()
@@ -3895,7 +3882,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ResourceIterator_Count(Handle, out resultCount));
             return resultCount;
         }
-
     }
 
     public class CSliceStackIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3907,7 +3893,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.SliceStackIterator_GetCurrentSliceStack(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CSliceStack>(newResource);
         }
-
     }
 
     public class CObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3919,7 +3904,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ObjectIterator_GetCurrentObject(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CObject>(newResource);
         }
-
     }
 
     public class CMeshObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3931,7 +3915,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MeshObjectIterator_GetCurrentMeshObject(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CMeshObject>(newResource);
         }
-
     }
 
     public class CComponentsObjectIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3943,7 +3926,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ComponentsObjectIterator_GetCurrentComponentsObject(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CComponentsObject>(newResource);
         }
-
     }
 
     public class CTexture2DIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3955,7 +3937,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Texture2DIterator_GetCurrentTexture2D(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CTexture2D>(newResource);
         }
-
     }
 
     public class CBaseMaterialGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3967,7 +3948,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BaseMaterialGroupIterator_GetCurrentBaseMaterialGroup(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CBaseMaterialGroup>(newResource);
         }
-
     }
 
     public class CColorGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3979,7 +3959,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ColorGroupIterator_GetCurrentColorGroup(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CColorGroup>(newResource);
         }
-
     }
 
     public class CTexture2DGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -3991,7 +3970,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Texture2DGroupIterator_GetCurrentTexture2DGroup(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CTexture2DGroup>(newResource);
         }
-
     }
 
     public class CCompositeMaterialsIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -4003,7 +3981,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.CompositeMaterialsIterator_GetCurrentCompositeMaterials(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CCompositeMaterials>(newResource);
         }
-
     }
 
     public class CMultiPropertyGroupIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -4015,7 +3992,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MultiPropertyGroupIterator_GetCurrentMultiPropertyGroup(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CMultiPropertyGroup>(newResource);
         }
-
     }
 
     public class CImage3DIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -4027,7 +4003,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Image3DIterator_GetCurrentImage3D(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImage3D>(newResource);
         }
-
     }
 
     public class CFunctionIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -4039,7 +4014,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.FunctionIterator_GetCurrentFunction(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CFunction>(newResource);
         }
-
     }
 
     public class CLevelSetIterator(IntPtr NewHandle) : CResourceIterator(NewHandle)
@@ -4051,7 +4025,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.LevelSetIterator_GetCurrentLevelSet(Handle, out newResource));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CLevelSet>(newResource);
         }
-
     }
 
     public class CMetaData(IntPtr NewHandle) : CBase(NewHandle)
@@ -4117,7 +4090,7 @@ namespace Lib3MF
             Byte resultMustPreserve = 0;
 
             CheckError(Internal.Lib3MFWrapper.MetaData_GetMustPreserve(Handle, out resultMustPreserve));
-            return (resultMustPreserve != 0);
+            return resultMustPreserve != 0;
         }
 
         public void SetMustPreserve(bool AMustPreserve)
@@ -4167,7 +4140,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.MetaData_SetValue(Handle, byteValue));
         }
-
     }
 
     public class CMetaDataGroup(IntPtr NewHandle) : CBase(NewHandle)
@@ -4226,7 +4198,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MetaDataGroup_AddMetaData(Handle, byteNameSpace, byteName, byteValue, byteType, (Byte)(AMustPreserve ? 1 : 0), out newMetaData));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CMetaData>(newMetaData);
         }
-
     }
 
     public class CTriangleSet(IntPtr NewHandle) : CBase(NewHandle)
@@ -4345,7 +4316,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.TriangleSet_Duplicate(Handle, byteIdentifier, out newNewSet));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CTriangleSet>(newNewSet);
         }
-
     }
 
     public class CObject(IntPtr NewHandle) : CResource(NewHandle)
@@ -4355,7 +4325,7 @@ namespace Lib3MF
             Int32 resultObjectType = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_GetType(Handle, out resultObjectType));
-            return (eObjectType)(resultObjectType);
+            return (eObjectType)resultObjectType;
         }
 
         public void SetType(eObjectType AObjectType)
@@ -4412,7 +4382,7 @@ namespace Lib3MF
             Byte resultIsMeshObject = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_IsMeshObject(Handle, out resultIsMeshObject));
-            return (resultIsMeshObject != 0);
+            return resultIsMeshObject != 0;
         }
 
         public bool IsComponentsObject()
@@ -4420,7 +4390,7 @@ namespace Lib3MF
             Byte resultIsComponentsObject = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_IsComponentsObject(Handle, out resultIsComponentsObject));
-            return (resultIsComponentsObject != 0);
+            return resultIsComponentsObject != 0;
         }
 
         public bool IsLevelSetObject()
@@ -4428,7 +4398,7 @@ namespace Lib3MF
             Byte resultIsLevelSetObject = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_IsLevelSetObject(Handle, out resultIsLevelSetObject));
-            return (resultIsLevelSetObject != 0);
+            return resultIsLevelSetObject != 0;
         }
 
         public bool IsValid()
@@ -4436,7 +4406,7 @@ namespace Lib3MF
             Byte resultIsValid = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_IsValid(Handle, out resultIsValid));
-            return (resultIsValid != 0);
+            return resultIsValid != 0;
         }
 
         public void SetAttachmentAsThumbnail(CAttachment AAttachment)
@@ -4483,7 +4453,7 @@ namespace Lib3MF
             GCHandle dataUUID = GCHandle.Alloc(bytesUUID, GCHandleType.Pinned);
 
             CheckError(Internal.Lib3MFWrapper.Object_GetUUID(Handle, out resultHasUUID, sizeUUID, out neededUUID, dataUUID.AddrOfPinnedObject()));
-            AHasUUID = (resultHasUUID != 0);
+            AHasUUID = resultHasUUID != 0;
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
@@ -4515,7 +4485,7 @@ namespace Lib3MF
             Int32 resultMeshResolution = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_GetSlicesMeshResolution(Handle, out resultMeshResolution));
-            return (eSlicesMeshResolution)(resultMeshResolution);
+            return (eSlicesMeshResolution)resultMeshResolution;
         }
 
         public bool HasSlices(bool ARecursive)
@@ -4523,7 +4493,7 @@ namespace Lib3MF
             Byte resultHasSlices = 0;
 
             CheckError(Internal.Lib3MFWrapper.Object_HasSlices(Handle, (Byte)(ARecursive ? 1 : 0), out resultHasSlices));
-            return (resultHasSlices != 0);
+            return resultHasSlices != 0;
         }
 
         public void ClearSliceStack()
@@ -4550,7 +4520,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Object_AssignSliceStack(Handle, ASliceStackInstanceHandle));
         }
-
     }
 
     public class CMeshObject(IntPtr NewHandle) : CObject(NewHandle)
@@ -4666,7 +4635,7 @@ namespace Lib3MF
             Byte resultHasObjectLevelProperty = 0;
 
             CheckError(Internal.Lib3MFWrapper.MeshObject_GetObjectLevelProperty(Handle, out AUniqueResourceID, out APropertyID, out resultHasObjectLevelProperty));
-            return (resultHasObjectLevelProperty != 0);
+            return resultHasObjectLevelProperty != 0;
         }
 
         public void SetTriangleProperties(UInt32 AIndex, sTriangleProperties AProperties)
@@ -4749,7 +4718,7 @@ namespace Lib3MF
             Byte resultIsManifoldAndOriented = 0;
 
             CheckError(Internal.Lib3MFWrapper.MeshObject_IsManifoldAndOriented(Handle, out resultIsManifoldAndOriented));
-            return (resultIsManifoldAndOriented != 0);
+            return resultIsManifoldAndOriented != 0;
         }
 
         public CBeamLattice BeamLattice()
@@ -4795,7 +4764,7 @@ namespace Lib3MF
             Byte resultTriangleSetExists = 0;
 
             CheckError(Internal.Lib3MFWrapper.MeshObject_HasTriangleSet(Handle, byteIdentifier, out resultTriangleSetExists));
-            return (resultTriangleSetExists != 0);
+            return resultTriangleSetExists != 0;
         }
 
         public CTriangleSet FindTriangleSet(String AIdentifier)
@@ -4822,7 +4791,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MeshObject_GetTriangleSet(Handle, AIndex, out newTheTriangleSet));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CTriangleSet>(newTheTriangleSet);
         }
-
     }
 
     public class CLevelSet(IntPtr NewHandle) : CObject(NewHandle)
@@ -4921,7 +4889,7 @@ namespace Lib3MF
             Byte resultMeshBBoxOnly = 0;
 
             CheckError(Internal.Lib3MFWrapper.LevelSet_GetMeshBBoxOnly(Handle, out resultMeshBBoxOnly));
-            return (resultMeshBBoxOnly != 0);
+            return resultMeshBBoxOnly != 0;
         }
 
         public void SetMesh(CMeshObject ATheMesh)
@@ -4961,7 +4929,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.LevelSet_SetVolumeData(Handle, ATheVolumeDataHandle));
         }
-
     }
 
     public class CBeamLattice(IntPtr NewHandle) : CBase(NewHandle)
@@ -4985,7 +4952,7 @@ namespace Lib3MF
             Int32 resultClipMode = 0;
 
             CheckError(Internal.Lib3MFWrapper.BeamLattice_GetClipping(Handle, out resultClipMode, out AUniqueResourceID));
-            AClipMode = (eBeamLatticeClipMode)(resultClipMode);
+            AClipMode = (eBeamLatticeClipMode)resultClipMode;
         }
 
         public void SetClipping(eBeamLatticeClipMode AClipMode, UInt32 AUniqueResourceID)
@@ -5000,7 +4967,7 @@ namespace Lib3MF
             Byte resultHasRepresentation = 0;
 
             CheckError(Internal.Lib3MFWrapper.BeamLattice_GetRepresentation(Handle, out resultHasRepresentation, out AUniqueResourceID));
-            return (resultHasRepresentation != 0);
+            return resultHasRepresentation != 0;
         }
 
         public void SetRepresentation(UInt32 AUniqueResourceID)
@@ -5014,7 +4981,7 @@ namespace Lib3MF
             Int32 resultBallMode = 0;
 
             CheckError(Internal.Lib3MFWrapper.BeamLattice_GetBallOptions(Handle, out resultBallMode, out ABallRadius));
-            ABallMode = (eBeamLatticeBallMode)(resultBallMode);
+            ABallMode = (eBeamLatticeBallMode)resultBallMode;
         }
 
         public void SetBallOptions(eBeamLatticeBallMode ABallMode, Double ABallRadius)
@@ -5175,7 +5142,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BeamLattice_GetBeamSet(Handle, AIndex, out newBeamSet));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CBeamSet>(newBeamSet);
         }
-
     }
 
     public class CFunctionReference(IntPtr NewHandle) : CBase(NewHandle)
@@ -5257,7 +5223,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.FunctionReference_GetFallBackValue(Handle, out resultFallBackValue));
             return resultFallBackValue;
         }
-
     }
 
     public class CVolumeDataColor(IntPtr NewHandle) : CFunctionReference(NewHandle)
@@ -5319,7 +5284,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.VolumeDataComposite_RemoveMaterialMapping(Handle, AIndex));
         }
-
     }
 
     public class CVolumeDataProperty(IntPtr NewHandle) : CFunctionReference(NewHandle)
@@ -5349,9 +5313,8 @@ namespace Lib3MF
             Byte resultIsRequired = 0;
 
             CheckError(Internal.Lib3MFWrapper.VolumeDataProperty_IsRequired(Handle, out resultIsRequired));
-            return (resultIsRequired != 0);
+            return resultIsRequired != 0;
         }
-
     }
 
     public class CVolumeData(IntPtr NewHandle) : CResource(NewHandle)
@@ -5442,7 +5405,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.VolumeData_RemoveProperty(Handle, AIndex));
         }
-
     }
 
     public class CComponent(IntPtr NewHandle) : CBase(NewHandle)
@@ -5474,7 +5436,7 @@ namespace Lib3MF
             GCHandle dataUUID = GCHandle.Alloc(bytesUUID, GCHandleType.Pinned);
 
             CheckError(Internal.Lib3MFWrapper.Component_GetUUID(Handle, out resultHasUUID, sizeUUID, out neededUUID, dataUUID.AddrOfPinnedObject()));
-            AHasUUID = (resultHasUUID != 0);
+            AHasUUID = resultHasUUID != 0;
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
@@ -5491,7 +5453,7 @@ namespace Lib3MF
             Byte resultHasTransform = 0;
 
             CheckError(Internal.Lib3MFWrapper.Component_HasTransform(Handle, out resultHasTransform));
-            return (resultHasTransform != 0);
+            return resultHasTransform != 0;
         }
 
         public sTransform GetTransform()
@@ -5508,7 +5470,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Component_SetTransform(Handle, ref intTransform));
         }
-
     }
 
     public class CComponentsObject(IntPtr NewHandle) : CObject(NewHandle)
@@ -5543,7 +5504,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ComponentsObject_GetComponentCount(Handle, out resultCount));
             return resultCount;
         }
-
     }
 
     public class CBeamSet(IntPtr NewHandle) : CBase(NewHandle)
@@ -5647,7 +5607,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BeamSet_GetBallReferences(Handle, sizeBallReferences, out neededBallReferences, dataBallReferences.AddrOfPinnedObject()));
             dataBallReferences.Free();
         }
-
     }
 
     public class CBaseMaterialGroup(IntPtr NewHandle) : CResource(NewHandle)
@@ -5724,7 +5683,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BaseMaterialGroup_GetDisplayColor(Handle, APropertyID, out intresultTheColor));
             return Internal.Lib3MFWrapper.convertInternalToStruct_Color(intresultTheColor);
         }
-
     }
 
     public class CColorGroup(IntPtr NewHandle) : CResource(NewHandle)
@@ -5779,7 +5737,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ColorGroup_GetColor(Handle, APropertyID, out intresultTheColor));
             return Internal.Lib3MFWrapper.convertInternalToStruct_Color(intresultTheColor);
         }
-
     }
 
     public class CTexture2DGroup(IntPtr NewHandle) : CResource(NewHandle)
@@ -5835,7 +5792,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Texture2DGroup_GetTexture2D(Handle, out newTexture2DInstance));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CTexture2D>(newTexture2DInstance);
         }
-
     }
 
     public class CCompositeMaterials(IntPtr NewHandle) : CResource(NewHandle)
@@ -5908,7 +5864,6 @@ namespace Lib3MF
                 AComposite[index] = Internal.Lib3MFWrapper.convertInternalToStruct_CompositeConstituent(arrayComposite[index]);
             }
         }
-
     }
 
     public class CMultiPropertyGroup(IntPtr NewHandle) : CResource(NewHandle)
@@ -6001,7 +5956,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.MultiPropertyGroup_RemoveLayer(Handle, ALayerIndex));
         }
-
     }
 
     public class CImage3D(IntPtr NewHandle) : CResource(NewHandle)
@@ -6032,9 +5986,8 @@ namespace Lib3MF
             Byte resultIsImageStack = 0;
 
             CheckError(Internal.Lib3MFWrapper.Image3D_IsImageStack(Handle, out resultIsImageStack));
-            return (resultIsImageStack != 0);
+            return resultIsImageStack != 0;
         }
-
     }
 
     public class CImageStack(IntPtr NewHandle) : CImage3D(NewHandle)
@@ -6123,7 +6076,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ImageStack_CreateSheetFromFile(Handle, AIndex, bytePath, byteFileName, out newSheet));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CAttachment>(newSheet);
         }
-
     }
 
     public class CAttachment(IntPtr NewHandle) : CBase(NewHandle)
@@ -6226,7 +6178,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Attachment_ReadFromBuffer(Handle, (UInt64)ABuffer.Length, dataBuffer.AddrOfPinnedObject()));
             dataBuffer.Free();
         }
-
     }
 
     public class CTexture2D(IntPtr NewHandle) : CResource(NewHandle)
@@ -6255,7 +6206,7 @@ namespace Lib3MF
             Int32 resultContentType = 0;
 
             CheckError(Internal.Lib3MFWrapper.Texture2D_GetContentType(Handle, out resultContentType));
-            return (eTextureType)(resultContentType);
+            return (eTextureType)resultContentType;
         }
 
         public void SetContentType(eTextureType AContentType)
@@ -6271,8 +6222,8 @@ namespace Lib3MF
             Int32 resultTileStyleV = 0;
 
             CheckError(Internal.Lib3MFWrapper.Texture2D_GetTileStyleUV(Handle, out resultTileStyleU, out resultTileStyleV));
-            ATileStyleU = (eTextureTileStyle)(resultTileStyleU);
-            ATileStyleV = (eTextureTileStyle)(resultTileStyleV);
+            ATileStyleU = (eTextureTileStyle)resultTileStyleU;
+            ATileStyleV = (eTextureTileStyle)resultTileStyleV;
         }
 
         public void SetTileStyleUV(eTextureTileStyle ATileStyleU, eTextureTileStyle ATileStyleV)
@@ -6288,7 +6239,7 @@ namespace Lib3MF
             Int32 resultFilter = 0;
 
             CheckError(Internal.Lib3MFWrapper.Texture2D_GetFilter(Handle, out resultFilter));
-            return (eTextureFilter)(resultFilter);
+            return (eTextureFilter)resultFilter;
         }
 
         public void SetFilter(eTextureFilter AFilter)
@@ -6297,7 +6248,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Texture2D_SetFilter(Handle, enumFilter));
         }
-
     }
 
     public class CImplicitPort(IntPtr NewHandle) : CBase(NewHandle)
@@ -6356,7 +6306,7 @@ namespace Lib3MF
             Int32 resultImplicitPortType = 0;
 
             CheckError(Internal.Lib3MFWrapper.ImplicitPort_GetType(Handle, out resultImplicitPortType));
-            return (eImplicitPortType)(resultImplicitPortType);
+            return (eImplicitPortType)resultImplicitPortType;
         }
 
         public String GetReference()
@@ -6379,7 +6329,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.ImplicitPort_SetReference(Handle, byteReference));
         }
-
     }
 
     public class CIterator(IntPtr NewHandle) : CBase(NewHandle)
@@ -6389,7 +6338,7 @@ namespace Lib3MF
             Byte resultHasNext = 0;
 
             CheckError(Internal.Lib3MFWrapper.Iterator_MoveNext(Handle, out resultHasNext));
-            return (resultHasNext != 0);
+            return resultHasNext != 0;
         }
 
         public bool MovePrevious()
@@ -6397,7 +6346,7 @@ namespace Lib3MF
             Byte resultHasPrevious = 0;
 
             CheckError(Internal.Lib3MFWrapper.Iterator_MovePrevious(Handle, out resultHasPrevious));
-            return (resultHasPrevious != 0);
+            return resultHasPrevious != 0;
         }
 
         public UInt64 Count()
@@ -6407,7 +6356,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Iterator_Count(Handle, out resultCount));
             return resultCount;
         }
-
     }
 
     public class CImplicitPortIterator(IntPtr NewHandle) : CIterator(NewHandle)
@@ -6419,7 +6367,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ImplicitPortIterator_GetCurrent(Handle, out newPort));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newPort);
         }
-
     }
 
     public class CImplicitNode(IntPtr NewHandle) : CBase(NewHandle)
@@ -6492,7 +6439,7 @@ namespace Lib3MF
             Int32 resultType = 0;
 
             CheckError(Internal.Lib3MFWrapper.ImplicitNode_GetNodeType(Handle, out resultType));
-            return (eImplicitNodeType)(resultType);
+            return (eImplicitNodeType)resultType;
         }
 
         public CImplicitPort AddInput(String AIdentifier, String ADisplayName)
@@ -6554,9 +6501,8 @@ namespace Lib3MF
             Byte resultValid = 0;
 
             CheckError(Internal.Lib3MFWrapper.ImplicitNode_AreTypesValid(Handle, out resultValid));
-            return (resultValid != 0);
+            return resultValid != 0;
         }
-
     }
 
     public class COneInputNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -6576,7 +6522,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.OneInputNode_GetOutputResult(Handle, out newResult));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newResult);
         }
-
     }
 
     public class CSinNode(IntPtr NewHandle) : COneInputNode(NewHandle)
@@ -6699,7 +6644,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ResourceIdNode_GetOutputValue(Handle, out newValue));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newValue);
         }
-
     }
 
     public class CTwoInputNode(IntPtr NewHandle) : COneInputNode(NewHandle)
@@ -6711,7 +6655,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.TwoInputNode_GetInputB(Handle, out newB));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newB);
         }
-
     }
 
     public class CAdditionNode(IntPtr NewHandle) : CTwoInputNode(NewHandle)
@@ -6791,7 +6734,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.SelectNode_GetInputD(Handle, out newD));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newD);
         }
-
     }
 
     public class CClampNode(IntPtr NewHandle) : COneInputNode(NewHandle)
@@ -6811,7 +6753,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ClampNode_GetInputMax(Handle, out newMax));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newMax);
         }
-
     }
 
     public class CComposeVectorNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -6847,7 +6788,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ComposeVectorNode_GetOutputResult(Handle, out newResult));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newResult);
         }
-
     }
 
     public class CVectorFromScalarNode(IntPtr NewHandle) : COneInputNode(NewHandle)
@@ -6887,7 +6827,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.DecomposeVectorNode_GetOutputZ(Handle, out newZ));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newZ);
         }
-
     }
 
     public class CComposeMatrixNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7027,7 +6966,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ComposeMatrixNode_GetOutputResult(Handle, out newResult));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newResult);
         }
-
     }
 
     public class CMatrixFromRowsNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7071,7 +7009,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MatrixFromRowsNode_GetOutputResult(Handle, out newResult));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newResult);
         }
-
     }
 
     public class CMatrixFromColumnsNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7115,7 +7052,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MatrixFromColumnsNode_GetOutputResult(Handle, out newResult));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newResult);
         }
-
     }
 
     public class CConstantNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7141,7 +7077,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ConstantNode_GetOutputValue(Handle, out newValue));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newValue);
         }
-
     }
 
     public class CConstVecNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7168,7 +7103,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ConstVecNode_GetOutputVector(Handle, out newVector));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newVector);
         }
-
     }
 
     public class CConstMatNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7195,7 +7129,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ConstMatNode_GetOutputMatrix(Handle, out newMatrix));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newMatrix);
         }
-
     }
 
     public class CMeshNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7223,7 +7156,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.MeshNode_GetOutputDistance(Handle, out newDistance));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newDistance);
         }
-
     }
 
     public class CUnsignedMeshNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7251,7 +7183,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.UnsignedMeshNode_GetOutputDistance(Handle, out newDistance));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newDistance);
         }
-
     }
 
     public class CFunctionCallNode(IntPtr NewHandle) : CImplicitNode(NewHandle)
@@ -7263,7 +7194,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.FunctionCallNode_GetInputFunctionID(Handle, out newFunction));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newFunction);
         }
-
     }
 
     public class CNodeIterator(IntPtr NewHandle) : CIterator(NewHandle)
@@ -7275,7 +7205,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.NodeIterator_GetCurrent(Handle, out newNode));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitNode>(newNode);
         }
-
     }
 
     public class CFunction(IntPtr NewHandle) : CResource(NewHandle)
@@ -7378,7 +7307,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Function_FindOutput(Handle, byteIdentifier, out newOutput));
             return Internal.Lib3MFWrapper.PolymorphicFactory<CImplicitPort>(newOutput);
         }
-
     }
 
     public class CImplicitFunction(IntPtr NewHandle) : CFunction(NewHandle)
@@ -8042,7 +7970,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.ImplicitFunction_SortNodesTopologically(Handle));
         }
-
     }
 
     public class CFunctionFromImage3D(IntPtr NewHandle) : CFunction(NewHandle)
@@ -8078,7 +8005,7 @@ namespace Lib3MF
             Int32 resultFilter = 0;
 
             CheckError(Internal.Lib3MFWrapper.FunctionFromImage3D_GetFilter(Handle, out resultFilter));
-            return (eTextureFilter)(resultFilter);
+            return (eTextureFilter)resultFilter;
         }
 
         public void SetTileStyles(eTextureTileStyle ATileStyleU, eTextureTileStyle ATileStyleV, eTextureTileStyle ATileStyleW)
@@ -8097,9 +8024,9 @@ namespace Lib3MF
             Int32 resultTileStyleW = 0;
 
             CheckError(Internal.Lib3MFWrapper.FunctionFromImage3D_GetTileStyles(Handle, out resultTileStyleU, out resultTileStyleV, out resultTileStyleW));
-            ATileStyleU = (eTextureTileStyle)(resultTileStyleU);
-            ATileStyleV = (eTextureTileStyle)(resultTileStyleV);
-            ATileStyleW = (eTextureTileStyle)(resultTileStyleW);
+            ATileStyleU = (eTextureTileStyle)resultTileStyleU;
+            ATileStyleV = (eTextureTileStyle)resultTileStyleV;
+            ATileStyleW = (eTextureTileStyle)resultTileStyleW;
         }
 
         public Double GetOffset()
@@ -8129,7 +8056,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.FunctionFromImage3D_SetScale(Handle, AScale));
         }
-
     }
 
     public class CBuildItem(IntPtr NewHandle) : CBase(NewHandle)
@@ -8153,7 +8079,7 @@ namespace Lib3MF
             GCHandle dataUUID = GCHandle.Alloc(bytesUUID, GCHandleType.Pinned);
 
             CheckError(Internal.Lib3MFWrapper.BuildItem_GetUUID(Handle, out resultHasUUID, sizeUUID, out neededUUID, dataUUID.AddrOfPinnedObject()));
-            AHasUUID = (resultHasUUID != 0);
+            AHasUUID = resultHasUUID != 0;
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
@@ -8178,7 +8104,7 @@ namespace Lib3MF
             Byte resultHasTransform = 0;
 
             CheckError(Internal.Lib3MFWrapper.BuildItem_HasObjectTransform(Handle, out resultHasTransform));
-            return (resultHasTransform != 0);
+            return resultHasTransform != 0;
         }
 
         public sTransform GetObjectTransform()
@@ -8232,7 +8158,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BuildItem_GetOutbox(Handle, out intresultOutbox));
             return Internal.Lib3MFWrapper.convertInternalToStruct_Box(intresultOutbox);
         }
-
     }
 
     public class CBuildItemIterator(IntPtr NewHandle) : CBase(NewHandle)
@@ -8242,7 +8167,7 @@ namespace Lib3MF
             Byte resultHasNext = 0;
 
             CheckError(Internal.Lib3MFWrapper.BuildItemIterator_MoveNext(Handle, out resultHasNext));
-            return (resultHasNext != 0);
+            return resultHasNext != 0;
         }
 
         public bool MovePrevious()
@@ -8250,7 +8175,7 @@ namespace Lib3MF
             Byte resultHasPrevious = 0;
 
             CheckError(Internal.Lib3MFWrapper.BuildItemIterator_MovePrevious(Handle, out resultHasPrevious));
-            return (resultHasPrevious != 0);
+            return resultHasPrevious != 0;
         }
 
         public CBuildItem GetCurrent()
@@ -8276,7 +8201,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.BuildItemIterator_Count(Handle, out resultCount));
             return resultCount;
         }
-
     }
 
     public class CSlice(IntPtr NewHandle) : CBase(NewHandle)
@@ -8375,7 +8299,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.Slice_GetZTop(Handle, out resultZTop));
             return resultZTop;
         }
-
     }
 
     public class CSliceStack(IntPtr NewHandle) : CResource(NewHandle)
@@ -8465,7 +8388,6 @@ namespace Lib3MF
             dataPath.Free();
             return Encoding.UTF8.GetString(bytesPath).TrimEnd(char.MinValue);
         }
-
     }
 
     public class CConsumer(IntPtr NewHandle) : CBase(NewHandle)
@@ -8511,7 +8433,6 @@ namespace Lib3MF
             dataKeyValue.Free();
             return Encoding.UTF8.GetString(bytesKeyValue).TrimEnd(char.MinValue);
         }
-
     }
 
     public class CAccessRight(IntPtr NewHandle) : CBase(NewHandle)
@@ -8529,7 +8450,7 @@ namespace Lib3MF
             Int32 resultAlgorithm = 0;
 
             CheckError(Internal.Lib3MFWrapper.AccessRight_GetWrappingAlgorithm(Handle, out resultAlgorithm));
-            return (eWrappingAlgorithm)(resultAlgorithm);
+            return (eWrappingAlgorithm)resultAlgorithm;
         }
 
         public eMgfAlgorithm GetMgfAlgorithm()
@@ -8537,7 +8458,7 @@ namespace Lib3MF
             Int32 resultAlgorithm = 0;
 
             CheckError(Internal.Lib3MFWrapper.AccessRight_GetMgfAlgorithm(Handle, out resultAlgorithm));
-            return (eMgfAlgorithm)(resultAlgorithm);
+            return (eMgfAlgorithm)resultAlgorithm;
         }
 
         public eDigestMethod GetDigestMethod()
@@ -8545,9 +8466,8 @@ namespace Lib3MF
             Int32 resultAlgorithm = 0;
 
             CheckError(Internal.Lib3MFWrapper.AccessRight_GetDigestMethod(Handle, out resultAlgorithm));
-            return (eDigestMethod)(resultAlgorithm);
+            return (eDigestMethod)resultAlgorithm;
         }
-
     }
 
     public class CContentEncryptionParams(IntPtr NewHandle) : CBase(NewHandle)
@@ -8557,7 +8477,7 @@ namespace Lib3MF
             Int32 resultAlgorithm = 0;
 
             CheckError(Internal.Lib3MFWrapper.ContentEncryptionParams_GetEncryptionAlgorithm(Handle, out resultAlgorithm));
-            return (eEncryptionAlgorithm)(resultAlgorithm);
+            return (eEncryptionAlgorithm)resultAlgorithm;
         }
 
         public void GetKey(out Byte[] AByteData)
@@ -8641,7 +8561,6 @@ namespace Lib3MF
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
-
     }
 
     public class CResourceData(IntPtr NewHandle) : CBase(NewHandle)
@@ -8659,7 +8578,7 @@ namespace Lib3MF
             Int32 resultEncryptionAlgorithm = 0;
 
             CheckError(Internal.Lib3MFWrapper.ResourceData_GetEncryptionAlgorithm(Handle, out resultEncryptionAlgorithm));
-            return (eEncryptionAlgorithm)(resultEncryptionAlgorithm);
+            return (eEncryptionAlgorithm)resultEncryptionAlgorithm;
         }
 
         public eCompression GetCompression()
@@ -8667,7 +8586,7 @@ namespace Lib3MF
             Int32 resultCompression = 0;
 
             CheckError(Internal.Lib3MFWrapper.ResourceData_GetCompression(Handle, out resultCompression));
-            return (eCompression)(resultCompression);
+            return (eCompression)resultCompression;
         }
 
         public void GetAdditionalAuthenticationData(out Byte[] AByteData)
@@ -8682,7 +8601,6 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.ResourceData_GetAdditionalAuthenticationData(Handle, sizeByteData, out neededByteData, dataByteData.AddrOfPinnedObject()));
             dataByteData.Free();
         }
-
     }
 
     public class CResourceDataGroup(IntPtr NewHandle) : CBase(NewHandle)
@@ -8742,7 +8660,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.ResourceDataGroup_RemoveAccessRight(Handle, AConsumerHandle));
         }
-
     }
 
     public class CKeyStore(IntPtr NewHandle) : CBase(NewHandle)
@@ -8919,7 +8836,7 @@ namespace Lib3MF
             GCHandle dataUUID = GCHandle.Alloc(bytesUUID, GCHandleType.Pinned);
 
             CheckError(Internal.Lib3MFWrapper.KeyStore_GetUUID(Handle, out resultHasUUID, sizeUUID, out neededUUID, dataUUID.AddrOfPinnedObject()));
-            AHasUUID = (resultHasUUID != 0);
+            AHasUUID = resultHasUUID != 0;
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
@@ -8930,7 +8847,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.KeyStore_SetUUID(Handle, byteUUID));
         }
-
     }
 
     public class CModel(IntPtr NewHandle) : CBase(NewHandle)
@@ -8964,7 +8880,7 @@ namespace Lib3MF
             Int32 resultUnit = 0;
 
             CheckError(Internal.Lib3MFWrapper.Model_GetUnit(Handle, out resultUnit));
-            return (eModelUnit)(resultUnit);
+            return (eModelUnit)resultUnit;
         }
 
         public String GetLanguage()
@@ -9027,7 +8943,7 @@ namespace Lib3MF
             Int32 resultThePropertyType = 0;
 
             CheckError(Internal.Lib3MFWrapper.Model_GetPropertyTypeByID(Handle, AUniqueResourceID, out resultThePropertyType));
-            return (ePropertyType)(resultThePropertyType);
+            return (ePropertyType)resultThePropertyType;
         }
 
         public CBaseMaterialGroup GetBaseMaterialGroupByID(UInt32 AUniqueResourceID)
@@ -9113,7 +9029,7 @@ namespace Lib3MF
             GCHandle dataUUID = GCHandle.Alloc(bytesUUID, GCHandleType.Pinned);
 
             CheckError(Internal.Lib3MFWrapper.Model_GetBuildUUID(Handle, out resultHasUUID, sizeUUID, out neededUUID, dataUUID.AddrOfPinnedObject()));
-            AHasUUID = (resultHasUUID != 0);
+            AHasUUID = resultHasUUID != 0;
             dataUUID.Free();
             return Encoding.UTF8.GetString(bytesUUID).TrimEnd(char.MinValue);
         }
@@ -9447,7 +9363,7 @@ namespace Lib3MF
             Byte resultHasThumbnail = 0;
 
             CheckError(Internal.Lib3MFWrapper.Model_HasPackageThumbnailAttachment(Handle, out resultHasThumbnail));
-            return (resultHasThumbnail != 0);
+            return resultHasThumbnail != 0;
         }
 
         public CAttachment CreatePackageThumbnailAttachment()
@@ -9565,7 +9481,6 @@ namespace Lib3MF
 
             CheckError(Internal.Lib3MFWrapper.Model_RemoveResource(Handle, AResourceHandle));
         }
-
     }
 
     class Wrapper
@@ -9597,7 +9512,7 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.GetPrereleaseInformation(out resultHasPrereleaseInfo, sizePrereleaseInfo, out neededPrereleaseInfo, dataPrereleaseInfo.AddrOfPinnedObject()));
             dataPrereleaseInfo.Free();
             APrereleaseInfo = Encoding.UTF8.GetString(bytesPrereleaseInfo).TrimEnd(char.MinValue);
-            return (resultHasPrereleaseInfo != 0);
+            return resultHasPrereleaseInfo != 0;
         }
 
         public static bool GetBuildInformation(out String ABuildInformation)
@@ -9613,7 +9528,7 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.GetBuildInformation(out resultHasBuildInfo, sizeBuildInformation, out neededBuildInformation, dataBuildInformation.AddrOfPinnedObject()));
             dataBuildInformation.Free();
             ABuildInformation = Encoding.UTF8.GetString(bytesBuildInformation).TrimEnd(char.MinValue);
-            return (resultHasBuildInfo != 0);
+            return resultHasBuildInfo != 0;
         }
 
         public static void GetSpecificationVersion(String ASpecificationURL, out bool AIsSupported, out UInt32 AMajor, out UInt32 AMinor, out UInt32 AMicro)
@@ -9622,7 +9537,7 @@ namespace Lib3MF
             Byte resultIsSupported = 0;
 
             CheckError(Internal.Lib3MFWrapper.GetSpecificationVersion(byteSpecificationURL, out resultIsSupported, out AMajor, out AMinor, out AMicro));
-            AIsSupported = (resultIsSupported != 0);
+            AIsSupported = resultIsSupported != 0;
         }
 
         public static CModel CreateModel()
@@ -9681,7 +9596,7 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.GetLastError(AInstanceHandle, sizeLastErrorString, out neededLastErrorString, dataLastErrorString.AddrOfPinnedObject(), out resultHasLastError));
             dataLastErrorString.Free();
             ALastErrorString = Encoding.UTF8.GetString(bytesLastErrorString).TrimEnd(char.MinValue);
-            return (resultHasLastError != 0);
+            return resultHasLastError != 0;
         }
 
         public static UInt64 GetSymbolLookupMethod()
@@ -9768,7 +9683,5 @@ namespace Lib3MF
             CheckError(Internal.Lib3MFWrapper.GetTranslationTransform(AVectorX, AVectorY, AVectorZ, out intresultTransform));
             return Internal.Lib3MFWrapper.convertInternalToStruct_Transform(intresultTransform);
         }
-
     }
-
 }

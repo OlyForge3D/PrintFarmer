@@ -61,7 +61,7 @@ public class GcodeHarvestController(
             _logger.LogInformation($"Queueing harvest operation for printer {request.PrinterId}");
 
             // Queue the harvest operation for background processing
-            var queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
+            Farm.Infrastructure.Domain.GcodeHarvestQueueItem queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
 
             var response = new QueueHarvestResponseDto(
                 queueItem.Id,
@@ -207,6 +207,7 @@ public class GcodeHarvestController(
         catch (Exception ex)
         {
             _logger.LogErrorWithSource(ex, $"Failed to import selected files for operation {request.HarvestOperationId}");
+
             // Log inner exceptions for better debugging
             if (ex.InnerException != null)
             {
@@ -462,14 +463,14 @@ public class GcodeHarvestController(
     {
         try
         {
-            var items = await _harvestQueue.GetQueuedItemsAsync(status);
+            IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetQueuedItemsAsync(status);
 
             // Filter by printer ID if provided
-            var filtered = printerId.HasValue
+            IEnumerable<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> filtered = printerId.HasValue
                 ? items.Where(i => i.PrinterId == printerId.Value)
                 : items;
 
-            var dtos = filtered.Select(item => new GcodeHarvestQueueItemDto(
+            GcodeHarvestQueueItemDto[] dtos = filtered.Select(item => new GcodeHarvestQueueItemDto(
                 item.Id,
                 item.PrinterId,
                 item.Printer?.Name ?? "Unknown",
@@ -506,9 +507,9 @@ public class GcodeHarvestController(
     {
         try
         {
-            var items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
+            IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
 
-            var dtos = items.Select(item => new GcodeHarvestQueueItemDto(
+            GcodeHarvestQueueItemDto[] dtos = items.Select(item => new GcodeHarvestQueueItemDto(
                 item.Id,
                 item.PrinterId,
                 item.Printer?.Name ?? "Unknown",
@@ -559,7 +560,7 @@ public class GcodeHarvestController(
             _logger.LogInformation($"Harvesting single file '{filename}' on printer {printerId}");
 
             // Call the harvest service to download, process, and add file to library
-            var result = await _harvestService.HarvestSingleFileDirectAsync(printerId, filename, ct);
+            GcodeHarvestResultDto result = await _harvestService.HarvestSingleFileDirectAsync(printerId, filename, ct);
 
             if (!result.Success)
             {

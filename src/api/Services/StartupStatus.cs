@@ -7,8 +7,10 @@ public enum StartupPhase
 {
     /// <summary>Initialization has not yet completed (background tasks may be running).</summary>
     Starting = 0,
+
     /// <summary>Initialization finished successfully; the application is fully ready.</summary>
     Ready = 1,
+
     /// <summary>Initialization failed (timeout or unrecoverable error); manual intervention required.</summary>
     Failed = 2
 }

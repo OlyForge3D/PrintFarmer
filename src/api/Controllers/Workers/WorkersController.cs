@@ -293,11 +293,11 @@ public class WorkersController(
     [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteOfflineWorkersAsync()
     {
-        var allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
+        IReadOnlyList<Worker> allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
         var offlineWorkers = allWorkers.Where(w => w.Status == WorkerStatus.Offline).ToList();
 
         int deletedCount = 0;
-        foreach (var worker in offlineWorkers)
+        foreach (Worker? worker in offlineWorkers)
         {
             await _workerRepository.DeleteAsync(worker.Id);
             deletedCount++;
@@ -319,15 +319,15 @@ public class WorkersController(
     [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteStaleWorkersAsync([FromQuery] int staleAfterMinutes = 1440)
     {
-        var cutoffTime = DateTime.UtcNow.AddMinutes(-staleAfterMinutes);
-        var allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
+        DateTime cutoffTime = DateTime.UtcNow.AddMinutes(-staleAfterMinutes);
+        IReadOnlyList<Worker> allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
 
         var staleWorkers = allWorkers
             .Where(w => w.LastHeartbeat == null || w.LastHeartbeat < cutoffTime)
             .ToList();
 
         int deletedCount = 0;
-        foreach (var worker in staleWorkers)
+        foreach (Worker? worker in staleWorkers)
         {
             await _workerRepository.DeleteAsync(worker.Id);
             deletedCount++;

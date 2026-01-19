@@ -18,6 +18,7 @@ public class SignalRTestController(
     /// <summary>
     /// Test endpoint to verify SignalR hub can send messages
     /// </summary>
+    /// <param name="request">The test message request containing connection details and message.</param>
     [HttpPost("send-test-message")]
     public async Task<IActionResult> SendTestMessageAsync([FromBody] SignalRTestRequest request)
     {
@@ -37,6 +38,7 @@ public class SignalRTestController(
     /// <summary>
     /// Test discovery group functionality specifically
     /// </summary>
+    /// <param name="request">The discovery test request containing session and delay configuration.</param>
     [HttpPost("test-discovery-group")]
     public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] DiscoveryTestRequest request)
     {

@@ -11,6 +11,12 @@ public static class LoggingExtensions
     /// <summary>
     /// Log a debug message with automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogDebugWithSource(
         this IUnifiedLoggingService logger,
         string message,
@@ -19,14 +25,21 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogDebug(enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log a debug message with exception and automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogDebugWithSource(
         this IUnifiedLoggingService logger,
         Exception exception,
@@ -36,14 +49,20 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogDebug(exception, enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log an information message with automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogInformationWithSource(
         this IUnifiedLoggingService logger,
         string message,
@@ -52,14 +71,20 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogInformation(enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log a warning message with automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogWarningWithSource(
         this IUnifiedLoggingService logger,
         string message,
@@ -68,14 +93,21 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogWarning(enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log a warning message with exception and automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogWarningWithSource(
         this IUnifiedLoggingService logger,
         Exception exception,
@@ -85,14 +117,20 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogWarning(exception, enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log an error message with automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogErrorWithSource(
         this IUnifiedLoggingService logger,
         string message,
@@ -101,14 +139,21 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogError(enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log an error message with exception and automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogErrorWithSource(
         this IUnifiedLoggingService logger,
         Exception exception,
@@ -118,14 +163,20 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogError(exception, enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log a critical message with automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogCriticalWithSource(
         this IUnifiedLoggingService logger,
         string message,
@@ -134,14 +185,21 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogCritical(enrichedMessage, correlationId, metadata);
     }
 
     /// <summary>
     /// Log a critical message with exception and automatic caller information
     /// </summary>
+    /// <param name="logger">The unified logging service instance.</param>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The log message.</param>
+    /// <param name="correlationId">Optional correlation ID for tracing.</param>
+    /// <param name="metadata">Optional metadata to include with the log entry.</param>
+    /// <param name="callerMemberName">Automatically captured caller member name.</param>
+    /// <param name="callerFilePath">Automatically captured caller file path.</param>
     public static void LogCriticalWithSource(
         this IUnifiedLoggingService logger,
         Exception exception,
@@ -151,8 +209,8 @@ public static class LoggingExtensions
         [CallerMemberName] string callerMemberName = "",
         [CallerFilePath] string callerFilePath = "")
     {
-        var sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
-        var enrichedMessage = $"[{sourceContext}] {message}";
+        string sourceContext = FormatSourceContext(callerFilePath, callerMemberName);
+        string enrichedMessage = $"[{sourceContext}] {message}";
         logger.LogCritical(exception, enrichedMessage, correlationId, metadata);
     }
 
@@ -160,6 +218,8 @@ public static class LoggingExtensions
     /// Format source context from file path and method name
     /// Example: "GcodeHarvestService.ImportSelectedFilesAsync"
     /// </summary>
+    /// <param name="filePath">The full file path of the caller.</param>
+    /// <param name="methodName">The method name of the caller.</param>
     private static string FormatSourceContext(string filePath, string methodName)
     {
         // Extract the class name from file path

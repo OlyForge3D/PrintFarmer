@@ -11,8 +11,8 @@ namespace Farm.Web.Api.Middleware
 
         public bool TryConsume(string key, int limit, TimeSpan window)
         {
-            var now = DateTime.UtcNow;
-            var entry = _counts.GetOrAdd(key, _ => (0, now));
+            DateTime now = DateTime.UtcNow;
+            (int Count, DateTime WindowStart) entry = _counts.GetOrAdd(key, _ => (0, now));
             if ((now - entry.WindowStart) > window)
             {
                 _counts[key] = (1, now);

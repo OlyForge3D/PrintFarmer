@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Services.Interfaces;
@@ -11,58 +10,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services
 {
-    /// <summary>
-    /// DTOs for asset responses
-    /// </summary>
-    public class PrinterAssetDto
-    {
-        [JsonPropertyName("id")]
-        public string Id { get; set; } = string.Empty;
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("cover")]
-        public string? Cover { get; set; }
-
-        [JsonPropertyName("bedTexture")]
-        public string? BedTexture { get; set; }
-    }
-
-    public class ManufacturerAssetsDto
-    {
-        [JsonPropertyName("id")]
-        public string Id { get; set; } = string.Empty;
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("printers")]
-        public List<PrinterAssetDto> Printers { get; set; } = new();
-    }
-
-    public class AssetManifestDto
-    {
-        [JsonPropertyName("manufacturers")]
-        public List<ManufacturerAssetsDto> Manufacturers { get; set; } = new();
-    }
-
-    /// <summary>
-    /// Service interface for asset management
-    /// </summary>
-    public interface IAssetService
-    {
-        Task<AssetManifestDto?> GetManifestAsync(CancellationToken ct = default);
-
-        Task<ManufacturerAssetsDto?> GetManufacturerAsync(string manufacturerId, CancellationToken ct = default);
-
-        Task<PrinterAssetDto?> GetPrinterAssetAsync(string manufacturerId, string modelId, CancellationToken ct = default);
-
-        Task<string?> GetCoverImageUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default);
-
-        Task<string?> GetBedTextureUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default);
-    }
-
     /// <summary>
     /// Service implementation for OrcaSlicer asset management
     /// Loads assets from the React app's public folder and provides access to asset URLs
@@ -76,6 +23,8 @@ namespace Farm.Web.Api.Services
         /// Get the complete asset manifest
         /// In a real implementation, this would be loaded from the React app or a static asset service
         /// </summary>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The asset manifest or null if not available.</returns>
         public Task<AssetManifestDto?> GetManifestAsync(CancellationToken ct = default)
         {
             try
@@ -96,6 +45,9 @@ namespace Farm.Web.Api.Services
         /// <summary>
         /// Get assets for a specific manufacturer
         /// </summary>
+        /// <param name="manufacturerId">The manufacturer ID to get assets for.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The manufacturer's assets or null if not found.</returns>
         public Task<ManufacturerAssetsDto?> GetManufacturerAsync(string manufacturerId, CancellationToken ct = default)
         {
             try
@@ -120,6 +72,10 @@ namespace Farm.Web.Api.Services
         /// <summary>
         /// Get printer asset by manufacturer and model
         /// </summary>
+        /// <param name="manufacturerId">The manufacturer ID.</param>
+        /// <param name="modelId">The printer model ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The printer asset or null if not found.</returns>
         public Task<PrinterAssetDto?> GetPrinterAssetAsync(string manufacturerId, string modelId, CancellationToken ct = default)
         {
             try
@@ -145,8 +101,7 @@ namespace Farm.Web.Api.Services
                     "[AssetService] Printer asset: {ManufacturerId}/{ModelId} -> {CoverUrl}",
                     manufacturerId,
                     modelId,
-                    asset.Cover
-                );
+                    asset.Cover);
 
                 return Task.FromResult<PrinterAssetDto?>(asset);
             }
@@ -156,8 +111,7 @@ namespace Farm.Web.Api.Services
                     ex,
                     "[AssetService] Error getting printer asset {ManufacturerId}/{ModelId}",
                     manufacturerId,
-                    modelId
-                );
+                    modelId);
                 return Task.FromResult<PrinterAssetDto?>(null);
             }
         }
@@ -165,6 +119,10 @@ namespace Farm.Web.Api.Services
         /// <summary>
         /// Get cover image URL for a printer
         /// </summary>
+        /// <param name="manufacturerId">The manufacturer ID.</param>
+        /// <param name="modelId">The printer model ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The cover image URL or null if not found.</returns>
         public async Task<string?> GetCoverImageUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default)
         {
             PrinterAssetDto? asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
@@ -174,6 +132,10 @@ namespace Farm.Web.Api.Services
         /// <summary>
         /// Get bed texture image URL for a printer
         /// </summary>
+        /// <param name="manufacturerId">The manufacturer ID.</param>
+        /// <param name="modelId">The printer model ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The bed texture URL or null if not found.</returns>
         public async Task<string?> GetBedTextureUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default)
         {
             PrinterAssetDto? asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
@@ -183,13 +145,15 @@ namespace Farm.Web.Api.Services
         /// <summary>
         /// Normalize ID for URL usage (lowercase, replace spaces with underscores)
         /// </summary>
+        /// <param name="id">The ID to normalize.</param>
+        /// <returns>The normalized ID suitable for URLs.</returns>
         private static string NormalizeId(string id)
         {
             return id
                 .ToLowerInvariant()
                 .Replace(' ', '_')
-                .Replace("(", "")
-                .Replace(")", "")
+                .Replace("(", string.Empty)
+                .Replace(")", string.Empty)
                 .Replace("+", "plus")
                 .Replace("&", "and");
         }

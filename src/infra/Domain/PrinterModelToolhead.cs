@@ -3,7 +3,7 @@
 /// <summary>
 /// Represents a default toolhead configuration for a printer model.
 /// When a printer is created from this model, these toolheads become the template.
-/// 
+///
 /// Similar to the Toolhead class, but for templates at the model level.
 /// For multi-toolhead printer models (Prusa XL, Bambu Lab X1, etc.), there will be multiple entries.
 /// </summary>

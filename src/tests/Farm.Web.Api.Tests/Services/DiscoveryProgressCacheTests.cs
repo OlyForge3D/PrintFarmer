@@ -30,7 +30,7 @@ public class DiscoveryProgressCacheTests
 
         _cache.Set("test-session", progress);
 
-        bool found = _cache.TryGet("test-session", out var retrieved);
+        bool found = _cache.TryGet("test-session", out DiscoveryProgressDto? retrieved);
         found.Should().BeTrue();
         retrieved.Should().NotBeNull();
         retrieved!.SessionId.Should().Be("test-session");
@@ -41,7 +41,7 @@ public class DiscoveryProgressCacheTests
     [Fact]
     public void TryGet_ReturnsFalseForNonExistentSession()
     {
-        bool found = _cache.TryGet("nonexistent", out var progress);
+        bool found = _cache.TryGet("nonexistent", out DiscoveryProgressDto? progress);
 
         found.Should().BeFalse();
         progress.Should().BeNull();
@@ -110,7 +110,7 @@ public class DiscoveryProgressCacheTests
         var progress = new DiscoveryProgressDto("Test-Session", "", "", 0, 0, 0, 0, 0, DiscoveryStatus.Scanning);
         _cache.Set("TEST-SESSION", progress);
 
-        bool found = _cache.TryGet("test-session", out var retrieved);
+        bool found = _cache.TryGet("test-session", out DiscoveryProgressDto? retrieved);
         found.Should().BeTrue();
         retrieved.Should().NotBeNull();
     }
@@ -124,7 +124,7 @@ public class DiscoveryProgressCacheTests
         _cache.Set("session", progress1);
         _cache.Set("session", progress2);
 
-        _cache.TryGet("session", out var retrieved);
+        _cache.TryGet("session", out DiscoveryProgressDto? retrieved);
         retrieved!.ScannedIps.Should().Be(10);
     }
 
@@ -137,8 +137,8 @@ public class DiscoveryProgressCacheTests
         _cache.Set("session1", progress1);
         _cache.Set("session2", progress2);
 
-        _cache.TryGet("session1", out var retrieved1);
-        _cache.TryGet("session2", out var retrieved2);
+        _cache.TryGet("session1", out DiscoveryProgressDto? retrieved1);
+        _cache.TryGet("session2", out DiscoveryProgressDto? retrieved2);
 
         retrieved1!.ScannedIps.Should().Be(5);
         retrieved2!.ScannedIps.Should().Be(10);

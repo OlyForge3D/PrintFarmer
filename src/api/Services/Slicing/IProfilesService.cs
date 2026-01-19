@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Services.Slicing
     /// - Bulk import operations from worker or database
     /// - Profile cloning from template machines to custom printer instances
     /// - Default profile configuration per slicer type
-    /// 
+    ///
     /// All profile operations maintain data integrity through validation, hash checking,
     /// and proper error handling. External worker communication is coordinated through
     /// this service layer, abstracting HTTP details from controllers.
@@ -42,7 +42,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// Parses metadata from raw JSON to extract properties like layer height, infill, and material.
         /// Throws ArgumentException if rawJson or slicerType are invalid.
         /// </remarks>
-        Task<(ProcessProfileExtendedDto dto, bool created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct);
+        Task<(ProcessProfileExtendedDto Dto, bool Created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct);
 
         /// <summary>
         /// Exports a profile to a storable format including raw JSON and metadata.

@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Services.FolderManagement
     /// - Managing folder types (gcode, models, etc.) for proper categorization
     /// - Supporting path-based folder organization for file system structure
     /// - Maintaining referential integrity through repository pattern with atomic transactions
-    /// 
+    ///
     /// All operations use IUnitOfWork to ensure consistency across folder and file operations
     /// through shared DbContext, preventing foreign key constraint violations.
     /// </remarks>
@@ -35,6 +35,9 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// <summary>
         /// Get an existing folder or create it if it doesn't exist.
         /// </summary>
+        /// <param name="directoryPath">The path of the folder to get or create.</param>
+        /// <param name="folderType">The type of folder (e.g., "gcode", "models").</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
             return await _unitOfWork.Folders.GetOrCreateFolderAsync(directoryPath, folderType, ct);
@@ -45,6 +48,9 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// Used by file services to build folder hierarchies for UI tree views.
         /// Returns a simple flat list of all folder paths ordered for consistent tree building.
         /// </summary>
+        /// <param name="folderType">The type of folder to retrieve (e.g., "gcode", "models").</param>
+        /// <param name="parentPath">The parent path to start from (defaults to root "/").</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task<List<string>> GetAllFolderPathsRecursiveAsync(
             string folderType,
             string? parentPath = "/",
@@ -63,13 +69,13 @@ namespace Farm.Web.Api.Services.FolderManagement
             }
 
             // Get all folders of this type from the repository
-            var allFolders = await _unitOfWork.Folders.GetAllByFolderTypeAsync(folderType, ct);
+            List<FolderNode> allFolders = await _unitOfWork.Folders.GetAllByFolderTypeAsync(folderType, ct);
 
             // Filter folders to those under the parent path and extract their paths
             var folderPaths = allFolders
                 .Where(f => f.Path.StartsWith(normalizedParent) && f.Path != normalizedParent)
                 .Select(f => f.Path)
-                .OrderBy(p => p)  // Consistent ordering for tree building
+                .OrderBy(p => p) // Consistent ordering for tree building
                 .ToList();
 
             return folderPaths;

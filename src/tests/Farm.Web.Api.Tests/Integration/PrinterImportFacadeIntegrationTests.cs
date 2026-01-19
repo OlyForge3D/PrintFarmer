@@ -3,6 +3,7 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,7 +31,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
 
     private IFormFile CreateCsvFormFile(string filename, string csvContent)
     {
-        var bytes = Encoding.UTF8.GetBytes(csvContent);
+        byte[] bytes = Encoding.UTF8.GetBytes(csvContent);
         var stream = new MemoryStream(bytes);
         return new FormFile(stream, 0, bytes.Length, "file", filename)
         {
@@ -41,7 +42,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
 
     private IFormFile CreateJsonFormFile(string filename, string jsonContent)
     {
-        var bytes = Encoding.UTF8.GetBytes(jsonContent);
+        byte[] bytes = Encoding.UTF8.GetBytes(jsonContent);
         var stream = new MemoryStream(bytes);
         return new FormFile(stream, 0, bytes.Length, "file", filename)
         {
@@ -56,16 +57,16 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithEmptyCsvFile_ThrowsArgumentException()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var csvContent = "";
-        var file = CreateCsvFormFile("empty.csv", csvContent);
+        string csvContent = "";
+        IFormFile file = CreateCsvFormFile("empty.csv", csvContent);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             {
                 await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
             }
@@ -77,16 +78,16 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithHeaderOnlyCsvFile_ThrowsInvalidOperationException()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var csvContent = "Name,IpAddress,Backend\n";
-        var file = CreateCsvFormFile("header-only.csv", csvContent);
+        string csvContent = "Name,IpAddress,Backend\n";
+        IFormFile file = CreateCsvFormFile("header-only.csv", csvContent);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("No valid printer");
@@ -96,16 +97,16 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithInvalidJsonFile_ThrowsInvalidOperationException()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var jsonContent = "{ invalid json }";
-        var file = CreateJsonFormFile("invalid.json", jsonContent);
+        string jsonContent = "{ invalid json }";
+        IFormFile file = CreateJsonFormFile("invalid.json", jsonContent);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
     }
@@ -114,11 +115,11 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithInvalidFileExtension_ThrowsArgumentException()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var content = "some content";
-        var bytes = Encoding.UTF8.GetBytes(content);
+        string content = "some content";
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
         var stream = new MemoryStream(bytes);
         var file = new FormFile(stream, 0, bytes.Length, "file", "printers.txt")
         {
@@ -127,9 +128,9 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
         };
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("CSV or JSON");
@@ -139,17 +140,17 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithMissingRequiredCsvColumns_ThrowsInvalidOperationException()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         // Missing 'Backend' required column
-        var csvContent = "Name,IpAddress\nPrinter1,192.168.1.100\n";
-        var file = CreateCsvFormFile("missing-cols.csv", csvContent);
+        string csvContent = "Name,IpAddress\nPrinter1,192.168.1.100\n";
+        IFormFile file = CreateCsvFormFile("missing-cols.csv", csvContent);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("required columns");
@@ -161,10 +162,10 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithValidJsonFile_ParsesSuccessfully()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var jsonContent = JsonSerializer.Serialize(new[]
+        string jsonContent = JsonSerializer.Serialize(new[]
         {
             new CreatePrinterDto
             {
@@ -179,11 +180,11 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
                 Backend = PrinterBackend.PrusaLink
             }
         });
-        var file = CreateJsonFormFile("printers.json", jsonContent);
+        IFormFile file = CreateJsonFormFile("printers.json", jsonContent);
 
         // Act
         object result;
-        using (var stream = file.OpenReadStream())
+        using (Stream stream = file.OpenReadStream())
         {
             result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
         }
@@ -196,19 +197,19 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     public async Task ImportFromFileAsync_WithValidCsvFile_ParsesSuccessfully()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var csvContent = @"Name,IpAddress,Backend,Notes
+        string csvContent = @"Name,IpAddress,Backend,Notes
 Prusa1,192.168.1.100,Moonraker,First printer
 Prusa2,192.168.1.101,PrusaLink,Second printer
 Prusa3,192.168.1.102,SDCP,Third printer
 ";
-        var file = CreateCsvFormFile("printers-detailed.csv", csvContent);
+        IFormFile file = CreateCsvFormFile("printers-detailed.csv", csvContent);
 
         // Act
         object result;
-        using (var stream = file.OpenReadStream())
+        using (Stream stream = file.OpenReadStream())
         {
             result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
         }
@@ -221,19 +222,19 @@ Prusa3,192.168.1.102,SDCP,Third printer
     public async Task ImportFromFileAsync_WithQuotedFieldsInCsv_HandlesCommasInFields()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         // CSV with quoted fields containing commas
-        var csvContent = @"Name,IpAddress,Backend,Notes
+        string csvContent = @"Name,IpAddress,Backend,Notes
 ""Printer, Special Model"",192.168.1.100,Moonraker,""Note with, comma inside""
 SimpleNamePrinter,192.168.1.101,Moonraker,SimpleNote
 ";
-        var file = CreateCsvFormFile("quoted.csv", csvContent);
+        IFormFile file = CreateCsvFormFile("quoted.csv", csvContent);
 
         // Act
         object result;
-        using (var stream = file.OpenReadStream())
+        using (Stream stream = file.OpenReadStream())
         {
             result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
         }
@@ -246,20 +247,20 @@ SimpleNamePrinter,192.168.1.101,Moonraker,SimpleNote
     public async Task ImportFromFileAsync_WithMultiplePrinterBackends_ParsesAllTypes()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var csvContent = @"Name,IpAddress,Backend
+        string csvContent = @"Name,IpAddress,Backend
 MoonrakerPrinter,192.168.1.100,Moonraker
 PrusaLinkPrinter,192.168.1.101,PrusaLink
 SDCPPrinter,192.168.1.102,SDCP
 OctoPrintPrinter,192.168.1.103,OctoPrint
 ";
-        var file = CreateCsvFormFile("mixed-backends.csv", csvContent);
+        IFormFile file = CreateCsvFormFile("mixed-backends.csv", csvContent);
 
         // Act
         object result;
-        using (var stream = file.OpenReadStream())
+        using (Stream stream = file.OpenReadStream())
         {
             result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
         }
@@ -272,18 +273,18 @@ OctoPrintPrinter,192.168.1.103,OctoPrint
     public async Task ImportFromFileAsync_WithOptionalFields_ParsesSuccessfully()
     {
         // Arrange
-        var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
-        var csvContent = @"Name,IpAddress,Backend,Notes,ManufacturerName,ModelName,ApiKey,IsEnabled,BackendPort,CameraStreamUrl
+        string csvContent = @"Name,IpAddress,Backend,Notes,ManufacturerName,ModelName,ApiKey,IsEnabled,BackendPort,CameraStreamUrl
 Printer1,192.168.1.100,Moonraker,Test,Prusa,CORE One,key123,true,7125,http://cam.local
 Printer2,192.168.1.101,PrusaLink,Test2,Prusa,Mk3S+,key456,false,8008,http://cam2.local
 ";
-        var file = CreateCsvFormFile("with-optional.csv", csvContent);
+        IFormFile file = CreateCsvFormFile("with-optional.csv", csvContent);
 
         // Act
         object result;
-        using (var stream = file.OpenReadStream())
+        using (Stream stream = file.OpenReadStream())
         {
             result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
         }

@@ -6,7 +6,6 @@ using Svg.Skia;
 //  [0] => repo root (optional; auto-detected if omitted)
 //  [1] => svg source path (optional)
 //  [2] => output directory (optional)
-
 string? repoRoot = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0])
     ? Path.GetFullPath(args[0])
     : FindRepoRoot();
@@ -43,7 +42,7 @@ string outDir = args.Length > 2 && !string.IsNullOrWhiteSpace(args[2])
 
 Directory.CreateDirectory(outDir);
 
-(int size, string name)[] sizes = new (int size, string name)[]
+(int Size, string Name)[] sizes = new (int Size, string Name)[]
 {
     (16, "favicon-16x16.png"),
     (32, "favicon-32x32.png"),
@@ -78,8 +77,10 @@ foreach ((int size, string? name) in sizes)
     canvas.Clear(SKColors.Transparent);
 
     SKRect svgBounds = picture.CullRect;
+
     // Uniform scale to fit
     float scale = Math.Min(size / svgBounds.Width, size / svgBounds.Height);
+
     // Centering translation after scale
     float scaledWidth = svgBounds.Width * scale;
     float scaledHeight = svgBounds.Height * scale;

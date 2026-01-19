@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Services.Queue
     /// - Estimated completion time calculations
     /// - Job status transitions (queued, assigned, starting, printing, completed)
     /// - Comprehensive logging of all queue operations for debugging and analysis
-    /// 
+    ///
     /// The service uses IQueueDataService for specialized data queries and IQueueRepository
     /// for persistence operations, maintaining proper separation of concerns.
     /// </remarks>
@@ -73,7 +73,7 @@ namespace Farm.Web.Api.Services.Queue
                 PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
 
                 // Get primary toolhead info (first toolhead or the one marked as primary)
-                var primaryToolhead = printer.Toolheads?.FirstOrDefault(t => t.IsPrimary)
+                Toolhead? primaryToolhead = printer.Toolheads?.FirstOrDefault(t => t.IsPrimary)
                     ?? printer.Toolheads?.FirstOrDefault();
 
                 // Collect all supported materials from all toolheads
@@ -344,7 +344,7 @@ namespace Farm.Web.Api.Services.Queue
         /// - Assigned Printer: Reassignment to a different printer (validates printer exists)
         /// - Actual Filament Usage: Recorded usage for completed/failed jobs
         /// - Failure Reason: Description of failure conditions for failed jobs
-        /// 
+        ///
         /// All fields in the update request are optional. Only provided fields are modified. The update timestamp
         /// is automatically set to current UTC time. Printer assignment changes trigger a reload of the complete job data
         /// to ensure printer information is current. Returns null if job not found or if assigned printer ID is invalid.
@@ -373,6 +373,7 @@ namespace Farm.Web.Api.Services.Queue
             if (request.AssignedPrinterId.HasValue)
             {
                 List<Printer> printer = await _dataService.GetAvailablePrintersAsync(ct);
+
                 // Validate printer exists
                 Printer? found = printer.Find(p => p.Id == request.AssignedPrinterId.Value);
                 if (found == null)

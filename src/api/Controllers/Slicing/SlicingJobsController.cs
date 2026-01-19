@@ -28,7 +28,7 @@ public class SlicingJobsController(
 
     private static object EnsureTempDirectoryExists(Infrastructure.Temp.ITempPathProvider provider)
     {
-        var tempRoot = Path.GetFullPath(provider.GetTempRoot());
+        string tempRoot = Path.GetFullPath(provider.GetTempRoot());
         _ = Directory.CreateDirectory(tempRoot);
         return new object(); // Return dummy value since we only care about side effect
     }
@@ -54,6 +54,7 @@ public class SlicingJobsController(
         }
 
         SlicingJobDto j = job;
+
         // Extract profile information from composite SlicerProfileDto
         string profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
         string profileMaterial = j.Profile?.FilamentProfile?.Material ?? "Unknown";
@@ -61,6 +62,7 @@ public class SlicingJobsController(
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,
+
             // Prefer plural form in emitted URLs
             GcodeUrl = j.Status == SlicingJobStatus.Completed ? _fileOperations.BuildSlicerJobGcodeUrl(Guid.Parse(j.JobId)) : string.Empty,
             PrintTime = j.EstimatedPrintTime ?? 0,
@@ -117,6 +119,7 @@ public class SlicingJobsController(
         DateTime sunsetDate = new(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
         _ = Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
         _ = Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
+
         // Issue 302 redirect to canonical plural endpoint
         return Redirect($"/api/slicer/jobs/{jobId}");
     }
@@ -142,6 +145,7 @@ public class SlicingJobsController(
 
         string originalPath = job.GcodeFilePath!;
         string tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+
         // Rebuild path from trusted root to mitigate stored path tampering
         string fileName = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(fileName))

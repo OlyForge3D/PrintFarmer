@@ -52,7 +52,8 @@ public class ArtifactCleanupService(
             long totalSize = await _artifactsRepo.GetTotalSizeAsync(ct);
             if (totalSize > _settings.MaxTotalBytes.Value)
             {
-                _logger.LogInformation("Total storage {TotalSize} exceeds threshold {MaxTotalBytes}, selecting oldest artifacts for cleanup",
+                _logger.LogInformation(
+                    "Total storage {TotalSize} exceeds threshold {MaxTotalBytes}, selecting oldest artifacts for cleanup",
                     totalSize, _settings.MaxTotalBytes.Value);
 
                 List<Artifact> allArtifacts = (await _artifactsRepo.GetAllAsync(ct)).ToList();
@@ -83,7 +84,8 @@ public class ArtifactCleanupService(
             return 0;
         }
 
-        _logger.LogInformation("Identified {Count} artifacts for cleanup (dry-run={DryRun})",
+        _logger.LogInformation(
+            "Identified {Count} artifacts for cleanup (dry-run={DryRun})",
             candidatesForDeletion.Count, _settings.EnableCleanupDryRun);
 
         if (_settings.EnableCleanupDryRun)

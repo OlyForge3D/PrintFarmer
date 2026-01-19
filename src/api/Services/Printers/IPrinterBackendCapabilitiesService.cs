@@ -5,7 +5,7 @@ namespace Farm.Web.Api.Services.Printers;
 /// <summary>
 /// Service for exposing backend capabilities (what features a printer's backend supports)
 /// as opposed to hardware capabilities (nozzle size, build volume, etc.).
-/// 
+///
 /// Backend capabilities are determined by which interfaces the backend client implements
 /// (ISupportsCamera, ISupportsFileUpload, etc.) and are exposed to the UI so it can
 /// enable/disable features appropriately.

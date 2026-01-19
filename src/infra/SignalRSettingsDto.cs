@@ -7,8 +7,9 @@
 /// <param name="ConsoleLoggingEnabled">Whether SignalR console logging is enabled in the client</param>
 public sealed record SignalRSettingsDto(
     string LogLevel,
-    bool ConsoleLoggingEnabled
-)
+    bool ConsoleLoggingEnabled)
 {
-    public SignalRSettingsDto() : this("Information", true) { }
+    public SignalRSettingsDto() : this("Information", true)
+    {
+    }
 }

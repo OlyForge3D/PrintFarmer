@@ -83,7 +83,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
         // Get all unique subdirectories that are direct children of the parent from Folder entities
-        var subdirs = await _db.Folders
+        List<string> subdirs = await _db.Folders
             .Where(f => f.FolderType == "models" && f.Path.StartsWith(normalizedParent))
             .Select(f => f.Path)
             .Distinct()
@@ -91,13 +91,13 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
 
         // Filter to only direct children (one level down)
         var directChildren = new HashSet<string>();
-        foreach (var dir in subdirs)
+        foreach (string dir in subdirs)
         {
             // If parent is empty, we want top-level directories
             if (string.IsNullOrEmpty(normalizedParent))
             {
                 // Find the first segment
-                var segments = dir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                string[] segments = dir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
                 if (segments.Length > 0)
                 {
                     directChildren.Add(segments[0]);
@@ -109,7 +109,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
                 if (dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
                 {
                     string relative = dir.Substring(normalizedParent.Length).TrimStart(Path.DirectorySeparatorChar);
-                    var segments = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                    string[] segments = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
                     if (segments.Length > 0)
                     {
                         directChildren.Add(segments[0]);
@@ -119,14 +119,14 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         }
 
         // Also include folders from the Folder table that exist at this level
-        var foldersFolders = await _db.Folders
+        List<FolderNode> foldersFolders = await _db.Folders
             .Where(f => f.FolderType == "models" && !f.DeletedAt.HasValue)
             .AsNoTracking()
             .ToListAsync();
 
-        foreach (var folder in foldersFolders)
+        foreach (FolderNode? folder in foldersFolders)
         {
-            var folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            string[] folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
 
             if (string.IsNullOrEmpty(normalizedParent))
             {
@@ -158,7 +158,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);
     }
 
-    public async Task<(List<Model3D> models, int totalCount)> QueryModelsAsync(
+    public async Task<(List<Model3D> Models, int TotalCount)> QueryModelsAsync(
         string? path,
         string? search,
         Guid[]? tagIds,
@@ -239,7 +239,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
             .ToListAsync(ct);
 
         // Apply client-side filtering for text search and tags
-        var queryable = allModels.AsEnumerable();
+        IEnumerable<Model3D> queryable = allModels.AsEnumerable();
 
         // Text search (case-insensitive)
         if (!string.IsNullOrWhiteSpace(query))
@@ -260,7 +260,7 @@ public class EfModel3DFileRepository(AppDbContext db) : IModel3DFileRepository
         }
 
         // Sorting
-        queryable = (sortBy?.ToLower()) switch
+        queryable = sortBy?.ToLower() switch
         {
             "name" => descending ? queryable.OrderByDescending(m => m.FileName) : queryable.OrderBy(m => m.FileName),
             "size" => descending ? queryable.OrderByDescending(m => m.FileSizeBytes) : queryable.OrderBy(m => m.FileSizeBytes),

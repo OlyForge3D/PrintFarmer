@@ -26,10 +26,10 @@ public class PrintJobQueueControllerTests
         var controller = new PrintJobQueueController(svcMock.Object, loggerMock.Object);
 
         var req = new EnqueuePrintJobRequest(dto.GcodeFileId, null, "normal", 0.4, "PLA");
-        var result = await controller.EnqueueAsync(req, CancellationToken.None);
+        ActionResult<PrintJobDto> result = await controller.EnqueueAsync(req, CancellationToken.None);
 
-        var createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
-        var returned = Assert.IsType<PrintJobDto>(createdResult.Value);
+        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        PrintJobDto returned = Assert.IsType<PrintJobDto>(createdResult.Value);
         Assert.Equal(dto.Id, returned.Id);
     }
 
@@ -43,10 +43,10 @@ public class PrintJobQueueControllerTests
         svcMock.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
 
         var controller = new PrintJobQueueController(svcMock.Object, loggerMock.Object);
-        var result = await controller.GetAllAsync(CancellationToken.None);
+        ActionResult<IEnumerable<PrintJobDto>> result = await controller.GetAllAsync(CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var returned = Assert.IsAssignableFrom<IEnumerable<PrintJobDto>>(ok.Value!);
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        IEnumerable<PrintJobDto> returned = Assert.IsAssignableFrom<IEnumerable<PrintJobDto>>(ok.Value!);
         Assert.NotEmpty(returned);
     }
 }

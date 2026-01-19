@@ -159,7 +159,8 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
     {
         return _db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u =>
+            .FirstOrDefaultAsync(
+                u =>
                 u.Username == username && u.Email == email &&
                 u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
     }

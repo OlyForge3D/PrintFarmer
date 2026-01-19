@@ -4,6 +4,7 @@ using System.Linq;
 using Farm.Infrastructure.Domain;
 using Lucene.Net.Analysis.Core;
 using Lucene.Net.QueryParsers.Classic;
+using Lucene.Net.Search;
 using Lucene.Net.Util;
 
 namespace Farm.Infrastructure.Services.SystemLogs;
@@ -20,6 +21,7 @@ public static class LuceneLogQueryParser
     /// <summary>
     /// Parses a Lucene query string and returns a filter function.
     /// </summary>
+    /// <param name="queryString">The Lucene query string to parse (supports fields: level, message, correlationId, source, metadata).</param>
     public static Func<SystemLog, bool> Parse(string? queryString)
     {
         if (string.IsNullOrWhiteSpace(queryString))
@@ -31,7 +33,7 @@ public static class LuceneLogQueryParser
         {
             // Parse the Lucene query
             var parser = new QueryParser(LuceneVersion.AsVersionEnum(), "message", new SimpleAnalyzer(LuceneVersion.AsVersionEnum()));
-            var query = parser.Parse(queryString);
+            Query query = parser.Parse(queryString);
 
             // Convert Lucene query to lambda expression
             return CreateFilter(query);
@@ -48,18 +50,18 @@ public static class LuceneLogQueryParser
     /// </summary>
     private static Func<SystemLog, bool> ParseSimpleFields(string queryString)
     {
-        var terms = queryString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        string[] terms = queryString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
         var filters = new List<Func<SystemLog, bool>>();
 
-        foreach (var term in terms)
+        foreach (string term in terms)
         {
             if (term.Contains(':'))
             {
-                var parts = term.Split(':', 2);
-                var field = parts[0].ToLowerInvariant();
-                var value = parts[1].Trim('"', '\'');
+                string[] parts = term.Split(':', 2);
+                string field = parts[0].ToLowerInvariant();
+                string value = parts[1].Trim('"', '\'');
 
-                var filter = field switch
+                Func<SystemLog, bool> filter = field switch
                 {
                     "level" => (Func<SystemLog, bool>)(log => log.Level?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false),
                     "message" => log => log.Message?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false,
@@ -85,13 +87,14 @@ public static class LuceneLogQueryParser
     /// <summary>
     /// Converts a parsed Lucene query to a filter function.
     /// </summary>
+    /// <param name="query">The parsed Lucene query object to convert.</param>
     private static Func<SystemLog, bool> CreateFilter(Lucene.Net.Search.Query query)
     {
         // For simple term queries, extract the field and value
         if (query is Lucene.Net.Search.TermQuery termQuery)
         {
-            var field = termQuery.Term.Field;
-            var value = termQuery.Term.Text;
+            string field = termQuery.Term.Field;
+            string value = termQuery.Term.Text;
 
             return field switch
             {
@@ -109,9 +112,9 @@ public static class LuceneLogQueryParser
         {
             var filters = new List<Func<SystemLog, bool>>();
 
-            foreach (var clause in boolQuery.Clauses)
+            foreach (BooleanClause? clause in boolQuery.Clauses)
             {
-                var filter = CreateFilter(clause.Query);
+                Func<SystemLog, bool> filter = CreateFilter(clause.Query);
 
                 if (clause.Occur == Lucene.Net.Search.Occur.MUST)
                 {
@@ -131,10 +134,10 @@ public static class LuceneLogQueryParser
         // For wildcard queries
         if (query is Lucene.Net.Search.WildcardQuery wildcardQuery)
         {
-            var field = wildcardQuery.Term.Field;
-            var pattern = wildcardQuery.Term.Text
-                .Replace("*", "")
-                .Replace("?", "");
+            string field = wildcardQuery.Term.Field;
+            string pattern = wildcardQuery.Term.Text
+                .Replace("*", string.Empty)
+                .Replace("?", string.Empty);
 
             return field switch
             {
@@ -161,5 +164,6 @@ internal static class LuceneVersionExtensions
     /// Converts string version to LuceneVersion enum.
     /// Currently only LUCENE_48 is supported.
     /// </summary>
+    /// <param name="version">The version string to convert.</param>
     public static LuceneVersion AsVersionEnum(this string version) => LuceneVersion.LUCENE_48;
 }

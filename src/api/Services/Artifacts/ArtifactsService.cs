@@ -180,7 +180,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         return await _artifactsRepo.GetByJobIdAsync(jobId, ct);
     }
 
-    public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
+    public async Task<(Artifact Artifact, string FullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
         Artifact? artifact = await _artifactsRepo.GetByIdAsync(id, ct);
         if (artifact == null)

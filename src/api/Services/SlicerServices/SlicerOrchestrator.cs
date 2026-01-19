@@ -202,6 +202,7 @@ public class SlicerOrchestrator(
             {
                 failures++;
                 _logger.LogWarning(ex, $"Queue stats retrieval failed for engine {meta.EngineType}");
+
                 // Return an unhealthy placeholder so the UI can still show engine availability and degraded status
                 engineInfos.Add(new SlicerEngineInfo
                 {

@@ -39,8 +39,7 @@ public class GcodeFilesController(
     Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
     Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
     IStoragePathService storagePathService,
-    IStoredFileOperationsService storedFileOperationsService
-) : ControllerBase
+    IStoredFileOperationsService storedFileOperationsService) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
     private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.GetAllowedExtensions();
@@ -57,6 +56,8 @@ public class GcodeFilesController(
     /// <summary>
     /// Computes a hash for an existing G-code file for deduplication/comparison (sha256 default; supports sha1).
     /// </summary>
+    /// <param name="path">Virtual path to the G-code file.</param>
+    /// <param name="algorithm">Hash algorithm to use: 'sha256' (default) or 'sha1'.</param>
     [HttpGet("hash")]
     [ProducesResponseType(typeof(GcodeFileHashResponse), 200)]
     [ProducesResponseType(400)]
@@ -124,6 +125,14 @@ public class GcodeFilesController(
     /// When path is null or empty, returns all files across all directories (paginated).
     /// When path is specified, returns only files in that specific directory (non-recursive).
     /// </summary>
+    /// <param name="path">Virtual directory path. Null/empty returns all files.</param>
+    /// <param name="sortBy">Sort field: 'name', 'size', or 'date'.</param>
+    /// <param name="sortOrder">Sort order: 'asc' or 'desc'.</param>
+    /// <param name="search">Optional search term for file names.</param>
+    /// <param name="page">Page number (1-based).</param>
+    /// <param name="pageSize">Page size.</param>
+    /// <param name="harvestId">Optional filter by harvest operation ID.</param>
+    /// <param name="printerId">Optional filter by source printer ID.</param>
     [HttpGet]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
     public async Task<ActionResult<GcodeFileListResponse>> ListAsync(
@@ -134,8 +143,7 @@ public class GcodeFilesController(
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 100,
     [FromQuery] Guid? harvestId = null,
-    [FromQuery] Guid? printerId = null
-    )
+    [FromQuery] Guid? printerId = null)
     {
         try
         {
@@ -181,8 +189,7 @@ public class GcodeFilesController(
         [FromQuery] int pageSize = 100,
         [FromQuery] Guid[]? tagIds = null,
         [FromQuery] Guid? printerModelId = null,
-        [FromQuery] Guid? printerId = null
-    )
+        [FromQuery] Guid? printerId = null)
     {
         try
         {
@@ -215,7 +222,7 @@ public class GcodeFilesController(
     {
         try
         {
-            var folders = await gcodeFilesService.ListAllFoldersAsync(HttpContext.RequestAborted);
+            List<GcodeFileEntryDto> folders = await gcodeFilesService.ListAllFoldersAsync(HttpContext.RequestAborted);
             return Ok(folders);
         }
         catch (Exception ex)
@@ -325,7 +332,7 @@ public class GcodeFilesController(
                     string? virtualDir = chunkedUploadService.GetUploadVirtualDirectory(uploadId);
 
                     // Try to finalize the upload to database, passing the thumbnail path and virtual directory
-                    var gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
+                    GcodeFile? gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
                         GetUploadFilePath(result),
                         result.SafeFileName,
                         result.ThumbnailPath,
@@ -342,6 +349,7 @@ public class GcodeFilesController(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Failed to finalize chunked upload {UploadId} to database, but file is on disk", uploadId);
+
                     // Continue anyway - file is on disk, just not indexed in database
                 }
             }
@@ -396,6 +404,7 @@ public class GcodeFilesController(
     /// Gets current status of a chunked upload. If not in memory but a metadata file exists (service restart scenario),
     /// the state will be rehydrated, enabling resume capability.
     /// </summary>
+    /// <param name="uploadId">The unique identifier for the chunked upload session.</param>
     [HttpGet("chunk/{uploadId}")]
     [ProducesResponseType(typeof(ChunkStatusResponse), 200)]
     [ProducesResponseType(404)]
@@ -523,6 +532,7 @@ public class GcodeFilesController(
         catch (Exception ex)
         {
             logger.LogDebug($"Failed to cancel upload {uploadId}: {ex.Message}");
+
             // Still return success - we tried our best to clean up
         }
 
@@ -594,7 +604,7 @@ public class GcodeFilesController(
     {
         try
         {
-            (byte[] bytes, string fileName)? result = await gcodeFilesService.DownloadAsync(path, HttpContext.RequestAborted);
+            (byte[] Bytes, string FileName)? result = await gcodeFilesService.DownloadAsync(path, HttpContext.RequestAborted);
             if (result == null)
             {
                 return NotFound();
@@ -638,7 +648,7 @@ public class GcodeFilesController(
                 return new StatusCodeResult(200);
             }
 
-            return File(result.Value.bytes, "application/octet-stream", result.Value.fileName);
+            return File(result.Value.Bytes, "application/octet-stream", result.Value.FileName);
         }
         catch (Exception ex)
         {
@@ -662,7 +672,7 @@ public class GcodeFilesController(
             logger.LogInformation($"Attempting to download GCode file {id}");
 
             // Get file path and original filename from service
-            var fileInfo = await gcodeFilesService.GetFilePathAndNameAsync(id, HttpContext.RequestAborted);
+            (string FilePath, string OriginalFileName)? fileInfo = await gcodeFilesService.GetFilePathAndNameAsync(id, HttpContext.RequestAborted);
 
             if (fileInfo == null)
             {
@@ -670,8 +680,8 @@ public class GcodeFilesController(
                 return NotFound(new { message = "File not found in database", fileId = id });
             }
 
-            string filePath = fileInfo.Value.filePath;
-            string originalFileName = fileInfo.Value.originalFileName;
+            string filePath = fileInfo.Value.FilePath;
+            string originalFileName = fileInfo.Value.OriginalFileName;
 
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
             string fullPath = ResolveGcodePath(filePath);
@@ -880,7 +890,7 @@ public class GcodeFilesController(
     // ------------------------------------------------------------
     // Helper models & utilities
     // ------------------------------------------------------------
-    private (string rootFullPath, string resolvedFullPath, string virtualNormalized) ResolveAndValidatePath(
+    private (string RootFullPath, string ResolvedFullPath, string VirtualNormalized) ResolveAndValidatePath(
         string? virtualPath,
         string? rootFullPathOverride = null,
         bool treatAsFile = false)
@@ -940,9 +950,6 @@ public class GcodeFilesController(
             : status.FinalFilePath;
     }
 
-    // Note: ToHex has been moved to IFileManagementService.ToHex() - use that instead
-    // Note: PersistChunkState has been moved to ChunkedUploadService - no longer needed here
-
     // ---------------- Settings & Move endpoints ----------------
     [HttpGet("settings")]
     [ProducesResponseType(typeof(GcodeUploadSettingsResponse), 200)]
@@ -952,7 +959,6 @@ public class GcodeFilesController(
         GcodeUploadSettingsResponse resp = await gcodeFilesService.GetSettingsAsync(userId, uploadSettings, quotaService, CancellationToken.None);
         return Ok(resp);
     }
-
 
     [HttpPut("settings")]
     [ProducesResponseType(204)]
@@ -999,10 +1005,10 @@ public class GcodeFilesController(
 
             int movedCount = 0;
             int failedCount = 0;
-            List<(string id, string reason)> failedFiles = [];
+            List<(string Id, string Reason)> failedFiles = [];
 
             // Move each file - virtual move (update database folder reference)
-            foreach (var fileIdStr in request.ModelIds)
+            foreach (string fileIdStr in request.ModelIds)
             {
                 try
                 {
@@ -1066,7 +1072,7 @@ public class GcodeFilesController(
 
             if (failedFiles.Count > 0)
             {
-                var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
+                var failureDetails = failedFiles.Take(3).Select(f => $"{f.Id} ({f.Reason})").ToList();
                 message += $" - Failed: {string.Join(", ", failureDetails)}";
                 if (failedFiles.Count > 3)
                 {
@@ -1098,140 +1104,4 @@ public class GcodeFilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
-
-
 }
-
-
-// ---------------- Additional DTOs for move & settings ----------------
-public record MoveGcodeFilesRequest(
-    [property: JsonPropertyName("modelIds")] List<string> ModelIds,
-    [property: JsonPropertyName("targetDirectoryId")] string TargetDirectoryId
-);
-
-public record MoveRequestDto(
-    [property: JsonPropertyName("sourcePath")] string SourcePath,
-    [property: JsonPropertyName("destinationPath")] string DestinationPath,
-    [property: JsonPropertyName("overwrite")] bool Overwrite = false
-);
-
-public record GcodeUploadSettingsResponse(
-    [property: JsonPropertyName("allowedExtensions")] IReadOnlyCollection<string> AllowedExtensions,
-    [property: JsonPropertyName("dailyUploadLimitBytes")] long DailyUploadLimitBytes,
-    [property: JsonPropertyName("userUsedBytes")] long UserUsedBytes
-);
-
-/// <summary>DTO describing a single file or directory entry in the virtual G-code library listing.</summary>
-public record GcodeFileEntryDto(
-    [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("fileSize")] long FileSize,
-    [property: JsonPropertyName("uploadedAt")] DateTime UploadedAt,
-    [property: JsonPropertyName("isDirectory")] bool IsDirectory,
-    [property: JsonPropertyName("name")] string? Name = null,  // Original filename for display
-    [property: JsonPropertyName("thumbnailUrl")] string? ThumbnailUrl = null,
-    [property: JsonPropertyName("id")] string? Id = null,  // Include file ID for efficient lookups (GUID as string)
-    [property: JsonPropertyName("fileType")] string? FileType = null,  // File extension: gcode, bgcode
-    [property: JsonPropertyName("directoryId")] string? DirectoryId = null,   // Include directory ID for efficient directory lookups (virtual path)
-    [property: JsonPropertyName("targetModelName")] string? TargetModelName = null,  // Printer model this gcode was sliced for
-    [property: JsonPropertyName("requiredMaterial")] string? RequiredMaterial = null,  // Required filament type (e.g., "PLA", "PETG")
-    [property: JsonPropertyName("tags")] IReadOnlyList<TagDto>? Tags = null,  // Tags assigned to this gcode file
-    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,  // Slicer used (PrusaSlicer, OrcaSlicer, etc.)
-    [property: JsonPropertyName("extractedSlicerVersion")] string? ExtractedSlicerVersion = null,
-    [property: JsonPropertyName("extractedPrintTime")] double? ExtractedPrintTime = null,  // Minutes
-    [property: JsonPropertyName("extractedFilamentLength")] double? ExtractedFilamentLength = null,  // Millimeters
-    [property: JsonPropertyName("extractedNozzleDiameter")] double? ExtractedNozzleDiameter = null,  // Millimeters
-    [property: JsonPropertyName("extractedMaterial")] string? ExtractedMaterial = null,
-    [property: JsonPropertyName("extractedPrinterModel")] string? ExtractedPrinterModel = null,
-    [property: JsonPropertyName("extractedPrinterModelName")] string? ExtractedPrinterModelName = null,  // Raw extracted name (fallback if resolution failed)
-    [property: JsonPropertyName("extractedLayerHeight")] double? ExtractedLayerHeight = null,  // Millimeters
-    [property: JsonPropertyName("extractedInfill")] double? ExtractedInfill = null,  // Percentage
-    [property: JsonPropertyName("extractedPerimeters")] int? ExtractedPerimeters = null,  // Number of perimeter loops
-    [property: JsonPropertyName("extractedHotendTemp")] double? ExtractedHotendTemp = null,  // Celsius
-    [property: JsonPropertyName("extractedBedTemp")] double? ExtractedBedTemp = null  // Celsius
-);
-
-/// <summary>
-/// Response envelope for a directory listing.
-/// totalFiles/totalSize refer ONLY to regular files in the (unpaginated) result set (not directories).
-/// totalItems counts both directories and files prior to pagination; it is used with page/pageSize to compute totalPages.
-/// </summary>
-public record GcodeFileListResponse(
-    [property: JsonPropertyName("files")] IReadOnlyList<GcodeFileEntryDto> Files,
-    [property: JsonPropertyName("totalFiles")] int TotalFiles,
-    [property: JsonPropertyName("totalSize")] long TotalSize,
-    [property: JsonPropertyName("page")] int Page,
-    [property: JsonPropertyName("pageSize")] int PageSize,
-    [property: JsonPropertyName("totalPages")] int TotalPages,
-    [property: JsonPropertyName("totalItems")] int TotalItems,
-    [property: JsonPropertyName("availablePrinterModels")] IReadOnlyList<PrinterModelSummary>? AvailablePrinterModels = null
-);
-
-/// <summary>Summary of printer model info for filtering.</summary>
-public record PrinterModelSummary(
-    [property: JsonPropertyName("id")] Guid? Id,
-    [property: JsonPropertyName("name")] string Name
-);
-
-/// <summary>Response for multi-file upload endpoint.</summary>
-public record MultiUploadResponse(
-    [property: JsonPropertyName("created")] IReadOnlyList<GcodeFileEntryDto> Created,
-    [property: JsonPropertyName("failed")] IReadOnlyList<MultiUploadFailure> Failed,
-    [property: JsonPropertyName("succeededCount")] int SucceededCount,
-    [property: JsonPropertyName("failedCount")] int FailedCount
-);
-
-/// <summary>Failure detail for an individual file during multi-upload.</summary>
-public record MultiUploadFailure(
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("error")] string Error
-);
-
-public sealed record UpdateSettingsRequest(
-    [property: JsonPropertyName("allowedExtensions")] IReadOnlyCollection<string> AllowedExtensions
-);
-
-
-/// <summary>Request body for bulk deletion of virtual G-code files.</summary>
-public sealed class DeleteFilesRequest
-{
-    [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = [];
-}
-
-// ---------------- Chunk Upload DTOs ----------------
-public sealed record ChunkInitRequest(
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size"), JsonRequired] long Size,
-    [property: JsonPropertyName("path")] string? Path,
-    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm = null,
-    [property: JsonPropertyName("expectedHash")] string? ExpectedHash = null
-);
-
-public sealed record ChunkInitResponse(
-    [property: JsonPropertyName("uploadId")] string UploadId,
-    [property: JsonPropertyName("finalFileName")] string FinalFileName,
-    [property: JsonPropertyName("virtualPath")] string VirtualPath,
-    [property: JsonPropertyName("uploadedBytes")] long UploadedBytes,
-    [property: JsonPropertyName("totalSize")] long TotalSize,
-    [property: JsonPropertyName("recommendedChunkSize")] int RecommendedChunkSize,
-    [property: JsonPropertyName("hashAlgorithm")] string? HashAlgorithm
-);
-
-public sealed record ChunkStatusResponse(
-    [property: JsonPropertyName("uploadId")] string UploadId,
-    [property: JsonPropertyName("finalFileName")] string FinalFileName,
-    [property: JsonPropertyName("uploadedBytes")] long UploadedBytes,
-    [property: JsonPropertyName("totalSize")] long TotalSize,
-    [property: JsonPropertyName("completed")] bool Completed,
-    [property: JsonPropertyName("finalHash")] string? FinalHash = null,
-    [property: JsonPropertyName("paused")] bool Paused = false,
-    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
-    [property: JsonPropertyName("gcodeFileId")] Guid? GcodeFileId = null
-);
-
-public sealed record GcodeFileHashResponse(
-    [property: JsonPropertyName("fileName")] string FileName,
-    [property: JsonPropertyName("size")] long Size,
-    [property: JsonPropertyName("algorithm")] string Algorithm,
-    [property: JsonPropertyName("hash")] string Hash
-);

@@ -1,12 +1,12 @@
-﻿namespace Farm.Web.Api.Services.Slicing;
-
-using System.Linq;
+﻿using System.Linq;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Filament;
 using Farm.Infrastructure.Repositories.Slicing;
+
+namespace Farm.Web.Api.Services.Slicing;
 
 /// <summary>
 /// Exports PrintFarmer profiles to OrcaSlicer config bundle JSON format.
@@ -74,17 +74,17 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
 
     private async Task<List<Dictionary<string, object>>> ExportPrinterPresetsAsync(IReadOnlyList<Guid>? filterIds)
     {
-        var modelDtos = await _catalogRepo.GetModelsCachedAsync(null);
+        IReadOnlyList<PrinterModelDto> modelDtos = await _catalogRepo.GetModelsCachedAsync(null);
         var models = modelDtos
             .Where(m => filterIds == null || filterIds.Count == 0 || filterIds.Contains(m.Id))
             .ToList();
 
         List<Dictionary<string, object>> presets = [];
 
-        foreach (var modelDto in models)
+        foreach (PrinterModelDto? modelDto in models)
         {
-            var manufacturerTuples = await _catalogRepo.GetManufacturersAsync();
-            var manufacturer = manufacturerTuples.FirstOrDefault(m => m.Id == modelDto.ManufacturerId);
+            IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)> manufacturerTuples = await _catalogRepo.GetManufacturersAsync();
+            (Guid Id, string Name, string? Url, string? Description) manufacturer = manufacturerTuples.FirstOrDefault(m => m.Id == modelDto.ManufacturerId);
 
             Dictionary<string, object> preset = new Dictionary<string, object>
             {
@@ -117,7 +117,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
         List<Dictionary<string, object>> presets = [];
 
         // Get all public process profiles
-        var profiles = await _processRepo.GetPublicAsync();
+        IReadOnlyList<ProcessProfile> profiles = await _processRepo.GetPublicAsync();
 
         if (profiles.Count == 0)
         {
@@ -125,7 +125,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
             return presets;
         }
 
-        foreach (var profile in profiles)
+        foreach (ProcessProfile profile in profiles)
         {
             Dictionary<string, object> preset = new Dictionary<string, object>
             {

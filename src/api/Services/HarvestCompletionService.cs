@@ -53,6 +53,8 @@ public class HarvestCompletionService(
     /// <summary>
     /// Testable hook that processes a batch of operations using an already-resolved Unit of Work.
     /// </summary>
+    /// <param name="unitOfWork">The Unit of Work instance for database operations.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     internal async Task ProcessOperationsAsync(IUnitOfWork unitOfWork, CancellationToken ct)
     {
         // Find running operations that might be completed

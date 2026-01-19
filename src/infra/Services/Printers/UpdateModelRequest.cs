@@ -1,7 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure;
 
-using Farm.Infrastructure;
-
+namespace Farm.Infrastructure.Services.Printers;
 /// <summary>
 /// Request object for updating a printer model.
 /// Infrastructure version (no ASP.NET binding attributes).

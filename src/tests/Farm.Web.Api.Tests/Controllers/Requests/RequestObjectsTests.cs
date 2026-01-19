@@ -19,9 +19,9 @@ public class CreateManufacturerRequestTests
     [Fact]
     public void Constructor_WithDifferentNames_Succeeds()
     {
-        var names = new[] { "Prusa", "Ultimaker", "Creality", "Anycubic", "3D Systems" };
+        string[] names = new[] { "Prusa", "Ultimaker", "Creality", "Anycubic", "3D Systems" };
 
-        foreach (var name in names)
+        foreach (string? name in names)
         {
             var request = new CreateManufacturerRequest(Name: name);
             request.Name.Should().Be(name);
@@ -51,7 +51,7 @@ public class CreateManufacturerRequestTests
     {
         var request = new CreateManufacturerRequest("Prusa");
 
-        var name = request.Name;
+        string name = request.Name;
 
         name.Should().Be("Prusa");
     }
@@ -79,7 +79,7 @@ public class CreateManufacturerRequestTests
     [Fact]
     public void CreateManufacturerRequest_WithLongName()
     {
-        var longName = "Very Long Manufacturer Name With Many Words";
+        string longName = "Very Long Manufacturer Name With Many Words";
 
         var request = new CreateManufacturerRequest(longName);
 
@@ -154,7 +154,7 @@ public class DiscoveryStreamRequestTests
     [Fact]
     public void DiscoveryStreamRequest_WithAllBackends()
     {
-        var allBackends = new[]
+        PrinterBackend[] allBackends = new[]
         {
             PrinterBackend.Moonraker,
             PrinterBackend.PrusaLink,
@@ -268,7 +268,7 @@ public class FileOperationRequestTests
     [Fact]
     public void FileName_WithLongPath()
     {
-        var longPath = string.Join("/", Enumerable.Range(0, 20).Select(i => $"folder{i}")) + "/file.gcode";
+        string longPath = string.Join("/", Enumerable.Range(0, 20).Select(i => $"folder{i}")) + "/file.gcode";
 
         var request = new FileOperationRequest { FileName = longPath };
 
@@ -304,7 +304,7 @@ public class UpdateModelRequestTests
     [Fact]
     public void Constructor_WithAllParameters_Succeeds()
     {
-        var filamentIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        Guid[] filamentIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
         var request = new UpdateModelRequest(
             Name: "Prusa CORE One",
             Type: MotionType.Cartesian,
@@ -338,9 +338,9 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithDifferentBackends()
     {
-        var backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint };
+        PrinterBackend[] backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint };
 
-        foreach (var backend in backends)
+        foreach (PrinterBackend backend in backends)
         {
             var request = new UpdateModelRequest("Model", null, null, null, null, backend, null);
             request.DefaultBackend.Should().Be(backend);
@@ -350,9 +350,9 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithMotionTypes()
     {
-        var motionTypes = new[] { MotionType.Cartesian, MotionType.Delta, MotionType.Unknown };
+        MotionType[] motionTypes = new[] { MotionType.Cartesian, MotionType.Delta, MotionType.Unknown };
 
-        foreach (var motionType in motionTypes)
+        foreach (MotionType motionType in motionTypes)
         {
             var request = new UpdateModelRequest("Model", motionType, null, null, null, null, null);
             request.Type.Should().Be(motionType);
@@ -414,7 +414,7 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithLongModelName()
     {
-        var longName = "Very Long Printer Model Name With Many Words And Characters";
+        string longName = "Very Long Printer Model Name With Many Words And Characters";
         var request = new UpdateModelRequest(longName, null, null, null, null, null, null);
 
         request.Name.Should().Be(longName);
@@ -449,7 +449,7 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithMultipleFilamentTypes()
     {
-        var filamentIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+        Guid[] filamentIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null,

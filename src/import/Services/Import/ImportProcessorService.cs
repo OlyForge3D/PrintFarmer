@@ -119,6 +119,7 @@ public class ImportProcessorService : IImportProcessorService
                 if (parts.Length == 2)
                 {
                     string hostPart = parts[1];
+
                     // Remove port and path
                     int colonIndex = hostPart.IndexOf(':');
                     int slashIndex = hostPart.IndexOf('/');
@@ -126,19 +127,24 @@ public class ImportProcessorService : IImportProcessorService
                     if (colonIndex > 0 || slashIndex > 0)
                     {
                         int endIndex = hostPart.Length;
+
                         if (colonIndex > 0)
                         {
                             endIndex = Math.Min(endIndex, colonIndex);
                         }
+
                         if (slashIndex > 0)
                         {
                             endIndex = Math.Min(endIndex, slashIndex);
                         }
+
                         hostPart = hostPart.Substring(0, endIndex);
                     }
+
                     return parts[0] + "://" + hostPart;
                 }
             }
+
             return trimmed;
         }
     }
@@ -221,6 +227,7 @@ public class ImportProcessorService : IImportProcessorService
             DateAcquired = dto.DateAcquired,
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey,
+
             // Populate hardware specs from DTO (populated from exported data or discovery)
             MaxBuildVolumeX = dto.MaxBuildVolumeX,
             MaxBuildVolumeY = dto.MaxBuildVolumeY,
@@ -253,7 +260,6 @@ public class ImportProcessorService : IImportProcessorService
 
         // TODO: Add toolhead via repository if one exists, or directly via context
         // For now, we'll need to add it to the database - this may need a toolhead repository
-
         return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
             Name: p.Name,
@@ -281,7 +287,6 @@ public class ImportProcessorService : IImportProcessorService
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
-            FrontendUrl: p.FrontendUrl
-        );
+            FrontendUrl: p.FrontendUrl);
     }
 }

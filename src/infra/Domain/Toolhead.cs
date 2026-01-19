@@ -3,7 +3,7 @@
 /// <summary>
 /// Represents a single hotend/nozzle configuration.
 /// Supports multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.).
-/// 
+///
 /// For single-toolhead printers, there will be one Toolhead per Printer.
 /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), there will be multiple Toolheads, one for each hotend.
 /// </summary>

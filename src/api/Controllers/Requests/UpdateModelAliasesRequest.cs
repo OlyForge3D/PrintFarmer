@@ -6,5 +6,4 @@
 /// </summary>
 public record UpdateModelAliasesRequest(
     List<string>? OrcaSlicerNames = null,
-    List<string>? PrusaSlicerNames = null
-);
+    List<string>? PrusaSlicerNames = null);

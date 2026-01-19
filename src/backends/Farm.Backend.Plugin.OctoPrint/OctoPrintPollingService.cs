@@ -110,11 +110,15 @@ public sealed class OctoPrintPollingService(
             // ignore - already disposed
         }
 
-        foreach (var adapter in _webSocketAdapters.Values)
+        foreach (OctoPrintWebSocketAdapter adapter in _webSocketAdapters.Values)
         {
             try
-            { adapter?.Dispose(); }
-            catch { }
+            {
+                adapter?.Dispose();
+            }
+            catch
+            {
+            }
         }
 
         _webSocketAdapters.Clear();
@@ -126,7 +130,9 @@ public sealed class OctoPrintPollingService(
         {
             _cts.Dispose();
         }
-        catch { }
+        catch
+        {
+        }
     }
 
     /// <summary>
@@ -143,21 +149,21 @@ public sealed class OctoPrintPollingService(
                 try
                 {
                     // Get list of OctoPrint printers from database
-                    var printerIds = await GetOctoPrintPrinterIdsAsync(ct);
+                    List<Guid> printerIds = await GetOctoPrintPrinterIdsAsync(ct);
                     _logger.LogDebug($"OctoPrintPollingService: Found {printerIds.Count} OctoPrint printers");
 
                     // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers
-                    foreach (var id in printerIds)
+                    foreach (Guid id in printerIds)
                     {
                         if (!_webSocketAdapters.ContainsKey(id))
                         {
-                            var printer = await GetPrinterAsync(id, ct);
+                            Printer? printer = await GetPrinterAsync(id, ct);
                             if (printer != null)
                             {
                                 // Get the OctoPrint client from a scoped context
                                 // (scoped services cannot be injected directly into singletons)
-                                using var scope = _scopeFactory.CreateScope();
-                                var octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
+                                using IServiceScope scope = _scopeFactory.CreateScope();
+                                IOctoPrintClient octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
 
                                 var adapter = new OctoPrintWebSocketAdapter(
                                     id,
@@ -168,7 +174,7 @@ public sealed class OctoPrintPollingService(
                                     _statusCacheWriter);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
-                                var state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+                                PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
                                 {
                                     PrinterId = printerId,
                                     LastKnownIsOnline = false,
@@ -180,7 +186,8 @@ public sealed class OctoPrintPollingService(
                                 _logger.LogDebug($"Created WebSocket adapter for OctoPrint printer {id}");
 
                                 // Attempt WebSocket connection in background
-                                _ = Task.Run(async () =>
+                                _ = Task.Run(
+                                    async () =>
                                 {
                                     try
                                     {
@@ -207,9 +214,9 @@ public sealed class OctoPrintPollingService(
 
                     // Remove adapters and polling loops for printers that are no longer OctoPrint
                     var inactiveIds = _webSocketAdapters.Keys.Except(printerIds).ToList();
-                    foreach (var printerId in inactiveIds)
+                    foreach (Guid printerId in inactiveIds)
                     {
-                        _webSocketAdapters.TryRemove(printerId, out var adapter);
+                        _webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter);
                         adapter?.Dispose();
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
@@ -244,7 +251,7 @@ public sealed class OctoPrintPollingService(
     private async Task PollPrinterAsync(Guid printerId, CancellationToken ct)
     {
 #pragma warning disable S6612 // Capturing printerId in lambda is intentional and safe
-        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState
+        PrinterPollingState state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState
         {
             PrinterId = printerId,
             LastKnownIsOnline = false,
@@ -263,7 +270,7 @@ public sealed class OctoPrintPollingService(
                     // Printer is no longer OctoPrint, remove from polling
                     _pollingLoops.TryRemove(printerId, out _);
                     _printerStates.TryRemove(printerId, out _);
-                    if (_webSocketAdapters.TryRemove(printerId, out var adapter))
+                    if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
                     {
                         adapter?.Dispose();
                     }
@@ -272,7 +279,7 @@ public sealed class OctoPrintPollingService(
                 }
 
                 // Get WebSocket adapter for this printer
-                if (!_webSocketAdapters.TryGetValue(printerId, out var wsAdapter) || wsAdapter == null)
+                if (!_webSocketAdapters.TryGetValue(printerId, out OctoPrintWebSocketAdapter? wsAdapter) || wsAdapter == null)
                 {
                     _logger.LogWarning($"OctoPrint {printerId}: WebSocket adapter not found");
                     await Task.Delay(PollingInterval, ct);
@@ -290,7 +297,7 @@ public sealed class OctoPrintPollingService(
                 // Try HTTP polling fallback
                 try
                 {
-                    var statusData = await wsAdapter.TryHttpPollingFallbackAsync(ct);
+                    OctoPrintStatusData? statusData = await wsAdapter.TryHttpPollingFallbackAsync(ct);
                     if (statusData != null)
                     {
                         state.LastKnownIsOnline = statusData.IsOnline;
@@ -317,8 +324,7 @@ public sealed class OctoPrintPollingService(
                             BedTemp: statusData.BedTemp,
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(cacheUpdate);
@@ -340,8 +346,7 @@ public sealed class OctoPrintPollingService(
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
                             HomedAxes: null,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
                     }
@@ -379,8 +384,7 @@ public sealed class OctoPrintPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
@@ -402,8 +406,7 @@ public sealed class OctoPrintPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             HomedAxes: null,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
@@ -423,8 +426,6 @@ public sealed class OctoPrintPollingService(
             }
         }
     }
-
-
 
     /// <summary>
     /// Determines the API state based on exception type.
@@ -447,9 +448,9 @@ public sealed class OctoPrintPollingService(
     /// </summary>
     private async Task<List<Guid>> GetOctoPrintPrinterIdsAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        var printers = await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IPrintersRepository repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+        List<Printer> printers = await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
         return printers.Select(p => p.Id).ToList();
     }
 
@@ -458,9 +459,8 @@ public sealed class OctoPrintPollingService(
     /// </summary>
     private async Task<Printer?> GetPrinterAsync(Guid printerId, CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IPrintersRepository repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         return await repo.FindByIdAsync(printerId, ct);
     }
-
 }

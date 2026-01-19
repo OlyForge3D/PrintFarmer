@@ -4,16 +4,15 @@ using System.Text.Json.Serialization;
 namespace Farm.Infrastructure.Settings;
 
 // Use PerEngineSlicerSetting from AppSettings.cs (record)
-
 [AppSetting(SectionName)]
 [SettingDisplay(Name = "G-code Upload", Description = "Settings for G-code file uploads.", Icon = "pf-icon-gcodeupload", Group = "Files", Order = 6)]
 public class GcodeUploadSettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "GcodeUpload";
 
-    public static string SectionKey => SectionName;
-
     private static readonly List<string> _defaultExtensions = new() { ".gcode" };
+
+    public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Allowed Extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
     [JsonPropertyName("allowedExtensions")]

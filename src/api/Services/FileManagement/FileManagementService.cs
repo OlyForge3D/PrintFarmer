@@ -12,7 +12,7 @@ public sealed class FileManagementService : IFileManagementService
     // Allowed model file extensions (centralized source of truth)
     private static readonly IReadOnlyCollection<string> AllowedModelExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" }.AsReadOnly();
 
-    public (string storageRoot, string resolvedFullPath, string virtualNormalized) ResolveVirtualPath(
+    public (string StorageRoot, string ResolvedFullPath, string VirtualNormalized) ResolveVirtualPath(
         string? virtualPath,
         string storageRoot)
     {
@@ -77,7 +77,8 @@ public sealed class FileManagementService : IFileManagementService
         {
             candidate = $"{baseName} ({counter++}){ext}";
             fullPath = Path.GetFullPath(Path.Combine(targetDirectory, candidate));
-        } while (System.IO.File.Exists(fullPath));
+        }
+        while (System.IO.File.Exists(fullPath));
 
         return candidate;
     }

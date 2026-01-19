@@ -18,6 +18,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// Checks if the application needs initial setup.
     /// Returns true if no admin users exist in the system.
     /// </summary>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpGet("status")]
     public async Task<ActionResult<object>> GetSetupStatusAsync(CancellationToken ct)
     {
@@ -29,6 +30,8 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// Creates the initial admin user and completes first-run setup.
     /// This endpoint is only available when no admin users exist.
     /// </summary>
+    /// <param name="request">The request containing the initial admin user details.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpPost("initial-admin")]
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
         [FromBody] CreateInitialAdminRequest request,

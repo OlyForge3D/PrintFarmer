@@ -1,0 +1,16 @@
+﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
+using Farm.Infrastructure.Annotations;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
+
+/// <summary>
+/// Slicer-specific model name alias mapping (e.g., OrcaSlicer "Prusa MK4" -> PrusaSlicer "MK4").
+/// </summary>
+public record SlicerModelAliasDto(
+    Guid Id,
+    Guid PrinterModelId,
+    string SlicerModelName,
+    string? SlicerType); // "OrcaSlicer", "PrusaSlicer", or null if applies to all slicers

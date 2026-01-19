@@ -105,6 +105,7 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>The printer with matching IP, or null if not found</returns>
     Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+
     /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
     /// </summary>
@@ -225,7 +226,8 @@ public interface IPrintersService
     /// <param name="id">The printer ID</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Tuple of (streamUrl, snapshotUrl), either or both may be null</returns>
-    Task<(string? streamUrl, string? snapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
+
     /// <summary>
     /// Retrieves the history of print jobs for a printer.
     /// </summary>
@@ -387,6 +389,7 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if print started successfully, false if backend unavailable or file not found</returns>
     Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct);
+
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>

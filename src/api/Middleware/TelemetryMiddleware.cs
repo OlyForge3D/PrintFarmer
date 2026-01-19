@@ -38,10 +38,10 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
         string method = context.Request.Method;
 
         using Activity? activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
-        _ = (activity?.SetTag("http.method", method));
-        _ = (activity?.SetTag("http.route", endpoint));
-        _ = (activity?.SetTag("http.scheme", context.Request.Scheme));
-        _ = (activity?.SetTag("correlation.id", correlationId));
+        _ = activity?.SetTag("http.method", method);
+        _ = activity?.SetTag("http.route", endpoint);
+        _ = activity?.SetTag("http.scheme", context.Request.Scheme);
+        _ = activity?.SetTag("correlation.id", correlationId);
 
         try
         {
@@ -49,17 +49,17 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
 
             stopwatch.Stop();
             int statusCode = context.Response.StatusCode;
-            _ = (activity?.SetTag("http.status_code", statusCode));
+            _ = activity?.SetTag("http.status_code", statusCode);
 
             _telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            _ = (activity?.SetTag("http.status_code", 500));
-            _ = (activity?.SetTag("error", true));
-            _ = (activity?.SetTag("exception.type", ex.GetType().Name));
-            _ = (activity?.SetTag("exception.message", ex.Message));
+            _ = activity?.SetTag("http.status_code", 500);
+            _ = activity?.SetTag("error", true);
+            _ = activity?.SetTag("exception.type", ex.GetType().Name);
+            _ = activity?.SetTag("exception.message", ex.Message);
 
             _telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
             throw;

@@ -3,21 +3,18 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Infrastructure.Database;
 
-public interface IMigrationStatusProvider
-{
-    MigrationStatus GetStatus();
-}
-
-public sealed record MigrationStatus(string Mode, bool HasMigrations, bool AppliedAny, string? Provider);
-
 public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusProvider
 {
     public MigrationStatus GetStatus()
     {
         string? provider = null;
         try
-        { provider = context.Database.ProviderName; }
-        catch { /* ignore */ }
+        {
+            provider = context.Database.ProviderName;
+        }
+        catch
+        { /* ignore */
+        }
 
         bool hasMigrations = false;
         bool appliedAny = false;

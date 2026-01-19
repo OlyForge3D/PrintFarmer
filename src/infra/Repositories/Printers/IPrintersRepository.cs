@@ -38,12 +38,17 @@ public interface IPrintersRepository
 
     // Detach all tracked entities to prevent concurrent operation errors in bulk operations
     void DetachAllEntities();
+
     /// <summary>
     /// Gets all printers with Toolheads included, with tracking enabled for template updates.
     /// </summary>
+    /// <param name="ct">The cancellation token.</param>
     Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct);
+
     /// <summary>
     /// Gets a single printer with Toolheads included, with tracking enabled for template updates.
     /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">The cancellation token.</param>
     Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct);
 }

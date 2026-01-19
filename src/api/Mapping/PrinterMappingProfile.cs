@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Web.Api.Services;
+
 // Alias for Infrastructure types used in mappings
 using SharedModels = Farm.Infrastructure;
 

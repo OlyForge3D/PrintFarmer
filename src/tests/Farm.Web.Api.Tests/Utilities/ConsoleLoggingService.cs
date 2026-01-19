@@ -98,7 +98,7 @@ public class ConsoleLoggingService(string categoryName = "Test") : IUnifiedLoggi
 
     public void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null)
     {
-        var levelStr = level switch
+        string levelStr = level switch
         {
             LogLevel.Debug => "DEBUG",
             LogLevel.Information => "INFO",

@@ -206,8 +206,13 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { _logger.LogWarning(ex, $"Error monitoring slicing progress for job {jobId}"); }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Error monitoring slicing progress for job {jobId}");
+        }
     }
 
     private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
@@ -226,7 +231,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             Match tm = printTimeRegex.Match(line);
             if (tm.Success)
             {
-                metadata.PrintTimeSeconds = int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600 + int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60;
+                metadata.PrintTimeSeconds = (int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + (int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
             }
             else
             {

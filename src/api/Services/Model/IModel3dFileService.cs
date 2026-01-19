@@ -105,7 +105,7 @@ namespace Farm.Web.Api.Services.Model
 
         /// <summary>
         /// Uploads and processes a 3D model file.
-        /// Performs file validation, hash computation, deduplication checking, metadata extraction, 
+        /// Performs file validation, hash computation, deduplication checking, metadata extraction,
         /// and thumbnail generation. Returns immediately; processing continues in background.
         /// </summary>
         /// <param name="modelFile">The model file to upload (IFormFile from HTTP request)</param>
@@ -128,7 +128,7 @@ namespace Farm.Web.Api.Services.Model
         /// </summary>
         /// <param name="modelId">GUID of the model to move</param>
         /// <param name="targetFolderPath">Virtual path of the destination folder</param>
-        /// <param name="ct">Cancellation token</param>
+        /// <param name="ct">Cancellation token.</param>
         /// <returns>True if the model was successfully moved; false if model was not found</returns>
         /// <remarks>
         /// This is a virtual move operation that only updates the model's FolderId reference in the database.
@@ -148,6 +148,6 @@ namespace Farm.Web.Api.Services.Model
         /// This method serves both model files and thumbnails using path-based lookups.
         /// Path validation is performed internally to prevent directory traversal attacks.
         /// </remarks>
-        Task<(byte[] bytes, string fileName)?> DownloadFileAsync(string path, CancellationToken ct);
+        Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct);
     }
 }

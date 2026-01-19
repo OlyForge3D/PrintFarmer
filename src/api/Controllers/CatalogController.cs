@@ -50,6 +50,7 @@ public class CatalogController(
         {
             // Log the error with as much context as possible via injected unified logging service
             _unifiedLoggingService?.LogError(ex, $"[CatalogController] GetManufacturersAsync failed: {ex.Message}");
+
             // Optionally, include more context in the error response
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve manufacturers", details = ex.ToString() });
         }
@@ -87,6 +88,7 @@ public class CatalogController(
 
         // Normalize via shared helper for consistent rule across API & seeding
         ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, request.Url, request.Description, ct);
+
         // The service handles normalization and cache invalidation; include normalized header only if different
         string normalized = dto.Name;
         if (!string.Equals(request.Name, normalized, StringComparison.Ordinal))
@@ -224,7 +226,7 @@ public class CatalogController(
     {
         try
         {
-            var aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
             return Ok(aliases);
         }
         catch (KeyNotFoundException)
@@ -254,7 +256,7 @@ public class CatalogController(
     {
         try
         {
-            var aliases = await _catalogService.UpdateModelAliasesAsync(modelId, request.OrcaSlicerNames ?? new List<string>(), request.PrusaSlicerNames ?? new List<string>(), ct);
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.UpdateModelAliasesAsync(modelId, request.OrcaSlicerNames ?? new List<string>(), request.PrusaSlicerNames ?? new List<string>(), ct);
             return Ok(aliases);
         }
         catch (KeyNotFoundException)
@@ -273,6 +275,7 @@ public class CatalogController(
     /// <summary>
     /// Gets all available hotend models.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all hotend model definitions</returns>
     [HttpGet("hotends")]
     [ProducesResponseType(typeof(IEnumerable<HotendModelDto>), 200)]
@@ -280,7 +283,7 @@ public class CatalogController(
     {
         try
         {
-            var hotends = await _catalogService.GetHotendModelsAsync(ct);
+            IReadOnlyList<HotendModelDto> hotends = await _catalogService.GetHotendModelsAsync(ct);
             return Ok(hotends);
         }
         catch (Exception ex)
@@ -293,6 +296,7 @@ public class CatalogController(
     /// <summary>
     /// Gets all available extruder models.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all extruder model definitions</returns>
     [HttpGet("extruders")]
     [ProducesResponseType(typeof(IEnumerable<ExtruderModelDto>), 200)]
@@ -300,7 +304,7 @@ public class CatalogController(
     {
         try
         {
-            var extruders = await _catalogService.GetExtruderModelsAsync(ct);
+            IReadOnlyList<ExtruderModelDto> extruders = await _catalogService.GetExtruderModelsAsync(ct);
             return Ok(extruders);
         }
         catch (Exception ex)
@@ -313,6 +317,7 @@ public class CatalogController(
     /// <summary>
     /// Gets all available toolhead models.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all toolhead model definitions</returns>
     [HttpGet("toolheads")]
     [ProducesResponseType(typeof(IEnumerable<ToolheadModelDto>), 200)]
@@ -320,7 +325,7 @@ public class CatalogController(
     {
         try
         {
-            var toolheads = await _catalogService.GetToolheadModelsAsync(ct);
+            IReadOnlyList<ToolheadModelDto> toolheads = await _catalogService.GetToolheadModelsAsync(ct);
             return Ok(toolheads);
         }
         catch (Exception ex)
@@ -333,6 +338,7 @@ public class CatalogController(
     /// <summary>
     /// Gets all available nozzle models.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all nozzle model definitions</returns>
     [HttpGet("nozzles")]
     [ProducesResponseType(typeof(IEnumerable<NozzleModelDto>), 200)]
@@ -340,7 +346,7 @@ public class CatalogController(
     {
         try
         {
-            var nozzles = await _catalogService.GetNozzleModelsAsync(ct);
+            IReadOnlyList<NozzleModelDto> nozzles = await _catalogService.GetNozzleModelsAsync(ct);
             return Ok(nozzles);
         }
         catch (Exception ex)

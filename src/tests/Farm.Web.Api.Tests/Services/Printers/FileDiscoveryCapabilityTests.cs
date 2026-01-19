@@ -6,6 +6,7 @@ using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Moq;
@@ -32,12 +33,12 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void TryGetFileListClient_Moonraker_ShouldReturnClientImplementingISupportsFileList()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.Moonraker, out IBackendClient? client);
 
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for Moonraker");
@@ -51,12 +52,12 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void TryGetFileListClient_PrusaLink_ShouldReturnClientImplementingISupportsFileList()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.PrusaLink, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.PrusaLink, out IBackendClient? client);
 
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for PrusaLink");
@@ -69,12 +70,12 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void TryGetFileListClient_OctoPrint_ShouldReturnClientImplementingISupportsFileList()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.OctoPrint, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.OctoPrint, out IBackendClient? client);
 
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for OctoPrint");
@@ -87,12 +88,12 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void TryGetFileListClient_SDCP_ShouldReturnClientImplementingISupportsFileList()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act
-            var result = factory.TryGetFileListClient(PrinterBackend.SDCP, out var client);
+            bool result = factory.TryGetFileListClient(PrinterBackend.SDCP, out IBackendClient? client);
 
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for SDCP");
@@ -109,8 +110,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void CapabilitiesCache_ShouldMatchClientImplementation()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act & Assert - For each backend, if factory says it has capability, client must implement it
@@ -124,11 +125,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void ClientFactory_ShouldReturnSameClientTypeEachTime()
         {
             // Arrange
-            var clientFactory = CreateClientFactory();
+            IBackendClientFactory clientFactory = CreateClientFactory();
 
             // Act - Get client multiple times
-            var client1 = clientFactory.GetClient(PrinterBackend.Moonraker);
-            var client2 = clientFactory.GetClient(PrinterBackend.Moonraker);
+            IBackendClient client1 = clientFactory.GetClient(PrinterBackend.Moonraker);
+            IBackendClient client2 = clientFactory.GetClient(PrinterBackend.Moonraker);
 
             // Assert - Should return clients of same type (though not necessarily same instance)
             Assert.Equal(client1.GetType(), client2.GetType());
@@ -144,14 +145,14 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void CapabilityDetection_ShouldUsePluginRegistryWhenAvailable()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
             mockRegistry.Setup(r => r.IsRegistered("moonraker")).Returns(true);
 
-            var clientFactory = CreateClientFactory();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act
-            var hasCapability = factory.TryGetFileListClient(PrinterBackend.Moonraker, out _);
+            bool hasCapability = factory.TryGetFileListClient(PrinterBackend.Moonraker, out _);
 
             // Assert
             Assert.True(hasCapability);
@@ -163,16 +164,16 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void AllBackends_ShouldSupportFileListCapability()
         {
             // Arrange
-            var mockRegistry = CreateMockRegistry();
-            var clientFactory = CreateClientFactory();
+            Mock<IBackendPluginRegistry> mockRegistry = CreateMockRegistry();
+            IBackendClientFactory clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
             // Act & Assert - Every backend should support file listing
-            var backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint, PrinterBackend.SDCP };
+            PrinterBackend[] backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint, PrinterBackend.SDCP };
 
-            foreach (var backend in backends)
+            foreach (PrinterBackend backend in backends)
             {
-                var result = factory.TryGetFileListClient(backend, out var client);
+                bool result = factory.TryGetFileListClient(backend, out IBackendClient? client);
                 Assert.True(result, $"{backend} should support file listing");
                 Assert.NotNull(client);
                 Assert.True(client is ISupportsFileList,
@@ -302,7 +303,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             Type requiredCapability)
         {
             // If factory says backend has capability, the client must implement it
-            if (factory.TryGetFileListClient(backend, out var client))
+            if (factory.TryGetFileListClient(backend, out IBackendClient? client))
             {
                 Assert.NotNull(client);
                 Assert.True(client is ISupportsFileList,

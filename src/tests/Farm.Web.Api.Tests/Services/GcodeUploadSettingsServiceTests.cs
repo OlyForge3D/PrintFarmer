@@ -12,7 +12,7 @@ public class GcodeUploadSettingsTests
         var settings = new InMemoryGcodeUploadSettings();
 
         // Assert
-        var extensions = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> extensions = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", extensions);
         Assert.Contains(".bgcode", extensions);
     }
@@ -22,13 +22,13 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        var newExtensions = new[] { ".g", ".G", ".nc", ".ngc" };
+        string[] newExtensions = new[] { ".g", ".G", ".nc", ".ngc" };
 
         // Act
         settings.UpdateAllowedExtensions(newExtensions);
 
         // Assert
-        var extensions = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> extensions = settings.GetAllowedExtensions();
         Assert.Equal(4, extensions.Count);
         Assert.Contains(".g", extensions);
         Assert.Contains(".nc", extensions);
@@ -39,13 +39,13 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        var extensions = new[] { "gcode", "bgcode", ".g" }; // Missing dot prefix on first two
+        string[] extensions = new[] { "gcode", "bgcode", ".g" }; // Missing dot prefix on first two
 
         // Act
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", result);
         Assert.Contains(".bgcode", result);
         Assert.Contains(".g", result);
@@ -56,13 +56,13 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        var extensions = new[] { " .gcode ", "  .g  ", "\t.nc\t" };
+        string[] extensions = new[] { " .gcode ", "  .g  ", "\t.nc\t" };
 
         // Act
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
         Assert.Contains(".gcode", result);
         Assert.Contains(".g", result);
         Assert.Contains(".nc", result);
@@ -73,13 +73,13 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        var extensions = new[] { ".gcode", "", "   ", ".g" };
+        string[] extensions = new[] { ".gcode", "", "   ", ".g" };
 
         // Act
         settings.UpdateAllowedExtensions(extensions);
 
         // Assert
-        var result = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
         Assert.Equal(2, result.Count);
         Assert.Contains(".gcode", result);
         Assert.Contains(".g", result);
@@ -96,7 +96,7 @@ public class GcodeUploadSettingsTests
         settings.UpdateAllowedExtensions(new[] { ".xyz", ".abc" });
 
         // Assert
-        var result = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
         Assert.DoesNotContain(".gcode", result);
         Assert.Contains(".xyz", result);
         Assert.Contains(".abc", result);
@@ -107,11 +107,11 @@ public class GcodeUploadSettingsTests
     {
         // Arrange
         var settings = new InMemoryGcodeUploadSettings();
-        var extensions = new[] { ".GCODE", ".G", ".Nc" };
+        string[] extensions = new[] { ".GCODE", ".G", ".Nc" };
 
         // Act
         settings.UpdateAllowedExtensions(extensions);
-        var result = settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
 
         // Assert
         Assert.Equal(3, result.Count);

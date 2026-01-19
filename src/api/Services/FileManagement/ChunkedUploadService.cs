@@ -565,7 +565,9 @@ public sealed class ChunkedUploadService(
                         File.Delete(state.MetaFilePath);
                     }
                 }
-                catch { }
+                catch
+                {
+                }
 
                 throw new InvalidOperationException($"Hash mismatch: expected {state.ExpectedHash}, got {hex}");
             }
@@ -609,6 +611,7 @@ public sealed class ChunkedUploadService(
             catch (Exception ex)
             {
                 _logger.LogDebug($"Failed to extract thumbnail for {finalPath}: {ex.Message}");
+
                 // Continue anyway - thumbnail extraction is optional
             }
         }
@@ -624,7 +627,9 @@ public sealed class ChunkedUploadService(
             {
                 File.Delete(state.MetaFilePath);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return thumbnailPath;

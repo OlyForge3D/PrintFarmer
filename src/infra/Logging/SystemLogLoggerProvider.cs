@@ -7,6 +7,7 @@ using Farm.Infrastructure.Repositories.SystemLogs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Infrastructure.Logging;
 
@@ -29,13 +30,14 @@ public class SystemLogLoggerProvider : ILoggerProvider
         _minimumLevel = minimumLevel;
         _logQueue = new BlockingCollection<SystemLog>(1000);
         _cts = new CancellationTokenSource();
+
         // Don't start the processing task immediately - wait for service provider to be fully configured
         _processingTask = ProcessLogsAsync(_cts.Token);
     }
 
     public ILogger CreateLogger(string categoryName)
     {
-        var httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
+        IHttpContextAccessor? httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
         return new SystemLogLogger(categoryName, _logQueue, _minimumLevel, httpContextAccessor);
     }
 
@@ -54,7 +56,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
             while (!ct.IsCancellationRequested)
             {
                 // Try to get a log from the queue with a timeout
-                if (_logQueue.TryTake(out var log, 1000, ct))
+                if (_logQueue.TryTake(out SystemLog? log, 1000, ct))
                 {
                     batch.Add(log);
 
@@ -80,7 +82,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
             }
 
             // Drain any remaining items in queue
-            while (_logQueue.TryTake(out var log, 100))
+            while (_logQueue.TryTake(out SystemLog? log, 100))
             {
                 batch.Add(log);
                 if (batch.Count >= 50)
@@ -109,15 +111,15 @@ public class SystemLogLoggerProvider : ILoggerProvider
         try
         {
             // Create a scope to get the repository
-            using var scope = _serviceProvider.CreateAsyncScope();
-            var repository = scope.ServiceProvider.GetService<ISystemLogRepository>();
+            using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
+            ISystemLogRepository? repository = scope.ServiceProvider.GetService<ISystemLogRepository>();
 
             if (repository == null)
             {
                 return; // Repository not available yet
             }
 
-            foreach (var log in batch)
+            foreach (SystemLog log in batch)
             {
                 try
                 {
@@ -170,6 +172,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
         {
             _logQueue.Dispose();
             _cts.Dispose();
+
             // Tasks don't need explicit disposal in modern .NET
             // Disposing incomplete tasks throws InvalidOperationException in .NET 10+
         }
@@ -187,7 +190,8 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
     private readonly LogLevel _minimumLevel = minimumLevel;
     private readonly IHttpContextAccessor? _httpContextAccessor = httpContextAccessor;
 
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull
     {
         return null; // Scopes not used for this implementation
     }
@@ -211,11 +215,11 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
 
         try
         {
-            var message = formatter(state, exception);
-            var exceptionText = exception?.ToString();
+            string message = formatter(state, exception);
+            string? exceptionText = exception?.ToString();
 
             // Try to extract correlation ID from HTTP context
-            var correlationId = GetCorrelationIdFromContext();
+            string? correlationId = GetCorrelationIdFromContext();
 
             var log = new SystemLog
             {
@@ -240,17 +244,17 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
     {
         try
         {
-            var httpContext = _httpContextAccessor?.HttpContext;
+            HttpContext? httpContext = _httpContextAccessor?.HttpContext;
             if (httpContext != null)
             {
                 // Check for X-Correlation-Id header (sent by frontend)
-                if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out var correlationId))
+                if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out StringValues correlationId))
                 {
                     return correlationId.ToString();
                 }
 
                 // Fallback to X-Request-Id if available
-                if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out var requestId))
+                if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out StringValues requestId))
                 {
                     return requestId.ToString();
                 }

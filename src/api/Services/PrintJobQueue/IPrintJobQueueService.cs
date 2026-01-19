@@ -22,8 +22,7 @@ public record EnqueuePrintJobRequest
     Guid? assignedPrinterId,
     string? priority,
     double? requiredNozzleDiameter,
-    string? requiredMaterialType
-);
+    string? requiredMaterialType);
 
 public record PrintJobDto
 (
@@ -36,5 +35,4 @@ public record PrintJobDto
     int QueuePosition,
     double? RequiredNozzleDiameter,
     string? RequiredMaterialType,
-    DateTime CreatedAt
-);
+    DateTime CreatedAt);

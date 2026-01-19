@@ -26,6 +26,7 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Gets all active locations.
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)
     {
         return await _dbContext.Locations
@@ -37,6 +38,7 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Gets all locations including inactive ones.
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Location>> GetAllWithInactiveAsync(CancellationToken ct)
     {
         return await _dbContext.Locations
@@ -47,6 +49,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Finds a location by ID.
     /// </summary>
+    /// <param name="id">The location ID.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<Location?> FindByIdAsync(Guid id, CancellationToken ct)
     {
         return await _dbContext.Locations.FindAsync(new object[] { id }, cancellationToken: ct);
@@ -55,6 +59,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Finds a location by name (case-insensitive, trimmed).
     /// </summary>
+    /// <param name="name">The location name to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -66,7 +72,7 @@ public class EfLocationRepository : ILocationRepository
 
         // EF Core cannot translate the StringComparison overload, so materialize
         // the candidates and perform a culture-invariant ordinal comparison on the client.
-        var candidates = await _dbContext.Locations
+        List<Location> candidates = await _dbContext.Locations
             .Where(l => l.Name != null)
             .ToListAsync(ct);
 
@@ -76,6 +82,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Checks if a location with the given name exists (case-insensitive, trimmed).
     /// </summary>
+    /// <param name="name">The location name to check.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<bool> ExistsByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -87,7 +95,7 @@ public class EfLocationRepository : ILocationRepository
 
         // Materialize only the name column to minimize transport, then perform
         // a case-insensitive comparison on the client side.
-        var names = await _dbContext.Locations
+        List<string> names = await _dbContext.Locations
             .Where(l => l.Name != null)
             .Select(l => l.Name)
             .ToListAsync(ct);
@@ -98,6 +106,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Adds a new location to the repository.
     /// </summary>
+    /// <param name="location">The location to add.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task AddAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -111,6 +121,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Updates an existing location.
     /// </summary>
+    /// <param name="location">The location to update.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task UpdateAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -123,6 +135,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Removes a location from the repository (hard delete).
     /// </summary>
+    /// <param name="location">The location to remove.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task RemoveAsync(Location location, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -134,6 +148,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Gets all printers assigned to a location.
     /// </summary>
+    /// <param name="locationId">The location ID.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<List<Printer>> GetPrintersInLocationAsync(Guid locationId, CancellationToken ct)
     {
         return await _dbContext.Printers
@@ -145,6 +161,8 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Gets the count of printers assigned to a location.
     /// </summary>
+    /// <param name="locationId">The location ID.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<int> GetPrinterCountAsync(Guid locationId, CancellationToken ct)
     {
         return await _dbContext.Printers
@@ -155,6 +173,7 @@ public class EfLocationRepository : ILocationRepository
     /// <summary>
     /// Persists changes to the database.
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         await _dbContext.SaveChangesAsync(ct);

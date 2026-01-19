@@ -26,7 +26,7 @@ public class ProfileSampleDataTests
         {
             if (File.Exists(Path.Combine(currentDir.FullName, "farm-web.sln")))
             {
-                var profilePath = Path.Combine(currentDir.FullName, "sample_profiles/orcaslicer");
+                string profilePath = Path.Combine(currentDir.FullName, "sample_profiles/orcaslicer");
                 if (Directory.Exists(profilePath))
                 {
                     return profilePath;
@@ -41,7 +41,7 @@ public class ProfileSampleDataTests
         currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (currentDir != null && currentDir.Parent != null)
         {
-            var profilePath = Path.Combine(currentDir.Parent.FullName, "sample_profiles/orcaslicer");
+            string profilePath = Path.Combine(currentDir.Parent.FullName, "sample_profiles/orcaslicer");
             if (Directory.Exists(profilePath))
             {
                 return profilePath;
@@ -60,7 +60,7 @@ public class ProfileSampleDataTests
         Directory.Exists(SampleProfilesPath).Should().BeTrue(
             $"Sample profiles directory should exist at {SampleProfilesPath}");
 
-        var manufacturers = Directory.GetDirectories(SampleProfilesPath);
+        string[] manufacturers = Directory.GetDirectories(SampleProfilesPath);
         manufacturers.Should().NotBeEmpty("Should have manufacturer directories");
         manufacturers.Should().Contain(m => m.EndsWith("Prusa"), "Should have Prusa directory");
         manufacturers.Should().Contain(m => m.EndsWith("Voron"), "Should have Voron directory");
@@ -75,11 +75,11 @@ public class ProfileSampleDataTests
     public void Manufacturer_HasMachineProfiles(string manufacturerName)
     {
         // Arrange
-        var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        var machineDir = Path.Combine(manufacturerDir, "machine");
+        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
+        string machineDir = Path.Combine(manufacturerDir, "machine");
 
         // Act
-        var machineFiles = Directory.GetFiles(machineDir, "*.json");
+        string[] machineFiles = Directory.GetFiles(machineDir, "*.json");
 
         // Assert
         machineFiles.Should().NotBeEmpty(
@@ -94,22 +94,22 @@ public class ProfileSampleDataTests
     public void MachineProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        var machineDir = Path.Combine(manufacturerDir, "machine");
-        var machineFiles = Directory.GetFiles(machineDir, "*.json");
+        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
+        string machineDir = Path.Combine(manufacturerDir, "machine");
+        string[] machineFiles = Directory.GetFiles(machineDir, "*.json");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // Act & Assert
-        foreach (var file in machineFiles.Take(5))  // Test first 5 files
+        foreach (string? file in machineFiles.Take(5))  // Test first 5 files
         {
-            var json = File.ReadAllText(file);
-            var action = () => JsonSerializer.Deserialize<MachineProfileDto>(json, options);
+            string json = File.ReadAllText(file);
+            Func<MachineProfileDto> action = () => JsonSerializer.Deserialize<MachineProfileDto>(json, options)!;
 
             action.Should().NotThrow(
                 $"Machine profile {Path.GetFileName(file)} should deserialize successfully");
 
-            var profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options);
+            MachineProfileDto? profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options);
             profile.Should().NotBeNull();
             profile!.Name.Should().NotBeNullOrWhiteSpace($"{Path.GetFileName(file)} should have a name");
             // Manufacturer may be empty string in some sample profiles
@@ -123,8 +123,8 @@ public class ProfileSampleDataTests
     public void FilamentProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        var filamentDir = Path.Combine(manufacturerDir, "filament");
+        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
+        string filamentDir = Path.Combine(manufacturerDir, "filament");
 
         // Some manufacturers may not have filament profiles - skip them
         if (!Directory.Exists(filamentDir))
@@ -132,7 +132,7 @@ public class ProfileSampleDataTests
             return;
         }
 
-        var filamentFiles = Directory.GetFiles(filamentDir, "*.json");
+        string[] filamentFiles = Directory.GetFiles(filamentDir, "*.json");
 
         // Skip if no files found
         if (filamentFiles.Length == 0)
@@ -143,15 +143,15 @@ public class ProfileSampleDataTests
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // Act & Assert
-        foreach (var file in filamentFiles.Take(5))  // Test first 5 files
+        foreach (string? file in filamentFiles.Take(5))  // Test first 5 files
         {
-            var json = File.ReadAllText(file);
-            var action = () => JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
+            string json = File.ReadAllText(file);
+            Func<FilamentProfileDto> action = () => JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
 
             action.Should().NotThrow(
                 $"Filament profile {Path.GetFileName(file)} should deserialize successfully");
 
-            var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
+            FilamentProfileDto? profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
             profile.Should().NotBeNull();
             profile!.Name.Should().NotBeNullOrWhiteSpace($"{Path.GetFileName(file)} should have a name");
             profile.Material.Should().NotBeNullOrWhiteSpace($"{Path.GetFileName(file)} should have a material");
@@ -165,8 +165,8 @@ public class ProfileSampleDataTests
     public void ProcessProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        var processDir = Path.Combine(manufacturerDir, "process");
+        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
+        string processDir = Path.Combine(manufacturerDir, "process");
 
         // Some manufacturers may not have process profiles
         if (!Directory.Exists(processDir))
@@ -174,19 +174,19 @@ public class ProfileSampleDataTests
             return;
         }
 
-        var processFiles = Directory.GetFiles(processDir, "*.json");
+        string[] processFiles = Directory.GetFiles(processDir, "*.json");
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // Act & Assert
-        foreach (var file in processFiles.Take(5))  // Test first 5 files
+        foreach (string? file in processFiles.Take(5))  // Test first 5 files
         {
-            var json = File.ReadAllText(file);
-            var action = () => JsonSerializer.Deserialize<ProcessProfileDto>(json, options);
+            string json = File.ReadAllText(file);
+            Func<ProcessProfileDto> action = () => JsonSerializer.Deserialize<ProcessProfileDto>(json, options)!;
 
             action.Should().NotThrow(
                 $"Process profile {Path.GetFileName(file)} should deserialize successfully");
 
-            var profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options);
+            ProcessProfileDto? profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options);
             profile.Should().NotBeNull();
             profile!.Name.Should().NotBeNullOrWhiteSpace($"{Path.GetFileName(file)} should have a name");
         }
@@ -196,7 +196,7 @@ public class ProfileSampleDataTests
     public void CatalogManufacturers_MatchSampleProfiles()
     {
         // Arrange - manufacturers in the catalog that should have sample profiles
-        var catalogManufacturers = new[]
+        string[] catalogManufacturers = new[]
         {
             "Prusa", "Voron", "RatRig", "Flashforge", "Phrozen",
             "Elegoo", "Eryone", "Sovol"
@@ -208,9 +208,9 @@ public class ProfileSampleDataTests
             .ToList();
 
         // Assert
-        foreach (var manufacturer in catalogManufacturers)
+        foreach (string? manufacturer in catalogManufacturers)
         {
-            var matching = sampleManufacturers.FirstOrDefault(m =>
+            string? matching = sampleManufacturers.FirstOrDefault(m =>
                 m.Equals(manufacturer, StringComparison.OrdinalIgnoreCase));
 
             matching.Should().NotBeNull(
@@ -222,10 +222,10 @@ public class ProfileSampleDataTests
     public void PrusaSampleProfiles_ContainValidData()
     {
         // Arrange
-        var prusaDir = Path.Combine(SampleProfilesPath, "Prusa");
-        var machineDir = Path.Combine(prusaDir, "machine");
-        var filamentDir = Path.Combine(prusaDir, "filament");
-        var processDir = Path.Combine(prusaDir, "process");
+        string prusaDir = Path.Combine(SampleProfilesPath, "Prusa");
+        string machineDir = Path.Combine(prusaDir, "machine");
+        string filamentDir = Path.Combine(prusaDir, "filament");
+        string processDir = Path.Combine(prusaDir, "process");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -235,7 +235,7 @@ public class ProfileSampleDataTests
             {
                 try
                 {
-                    var profile = JsonSerializer.Deserialize<MachineProfileDto>(
+                    MachineProfileDto? profile = JsonSerializer.Deserialize<MachineProfileDto>(
                         File.ReadAllText(f), options);
                     return profile != null;
                 }
@@ -258,7 +258,7 @@ public class ProfileSampleDataTests
     public void CaseInsensitiveMatching_WorksForSampleProfiles()
     {
         // Arrange - the sample profile directories have mixed case
-        var sampleDirs = Directory.GetDirectories(SampleProfilesPath);
+        string[] sampleDirs = Directory.GetDirectories(SampleProfilesPath);
         var manufacturerNames = sampleDirs.Select(d => new DirectoryInfo(d).Name).ToList();
 
         // Create catalog with different casing
@@ -281,15 +281,15 @@ public class ProfileSampleDataTests
     public void FlashforgeSampleProfiles_HandleCasingInconsistency()
     {
         // Arrange - we know Flashforge has files with "FlashForge" vs "Flashforge" casing
-        var flashforgeDir = Path.Combine(SampleProfilesPath, "Flashforge");
+        string flashforgeDir = Path.Combine(SampleProfilesPath, "Flashforge");
 
         if (!Directory.Exists(flashforgeDir))
         {
             return;  // Skip if Flashforge doesn't exist
         }
 
-        var filamentDir = Path.Combine(flashforgeDir, "filament");
-        var filamentFiles = Directory.GetFiles(filamentDir, "*.json");
+        string filamentDir = Path.Combine(flashforgeDir, "filament");
+        string[] filamentFiles = Directory.GetFiles(filamentDir, "*.json");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 

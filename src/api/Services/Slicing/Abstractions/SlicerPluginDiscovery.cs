@@ -25,7 +25,7 @@ public static class SlicerPluginDiscovery
     /// 1. Scans all loaded assemblies for SlicerPluginAttribute
     /// 2. Instantiates library and UI provider types from attributes
     /// 3. Collects them for registry initialization
-    /// 
+    ///
     /// Example:
     /// <code>
     /// services.DiscoverAndRegisterSlicerPlugins()

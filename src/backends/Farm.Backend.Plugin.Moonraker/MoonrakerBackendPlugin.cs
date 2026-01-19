@@ -1,10 +1,10 @@
-﻿namespace Farm.Backend.Plugin.Moonraker;
-
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+
+namespace Farm.Backend.Plugin.Moonraker;
 
 /// <summary>
 /// Plugin descriptor for Moonraker backend client support.
@@ -71,10 +71,10 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         // Register the Moonraker client interface with its implementation
         services.AddScoped<IMoonrakerClient>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
             return new MoonrakerClient(httpClient, logger);
         });
 
@@ -97,7 +97,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// <returns>An enumerable of capability interface types.</returns>
     public IEnumerable<Type> GetCapabilities()
     {
-        var capabilityNames = new[]
+        string[] capabilityNames = new[]
         {
             "ISupportsFileList",
             "ISupportsFileDownload",
@@ -115,7 +115,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         return capabilityNames
             .Select(name =>
             {
-                var type = typeof(ISupportsFileList).Assembly.GetType($"Farm.Infrastructure.Services.Printers.{name}");
+                Type? type = typeof(ISupportsFileList).Assembly.GetType($"Farm.Infrastructure.Services.Printers.{name}");
                 return type;
             })
             .Where(t => t != null)

@@ -169,6 +169,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(p => p.IpAddress).HasMaxLength(64);
             _ = b.Property(p => p.Backend).HasDefaultValue(0);
             _ = b.Property(p => p.ApiKey);
+
             // Prevent duplicate printers by IP address (unique constraint)
             // SQLite allows multiple NULLs in unique index by default
             // SQL Server needs a filtered index to allow NULLs
@@ -349,6 +350,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)
              .OnDelete(DeleteBehavior.NoAction); // Changed from Cascade to NoAction to prevent multiple cascade paths
+
             // Persisted shadow column for cross-provider case-insensitive uniqueness inside a manufacturer.
             _ = b.Property<string>("NameLowered")
                 .HasColumnName("NameLowered")
@@ -412,6 +414,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(a => a.PrinterModelId)
              .OnDelete(DeleteBehavior.Cascade);
+
             // Unique constraint: SlicerModelName + SlicerType (NULL safe)
             _ = b.HasIndex(a => new { a.PrinterModelId, a.SlicerModelName, a.SlicerType }).IsUnique();
         });
@@ -984,7 +987,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
             _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
             _ = b.Property(t => t.Description).HasMaxLength(512);
-
 
             // Index for quick tag lookups
             _ = b.HasIndex(t => t.Name).IsUnique();

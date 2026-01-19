@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Services.Slicing
     {
         Task<IReadOnlyList<SlicerService>> ListAsync(CancellationToken ct);
 
-        Task<(Guid id, string apiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct);
+        Task<(Guid Id, string ApiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct);
 
         Task<SlicerService?> GetAsync(Guid id, CancellationToken ct);
 

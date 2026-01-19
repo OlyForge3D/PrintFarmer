@@ -67,7 +67,9 @@ public class ChunkUploadCleanupService(IUnifiedLoggingService logger, string web
                 File.Delete(meta);
                 removed++;
             }
-            catch { /* ignore */ }
+            catch
+            { /* ignore */
+            }
         }
 
         if (removed > 0)

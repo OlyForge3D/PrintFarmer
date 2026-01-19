@@ -22,6 +22,12 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Schedule a print job for a specific date and time in a given timezone
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job to schedule.</param>
+    /// <param name="scheduledStartTime">The desired start time for the job.</param>
+    /// <param name="timeZone">The timezone for the scheduled time (default: UTC).</param>
+    /// <param name="recurrencePattern">Optional recurrence pattern for repeating jobs.</param>
+    /// <param name="recurrenceEndDate">Optional end date for recurring jobs.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ScheduledJobDto> ScheduleJobAsync(
         Guid jobId,
         DateTime scheduledStartTime,
@@ -31,18 +37,18 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
         CancellationToken cancellationToken = default)
     {
         // Validate job exists
-        var job = await _context.PrintJobs
+        PrintJob job = await _context.PrintJobs
             .Include(j => j.Schedule)
             .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken) ?? throw new InvalidOperationException($"Print job '{jobId}' not found");
 
         // Validate timezone
-        if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
+        if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
         {
             throw new ArgumentException($"Invalid timezone: {timeZone}");
         }
 
         // Convert input time from user timezone to UTC
-        var utcTime = ConvertToUtc(scheduledStartTime, tzInfo);
+        DateTime utcTime = ConvertToUtc(scheduledStartTime, tzInfo);
 
         // If job already has a schedule, update it
         if (job.Schedule != null)
@@ -84,23 +90,27 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Reschedule an existing scheduled job to a different time
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to reschedule.</param>
+    /// <param name="newScheduledTime">The new scheduled start time.</param>
+    /// <param name="timeZone">The timezone for the new scheduled time (default: UTC).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ScheduledJobDto> RescheduleJobAsync(
         Guid jobId,
         DateTime newScheduledTime,
         string timeZone = "UTC",
         CancellationToken cancellationToken = default)
     {
-        var schedule = await _context.JobSchedules
+        JobSchedule schedule = await _context.JobSchedules
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         // Validate timezone
-        if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
+        if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
         {
             throw new ArgumentException($"Invalid timezone: {timeZone}");
         }
 
         // Convert to UTC
-        var utcTime = ConvertToUtc(newScheduledTime, tzInfo);
+        DateTime utcTime = ConvertToUtc(newScheduledTime, tzInfo);
 
         schedule.ScheduledStartTime = utcTime;
         schedule.TimeZone = timeZone;
@@ -117,9 +127,11 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Cancel scheduling for a job (deactivates but keeps history)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to cancel scheduling for.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task CancelSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var schedule = await _context.JobSchedules
+        JobSchedule schedule = await _context.JobSchedules
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsActive = false;
@@ -133,9 +145,11 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Pause a scheduled job (can be resumed later)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to pause.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task PauseSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var schedule = await _context.JobSchedules
+        JobSchedule schedule = await _context.JobSchedules
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsPaused = true;
@@ -149,9 +163,11 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Resume a paused scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the paused job to resume.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task ResumeSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var schedule = await _context.JobSchedules
+        JobSchedule schedule = await _context.JobSchedules
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
 
         schedule.IsPaused = false;
@@ -165,12 +181,15 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Get all scheduled jobs (active and not paused)
     /// </summary>
+    /// <param name="dateFrom">Optional filter for jobs scheduled on or after this date.</param>
+    /// <param name="dateTo">Optional filter for jobs scheduled on or before this date.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<IEnumerable<ScheduledJobDto>> GetScheduledJobsAsync(
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
         CancellationToken cancellationToken = default)
     {
-        var query = _context.JobSchedules
+        IQueryable<JobSchedule> query = _context.JobSchedules
             .Where(js => js.IsActive && !js.IsPaused)
             .Include(js => js.PrintJob)
             .ThenInclude(j => j.AssignedPrinter)
@@ -186,7 +205,7 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
             query = query.Where(js => js.ScheduledStartTime <= dateTo.Value);
         }
 
-        var schedules = await query
+        List<JobSchedule> schedules = await query
             .OrderBy(js => js.ScheduledStartTime)
             .ToListAsync(cancellationToken);
 
@@ -207,9 +226,11 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Get a specific scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the scheduled job.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ScheduledJobDto?> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var schedule = await _context.JobSchedules
+        JobSchedule? schedule = await _context.JobSchedules
             .Include(js => js.PrintJob)
             .ThenInclude(j => j.AssignedPrinter)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
@@ -233,11 +254,13 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Get execution history for a scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to get history for.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<IEnumerable<JobExecutionDto>> GetExecutionHistoryAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        var executions = await _context.JobExecutions
+        List<JobExecution> executions = await _context.JobExecutions
             .Where(je => je.JobSchedule.PrintJobId == jobId)
             .OrderByDescending(je => je.ScheduledExecutionTime)
             .ToListAsync(cancellationToken);
@@ -259,17 +282,18 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// Trigger scheduled jobs that are due to run
     /// Called by background service periodically
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task TriggerScheduledJobsAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
 
         // Get all active, non-paused schedules that are due
-        var dueSchedules = await _context.JobSchedules
+        List<JobSchedule> dueSchedules = await _context.JobSchedules
             .Where(js => js.IsActive && !js.IsPaused && js.ScheduledStartTime <= now)
             .Include(js => js.PrintJob)
             .ToListAsync(cancellationToken);
 
-        foreach (var schedule in dueSchedules)
+        foreach (JobSchedule? schedule in dueSchedules)
         {
             try
             {
@@ -328,6 +352,8 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Convert time from user timezone to UTC
     /// </summary>
+    /// <param name="userTime">The time in the user's timezone.</param>
+    /// <param name="timeZone">The timezone information for the user's time.</param>
     public DateTime ConvertToUtc(DateTime userTime, TimeZoneInfo timeZone)
     {
         return TimeZoneInfo.ConvertTimeToUtc(userTime, timeZone);
@@ -336,9 +362,11 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Convert time from UTC to user timezone
     /// </summary>
+    /// <param name="utcTime">The UTC time to convert.</param>
+    /// <param name="timeZoneId">The target timezone identifier.</param>
     public DateTime ConvertFromUtc(DateTime utcTime, string timeZoneId)
     {
-        if (!TryGetTimeZoneInfo(timeZoneId, out var tzInfo))
+        if (!TryGetTimeZoneInfo(timeZoneId, out TimeZoneInfo? tzInfo))
         {
             return utcTime; // Fall back to UTC
         }
@@ -349,6 +377,8 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
     /// <summary>
     /// Try to get timezone info from ID, handles both Windows and IANA identifiers
     /// </summary>
+    /// <param name="timeZoneId">The timezone identifier (Windows or IANA format).</param>
+    /// <param name="timeZoneInfo">The resulting timezone info if found.</param>
     private bool TryGetTimeZoneInfo(string timeZoneId, out TimeZoneInfo timeZoneInfo)
     {
         try

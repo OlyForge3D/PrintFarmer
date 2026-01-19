@@ -10,10 +10,10 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
     private readonly TimeSpan _retryDelay = retryDelay ?? TimeSpan.FromSeconds(30);
     private readonly IUnifiedLoggingService _logger = logger ?? new NullLoggingService();
 
+    private readonly Lock _lock = new();
     private int _failureCount;
     private DateTime _lastFailureTime;
     private CircuitState _state = CircuitState.Closed;
-    private readonly Lock _lock = new();
 
     public string Name { get; set; } = "CircuitBreaker";
 
@@ -62,11 +62,13 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
     public async Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        _ = await ExecuteAsync<object?>(async token =>
-        {
-            await operation(token);
-            return null;
-        }, ct);
+        _ = await ExecuteAsync<object?>(
+            async token =>
+            {
+                await operation(token);
+                return null;
+            },
+            ct);
     }
 
     private void OnSuccess()
@@ -127,77 +129,4 @@ public class CircuitBreaker(int failureThreshold = 5, TimeSpan? timeout = null, 
         LastFailureTime = _lastFailureTime,
         FailureThreshold = _failureThreshold
     };
-}
-
-public enum CircuitState
-{
-    Closed,
-    Open,
-    HalfOpen
-}
-
-public class CircuitBreakerOpenException : Exception
-{
-    public CircuitBreakerOpenException(string message) : base(message) { }
-
-    public CircuitBreakerOpenException(string message, Exception innerException) : base(message, innerException) { }
-
-    public CircuitBreakerOpenException() { }
-}
-
-public record CircuitBreakerMetrics
-{
-    public string Name { get; init; } = string.Empty;
-
-    public CircuitState State { get; init; }
-
-    public int FailureCount { get; init; }
-
-    public DateTime LastFailureTime { get; init; }
-
-    public int FailureThreshold { get; init; }
-}
-
-public class CircuitBreakerService(IUnifiedLoggingService logger) : ICircuitBreakerService
-{
-    private readonly ConcurrentDictionary<string, CircuitBreaker> _circuitBreakers = new();
-    private readonly IUnifiedLoggingService _logger = logger;
-
-    public CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null)
-    {
-        return _circuitBreakers.GetOrAdd(name, key =>
-        {
-            CircuitBreaker cb = new(
-                failureThreshold ?? 5,
-                timeout ?? TimeSpan.FromMinutes(1),
-                retryDelay ?? TimeSpan.FromSeconds(30),
-                _logger);
-            cb.Name = key;
-            return cb;
-        });
-    }
-
-    public IEnumerable<CircuitBreakerMetrics> GetAllMetrics()
-    {
-        return _circuitBreakers.Values.Select(cb => cb.Metrics);
-    }
-
-    public void ResetAll()
-    {
-        foreach (CircuitBreaker cb in _circuitBreakers.Values)
-        {
-            cb.Reset();
-        }
-
-        _logger.LogInformation("All circuit breakers reset");
-    }
-}
-
-public interface ICircuitBreakerService
-{
-    CircuitBreaker GetCircuitBreaker(string name, int? failureThreshold = null, TimeSpan? timeout = null, TimeSpan? retryDelay = null);
-
-    IEnumerable<CircuitBreakerMetrics> GetAllMetrics();
-
-    void ResetAll();
 }

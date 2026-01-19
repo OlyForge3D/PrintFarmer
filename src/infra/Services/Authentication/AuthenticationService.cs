@@ -308,7 +308,9 @@ public class AuthenticationService(
             string? preview = user.PasswordHash != null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : user.PasswordHash;
             Console.WriteLine($"[AuthenticationService] ChangePassword: UserId={userId} StoredHashPreview={preview}");
         }
-        catch { }
+        catch
+        {
+        }
 
         if (string.IsNullOrEmpty(user.PasswordHash))
         {
@@ -363,7 +365,7 @@ public class AuthenticationService(
             string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
                 .Replace("+", "-")
                 .Replace("/", "_")
-                .Replace("=", "");
+                .Replace("=", string.Empty);
 
             // Update user with confirmation token
             user.EmailConfirmationToken = token;
@@ -458,6 +460,7 @@ public class AuthenticationService(
                     RemainingAttempts = rateLimit.RemainingAttempts,
                     RetryAfter = rateLimit.RetryAfter
                 });
+
                 // Still return true to prevent information leakage
                 return true;
             }
@@ -467,8 +470,10 @@ public class AuthenticationService(
             {
                 // Don't reveal that the email doesn't exist (security best practice)
                 _logger.LogWarning($"Password reset requested for non-existent email: {email}");
+
                 // Record attempt even for non-existent emails to prevent enumeration via rate limiting
                 await _rateLimitService.RecordPasswordResetAttemptAsync(email);
+
                 // Audit log the attempt (even for non-existent email)
                 await _authAuditService.LogPasswordResetInitiatedAsync(email, ipAddress, null);
                 return true; // Return true to prevent email enumeration
@@ -481,7 +486,7 @@ public class AuthenticationService(
             string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
                 .Replace("+", "-")
                 .Replace("/", "_")
-                .Replace("=", "");
+                .Replace("=", string.Empty);
 
             // Create password reset token entity
             PasswordResetToken resetToken = new()

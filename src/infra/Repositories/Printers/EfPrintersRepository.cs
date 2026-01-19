@@ -5,6 +5,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 
@@ -72,7 +73,7 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
     public void Detach(Printer p)
     {
         // Remove the entity from the tracker so it can be re-added without conflicts
-        var entry = _db.Entry(p);
+        EntityEntry<Printer> entry = _db.Entry(p);
         if (entry != null && entry.State != EntityState.Detached)
         {
             entry.State = EntityState.Detached;
@@ -118,11 +119,13 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
     /// Extracts the IP from the ServerUrl and matches against the stored IpAddress field.
     /// This is much more efficient than loading all printers into memory.
     /// </summary>
+    /// <param name="serverUrl">The server URL containing the IP address to search for.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
     {
         // Extract IP address from ServerUrl (format: http://ip or http://hostname)
         // Strip http/https and port (if any) to get just the host
-        string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
+        string inputHost = serverUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).Split(':')[0];
 
         // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
         return await _db.Printers
@@ -137,7 +140,7 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
     /// </summary>
     public void DetachAllEntities()
     {
-        foreach (var entry in _db.ChangeTracker.Entries().ToList())
+        foreach (EntityEntry? entry in _db.ChangeTracker.Entries().ToList())
         {
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
         }

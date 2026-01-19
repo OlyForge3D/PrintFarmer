@@ -19,11 +19,11 @@ public class StartupStatusTests
     public void MarkInitializationStarted_RecordsStartTime()
     {
         var status = new StartupStatus();
-        var beforeMark = DateTime.UtcNow;
+        DateTime beforeMark = DateTime.UtcNow;
 
         status.MarkInitializationStarted();
 
-        var afterMark = DateTime.UtcNow;
+        DateTime afterMark = DateTime.UtcNow;
         status.InitializationStartedUtc.Should().NotBeNull();
         status.InitializationStartedUtc!.Value.Should().BeOnOrAfter(beforeMark);
         status.InitializationStartedUtc!.Value.Should().BeOnOrBefore(afterMark);
@@ -34,12 +34,12 @@ public class StartupStatusTests
     {
         var status = new StartupStatus();
         status.MarkInitializationStarted();
-        var firstTime = status.InitializationStartedUtc;
+        DateTime? firstTime = status.InitializationStartedUtc;
 
         // Wait a tiny bit and call again
         System.Threading.Thread.Sleep(1);
         status.MarkInitializationStarted();
-        var secondTime = status.InitializationStartedUtc;
+        DateTime? secondTime = status.InitializationStartedUtc;
 
         // Should be the same (first call only)
         secondTime.Should().Be(firstTime);
@@ -62,11 +62,11 @@ public class StartupStatusTests
     public void MarkReady_RecordsCompletionTime()
     {
         var status = new StartupStatus();
-        var beforeMark = DateTime.UtcNow;
+        DateTime beforeMark = DateTime.UtcNow;
 
         status.MarkReady();
 
-        var afterMark = DateTime.UtcNow;
+        DateTime afterMark = DateTime.UtcNow;
         status.InitializationCompletedUtc.Should().NotBeNull();
         status.InitializationCompletedUtc!.Value.Should().BeOnOrAfter(beforeMark);
         status.InitializationCompletedUtc!.Value.Should().BeOnOrBefore(afterMark);
@@ -177,7 +177,7 @@ public class StartupStatusTests
 
         // Manually set end before start (simulating edge case)
         status.MarkReady();
-        var completedTime = status.InitializationCompletedUtc;
+        DateTime? completedTime = status.InitializationCompletedUtc;
 
         // Now if we could somehow set start after end, duration would be negative
         // In practice this shouldn't happen, but the code returns null in this case
@@ -214,11 +214,11 @@ public class StartupStatusTests
     public void MarkFailed_RecordsCompletionTime()
     {
         var status = new StartupStatus();
-        var beforeMark = DateTime.UtcNow;
+        DateTime beforeMark = DateTime.UtcNow;
 
         status.MarkFailed(null);
 
-        var afterMark = DateTime.UtcNow;
+        DateTime afterMark = DateTime.UtcNow;
         status.InitializationCompletedUtc.Should().NotBeNull();
         status.InitializationCompletedUtc!.Value.Should().BeOnOrAfter(beforeMark);
         status.InitializationCompletedUtc!.Value.Should().BeOnOrBefore(afterMark);

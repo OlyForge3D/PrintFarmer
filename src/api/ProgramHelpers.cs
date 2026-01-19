@@ -134,7 +134,10 @@ namespace Farm.Web.Api
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return Results.Ok(new { ranges = suggestions.OrderBy(s => s).ToArray() });
         }
 
@@ -145,7 +148,7 @@ namespace Farm.Web.Api
                 OnMessageReceived = context =>
                 {
                     string auth = context.Request.Headers["Authorization"].ToString();
-                    string snippet = "";
+                    string snippet = string.Empty;
                     if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                     {
                         string tok = auth["Bearer ".Length..].Trim();
@@ -168,7 +171,10 @@ namespace Farm.Web.Api
                             startupLogger?.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet: {TokenSnippet}", presence, snippet);
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
+
                     return Task.CompletedTask;
                 },
                 OnAuthenticationFailed = context =>
@@ -186,7 +192,10 @@ namespace Farm.Web.Api
                             startupLogger?.LogError(context.Exception, "[JWT][OnAuthenticationFailed] {ExceptionType}: {Message}", exType, exMessage);
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
+
                     return Task.CompletedTask;
                 },
                 OnTokenValidated = async context =>
@@ -216,7 +225,9 @@ namespace Farm.Web.Api
                                 token = authHeader["Bearer ".Length..].Trim();
                             }
                         }
-                        catch { }
+                        catch
+                        {
+                        }
 
                         token ??= context.SecurityToken?.ToString();
                         if (!string.IsNullOrEmpty(token))
@@ -241,7 +252,9 @@ namespace Farm.Web.Api
                             }
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
                 },
                 OnChallenge = context =>
                 {
@@ -258,7 +271,10 @@ namespace Farm.Web.Api
                             startupLogger?.LogWarning("[JWT][OnChallenge] Error={Error} Desc={Desc}", error, desc);
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
+
                     return Task.CompletedTask;
                 }
             };
@@ -335,7 +351,9 @@ namespace Farm.Web.Api
                 {
                     app.Logger.LogWarning(ex, "[Startup] Settings/database initialization failed (non-fatal)");
                 }
-                catch { }
+                catch
+                {
+                }
             }
         }
     }

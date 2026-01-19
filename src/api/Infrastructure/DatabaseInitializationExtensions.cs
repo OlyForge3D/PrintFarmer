@@ -16,7 +16,13 @@ public static class DatabaseInitializationExtensions
     /// Ensures schema exists before any services query the database.
     /// Enforces timeouts to prevent hanging containers during startup.
     /// </summary>
-    public static async Task InitializeDatabaseAsync(this WebApplication app,
+    /// <param name="app">The web application instance.</param>
+    /// <param name="logger">The unified logging service for diagnostic output.</param>
+    /// <param name="db">The application database context.</param>
+    /// <param name="dbInitializer">The database initializer service for seeding data.</param>
+    /// <param name="startupStatus">The startup status tracker to mark application readiness.</param>
+    public static async Task InitializeDatabaseAsync(
+        this WebApplication app,
         IUnifiedLoggingService logger,
         AppDbContext db,
         IDatabaseInitializer dbInitializer,
@@ -24,8 +30,7 @@ public static class DatabaseInitializationExtensions
     {
         // Get startup timeout from environment (default: 120 seconds)
         TimeSpan dbStartupTimeout = TimeSpan.FromSeconds(
-            int.TryParse(Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT"), out int timeoutSec) ? timeoutSec : 120
-        );
+            int.TryParse(Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT"), out int timeoutSec) ? timeoutSec : 120);
 
         try
         {
@@ -195,7 +200,7 @@ public static class DatabaseInitializationExtensions
             try
             {
                 // Create a scope to resolve scoped services (SettingsService depends on AppDbContext which is scoped)
-                using var settingsScope = app.Services.CreateScope();
+                using IServiceScope settingsScope = app.Services.CreateScope();
                 ISettingsInitializationService settingsInit = settingsScope.ServiceProvider.GetRequiredService<ISettingsInitializationService>();
                 settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                 settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();

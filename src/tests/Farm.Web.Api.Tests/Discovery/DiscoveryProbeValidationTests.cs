@@ -164,7 +164,7 @@ public class DiscoveryProbeValidationTests
             new MoonrakerDiscoveryProbe(),
         };
 
-        foreach (var probe in probes)
+        foreach (INetworkDiscoveryProbe probe in probes)
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {

@@ -77,8 +77,9 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLog
         {
             rateLimitResult = await rateLimitService.CheckLoginLimitAsync(ipAddress);
         }
-        else // isRegister
+        else
         {
+            // isRegister
             rateLimitResult = await rateLimitService.CheckRegisterLimitAsync(ipAddress);
         }
 

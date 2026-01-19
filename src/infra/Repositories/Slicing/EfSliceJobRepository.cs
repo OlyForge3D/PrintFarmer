@@ -153,6 +153,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
         job.EstimatedPrintTimeSeconds = estimatedPrintTimeSeconds;
         job.FilamentUsedGrams = filamentUsedGrams;
         job.ArtifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
+
         // Aggregate bytes from artifacts table
         if (ids.Length > 0)
         {
@@ -298,6 +299,7 @@ public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
         else
         {
             job.Status = SliceJobStatus.Queued;
+
             // bump queuedAt to now so it can be retried fairly
             job.QueuedAt = DateTime.UtcNow;
         }

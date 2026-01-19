@@ -10,8 +10,7 @@ namespace Farm.Infrastructure.Discovery;
 public record ProbeResult(
     DiscoveredPrinterDto Printer,
     int ConfidenceScore,
-    string Reason
-);
+    string Reason);
 
 /// <summary>
 /// Interface for discovering printer backends at a given IP address.
@@ -33,6 +32,9 @@ public interface INetworkDiscoveryProbe
     /// Attempt to discover a printer backend at the given IP/port.
     /// Returns a ProbeResult with confidence scoring, or null if not found.
     /// </summary>
+    /// <param name="ipAddress">The IP address to probe.</param>
+    /// <param name="timeoutMs">The timeout in milliseconds for the probe attempt.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <remarks>
     /// Confidence scores:
     /// 100: Very high confidence - backend-specific fields validated

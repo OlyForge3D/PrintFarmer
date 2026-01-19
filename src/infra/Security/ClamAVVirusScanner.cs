@@ -73,6 +73,7 @@ public class ClamAVVirusScanner : IVirusScanner
             }
 
             int exit = proc.ExitCode;
+
             // clamscan/clamdscan: 0 = clean, 1 = infected, >1 = error
             return exit switch
             {
@@ -116,7 +117,10 @@ public class ClamAVVirusScanner : IVirusScanner
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return null;
         }
     }

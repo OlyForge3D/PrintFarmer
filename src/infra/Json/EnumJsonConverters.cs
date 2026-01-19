@@ -51,6 +51,7 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);
+
         // Serialize as integer for frontend compatibility
         writer.WriteNumberValue((int)value);
     }

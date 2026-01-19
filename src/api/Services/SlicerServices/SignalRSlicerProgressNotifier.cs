@@ -198,7 +198,6 @@ public class SignalRSlicerProgressNotifier(
 /// <summary>
 /// SignalR Hub for slicer progress updates
 /// </summary>
-
 public class SlicerProgressHub(IUnifiedLoggingService logger, ISlicerProgressNotifier progressNotifier) : Hub
 {
     private readonly IUnifiedLoggingService _logger = logger;

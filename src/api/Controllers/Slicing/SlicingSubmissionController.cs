@@ -50,6 +50,7 @@ public class SlicingSubmissionController(
         if (modelFile == null && Request.HasFormContentType)
         {
             IFormCollection form = await Request.ReadFormAsync();
+
             // Prefer bound files collection populated by the model binder (handles arbitrary field names)
             if (files != null && files.Count > 0)
             {

@@ -35,7 +35,7 @@ public class TagServiceTests
             .ReturnsAsync(Array.Empty<Tag>());
 
         // Act
-        var result = await _service.GetAllTagsAsync(CancellationToken.None);
+        IReadOnlyList<TagDto> result = await _service.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -52,7 +52,7 @@ public class TagServiceTests
             .ReturnsAsync(new[] { tag1, tag2 });
 
         // Act
-        var result = await _service.GetAllTagsAsync(CancellationToken.None);
+        IReadOnlyList<TagDto> result = await _service.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -75,7 +75,7 @@ public class TagServiceTests
             .ReturnsAsync(tag);
 
         // Act
-        var result = await _service.GetTagByIdAsync(tagId, CancellationToken.None);
+        TagDto? result = await _service.GetTagByIdAsync(tagId, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -92,7 +92,7 @@ public class TagServiceTests
             .ReturnsAsync((Tag?)null);
 
         // Act
-        var result = await _service.GetTagByIdAsync(tagId, CancellationToken.None);
+        TagDto? result = await _service.GetTagByIdAsync(tagId, CancellationToken.None);
 
         // Assert
         Assert.Null(result);
@@ -116,7 +116,7 @@ public class TagServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _service.CreateTagAsync(dto, CancellationToken.None);
+        TagDto result = await _service.CreateTagAsync(dto, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -136,7 +136,7 @@ public class TagServiceTests
             .ReturnsAsync(existingTag);
 
         // Act
-        var result = await _service.CreateTagAsync(dto, CancellationToken.None);
+        TagDto result = await _service.CreateTagAsync(dto, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);
@@ -195,7 +195,7 @@ public class TagServiceTests
         // Arrange
         var objectId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
-        var objectType = "Model3D";
+        string objectType = "Model3D";
         var tag = new Tag { Id = tagId, Name = "TestTag", CreatedAt = DateTime.UtcNow };
 
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
@@ -220,7 +220,7 @@ public class TagServiceTests
         // Arrange
         var objectId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
-        var objectType = "Model3D";
+        string objectType = "Model3D";
         var tag = new Tag { Id = tagId, Name = "TestTag", CreatedAt = DateTime.UtcNow };
 
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
@@ -245,7 +245,7 @@ public class TagServiceTests
         // Arrange
         var objectId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
-        var objectType = "Model3D";
+        string objectType = "Model3D";
 
         _tagRepository.Setup(r => r.RemoveTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -268,8 +268,8 @@ public class TagServiceTests
     {
         // Arrange
         var objectId = Guid.NewGuid();
-        var objectType = "Model3D";
-        var tags = new[] {
+        string objectType = "Model3D";
+        Tag[] tags = new[] {
             new Tag { Id = Guid.NewGuid(), Name = "Tag1", Color = "#FF0000", CreatedAt = DateTime.UtcNow },
             new Tag { Id = Guid.NewGuid(), Name = "Tag2", Color = "#00FF00", CreatedAt = DateTime.UtcNow }
         };
@@ -278,7 +278,7 @@ public class TagServiceTests
             .ReturnsAsync(tags);
 
         // Act
-        var result = await _service.GetObjectTagsAsync(objectId, objectType, CancellationToken.None);
+        IReadOnlyList<TagDto> result = await _service.GetObjectTagsAsync(objectId, objectType, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result);

@@ -22,6 +22,8 @@ public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
     /// Score 100: Has multiple Prusa-specific fields (2-3 fields)
     /// Score 85: Has some Prusa-specific fields (1 field)
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -94,7 +96,9 @@ public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
 
                 return new ProbeResult(dto, confidence, reason);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return null;

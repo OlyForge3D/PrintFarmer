@@ -4,7 +4,9 @@ namespace Farm.Infrastructure.Settings;
 
 public sealed class PerEngineSlicerSetting
 {
-    public PerEngineSlicerSetting() { }
+    public PerEngineSlicerSetting()
+    {
+    }
 
     public PerEngineSlicerSetting(string path, string argsTemplate)
     {

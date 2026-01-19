@@ -60,6 +60,7 @@ public class ConsoleRedirectionService(IUnifiedLoggingService unifiedLogger) : I
             RestoreConsoleOutput();
             _consoleWriter?.Dispose();
             _errorWriter?.Dispose();
+
             // Do NOT dispose _originalOut or _originalError (system resources)
             _disposed = true;
         }
@@ -159,5 +160,5 @@ public static class UnifiedConsole
 
     public static void WriteLine(object value) => WriteLine(value?.ToString() ?? "null");
 
-    public static void WriteLine() => WriteLine("");
+    public static void WriteLine() => WriteLine(string.Empty);
 }

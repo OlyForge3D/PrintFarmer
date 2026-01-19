@@ -18,6 +18,7 @@ public record MessageEnvelope
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
     /// <summary>
     /// Envelope version for compatibility tracking
     /// </summary>

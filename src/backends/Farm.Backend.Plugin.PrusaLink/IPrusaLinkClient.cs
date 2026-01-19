@@ -110,6 +110,9 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// Gets a list of file details including names and paths for metadata retrieval.
     /// Used internally for thumbnail extraction.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
+    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 
     Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
@@ -118,6 +121,11 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// Gets detailed file information including metadata and thumbnail URLs.
     /// Used for retrieving thumbnail information for display.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
+    /// <param name="storagePath">The storage path on the printer (e.g., 'usb' or 'local').</param>
+    /// <param name="filePath">The file path within the storage location.</param>
+    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
 
     Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
@@ -125,6 +133,9 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// <summary>
     /// Gets detailed printer information from a PrusaLink printer (name, firmware, capabilities, etc.)
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
+    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 
     Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);

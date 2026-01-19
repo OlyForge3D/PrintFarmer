@@ -35,5 +35,4 @@ public interface ISetupService
 public record SetupConfigurationOptions(
     string[] DatabaseProviders,
     string[] DefaultNetworkRanges,
-    Dictionary<string, int> RecommendedPorts
-);
+    Dictionary<string, int> RecommendedPorts);

@@ -232,6 +232,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingS
                 lock (existing)
                 {
                     existing.Add(now);
+
                     // Clean up old attempts while recording
                     existing.RemoveAll(a => (now - a).TotalHours > 24);
                 }

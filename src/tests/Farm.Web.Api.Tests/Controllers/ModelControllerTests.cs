@@ -262,7 +262,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Model3DDto { Id = Guid.NewGuid(), FileName = fileName });
 
             // Create test file system that contains the file
-            var testFs = TestFileSystemFactory.WithFile(filePath, Encoding.UTF8.GetBytes("test stl content"));
+            TestFileSystem testFs = TestFileSystemFactory.WithFile(filePath, Encoding.UTF8.GetBytes("test stl content"));
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
             Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, testFs, mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);

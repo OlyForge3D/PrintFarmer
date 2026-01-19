@@ -12,7 +12,6 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
-
 public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : IDatabaseInitializer
 {
     private readonly AppDbContext _context = context;
@@ -21,6 +20,9 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     /// <summary>
     /// Initialize database with retry logic for container startup scenarios
     /// </summary>
+    /// <param name="dbProvider">The database provider name (e.g., "Sqlite", "SqlServer", "Postgres").</param>
+    /// <param name="maxRetries">Maximum number of retry attempts for database connection.</param>
+    /// <param name="delaySeconds">Delay in seconds between retry attempts.</param>
     public virtual async Task InitializeAsync(string dbProvider, int maxRetries = 10, int delaySeconds = 5)
     {
         _logger.LogInformation($"[DB] Starting database initialization for provider: {dbProvider}");
@@ -59,6 +61,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, $"[DB] EnsureCreated failed: {ex.Message}. Attempting manual schema initialization for SQLite.");
+
                     // Fallback: very early containers (or volume permission issues) sometimes cause EnsureCreated to throw
                     // For SQLite only, attempt a minimal manual schema verification/creation of the Users table presence heuristic.
                     try
@@ -67,6 +70,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         {
                             // Issue a pragma to force open / create file, then check a sentinel table.
                             _ = await _context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+
                             // If no tables exist, this query will fail; wrap & create a tiny bootstrap table then re-run seed later.
                             // We won't create full schema manually (that belongs to EF model); just let a second EnsureCreated attempt run.
                             _ = await _context.Database.EnsureCreatedAsync();
@@ -132,13 +136,15 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 retryCount++;
                 if (retryCount < maxRetries)
                 {
-                    _logger.LogWarning(ex,
+                    _logger.LogWarning(
+                        ex,
                         $"[DB] Database initialization attempt {retryCount}/{maxRetries} failed: {ex.Message}. Retrying in {delaySeconds} seconds...");
                     await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
                 }
                 else
                 {
-                    _logger.LogError(ex,
+                    _logger.LogError(
+                        ex,
                         $"[DB] Database initialization failed after {maxRetries} attempts. Last error: {ex.Message}");
                     throw new InvalidOperationException(
                         $"Failed to initialize database after {maxRetries} attempts. " +
@@ -163,6 +169,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     {
         try
         {
+#pragma warning disable SA1025 // Code should not contain multiple whitespace in a row
             string[] manufacturerNames = new[]
             {
                 "Unknown",  // Default for unidentified manufacturers - must be first to ensure it gets a consistent ID
@@ -176,8 +183,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 "Sovol",
                 "Ratrig",  // Note: OrcaSlicer manifest uses "Ratrig" not "RatRig", but model names use "RatRig V-Core"
                 "Voron",
+
                 // Bambu Lab (popular ecosystem for hotend adaptations)
                 "Bambu Lab",
+
                 // Component manufacturers (hotends, extruders, nozzles, toolheads)
                 "Phaetus",           // Dragon, Rapido, etc.
                 "Slice Engineering", // Mosquito, Copperhead, Mako
@@ -194,6 +203,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 "Fysetc",            // Budget boards and parts
                 "Community"          // For OpenSource community contributors
             };
+#pragma warning restore SA1025 // Code should not contain multiple whitespace in a row
 
             Dictionary<string, Manufacturer> manufacturers = new(StringComparer.OrdinalIgnoreCase);
             foreach (string? name in manufacturerNames.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -210,30 +220,35 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 manufacturers[normalized] = existing;
             }
 
-
             (string Name, string Mfg, double X, double Y, double Z, int? DefaultBackend, MotionType? MotionType,
              double? NozzleDiameter, bool HasBed, bool HasEnclosure, bool MultiMaterial, int Extruders, bool AutoLevel,
              int? MinHotend, int? MaxHotend, int? MinBed, int? MaxBed, string Materials, int? MaxSpeed)[] modelSeeds = new[]
             {
                 ("Unknown Model", "Unknown", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.Unknown, (double?)0.4, true, false, false, 1, false, (int?)0, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS", (int?)100),
+
                 // Flashforge (note: manifest uses "Flashforge" not "FlashForge")
                 ("Flashforge AD5X", "Flashforge", 220.0, 220.0, 220.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+
                 // Sovol (manifest names: "Sovol SV08", "Sovol SV08 MAX", "Sovol Zero")
                 ("Sovol SV08", "Sovol", 350.0, 350.0, 350.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
                 ("Sovol SV08 MAX", "Sovol", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
                 ("Sovol Zero", "Sovol", 150.0, 150.0, 150.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS", (int?)150),
+
                 // Eryone (manifest: "Eryone" -> "Thinker X400")
                 ("Thinker X400", "Eryone", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+
                 // Elegoo (manifest: Neptune 4 models and Centauri models)
                 ("Elegoo Neptune 4", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Elegoo Neptune 4 Max", "Elegoo", 256.0, 256.0, 256.0, (int?)2, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
                 ("Elegoo Centauri", "Elegoo", 256.0, 256.0, 256.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Elegoo Centauri Carbon", "Elegoo", 256.0, 256.0, 256.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+
                 // PrintersForAnts (community derivative of Voron - smaller build volumes)
                 ("SaladFork 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("SaladFork 180", "PrintersForAnts", 180.0, 180.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Micron 120", "PrintersForAnts", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
                 ("Micron 180", "PrintersForAnts", 180.0, 180.0, 165.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA", (int?)200),
+
                 // Voron (manifest: "Voron 0.1", "Voron 2.4 250", etc. - NOT "v2.4" or "Voron v0")
                 ("Voron 0.1", "Voron", 120.0, 120.0, 120.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 ("Voron 2.4 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
@@ -243,6 +258,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("Voron Trident 250", "Voron", 250.0, 250.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 ("Voron Trident 300", "Voron", 300.0, 300.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 ("Voron Trident 350", "Voron", 350.0, 350.0, 250.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+
                 // Ratrig (note: manifest uses "Ratrig" not "RatRig", models use "RatRig V-Core 3 200" etc.)
                 ("RatRig V-Core 3 200", "Ratrig", 200.0, 200.0, 200.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
                 ("RatRig V-Core 3 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)250),
@@ -257,10 +273,13 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("RatRig V-Core 4 IDEX 300", "Ratrig", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 ("RatRig V-Core 4 IDEX 400", "Ratrig", 400.0, 400.0, 400.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
                 ("RatRig V-Core 4 IDEX 500", "Ratrig", 500.0, 500.0, 500.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, true, 2, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)300),
+
                 // Phrozen (manifest: "Phrozen" -> "Phrozen Arco")
                 ("Phrozen Arco", "Phrozen", 300.0, 300.0, 300.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, false, false, 1, true, (int?)180, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
+
                 // Qidi (manifest: "Qidi" -> "Qidi Q1 Pro", "Qidi X-Plus 4", etc.)
                 ("QIDI X-Plus 4", "Qidi", 305.0, 305.0, 280.0, (int?)0, (MotionType?)MotionType.CoreXY, (double?)0.4, true, true, false, 1, true, (int?)180, (int?)370, (int?)0, (int?)110, "PLA,PETG,ABS,ASA,PC,TPU,Nylon", (int?)600),
+
                 // Prusa (manifest: "Prusa MINI", "Prusa MK3S", "Prusa MK4S", "Prusa CORE One", "Prusa XL" - NO "Original Prusa")
                 ("Prusa MINI", "Prusa", 180.0, 180.0, 180.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)280, (int?)0, (int?)100, "PLA,PETG,ABS,ASA,PC", (int?)180),
                 ("Prusa MK3S", "Prusa", 250.0, 210.0, 210.0, (int?)1, (MotionType?)MotionType.Cartesian, (double?)0.4, true, false, false, 1, true, (int?)170, (int?)300, (int?)0, (int?)120, "PLA,PETG,ABS,ASA,PC", (int?)200),
@@ -332,7 +351,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "Prusa MK4S", "Prusa MK4S" },
                 { "Prusa CORE One", "Prusa CORE One" },
                 { "Prusa XL", "Prusa XL" },
-                
+
                 // Voron models
                 { "Voron 0.1", "Voron 0.1" },
                 { "Voron 2.4 250", "Voron 2.4 250" },
@@ -342,7 +361,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "Voron Trident 250", "Voron Trident 250" },
                 { "Voron Trident 300", "Voron Trident 300" },
                 { "Voron Trident 350", "Voron Trident 350" },
-                
+
                 // RatRig models
                 { "RatRig V-Core 3 200", "RatRig V-Core 3 200" },
                 { "RatRig V-Core 3 300", "RatRig V-Core 3 300" },
@@ -357,12 +376,12 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "RatRig V-Core 4 IDEX 300", "RatRig V-Core 4 IDEX 300" },
                 { "RatRig V-Core 4 IDEX 400", "RatRig V-Core 4 IDEX 400" },
                 { "RatRig V-Core 4 IDEX 500", "RatRig V-Core 4 IDEX 500" },
-                
+
                 // Sovol models
                 { "Sovol SV08", "Sovol SV08" },
                 { "Sovol SV08 MAX", "Sovol SV08 MAX" },
                 { "Sovol Zero", "Sovol Zero" },
-                
+
                 // Other manufacturers
                 { "Flashforge AD5X", "Flashforge AD5X" },
                 { "Phrozen Arco", "Phrozen Arco" },
@@ -390,10 +409,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 { "COREONE", "Prusa CORE" },
                 { "COREONEL", "Prusa CORE One L" },
                 { "XLIS", "Prusa XL" },
-                
+
                 // Voron models - PrusaSlicer abbreviations
                 { "Voron_v0_120", "Voron 0.1" },
-                
+
                 // RatRig models
                 { "VC3_200", "RatRig V-Core 3 200" },
                 { "VC3_300", "RatRig V-Core 3 300" },
@@ -411,10 +430,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             };
 
             // Seed OrcaSlicer aliases
-            foreach (var (slicerName, canonicalName) in orcaSlicerNames)
+            foreach ((string? slicerName, string? canonicalName) in orcaSlicerNames)
             {
                 // Find the canonical PrinterModel
-                var model = await _context.PrinterModels
+                PrinterModel? model = await _context.PrinterModels
                     .FirstOrDefaultAsync(pm => pm.Name == canonicalName);
 
                 if (model == null)
@@ -443,10 +462,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             }
 
             // Seed PrusaSlicer aliases
-            foreach (var (slicerName, canonicalName) in prusaSlicerNames)
+            foreach ((string? slicerName, string? canonicalName) in prusaSlicerNames)
             {
                 // Find the canonical PrinterModel
-                var model = await _context.PrinterModels
+                PrinterModel? model = await _context.PrinterModels
                     .FirstOrDefaultAsync(pm => pm.Name == canonicalName);
 
                 if (model == null)
@@ -613,10 +632,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             {
                 // Stock option - for unmodified/default hotends
                 ("Stock", "Unknown", 280, false, "Original hotend that came with the printer", null),
-                
+
                 // Bambu Lab
                 ("A1 Hotend", "Bambu Lab", 300, true, "Popular hotend from Bambu A1, commonly adapted to other printers", "https://bambulab.com/en/a1"),
-                
+
                 // Phaetus
                 ("Dragon Standard Flow", "Phaetus", 500, false, "Popular all-metal hotend with great heat break", "https://www.phaetus.com/products/dragon-hotend-standard-flow"),
                 ("Dragon High Flow", "Phaetus", 500, true, "High flow variant for faster prints", "https://www.phaetus.com/products/dragon-hotend-high-flow"),
@@ -625,38 +644,38 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("Rapido HF", "Phaetus", 350, true, "High flow Rapido variant", "https://www.phaetus.com/products/rapido-hotend"),
                 ("Rapido 2", "Phaetus", 350, true, "Updated Rapido with improved heater", "https://www.phaetus.com/products/rapido-2-hotend"),
                 ("Rapido 2 Plus", "Phaetus", 350, true, "Large format high flow hotend", "https://www.phaetus.com/products/rapido-2-plus"),
-                
+
                 // Slice Engineering
                 ("Mosquito", "Slice Engineering", 500, false, "Premium all-metal hotend", "https://www.sliceengineering.com/products/mosquito-hotend"),
                 ("Mosquito Magnum", "Slice Engineering", 500, true, "High flow Mosquito", "https://www.sliceengineering.com/products/mosquito-magnum-hotend"),
                 ("Mosquito Magnum+", "Slice Engineering", 500, true, "Enhanced Magnum with better cooling", "https://www.sliceengineering.com/products/mosquito-magnum-plus-hotend"),
                 ("Copperhead", "Slice Engineering", 450, false, "Bi-metal heat break design", "https://www.sliceengineering.com/products/copperhead-heat-break"),
                 ("Mako", "Slice Engineering", 500, true, "Compact high flow hotend", "https://www.sliceengineering.com/products/mako-hotend"),
-                
+
                 // E3D
                 ("V6", "E3D", 285, false, "Classic all-metal hotend", "https://e3d-online.com/products/v6-all-metal-hotend"),
                 ("Revo Six", "E3D", 300, false, "Quick-swap nozzle system", "https://e3d-online.com/products/revo-six"),
                 ("Revo Voron", "E3D", 300, false, "Revo optimized for Voron", "https://e3d-online.com/products/revo-voron"),
                 ("Revo Micro", "E3D", 250, false, "Compact Revo for small printers", "https://e3d-online.com/products/revo-micro"),
-                
+
                 // TriangleLabs
                 ("CHC Pro", "TriangleLabs", 500, true, "High quality ceramic heater core", "https://www.aliexpress.com/item/1005004566533274.html"),
-                
+
                 // Microswiss
                 ("All Metal Hotend", "Microswiss", 300, false, "Direct replacement for Creality", "https://store.micro-swiss.com/collections/all-metal-hotend"),
                 ("FlowTech", "Microswiss", 300, true, "High flow design", "https://store.micro-swiss.com/products/flowtech-hotend"),
-                
+
                 // DropEffect
                 ("NextG", "DropEffect", 500, true, "Ultra high flow hotend", "https://www.dropeffect.com/products/nextg-hotend"),
                 ("XG", "DropEffect", 500, true, "Extra large format", "https://www.dropeffect.com/products/xg-hotend"),
-                
+
                 // BIQU
                 ("H2", "BIQU", 300, false, "Integrated extruder and hotend", "https://biqu.equipment/products/biqu-h2-extruder"),
                 ("H2 V2S", "BIQU", 300, false, "Updated H2 design", "https://biqu.equipment/products/biqu-h2-v2s-extruder"),
                 ("Panda Revo", "BIQU", 300, false, "Revo-compatible hotend", "https://biqu.equipment/products/panda-revo-hotend"),
             };
 
-            foreach (var (name, mfg, maxTemp, isHighFlow, desc, url) in hotendSeeds)
+            foreach ((string? name, string? mfg, int maxTemp, bool isHighFlow, string? desc, string? url) in hotendSeeds)
             {
                 if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
                 {
@@ -685,40 +704,40 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             {
                 // Stock option - for unmodified/default extruders
                 ("Stock", "Unknown", "N/A", false, "Original extruder that came with the printer", null),
-                
+
                 // Bondtech
                 ("BMG", "Bondtech", "3:1", true, "Dual-drive extruder, very popular", "https://www.bondtech.se/product/bmg-extruder/"),
                 ("LGX", "Bondtech", "3.5:1", true, "Large gears for better grip", "https://www.bondtech.se/product/lgx-large-gears-extruder/"),
                 ("LGX Lite", "Bondtech", "3.5:1", true, "Lighter weight LGX", "https://www.bondtech.se/product/lgx-lite-large-gears-extruder/"),
                 ("CW2", "Bondtech", "3:1", true, "Clockwork 2 compatible", "https://www.bondtech.se/product/cw2-extruder/"),
-                
+
                 // Orbiter
                 ("Orbiter 1.5", "Orbiter", "7.5:1", true, "Lightweight planetary gearbox", "https://www.orbiterprojects.com/orbiter-v1-5/"),
                 ("Orbiter 2.0", "Orbiter", "7.5:1", true, "Improved filament path", "https://www.orbiterprojects.com/orbiter-v2-0/"),
                 ("Orbiter 2.5", "Orbiter", "7.5:1", true, "Latest revision", "https://www.orbiterprojects.com/orbiter-v2-5/"),
-                
+
                 // E3D
                 ("Titan", "E3D", "3:1", false, "Compact geared extruder", "https://e3d-online.com/products/titan-extruder"),
                 ("Hemera", "E3D", "3:1", true, "Integrated hotend/extruder", "https://e3d-online.com/products/e3d-hemera"),
                 ("Hemera XS", "E3D", "3:1", true, "Compact Hemera", "https://e3d-online.com/products/e3d-hemera-xs"),
-                
+
                 // TriangleLabs
                 ("BMG Clone", "TriangleLabs", "3:1", true, "BMG compatible", "https://www.aliexpress.com/item/32917029058.html"),
                 ("Orbiter Clone", "TriangleLabs", "7.5:1", true, "Orbiter compatible", "https://www.aliexpress.com/item/1005003292442498.html"),
-                
+
                 // LDO
                 ("Galileo", "LDO", "7.5:1", true, "Compact planetary extruder", "https://docs.ldomotors.com/en/voron/toolhead-pcbs/galileo"),
                 ("Galileo 2", "LDO", "9:1", true, "Higher gear ratio Galileo", "https://docs.ldomotors.com/en/voron/toolhead-pcbs/galileo2"),
-                
+
                 // BIQU
                 ("H2 Extruder", "BIQU", "7:1", true, "Integrated with H2 hotend", "https://biqu.equipment/products/biqu-h2-extruder"),
-                
+
                 // Voron
                 ("Clockwork 1", "Voron", "3:1", true, "First generation Voron extruder", "https://github.com/VoronDesign/Voron-Afterburner"),
                 ("Clockwork 2", "Voron", "3:1", true, "Improved Voron extruder with better grip", "https://github.com/VoronDesign/Voron-Stealthburner"),
             };
 
-            foreach (var (name, mfg, gearRatio, isDirectDrive, desc, url) in extruderSeeds)
+            foreach ((string? name, string? mfg, string? gearRatio, bool isDirectDrive, string? desc, string? url) in extruderSeeds)
             {
                 if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
                 {
@@ -749,7 +768,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 // Voron official/community
                 ("StealthBurner", "Voron", "Enclosed direct drive toolhead for Voron", "https://github.com/VoronDesign/Voron-Stealthburner"),
                 ("MiniStealthBurner", "Voron", "Compact StealthBurner for V0", "https://github.com/VoronDesign/Voron-0"),
-                
+
                 // Community designs (use Unknown manufacturer)
                 ("DragonBurner", "Community", "Popular community toolhead design", "https://github.com/chirpy2605/voron/tree/main/V0/Dragon_Burner"),
                 ("Xol", "Community", "High performance community toolhead", "https://github.com/Armchair-Heavy-Industries/Xol-Toolhead"),
@@ -757,17 +776,17 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("Jabberwocky", "Community", "Community toolhead for V0", "https://github.com/Diyshift/Jabberwocky"),
                 ("AntHead", "Community", "Compact community design", "https://github.com/PrintersForAnts/AntHead"),
                 ("MiniAB", "Community", "Afterburner-based mini toolhead", "https://github.com/PrintersForAnts/Mini-AfterSherpa"),
-                
+
                 // RatRig
                 ("EVA", "Ratrig", "Universal toolhead system", "https://github.com/EVA-3D/eva-main"),
                 ("EVA 3", "Ratrig", "Latest EVA revision", "https://github.com/EVA-3D/eva-main"),
-                
+
                 // E3D
                 ("Hemera Toolhead", "E3D", "Official Hemera mounting", "https://e3d-online.com/products/e3d-hemera"),
                 ("Revo Toolhead", "E3D", "Quick-swap capable toolhead", "https://e3d-online.com/products/revo-voron"),
             };
 
-            foreach (var (name, mfg, desc, url) in toolheadSeeds)
+            foreach ((string? name, string? mfg, string? desc, string? url) in toolheadSeeds)
             {
                 // Manufacturer is required - should always resolve
                 if (string.IsNullOrEmpty(mfg) || !mfgLookup.TryGetValue(mfg, out Guid mfgId))
@@ -798,31 +817,31 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 ("Vanadium", "Slice Engineering", 500, true, "Extreme wear resistance", "https://www.sliceengineering.com/products/vanadium-nozzle"),
                 ("BridgeMaster", "Slice Engineering", 300, false, "Optimized for bridging", "https://www.sliceengineering.com/products/bridgemaster-nozzle"),
                 ("GammaMaster", "Slice Engineering", 300, false, "Precision nozzle", "https://www.sliceengineering.com/products/gammamaster-nozzle"),
-                
+
                 // West3D
                 ("Undertaker", "West3D", 500, true, "High flow hardened nozzle", "https://west3d.com/products/undertaker-nozzle"),
                 ("Undertaker Volcano", "West3D", 500, true, "Volcano-style Undertaker", "https://west3d.com/products/undertaker-volcano-nozzle"),
-                
+
                 // E3D
                 ("V6 Brass", "E3D", 300, false, "Standard brass nozzle", "https://e3d-online.com/products/v6-brass-nozzle"),
                 ("V6 Hardened Steel", "E3D", 500, true, "Abrasion resistant", "https://e3d-online.com/products/v6-hardened-steel-nozzle"),
                 ("NozzleX", "E3D", 500, true, "WS2 coated nozzle", "https://e3d-online.com/products/nozzle-x"),
                 ("Revo Nozzle", "E3D", 300, false, "Quick-swap nozzle", "https://e3d-online.com/products/revo-nozzle"),
-                
+
                 // TriangleLabs
                 ("ZS Nozzle", "TriangleLabs", 500, true, "Hardened steel", "https://www.aliexpress.com/item/1005001347220543.html"),
                 ("CHC Nozzle", "TriangleLabs", 500, false, "For CHC hotends", "https://www.aliexpress.com/item/1005004566533274.html"),
-                
+
                 // Phaetus
                 ("PS Nozzle", "Phaetus", 300, false, "Plated steel", "https://www.phaetus.com/products/ps-nozzle"),
                 ("Tungsten Carbide", "Phaetus", 500, true, "Maximum wear resistance", "https://www.phaetus.com/products/tungsten-carbide-nozzle"),
-                
+
                 // Bondtech
                 ("CHT Nozzle", "Bondtech", 300, false, "Clone-hotend technology high flow nozzle", "https://www.bondtech.se/product/bondtech-cht-nozzle/"),
                 ("CHT Coated", "Bondtech", 500, true, "CHT with hardened coating for abrasives", "https://www.bondtech.se/product/bondtech-cht-coated-nozzle/"),
             };
 
-            foreach (var (name, mfg, maxTemp, isHardened, desc, url) in nozzleSeeds)
+            foreach ((string? name, string? mfg, int maxTemp, bool isHardened, string? desc, string? url) in nozzleSeeds)
             {
                 if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
                 {
@@ -919,6 +938,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         while (e != null)
         {
             string msg = e.Message ?? string.Empty;
+
             // SQLite
             if (msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase) || msg.Contains("constraint failed", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique index", StringComparison.OrdinalIgnoreCase))
             {

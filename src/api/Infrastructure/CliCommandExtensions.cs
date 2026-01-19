@@ -13,6 +13,8 @@ public static class CliCommandExtensions
     /// Handles headless CLI commands like --create-admin and --list-users.
     /// Returns true if a CLI command was executed (app should exit after).
     /// </summary>
+    /// <param name="app">The WebApplication instance to handle CLI commands for.</param>
+    /// <param name="args">The command-line arguments to process.</param>
     public static async Task<bool> HandleCliCommandsAsync(this WebApplication app, string[] args)
     {
         List<string> rawArgs = args.ToList();
@@ -26,6 +28,7 @@ public static class CliCommandExtensions
 
         // Create an async scope to resolve scoped services without using the service locator pattern
         await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
+
         // Resolve logger explicitly; if not registered, keep null to preserve Console fallback
         IUnifiedLoggingService? logger = null;
         try

@@ -12,52 +12,6 @@ public sealed class SlicerServiceMetrics : IDisposable
     private readonly Meter _meter;
     private bool _disposed;
 
-    // Job lifecycle metrics
-    public Counter<long> JobsSubmittedTotal { get; }
-
-    public Counter<long> JobsStartedTotal { get; }
-
-    public Counter<long> JobsCompletedTotal { get; }
-
-    public Counter<long> JobsFailedTotal { get; }
-
-    public Counter<long> JobsCancelledTotal { get; }
-
-    // Duration metrics
-    public Histogram<double> JobQueueDurationSeconds { get; }
-
-    public Histogram<double> JobExecutionDurationSeconds { get; }
-
-    public Histogram<double> JobTotalDurationSeconds { get; }
-
-    // Per-service capacity metrics
-    public ObservableGauge<int> ServiceTotalCapacity { get; }
-
-    public ObservableGauge<int> ServiceAvailableCapacity { get; }
-
-    public ObservableGauge<int> ServiceActiveJobs { get; }
-
-    public Histogram<int> ServiceCapacityUtilization { get; }
-
-    // Service health metrics
-    public Counter<long> ServiceRegistrations { get; }
-
-    public Counter<long> ServiceDeregistrations { get; }
-
-    public Counter<long> ServiceHeartbeatsTotal { get; }
-
-    public Counter<long> ServiceHeartbeatFailuresTotal { get; }
-
-    public Histogram<double> ServiceHeartbeatLatencyMs { get; }
-
-    // API key rotation metrics
-    public Counter<long> ApiKeyRotationsTotal { get; }
-
-    public Counter<long> ApiKeyRotationFailuresTotal { get; }
-
-    // Failure reason tracking
-    public Counter<long> JobFailuresByReason { get; }
-
     private Func<int>? _getTotalCapacity;
     private Func<int>? _getAvailableCapacity;
     private Func<int>? _getActiveJobs;
@@ -161,9 +115,58 @@ public sealed class SlicerServiceMetrics : IDisposable
             description: "Job failures categorized by reason");
     }
 
+    // Job lifecycle metrics
+    public Counter<long> JobsSubmittedTotal { get; }
+
+    public Counter<long> JobsStartedTotal { get; }
+
+    public Counter<long> JobsCompletedTotal { get; }
+
+    public Counter<long> JobsFailedTotal { get; }
+
+    public Counter<long> JobsCancelledTotal { get; }
+
+    // Duration metrics
+    public Histogram<double> JobQueueDurationSeconds { get; }
+
+    public Histogram<double> JobExecutionDurationSeconds { get; }
+
+    public Histogram<double> JobTotalDurationSeconds { get; }
+
+    // Per-service capacity metrics
+    public ObservableGauge<int> ServiceTotalCapacity { get; }
+
+    public ObservableGauge<int> ServiceAvailableCapacity { get; }
+
+    public ObservableGauge<int> ServiceActiveJobs { get; }
+
+    public Histogram<int> ServiceCapacityUtilization { get; }
+
+    // Service health metrics
+    public Counter<long> ServiceRegistrations { get; }
+
+    public Counter<long> ServiceDeregistrations { get; }
+
+    public Counter<long> ServiceHeartbeatsTotal { get; }
+
+    public Counter<long> ServiceHeartbeatFailuresTotal { get; }
+
+    public Histogram<double> ServiceHeartbeatLatencyMs { get; }
+
+    // API key rotation metrics
+    public Counter<long> ApiKeyRotationsTotal { get; }
+
+    public Counter<long> ApiKeyRotationFailuresTotal { get; }
+
+    // Failure reason tracking
+    public Counter<long> JobFailuresByReason { get; }
+
     /// <summary>
     /// Set callbacks for observable capacity metrics.
     /// </summary>
+    /// <param name="getTotalCapacity">Callback function to retrieve total job capacity.</param>
+    /// <param name="getAvailableCapacity">Callback function to retrieve available job capacity.</param>
+    /// <param name="getActiveJobs">Callback function to retrieve the number of active jobs.</param>
     public void SetCapacityProviders(
         Func<int> getTotalCapacity,
         Func<int> getAvailableCapacity,
@@ -177,6 +180,8 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record job submission.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being used.</param>
+    /// <param name="serviceId">Optional identifier for the slicer service.</param>
     public void RecordJobSubmitted(string slicerType, string? serviceId = null)
     {
         TagList tags = new TagList
@@ -194,6 +199,9 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record job start (when worker claims job).
     /// </summary>
+    /// <param name="slicerType">The type of slicer being used.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
+    /// <param name="queueDurationSeconds">The time the job spent in queue, in seconds.</param>
     public void RecordJobStarted(string slicerType, string serviceId, double queueDurationSeconds)
     {
         TagList tags = new TagList
@@ -208,6 +216,10 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record successful job completion with durations.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being used.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
+    /// <param name="executionDurationSeconds">The time spent executing the job, in seconds.</param>
+    /// <param name="totalDurationSeconds">The total time from submission to completion, in seconds.</param>
     public void RecordJobCompleted(
         string slicerType,
         string serviceId,
@@ -227,6 +239,10 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record job failure with reason categorization.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being used.</param>
+    /// <param name="serviceId">Optional identifier for the slicer service.</param>
+    /// <param name="failureReason">The reason for the job failure.</param>
+    /// <param name="executionDurationSeconds">Optional execution duration before failure, in seconds.</param>
     public void RecordJobFailed(
         string slicerType,
         string? serviceId,
@@ -255,6 +271,8 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record job cancellation.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being used.</param>
+    /// <param name="serviceId">Optional identifier for the slicer service.</param>
     public void RecordJobCancelled(string slicerType, string? serviceId = null)
     {
         TagList tags = new TagList
@@ -272,6 +290,8 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record service registration.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being registered.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
     public void RecordServiceRegistration(string slicerType, string serviceId)
     {
         TagList tags = new TagList
@@ -285,6 +305,9 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record service deregistration.
     /// </summary>
+    /// <param name="slicerType">The type of slicer being deregistered.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
+    /// <param name="reason">The reason for deregistration.</param>
     public void RecordServiceDeregistration(string slicerType, string serviceId, string reason)
     {
         TagList tags = new TagList
@@ -299,6 +322,12 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record service heartbeat.
     /// </summary>
+    /// <param name="slicerType">The type of slicer sending the heartbeat.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
+    /// <param name="success">Whether the heartbeat was successful.</param>
+    /// <param name="latencyMs">The heartbeat latency in milliseconds.</param>
+    /// <param name="freeSlots">Optional number of free job slots.</param>
+    /// <param name="totalSlots">Optional total number of job slots.</param>
     public void RecordServiceHeartbeat(
         string slicerType,
         string serviceId,
@@ -321,7 +350,7 @@ public sealed class SlicerServiceMetrics : IDisposable
             // Record capacity utilization if provided
             if (freeSlots.HasValue && totalSlots.HasValue && totalSlots.Value > 0)
             {
-                int utilization = ((totalSlots.Value - freeSlots.Value) * 100) / totalSlots.Value;
+                int utilization = (totalSlots.Value - freeSlots.Value) * 100 / totalSlots.Value;
                 ServiceCapacityUtilization.Record(utilization, tags);
             }
         }
@@ -334,6 +363,10 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// <summary>
     /// Record API key rotation.
     /// </summary>
+    /// <param name="slicerType">The type of slicer whose API key is being rotated.</param>
+    /// <param name="serviceId">The identifier for the slicer service.</param>
+    /// <param name="success">Whether the API key rotation was successful.</param>
+    /// <param name="isAdminForced">Whether the rotation was forced by an administrator.</param>
     public void RecordApiKeyRotation(string slicerType, string serviceId, bool success, bool isAdminForced = false)
     {
         TagList tags = new TagList

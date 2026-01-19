@@ -30,6 +30,8 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     /// Override to provide backend-specific validation with confidence scoring.
     /// Returns (isValid, confidenceScore, reason).
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected virtual Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -81,7 +83,9 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 
                 return new ProbeResult(dto, confidence, reason);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return null;

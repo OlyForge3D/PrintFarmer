@@ -6,8 +6,7 @@ public record EmailMessage(
     string? PlainBody = null,
     string? HtmlBody = null,
     string TemplateKey = "",
-    Dictionary<string, string>? Metadata = null
-)
+    Dictionary<string, string>? Metadata = null)
 {
     public string? CcAddress { get; init; }
 }
@@ -15,5 +14,4 @@ public record EmailMessage(
 public record EmailDispatchResult(
     bool Success,
     string? ProviderMessage = null,
-    string? Error = null
-);
+    string? Error = null);

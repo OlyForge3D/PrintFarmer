@@ -54,8 +54,8 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetPrinterAssetAsync_WithValidManufacturerAndModel_ReturnsOkWithAsset()
         {
             // Arrange
-            var manufacturerId = "bambu-lab";
-            var modelId = "x1";
+            string manufacturerId = "bambu-lab";
+            string modelId = "x1";
             var asset = new PrinterAssetDto
             {
                 Id = modelId,
@@ -69,10 +69,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(asset);
 
             // Act
-            var result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
+            ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
             Assert.Equal(asset, okResult.Value);
         }
 
@@ -80,42 +80,42 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetPrinterAssetAsync_WithNullManufacturer_ReturnsBadRequest()
         {
             // Arrange
-            var modelId = "x1";
+            string modelId = "x1";
 
             // Act
-            var result = await _controller.GetPrinterAssetAsync(null!, modelId);
+            ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(null!, modelId);
 
             // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+            BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         }
 
         [Fact]
         public async Task GetPrinterAssetAsync_WithEmptyManufacturer_ReturnsBadRequest()
         {
             // Arrange
-            var manufacturerId = "";
-            var modelId = "x1";
+            string manufacturerId = "";
+            string modelId = "x1";
 
             // Act
-            var result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
+            ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
 
             // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+            BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         }
 
         [Fact]
         public async Task GetPrinterAssetAsync_WithAssetNotFound_ReturnsNotFound()
         {
             // Arrange
-            var manufacturerId = "unknown";
-            var modelId = "unknown";
+            string manufacturerId = "unknown";
+            string modelId = "unknown";
 
             _assetServiceMock
                 .Setup(s => s.GetPrinterAssetAsync(manufacturerId, modelId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((PrinterAssetDto?)null);
 
             // Act
-            var result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
+            ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
 
             // Assert
             Assert.IsType<NotFoundResult>(result.Result);
@@ -125,8 +125,8 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetPrinterAssetAsync_CallsServiceWithCorrectParameters()
         {
             // Arrange
-            var manufacturerId = "bambu-lab";
-            var modelId = "x1";
+            string manufacturerId = "bambu-lab";
+            string modelId = "x1";
             var ct = new CancellationToken();
             var asset = new PrinterAssetDto { Id = modelId, Name = "Test" };
 
@@ -147,19 +147,19 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetCoverImageAsync_WithValidParameters_ReturnsOkWithUrl()
         {
             // Arrange
-            var manufacturerId = "bambu-lab";
-            var modelId = "x1";
-            var url = "https://example.com/cover.png";
+            string manufacturerId = "bambu-lab";
+            string modelId = "x1";
+            string url = "https://example.com/cover.png";
 
             _assetServiceMock
                 .Setup(s => s.GetCoverImageUrlAsync(manufacturerId, modelId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(url);
 
             // Act
-            var result = await _controller.GetCoverImageAsync(manufacturerId, modelId);
+            ActionResult<string> result = await _controller.GetCoverImageAsync(manufacturerId, modelId);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
             Assert.Equal(url, okResult.Value);
         }
 
@@ -167,15 +167,15 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetCoverImageAsync_WithUrlNotFound_ReturnsNotFound()
         {
             // Arrange
-            var manufacturerId = "unknown";
-            var modelId = "unknown";
+            string manufacturerId = "unknown";
+            string modelId = "unknown";
 
             _assetServiceMock
                 .Setup(s => s.GetCoverImageUrlAsync(manufacturerId, modelId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string?)null);
 
             // Act
-            var result = await _controller.GetCoverImageAsync(manufacturerId, modelId);
+            ActionResult<string> result = await _controller.GetCoverImageAsync(manufacturerId, modelId);
 
             // Assert
             Assert.IsType<NotFoundResult>(result.Result);
@@ -185,19 +185,19 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetBedTextureAsync_WithValidParameters_ReturnsOkWithUrl()
         {
             // Arrange
-            var manufacturerId = "bambu-lab";
-            var modelId = "x1";
-            var url = "https://example.com/texture.png";
+            string manufacturerId = "bambu-lab";
+            string modelId = "x1";
+            string url = "https://example.com/texture.png";
 
             _assetServiceMock
                 .Setup(s => s.GetBedTextureUrlAsync(manufacturerId, modelId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(url);
 
             // Act
-            var result = await _controller.GetBedTextureAsync(manufacturerId, modelId);
+            ActionResult<string> result = await _controller.GetBedTextureAsync(manufacturerId, modelId);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
             Assert.Equal(url, okResult.Value);
         }
 
@@ -205,15 +205,15 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task GetBedTextureAsync_WithUrlNotFound_ReturnsNotFound()
         {
             // Arrange
-            var manufacturerId = "unknown";
-            var modelId = "unknown";
+            string manufacturerId = "unknown";
+            string modelId = "unknown";
 
             _assetServiceMock
                 .Setup(s => s.GetBedTextureUrlAsync(manufacturerId, modelId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string?)null);
 
             // Act
-            var result = await _controller.GetBedTextureAsync(manufacturerId, modelId);
+            ActionResult<string> result = await _controller.GetBedTextureAsync(manufacturerId, modelId);
 
             // Assert
             Assert.IsType<NotFoundResult>(result.Result);
@@ -250,11 +250,11 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(manifest);
 
             // Act
-            var result = await _controller.GetManifestAsync();
+            ActionResult<AssetManifestDto> result = await _controller.GetManifestAsync();
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
-            var returnedManifest = Assert.IsType<AssetManifestDto>(okResult.Value);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+            AssetManifestDto returnedManifest = Assert.IsType<AssetManifestDto>(okResult.Value);
             Assert.Single(returnedManifest.Manufacturers);
         }
 

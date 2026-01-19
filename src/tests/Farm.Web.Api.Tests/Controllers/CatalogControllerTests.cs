@@ -43,10 +43,10 @@ public class CatalogControllerTests
             .ReturnsAsync((manufacturers, "etag123"));
 
         // Act
-        var result = await _controller.GetManufacturersAsync(null, CancellationToken.None);
+        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync(null, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(manufacturers, okResult.Value);
         Assert.Equal("etag123", _controller.Response.Headers["ETag"].ToString());
     }
@@ -61,10 +61,10 @@ public class CatalogControllerTests
             .ReturnsAsync((manufacturers, "etag123"));
 
         // Act
-        var result = await _controller.GetManufacturersAsync("etag123", CancellationToken.None);
+        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync("etag123", CancellationToken.None);
 
         // Assert
-        var statusResult = Assert.IsType<StatusCodeResult>(result.Result);
+        StatusCodeResult statusResult = Assert.IsType<StatusCodeResult>(result.Result);
         Assert.Equal(304, statusResult.StatusCode);
     }
 
@@ -79,10 +79,10 @@ public class CatalogControllerTests
             .ReturnsAsync(manufacturer);
 
         // Act
-        var result = await _controller.GetManufacturerByIdAsync(manufacturerId, CancellationToken.None);
+        ActionResult<ManufacturerDto> result = await _controller.GetManufacturerByIdAsync(manufacturerId, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(manufacturer, okResult.Value);
     }
 
@@ -95,7 +95,7 @@ public class CatalogControllerTests
             .ReturnsAsync((ManufacturerDto?)null);
 
         // Act
-        var result = await _controller.GetManufacturerByIdAsync(Guid.NewGuid(), CancellationToken.None);
+        ActionResult<ManufacturerDto> result = await _controller.GetManufacturerByIdAsync(Guid.NewGuid(), CancellationToken.None);
 
         // Assert
         Assert.IsType<NotFoundResult>(result.Result);
@@ -112,10 +112,10 @@ public class CatalogControllerTests
             .ReturnsAsync(created);
 
         // Act
-        var result = await _controller.CreateManufacturerAsync(request, CancellationToken.None);
+        ActionResult<ManufacturerDto> result = await _controller.CreateManufacturerAsync(request, CancellationToken.None);
 
         // Assert
-        var createdResult = Assert.IsType<CreatedAtRouteResult>(result.Result);
+        CreatedAtRouteResult createdResult = Assert.IsType<CreatedAtRouteResult>(result.Result);
         Assert.Equal("GetManufacturerById", createdResult.RouteName);
         Assert.Equal(created, createdResult.Value);
     }
@@ -127,10 +127,10 @@ public class CatalogControllerTests
         var request = new CreateManufacturerRequest(Name: "");
 
         // Act
-        var result = await _controller.CreateManufacturerAsync(request, CancellationToken.None);
+        ActionResult<ManufacturerDto> result = await _controller.CreateManufacturerAsync(request, CancellationToken.None);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Equal("Name is required", badRequestResult.Value);
     }
 
@@ -147,10 +147,10 @@ public class CatalogControllerTests
             .ReturnsAsync((models, "etag456"));
 
         // Act
-        var result = await _controller.GetPrinterModelsAsync(null, null, CancellationToken.None);
+        ActionResult<IEnumerable<PrinterModelDto>> result = await _controller.GetPrinterModelsAsync(null, null, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(models, okResult.Value);
         Assert.Equal("etag456", _controller.Response.Headers["ETag"].ToString());
     }
@@ -166,10 +166,10 @@ public class CatalogControllerTests
             .ReturnsAsync(model);
 
         // Act
-        var result = await _controller.GetPrinterModelByIdAsync(modelId, CancellationToken.None);
+        ActionResult<PrinterModelDto> result = await _controller.GetPrinterModelByIdAsync(modelId, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(model, okResult.Value);
     }
 
@@ -194,10 +194,10 @@ public class CatalogControllerTests
             .ReturnsAsync(created);
 
         // Act
-        var result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
+        ActionResult<PrinterModelDto> result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
 
         // Assert
-        var createdResult = Assert.IsType<CreatedAtRouteResult>(result.Result);
+        CreatedAtRouteResult createdResult = Assert.IsType<CreatedAtRouteResult>(result.Result);
         Assert.Equal("GetPrinterModelById", createdResult.RouteName);
         Assert.Equal(created, createdResult.Value);
     }
@@ -221,10 +221,10 @@ public class CatalogControllerTests
             .ThrowsAsync(new KeyNotFoundException("Manufacturer not found"));
 
         // Act
-        var result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
+        ActionResult<PrinterModelDto> result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
 
         // Assert
-        var notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
         Assert.Equal("Manufacturer not found", notFoundResult.Value);
     }
 
@@ -247,10 +247,10 @@ public class CatalogControllerTests
             .ThrowsAsync(new DuplicateEntityException("Model already exists"));
 
         // Act
-        var result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
+        ActionResult<PrinterModelDto> result = await _controller.CreatePrinterModelAsync(request, CancellationToken.None);
 
         // Assert
-        var conflictResult = Assert.IsType<ConflictObjectResult>(result.Result);
+        ConflictObjectResult conflictResult = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.NotNull(conflictResult.Value);
     }
 
@@ -264,7 +264,7 @@ public class CatalogControllerTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _controller.DeleteModelAsync(modelId, CancellationToken.None);
+        IActionResult result = await _controller.DeleteModelAsync(modelId, CancellationToken.None);
 
         // Assert
         Assert.IsType<NoContentResult>(result);

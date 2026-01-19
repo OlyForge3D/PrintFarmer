@@ -186,9 +186,10 @@ public class JobFile
 }
 
 // Use JobFilePrint as the default Job type since it's more common
-
 [SuppressMessage("Major Code Smell", "S2094:Classes should not be empty", Justification = "Convenience wrapper to keep API shape consistent")]
-public class Job : JobFilePrint { }
+public class Job : JobFilePrint
+{
+}
 
 // Storage
 public class StorageListResponse

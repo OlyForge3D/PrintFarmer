@@ -9,10 +9,10 @@ namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
 /// Parser for OrcaSlicer printer condition expressions (compatible_printers_condition).
-/// 
+///
 /// Evaluates arbitrary boolean expressions with proper operator precedence:
 /// - Regex matching: property=~/pattern/
-/// - Equality: property==value or property[index]==value  
+/// - Equality: property==value or property[index]==value
 /// - Logical operators: and, or (AND has higher precedence than OR)
 /// - Properties: printer_notes (from Settings), nozzle_diameter
 ///
@@ -26,6 +26,8 @@ public static class PrinterExpressionParser
     /// Evaluates a compatible_printers_condition expression against available machines.
     /// Returns list of matching machine names, or null if expression cannot be evaluated.
     /// </summary>
+    /// <param name="condition">The compatible_printers_condition expression to evaluate.</param>
+    /// <param name="availableMachines">The list of available machine profiles to match against.</param>
     public static List<string>? EvaluateCondition(string condition, List<MachineProfileDto> availableMachines)
     {
         if (string.IsNullOrWhiteSpace(condition))
@@ -41,7 +43,7 @@ public static class PrinterExpressionParser
             {
                 if (EvaluateExpression(condition, machine))
                 {
-                    matchingMachines.Add(machine.Name ?? "");
+                    matchingMachines.Add(machine.Name ?? string.Empty);
                 }
             }
 
@@ -146,7 +148,7 @@ public static class PrinterExpressionParser
             throw new FormatException($"Invalid comparison at position {_position}");
         }
 
-        private (string property, int? index) ParseProperty()
+        private (string Property, int? Index) ParseProperty()
         {
             string property = ReadIdentifier();
             int? index = null;
@@ -374,7 +376,7 @@ public static class PrinterExpressionParser
 
         private static string? ExtractPrinterNotes(MachineProfileDto machine)
         {
-            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes) ? (notes?.ToString()) : null;
+            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes) ? notes?.ToString() : null;
         }
 
         private static string? ExtractNozzleDiameterFromName(string? machineName)

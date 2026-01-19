@@ -31,7 +31,7 @@ public class PrintApprovalServiceTests : IDisposable
         // Enable foreign keys for SQLite
         TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(_connection);
 
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection)
             .Options;
 
@@ -47,16 +47,16 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task CreatePendingApprovalAsync_ShouldCreateApprovalInDatabase()
     {
         // Arrange
-        var printJob = await CreateValidPrintJobAsync();
+        PrintJob printJob = await CreateValidPrintJobAsync();
         var printerId = Guid.NewGuid();
         const string requestedBy = "testuser";
 
         // Act
-        var approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, printerId, requestedBy);
+        Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, printerId, requestedBy);
 
         // Assert
         approvalId.Should().NotBeEmpty();
-        var approval = await _repository.GetAsync(approvalId);
+        PrintApproval? approval = await _repository.GetAsync(approvalId);
         approval.Should().NotBeNull();
         approval!.PrintJobId.Should().Be(printJob.Id);
         approval.PrinterId.Should().Be(printerId);
@@ -68,15 +68,15 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task CreatePendingApprovalAsync_WithNullPrinter_ShouldCreateApproval()
     {
         // Arrange
-        var printJob = await CreateValidPrintJobAsync();
+        PrintJob printJob = await CreateValidPrintJobAsync();
         const string requestedBy = "testuser";
 
         // Act
-        var approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, requestedBy);
+        Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, requestedBy);
 
         // Assert
         approvalId.Should().NotBeEmpty();
-        var approval = await _repository.GetAsync(approvalId);
+        PrintApproval? approval = await _repository.GetAsync(approvalId);
         approval.Should().NotBeNull();
         approval!.PrinterId.Should().BeNull();
     }
@@ -85,18 +85,18 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task ApproveAsync_ShouldEnqueueJobAndRemoveApproval()
     {
         // Arrange
-        var printJob = await CreateValidPrintJobAsync();
+        PrintJob printJob = await CreateValidPrintJobAsync();
         var printerId = Guid.NewGuid();
-        var approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, printerId, "testuser");
+        Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, printerId, "testuser");
 
         // Act
-        var result = await _service.ApproveAsync(approvalId, "approver");
+        bool result = await _service.ApproveAsync(approvalId, "approver");
 
         // Assert
         result.Should().BeTrue();
 
         // Approval should be removed after approval
-        var approval = await _repository.GetAsync(approvalId);
+        PrintApproval? approval = await _repository.GetAsync(approvalId);
         approval.Should().BeNull();
     }
 
@@ -107,7 +107,7 @@ public class PrintApprovalServiceTests : IDisposable
         var nonExistentId = Guid.NewGuid();
 
         // Act
-        var result = await _service.ApproveAsync(nonExistentId, "approver");
+        bool result = await _service.ApproveAsync(nonExistentId, "approver");
 
         // Assert
         result.Should().BeFalse();
@@ -118,17 +118,17 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task ApproveAsync_WhenEnqueueFails_ShouldNotRemoveApproval()
     {
         // Arrange
-        var printJob = await CreateValidPrintJobAsync();
-        var approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, "testuser");
+        PrintJob printJob = await CreateValidPrintJobAsync();
+        Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, "testuser");
 
         // Act
-        var result = await _service.ApproveAsync(approvalId, "approver");
+        bool result = await _service.ApproveAsync(approvalId, "approver");
 
         // Assert
         result.Should().BeTrue(); // Approval service just removes the approval, doesn't enqueue
 
         // Approval should be removed
-        var approval = await _repository.GetAsync(approvalId);
+        PrintApproval? approval = await _repository.GetAsync(approvalId);
         approval.Should().BeNull();
     }
 
@@ -136,17 +136,17 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task ApproveAsync_WithNullPrinterId_ShouldEnqueueWithoutPrinterAssignment()
     {
         // Arrange
-        var printJob = await CreateValidPrintJobAsync();
-        var approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, "testuser");
+        PrintJob printJob = await CreateValidPrintJobAsync();
+        Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, "testuser");
 
         // Act
-        var result = await _service.ApproveAsync(approvalId, "approver");
+        bool result = await _service.ApproveAsync(approvalId, "approver");
 
         // Assert
         result.Should().BeTrue();
 
         // Approval should be removed
-        var approval = await _repository.GetAsync(approvalId);
+        PrintApproval? approval = await _repository.GetAsync(approvalId);
         approval.Should().BeNull();
     }
 
@@ -154,16 +154,16 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task ListPendingAsync_ShouldReturnAllPendingApprovals()
     {
         // Arrange
-        var printJob1 = await CreateValidPrintJobAsync();
-        var printJob2 = await CreateValidPrintJobAsync();
-        var printJob3 = await CreateValidPrintJobAsync();
+        PrintJob printJob1 = await CreateValidPrintJobAsync();
+        PrintJob printJob2 = await CreateValidPrintJobAsync();
+        PrintJob printJob3 = await CreateValidPrintJobAsync();
 
-        var approval1Id = await _service.CreatePendingApprovalAsync(printJob1.Id, Guid.NewGuid(), "user1");
-        var approval2Id = await _service.CreatePendingApprovalAsync(printJob2.Id, null, "user2");
-        var approval3Id = await _service.CreatePendingApprovalAsync(printJob3.Id, Guid.NewGuid(), "user3");
+        Guid approval1Id = await _service.CreatePendingApprovalAsync(printJob1.Id, Guid.NewGuid(), "user1");
+        Guid approval2Id = await _service.CreatePendingApprovalAsync(printJob2.Id, null, "user2");
+        Guid approval3Id = await _service.CreatePendingApprovalAsync(printJob3.Id, Guid.NewGuid(), "user3");
 
         // Act
-        var pending = await _repository.ListPendingAsync();
+        IEnumerable<PrintApproval> pending = await _repository.ListPendingAsync();
 
         // Assert
         pending.Should().HaveCount(3);
@@ -176,17 +176,17 @@ public class PrintApprovalServiceTests : IDisposable
     public async Task ListPendingAsync_AfterApproval_ShouldNotIncludeApprovedItem()
     {
         // Arrange
-        var printJob1 = await CreateValidPrintJobAsync();
-        var printJob2 = await CreateValidPrintJobAsync();
+        PrintJob printJob1 = await CreateValidPrintJobAsync();
+        PrintJob printJob2 = await CreateValidPrintJobAsync();
 
-        var approval1Id = await _service.CreatePendingApprovalAsync(printJob1.Id, Guid.NewGuid(), "user1");
-        var approval2Id = await _service.CreatePendingApprovalAsync(printJob2.Id, null, "user2");
+        Guid approval1Id = await _service.CreatePendingApprovalAsync(printJob1.Id, Guid.NewGuid(), "user1");
+        Guid approval2Id = await _service.CreatePendingApprovalAsync(printJob2.Id, null, "user2");
 
         // Approve one
         await _service.ApproveAsync(approval1Id, "approver");
 
         // Act
-        var pending = await _repository.ListPendingAsync();
+        IEnumerable<PrintApproval> pending = await _repository.ListPendingAsync();
 
         // Assert
         pending.Should().ContainSingle();
@@ -198,7 +198,7 @@ public class PrintApprovalServiceTests : IDisposable
     {
         // Create a valid FolderNode first (required for GcodeFile → StoredFile)
         // Use unique path for each test to avoid UNIQUE constraint violations
-        var folderPath = $"/test/{Guid.NewGuid()}";
+        string folderPath = $"/test/{Guid.NewGuid()}";
         var folder = new FolderNode
         {
             Id = Guid.NewGuid(),

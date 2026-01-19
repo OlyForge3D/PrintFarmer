@@ -1,8 +1,7 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
-
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
 
+namespace Farm.Infrastructure.Services.Printers;
 /// <summary>
 /// Request object for creating a printer model.
 /// Infrastructure version (no ASP.NET binding attributes).

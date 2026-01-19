@@ -30,14 +30,14 @@ namespace Farm.Web.Api.Services.PrintJobs
 
         public async Task<bool> ApproveAsync(Guid approvalId, string? approvedBy)
         {
-            var approval = await _repo.GetAsync(approvalId);
+            PrintApproval? approval = await _repo.GetAsync(approvalId);
             if (approval is null)
             {
                 return false;
             }
 
             var req = new EnqueuePrintJobRequest(approval.PrintJobId, approval.PrinterId, priority: null, requiredNozzleDiameter: null, requiredMaterialType: null);
-            var enqueued = await _queueService.EnqueueAsync(req);
+            PrintJobQueue.PrintJobDto? enqueued = await _queueService.EnqueueAsync(req);
             if (enqueued is not null)
             {
                 await _repo.RemoveAsync(approval);

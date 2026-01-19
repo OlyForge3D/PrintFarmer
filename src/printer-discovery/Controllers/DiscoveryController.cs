@@ -34,7 +34,8 @@ public class DiscoveryController(
         try
         {
             string sessionId = Guid.NewGuid().ToString("N");
-            _logger.LogInformation("Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
+            _logger.LogInformation(
+                "Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
                 sessionId,
                 request?.Subnets != null ? string.Join(", ", request.Subnets) : "default",
                 request?.Backends != null ? string.Join(", ", request.Backends) : "all",

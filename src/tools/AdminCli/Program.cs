@@ -157,7 +157,7 @@ internal static class Program
 #pragma warning disable CA1303
         try
         {
-            string outputFile = argsDic.GetValueOrDefault("output", "");
+            string outputFile = argsDic.GetValueOrDefault("output", string.Empty);
             string csv = GenerateSampleCsv();
 
             if (!string.IsNullOrWhiteSpace(outputFile))
@@ -203,10 +203,10 @@ internal static class Program
         try
         {
             string outputFormat = argsDic.GetValueOrDefault("format", "json").ToLowerInvariant();
-            string outputFile = argsDic.GetValueOrDefault("output", "");
+            string outputFile = argsDic.GetValueOrDefault("output", string.Empty);
             bool noApproval = argsDic.ContainsKey("no-approval");
-            List<string> rangeConstraints = argsDic.GetValueOrDefault("range", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
-            List<string> interfaceConstraints = argsDic.GetValueOrDefault("interface", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
+            List<string> rangeConstraints = argsDic.GetValueOrDefault("range", string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
+            List<string> interfaceConstraints = argsDic.GetValueOrDefault("interface", string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
             int probeTimeoutMs = int.TryParse(argsDic.GetValueOrDefault("timeout", "200"), out int t) ? t : 200;
             int maxConcurrentScans = int.TryParse(argsDic.GetValueOrDefault("concurrent", "10"), out int c) ? c : 10;
 
@@ -424,7 +424,7 @@ internal static class Program
                             // Show progress every 10 IPs scanned
                             if (scanCountLocal % 10 == 0 || scanCountLocal == 1)
                             {
-                                int progress = (int)((scanCountLocal / (double)total) * 100);
+                                int progress = (int)(scanCountLocal / (double)total * 100);
                                 Console.Write($"\r  Scanning... [{progress}%] ({scanCountLocal}/{total} IPs checked, {discovered.Count} found)");
                             }
 
@@ -658,8 +658,8 @@ internal static class Program
         {
             string name = printer.FriendlyName ?? $"{printer.Backend}-{printer.IpAddress}";
             string enabled = setDisabledByDefault ? "false" : "true";
-            string backendPort = printer.BackendPort?.ToString() ?? "";
-            string frontendPort = printer.FrontendPort?.ToString() ?? "";
+            string backendPort = printer.BackendPort?.ToString() ?? string.Empty;
+            string frontendPort = printer.FrontendPort?.ToString() ?? string.Empty;
             _ = csv.AppendLine($"\"{EscapeCsv(name)}\",\"{printer.IpAddress}\",\"{printer.Backend}\",{backendPort},{frontendPort},\"Unknown\",\"Unknown\",\"Auto-discovered\",{enabled}");
         }
 

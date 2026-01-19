@@ -1,10 +1,10 @@
-﻿namespace Farm.Backend.Plugin.PrusaLink;
-
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+
+namespace Farm.Backend.Plugin.PrusaLink;
 
 /// <summary>
 /// Plugin descriptor for PrusaLink backend client support.
@@ -75,10 +75,10 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
         // Using AddScoped because it needs fresh instances per request
         services.AddScoped<IPrusaLinkClient>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            var logger = provider.GetService<IUnifiedLoggingService>();
+            IUnifiedLoggingService? logger = provider.GetService<IUnifiedLoggingService>();
             return new PrusaLinkClient(httpClient, logger);
         });
 

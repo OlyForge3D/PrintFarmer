@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services.Slicing;
 /// Parses OrcaSlicer config bundle JSON into structured preview DTOs.
 /// OrcaSlicer bundles typically contain:
 /// - "printer": array of printer presets
-/// - "filament": array of filament presets  
+/// - "filament": array of filament presets
 /// - "process": array of process/print settings presets
 /// Each preset can inherit from a base preset via "inherits" or "from" keys.
 /// </summary>

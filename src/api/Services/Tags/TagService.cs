@@ -37,6 +37,8 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Retrieves all tags in the system.
         /// </summary>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of all tags.</returns>
         public async Task<IReadOnlyList<TagDto>> GetAllTagsAsync(CancellationToken ct)
         {
             try
@@ -60,6 +62,9 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Retrieves a specific tag by its unique identifier.
         /// </summary>
+        /// <param name="tagId">The unique identifier of the tag to retrieve.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>The tag if found; otherwise, null.</returns>
         public async Task<TagDto?> GetTagByIdAsync(Guid tagId, CancellationToken ct)
         {
             try
@@ -85,6 +90,9 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Creates a new tag with automatic name normalization to PascalCase.
         /// </summary>
+        /// <param name="dto">The data transfer object containing tag creation details.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>The created tag, or an existing tag if a duplicate name exists.</returns>
         public async Task<TagDto> CreateTagAsync(CreateTagDto dto, CancellationToken ct)
         {
             try
@@ -167,6 +175,8 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Deletes a tag from the system.
         /// </summary>
+        /// <param name="tagId">The unique identifier of the tag to delete.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task DeleteTagAsync(Guid tagId, CancellationToken ct)
         {
             try
@@ -194,8 +204,12 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         /// <summary>
-        /// Assigns a tag to an object (polymorphic - supports any object type)
+        /// Assigns a tag to an object (polymorphic - supports any object type).
         /// </summary>
+        /// <param name="objectId">The unique identifier of the object to tag.</param>
+        /// <param name="tagId">The unique identifier of the tag to assign.</param>
+        /// <param name="objectType">The type of object being tagged.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task AssignTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
         {
             try
@@ -226,8 +240,12 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         /// <summary>
-        /// Removes a tag from an object (polymorphic - supports any object type)
+        /// Removes a tag from an object (polymorphic - supports any object type).
         /// </summary>
+        /// <param name="objectId">The unique identifier of the object to untag.</param>
+        /// <param name="tagId">The unique identifier of the tag to remove.</param>
+        /// <param name="objectType">The type of object being untagged.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task RemoveTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
         {
             try
@@ -244,8 +262,12 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         /// <summary>
-        /// Gets all tags assigned to an object (polymorphic)
+        /// Gets all tags assigned to an object (polymorphic).
         /// </summary>
+        /// <param name="objectId">The unique identifier of the object.</param>
+        /// <param name="objectType">The type of object to get tags for.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of tags assigned to the object.</returns>
         public async Task<IReadOnlyList<TagDto>> GetObjectTagsAsync(Guid objectId, string objectType, CancellationToken ct)
         {
             try
@@ -268,19 +290,23 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         /// <summary>
-        /// Assign tags to an object (replaces existing tags - polymorphic)
+        /// Assign tags to an object (replaces existing tags - polymorphic).
         /// </summary>
+        /// <param name="objectId">The unique identifier of the object to tag.</param>
+        /// <param name="tagIds">The collection of tag identifiers to assign.</param>
+        /// <param name="objectType">The type of object being tagged.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task AssignTagsAsync(Guid objectId, IEnumerable<Guid> tagIds, string objectType, CancellationToken ct)
         {
             try
             {
-                var tagIdList = tagIds?.ToList() ?? [];
+                List<Guid> tagIdList = tagIds?.ToList() ?? [];
 
                 // Remove all existing tags for this object (object-agnostic)
                 await _tagRepository.RemoveAllTagsFromObjectAsync(objectId, ct);
 
                 // Add new tags (object-agnostic)
-                foreach (var tagId in tagIdList)
+                foreach (Guid tagId in tagIdList)
                 {
                     await _tagRepository.AssignTagAsync(objectId, tagId, ct);
                 }
@@ -295,8 +321,12 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         /// <summary>
-        /// Bulk assign same tags to multiple objects (polymorphic)
+        /// Bulk assign same tags to multiple objects (polymorphic).
         /// </summary>
+        /// <param name="objectIds">The collection of object identifiers to tag.</param>
+        /// <param name="tagIds">The collection of tag identifiers to assign.</param>
+        /// <param name="objectType">The type of objects being tagged.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task BulkAssignTagsAsync(IEnumerable<Guid> objectIds, IEnumerable<Guid> tagIds, string objectType, CancellationToken ct)
         {
             try
@@ -306,15 +336,15 @@ namespace Farm.Web.Api.Services.Tags
                     throw new ArgumentException("Object type is required", nameof(objectType));
                 }
 
-                var objectIdList = objectIds?.ToList() ?? [];
-                var tagIdList = tagIds?.ToList() ?? [];
+                List<Guid> objectIdList = objectIds?.ToList() ?? [];
+                List<Guid> tagIdList = tagIds?.ToList() ?? [];
 
                 if (objectIdList.Count == 0 || tagIdList.Count == 0)
                 {
                     return;
                 }
 
-                foreach (var objectId in objectIdList)
+                foreach (Guid objectId in objectIdList)
                 {
                     await AssignTagsAsync(objectId, tagIdList, objectType, ct);
                 }
@@ -331,6 +361,9 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Searches for tags by partial name match with usage counts (Phase 3D).
         /// </summary>
+        /// <param name="query">The partial name to search for.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of tag suggestions matching the query.</returns>
         public async Task<IReadOnlyList<TagSuggestionDto>> SearchTagsAsync(string query, CancellationToken ct)
         {
             try
@@ -347,7 +380,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Filter and enrich with usage counts
                 List<TagSuggestionDto> suggestions = new();
-                foreach (var tag in allTags)
+                foreach (Tag tag in allTags)
                 {
                     if (tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
                     {
@@ -377,6 +410,9 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets the most popular tags by usage count (Phase 3D).
         /// </summary>
+        /// <param name="count">The maximum number of popular tags to return.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of the most popular tags.</returns>
         public async Task<IReadOnlyList<TagSuggestionDto>> GetPopularTagsAsync(int count, CancellationToken ct)
         {
             try
@@ -389,8 +425,8 @@ namespace Farm.Web.Api.Services.Tags
                 IReadOnlyList<Tag> allTags = await _tagRepository.ListAllAsync(ct);
 
                 // Get usage counts for all tags
-                List<(Tag tag, int count)> tagsWithCounts = new();
-                foreach (var tag in allTags)
+                List<(Tag Tag, int Count)> tagsWithCounts = new();
+                foreach (Tag tag in allTags)
                 {
                     int usageCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
                     if (usageCount > 0)
@@ -401,14 +437,14 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Sort by usage descending and take top N
                 var popularTags = tagsWithCounts
-                    .OrderByDescending(t => t.count)
+                    .OrderByDescending(t => t.Count)
                     .Take(count)
                     .Select(t => new TagSuggestionDto
                     {
-                        Id = t.tag.Id,
-                        Name = t.tag.Name,
-                        Color = t.tag.Color,
-                        UsageCount = t.count,
+                        Id = t.Tag.Id,
+                        Name = t.Tag.Name,
+                        Color = t.Tag.Color,
+                        UsageCount = t.Count,
                         IsPopular = true
                     })
                     .ToList();
@@ -425,6 +461,8 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets comprehensive tag usage analytics for dashboard (Phase 3D).
         /// </summary>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>Tag analytics data including usage statistics and trends.</returns>
         public async Task<TagAnalyticsDto> GetAnalyticsAsync(CancellationToken ct)
         {
             try
@@ -437,7 +475,7 @@ namespace Farm.Web.Api.Services.Tags
                 int totalAssociations = 0;
                 int tagsInUse = 0;
 
-                foreach (var tag in allTags)
+                foreach (Tag tag in allTags)
                 {
                     int objectCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
 
@@ -503,6 +541,9 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Merges a source tag into a target tag, consolidating duplicates (Phase 3D).
         /// </summary>
+        /// <param name="sourceTagId">The unique identifier of the source tag to merge from.</param>
+        /// <param name="targetTagId">The unique identifier of the target tag to merge into.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
         public async Task MergeTagsAsync(Guid sourceTagId, Guid targetTagId, CancellationToken ct)
         {
             try
@@ -534,7 +575,7 @@ namespace Farm.Web.Api.Services.Tags
                 var objectsInTarget = new HashSet<Guid>(targetObjectIds);
 
                 // Reassign objects from source to target (skip duplicates)
-                foreach (var objectId in sourceObjectIds)
+                foreach (Guid objectId in sourceObjectIds)
                 {
                     if (!objectsInTarget.Contains(objectId))
                     {
@@ -562,6 +603,12 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Filters objects by tag criteria (include/exclude with AND/OR logic) for a specific object type (Phase 3D).
         /// </summary>
+        /// <param name="includeTags">The tags to include in the filter (optional).</param>
+        /// <param name="excludeTags">The tags to exclude from the filter (optional).</param>
+        /// <param name="objectType">The type of objects to filter.</param>
+        /// <param name="requireAllTags">If true, objects must have all include tags; if false, any include tag matches.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of object identifiers matching the filter criteria.</returns>
         public async Task<IReadOnlyList<Guid>> FilterModelsByTagsAsync(
             IEnumerable<Guid>? includeTags,
             IEnumerable<Guid>? excludeTags,
@@ -605,11 +652,11 @@ namespace Farm.Web.Api.Services.Tags
                     {
                         // Require ANY tag: union all objects from all tags
                         objectSet = new HashSet<Guid>();
-                        foreach (var tagId in includeTagList)
+                        foreach (Guid tagId in includeTagList)
                         {
                             IReadOnlyList<Guid> objectIds =
                                 await _tagRepository.GetObjectsByTagAsync(tagId, objectType, ct);
-                            foreach (var objectId in objectIds)
+                            foreach (Guid objectId in objectIds)
                             {
                                 objectSet.Add(objectId);
                             }
@@ -624,11 +671,11 @@ namespace Farm.Web.Api.Services.Tags
                 }
 
                 // Remove objects with exclude tags
-                foreach (var tagId in excludeTagList)
+                foreach (Guid tagId in excludeTagList)
                 {
                     IReadOnlyList<Guid> objectIds =
                         await _tagRepository.GetObjectsByTagAsync(tagId, objectType, ct);
-                    foreach (var objectId in objectIds)
+                    foreach (Guid objectId in objectIds)
                     {
                         objectSet.Remove(objectId);
                     }
@@ -648,6 +695,10 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets tag suggestions for autocomplete/input (Phase 3D).
         /// </summary>
+        /// <param name="partialName">The partial tag name to match for suggestions.</param>
+        /// <param name="limit">The maximum number of suggestions to return.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of tag suggestions.</returns>
         public async Task<IReadOnlyList<TagSuggestionDto>> GetTagSuggestionsAsync(
             string partialName,
             int limit,
@@ -670,8 +721,7 @@ namespace Farm.Web.Api.Services.Tags
                 var suggestions = searchResults
                     .Take(limit)
                     .Concat(
-                        popularTags.Where(p => !searchResults.Any(s => s.Id == p.Id))
-                    )
+                        popularTags.Where(p => !searchResults.Any(s => s.Id == p.Id)))
                     .Take(limit)
                     .ToList();
 
@@ -687,6 +737,10 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets objects that have all specified tags (polymorphic - supports any object type).
         /// </summary>
+        /// <param name="objectType">The type of objects to search.</param>
+        /// <param name="tagIds">The collection of tag identifiers that objects must have.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only collection of object identifiers that have all specified tags.</returns>
         public async Task<IReadOnlyCollection<Guid>> GetObjectsWithAllTagsAsync(
             string objectType,
             IEnumerable<Guid> tagIds,
@@ -719,6 +773,10 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets objects that have any of the specified tags (polymorphic).
         /// </summary>
+        /// <param name="objectType">The type of objects to search.</param>
+        /// <param name="tagIds">The collection of tag identifiers to match against.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only collection of object identifiers that have any of the specified tags.</returns>
         public async Task<IReadOnlyCollection<Guid>> GetObjectsWithAnyTagAsync(
             string objectType,
             IEnumerable<Guid> tagIds,
@@ -744,6 +802,10 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Gets objects that exclude specific tags (polymorphic).
         /// </summary>
+        /// <param name="objectType">The type of objects to search.</param>
+        /// <param name="tagIds">The collection of tag identifiers to exclude.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only collection of object identifiers that do not have any of the specified tags.</returns>
         public async Task<IReadOnlyCollection<Guid>> GetObjectsExcludingTagsAsync(
             string objectType,
             IEnumerable<Guid> tagIds,
@@ -776,6 +838,12 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Complex filtering with include/exclude rules (polymorphic).
         /// </summary>
+        /// <param name="objectType">The type of objects to filter.</param>
+        /// <param name="includeAllTagIds">Tags that objects must all have (AND logic).</param>
+        /// <param name="includeAnyTagIds">Tags where objects must have at least one (OR logic).</param>
+        /// <param name="excludeTagIds">Tags that objects must not have.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only collection of object identifiers matching the complex filter criteria.</returns>
         public async Task<IReadOnlyCollection<Guid>> GetObjectsWithComplexFilterAsync(
             string objectType,
             IEnumerable<Guid> includeAllTagIds,
@@ -817,7 +885,7 @@ namespace Farm.Web.Api.Services.Tags
                 // Apply exclusion filter
                 if (excludeList.Count > 0 && resultObjects.Count > 0)
                 {
-                    var excludedObjects = await FilterObjectsByTagsAsync(objectType, excludeList, null, requireAllTags: false, ct);
+                    IReadOnlyList<Guid> excludedObjects = await FilterObjectsByTagsAsync(objectType, excludeList, null, requireAllTags: false, ct);
                     var excludedSet = new HashSet<Guid>(excludedObjects);
                     resultObjects = resultObjects.Where(m => !excludedSet.Contains(m)).ToList();
                 }
@@ -838,6 +906,12 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Filters objects by tag criteria (include/exclude with AND/OR logic) - polymorphic version.
         /// </summary>
+        /// <param name="objectType">The type of objects to filter.</param>
+        /// <param name="includeTags">The tags to include in the filter (optional).</param>
+        /// <param name="excludeTags">The tags to exclude from the filter (optional).</param>
+        /// <param name="requireAllTags">If true, objects must have all include tags; if false, any include tag matches.</param>
+        /// <param name="ct">Cancellation token for the operation.</param>
+        /// <returns>A read-only list of object identifiers matching the filter criteria.</returns>
         public async Task<IReadOnlyList<Guid>> FilterObjectsByTagsAsync(
             string objectType,
             IEnumerable<Guid>? includeTags,
@@ -886,11 +960,11 @@ namespace Farm.Web.Api.Services.Tags
                     {
                         // Require ANY tag: union all objects from all tags
                         objectSet = new HashSet<Guid>();
-                        foreach (var tagId in includeTagList)
+                        foreach (Guid tagId in includeTagList)
                         {
                             IReadOnlyList<Guid> objectIds =
                                 await _tagRepository.GetObjectsByTagAsync(tagId, objectType, ct);
-                            foreach (var objectId in objectIds)
+                            foreach (Guid objectId in objectIds)
                             {
                                 objectSet.Add(objectId);
                             }
@@ -905,11 +979,11 @@ namespace Farm.Web.Api.Services.Tags
                 }
 
                 // Remove objects with exclude tags
-                foreach (var tagId in excludeTagList)
+                foreach (Guid tagId in excludeTagList)
                 {
                     IReadOnlyList<Guid> objectIds =
                         await _tagRepository.GetObjectsByTagAsync(tagId, objectType, ct);
-                    foreach (var objectId in objectIds)
+                    foreach (Guid objectId in objectIds)
                     {
                         objectSet.Remove(objectId);
                     }
@@ -933,6 +1007,8 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Converts a string to PascalCase format for tag name normalization.
         /// </summary>
+        /// <param name="input">The input string to convert.</param>
+        /// <returns>The input string converted to PascalCase format.</returns>
         private static string ToPascalCase(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -954,7 +1030,7 @@ namespace Farm.Web.Api.Services.Tags
             IEnumerable<string> pascalWords = words.Select(word =>
             {
                 // Safety check in case word is somehow empty
-                return string.IsNullOrEmpty(word) ? "" : char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : "");
+                return string.IsNullOrEmpty(word) ? string.Empty : char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : string.Empty);
             });
 
             return string.Concat(pascalWords);

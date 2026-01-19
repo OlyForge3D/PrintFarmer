@@ -101,7 +101,7 @@ namespace Farm.Web.Api.Services.Users
         /// - FirstName and LastName: User's display name information
         /// - IsActive: Account activation status
         /// - RoleIds: User's assigned roles and associated permissions
-        /// 
+        ///
         /// The update timestamp is automatically set to current UTC time. Role updates trigger a reload of the
         /// user's complete profile including permissions. Returns null if the specified user ID does not exist.
         /// </remarks>

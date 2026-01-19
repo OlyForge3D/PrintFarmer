@@ -90,7 +90,10 @@ public abstract class PrinterClientBase
                     return ub.Uri.ToString();
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return abs.ToString();
         }
 

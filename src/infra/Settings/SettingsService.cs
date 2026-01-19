@@ -20,6 +20,8 @@ public class SettingsService : ISettingsService
     /// <summary>
     /// Returns the current settings object for a given settings class name (e.g., "DatabaseSettings").
     /// </summary>
+    /// <param name="className">The name of the settings class to retrieve.</param>
+    /// <returns>The settings object if found; otherwise, null.</returns>
     public object? GetSettingsClassValues(string className)
     {
         Type? type = _settingTypes.Find(t => t.Name.Equals(className, StringComparison.OrdinalIgnoreCase));
@@ -37,7 +39,8 @@ public class SettingsService : ISettingsService
     private readonly IUnifiedLoggingService _logger;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
-    public void Save<T>(T settings) where T : class, IAppSetting
+    public void Save<T>(T settings)
+        where T : class, IAppSetting
     {
         ArgumentNullException.ThrowIfNull(settings);
         Type type = typeof(T);
@@ -65,7 +68,6 @@ public class SettingsService : ISettingsService
     {
         // For DI: IConfiguration and IDbContextFactory
         throw new InvalidOperationException("Use the constructor with IConfiguration and IDbContextFactory<AppDbContext>");
-
     }
 
     private readonly Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository _settingsRepo;
@@ -85,7 +87,7 @@ public class SettingsService : ISettingsService
     private void LoadSettings(IConfiguration config)
     {
         Dictionary<string, object> newSettings = new Dictionary<string, object>();
-        using var dbContext = _dbContextFactory.CreateDbContext();
+        using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
 
         foreach (Type type in _settingTypes)
         {
@@ -143,12 +145,14 @@ public class SettingsService : ISettingsService
     /// <summary>
     /// Reloads all settings from the provided configuration at runtime.
     /// </summary>
+    /// <param name="config">The configuration source to reload settings from.</param>
     public void Reload(IConfiguration config)
     {
         LoadSettings(config);
     }
 
-    public T Get<T>() where T : class
+    public T Get<T>()
+        where T : class
     {
         T? result = _settings.Values.OfType<T>().FirstOrDefault();
         return result == null ? throw new InvalidOperationException($"No settings instance found for type {typeof(T).Name}") : result;
@@ -168,9 +172,12 @@ public class SettingsService : ISettingsService
     /// Attempts to acquire a distributed lock for a given key.
     /// Returns true if the lock was acquired (key did not exist or was in a completion state).
     /// </summary>
+    /// <param name="lockKey">The unique key identifying the lock.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
+    /// <returns>True if the lock was acquired; otherwise, false.</returns>
     public async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken ct = default)
     {
-        var existingLock = await _settingsRepo.GetAsync(lockKey, ct);
+        AppSettingsEntity? existingLock = await _settingsRepo.GetAsync(lockKey, ct);
         if (existingLock?.SettingsJson is "completed" or "in-progress")
         {
             return false; // Lock already held
@@ -185,6 +192,9 @@ public class SettingsService : ISettingsService
     /// <summary>
     /// Marks a distributed lock as completed.
     /// </summary>
+    /// <param name="lockKey">The unique key identifying the lock to complete.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task CompleteLockAsync(string lockKey, CancellationToken ct = default)
     {
         await _settingsRepo.SetAsync(lockKey, "completed", ct);
@@ -194,6 +204,9 @@ public class SettingsService : ISettingsService
     /// <summary>
     /// Clears a distributed lock to allow retry.
     /// </summary>
+    /// <param name="lockKey">The unique key identifying the lock to clear.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ClearLockAsync(string lockKey, CancellationToken ct = default)
     {
         await _settingsRepo.DeleteAsync(lockKey, ct);

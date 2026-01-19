@@ -304,7 +304,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         };
         requestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
         // Manually add auth header since SendAsync bypasses default headers
-        var authHeader = _client.DefaultRequestHeaders.Authorization;
+        AuthenticationHeaderValue? authHeader = _client.DefaultRequestHeaders.Authorization;
         if (authHeader != null)
         {
             requestMessage.Headers.Authorization = authHeader;

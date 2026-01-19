@@ -14,14 +14,14 @@ namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
 /// Service for discovering and loading OrcaSlicer profiles from the local installation.
-/// 
+///
 /// OrcaSlicer stores profiles organized by manufacturer:
 /// - ~/.config/OrcaSlicer/profiles/{manufacturer}.json - Bundle file listing all profiles for that manufacturer
 /// - ~/.config/OrcaSlicer/profiles/{manufacturer}/ - Directory containing actual profile JSON files
 ///   - machine/ - Machine/printer profiles
 ///   - filament/ - Filament/material profiles
 ///   - process/ - Process/quality profiles
-/// 
+///
 /// This service parses manufacturer bundles and follows sub_path references to load profiles.
 /// </summary>
 public class OrcaProfilesService : ISlicerProfilesService
@@ -47,6 +47,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
         // Check for environment variable override (useful for testing with sample profiles)
         string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
         if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
@@ -422,7 +423,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
-    private T? LoadProfileFromFile<T>(string filePath) where T : class, new()
+    private T? LoadProfileFromFile<T>(string filePath)
+        where T : class, new()
     {
         try
         {
@@ -527,7 +529,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 {
                     // Find the parent profile in the same directory
                     string? profileDir = Path.GetDirectoryName(filePath);
-                    string parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
+                    string parentProfilePath = Path.Combine(profileDir ?? string.Empty, $"{inheritedProfileName}.json");
 
                     if (File.Exists(parentProfilePath))
                     {
@@ -535,6 +537,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
                         {
                             _logger.LogWarning($"Failed to load parent profile '{inheritedProfileName}' for '{filePath}'");
+
                             // Don't fail - continue with what we have
                         }
                     }
@@ -637,7 +640,9 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Reconstruct as JSON string
             StringBuilder sb = new StringBuilder("{");
             bool first = true;
-            foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
+
+            // Order for consistency
+            foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key))
             {
                 if (!first)
                 {
@@ -904,7 +909,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 if (printer.ValueKind == JsonValueKind.String)
                 {
-                    string printerName = printer.GetString() ?? "";
+                    string printerName = printer.GetString() ?? string.Empty;
                     if (!string.IsNullOrWhiteSpace(printerName))
                     {
                         targetList.Add(printerName);
@@ -928,7 +933,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         {
                             if (item.ValueKind == JsonValueKind.String)
                             {
-                                string printerName = item.GetString() ?? "";
+                                string printerName = item.GetString() ?? string.Empty;
                                 if (!string.IsNullOrWhiteSpace(printerName))
                                 {
                                     targetList.Add(printerName);
@@ -984,4 +989,3 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 }
-

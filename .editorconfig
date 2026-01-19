@@ -3,6 +3,8 @@ dotnet_diagnostic.IDE0130.severity = none
 dotnet_diagnostic.IDE0290.severity = none
 # Suppress namespace/file mismatch warning globally
 dotnet_diagnostic.SA1402.severity = none
+dotnet_diagnostic.SA1404.severity = none
+
 # Suppress primary constructor and namespace/file mismatch issues globally
 dotnet_diagnostic.IDE0290.severity = none
 dotnet_diagnostic.SA1400.severity = none
@@ -178,16 +180,19 @@ csharp_using_directive_placement = outside_namespace:warning
 ##############################################
 
 # SA1201: Elements must appear in the correct order
-dotnet_diagnostic.SA1201.severity = warning
+dotnet_diagnostic.SA1201.severity = suggestion
 
 # SA1202: Elements must be ordered by access (public → internal → protected → private)
-dotnet_diagnostic.SA1202.severity = warning
+dotnet_diagnostic.SA1202.severity = suggestion
 
 # SA1203: Constants, fields, constructors, methods, etc. must follow standard order
-dotnet_diagnostic.SA1203.severity = warning
+dotnet_diagnostic.SA1203.severity = suggestion
+
+# 
+dotnet_diagnostic.SA1204.severity = suggestion
 
 # SA1214: Static members should appear before instance members
-dotnet_diagnostic.SA1214.severity = warning
+dotnet_diagnostic.SA1214.severity = suggestion
 
 # SA1216: Using directives must be sorted alphabetically
 dotnet_diagnostic.SA1216.severity = warning
@@ -209,10 +214,10 @@ dotnet_diagnostic.SA1600.severity = none
 dotnet_diagnostic.SA1601.severity = none
 
 # SA1602: Enumeration items should be documented
-dotnet_diagnostic.SA1602.severity = warning
+dotnet_diagnostic.SA1602.severity = suggestion
 
 # SA1413: Use trailing comma in multi-line initializers - style preference
-dotnet_diagnostic.SA1413.severity = suggestion
+dotnet_diagnostic.SA1413.severity = none
 
 # SA1513: Closing brace should be followed by blank line - too strict
 dotnet_diagnostic.SA1513.severity = warning
@@ -225,6 +230,8 @@ dotnet_diagnostic.SA1309.severity = none
 
 # SA1310: Field names should not contain underscore - conflicts with our naming convention
 dotnet_diagnostic.SA1310.severity = none
+dotnet_diagnostic.SA1311.severity = none
+dotnet_diagnostic.SA1312.severity = none # Variable names should begin with lower-case letter - conflicts with our naming convention
 
 # SA1503: Braces should not be omitted
 dotnet_diagnostic.SA1503.severity = warning
@@ -232,14 +239,29 @@ dotnet_diagnostic.SA1503.severity = warning
 # SA1516: Elements should be separated by blank line
 dotnet_diagnostic.SA1516.severity = warning
 
+dotnet_diagnostic.SA1115.severity = suggestion # Parameters should be on same line or separate lines - style preference
+dotnet_diagnostic.SA1117.severity = none # Parameters should be on same line or separate lines - style preference
+
 # SA1128: Put constructor initializers on their own line - style preference
 dotnet_diagnostic.SA1128.severity = suggestion
 
 # SA1402: File may only contain a single type - we allow multiple related types
-dotnet_diagnostic.SA1402.severity = warning
+dotnet_diagnostic.SA1402.severity = suggestion
+
+dotnet_diagnostic.SA1623.severity = none 
+
+dotnet_diagnostic.SA1629.severity = none # Documentation text must end with a period - too noisy
+
+dotnet_diagnostic.SA1124.severity = none # Do not use regions - style preference
+
+dotnet_diagnostic.SA1132.severity = none # Do not combine fields - style preference    
+
+dotnet_diagnostic.SA1134.severity = none # Attributes should not be grouped - style preference
+
+dotnet_diagnostic.SA1642.severity = none
 
 # SA1649: File name should match first type name - not always desirable
-dotnet_diagnostic.SA1649.severity = warning
+dotnet_diagnostic.SA1649.severity = suggestion
 
 # SA1400: Access modifier should be declared - records and primary constructors
 dotnet_diagnostic.SA1400.severity = warning
@@ -367,6 +389,7 @@ dotnet_diagnostic.CA2007.severity = none
 
 # CA1308: Normalize strings to uppercase
 dotnet_diagnostic.CA1308.severity = none
+dotnet_diagnostic.SA1308.severity = none
 
 # CS8618: Non-nullable field is uninitialized. Consider declaring as nullable.
 dotnet_diagnostic.CS8618.severity = none
@@ -453,6 +476,9 @@ dotnet_diagnostic.S6966.severity = none
 dotnet_diagnostic.CA1305.severity = suggestion
 dotnet_diagnostic.CA1310.severity = suggestion
 dotnet_diagnostic.CA1307.severity = suggestion
+
+dotnet_diagnostic.SA1315.severity = suggestion
+dotnet_diagnostic.SA1316.severity = suggestion
 
 # Misc Sonar style warnings that are noisy during refactors
 dotnet_diagnostic.S108.severity = none

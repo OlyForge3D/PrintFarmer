@@ -19,13 +19,13 @@ public class PrinterBackendCapabilitiesService(
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
-        var printer = await _repo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _repo.FindByIdAsync(printerId, ct);
         return printer == null ? null : CreateCapabilitiesDto(printer);
     }
 
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetAllAsync(CancellationToken ct)
     {
-        var printers = await _repo.GetAllAsync(ct);
+        List<Printer> printers = await _repo.GetAllAsync(ct);
         return printers.Select(CreateCapabilitiesDto);
     }
 
@@ -36,7 +36,7 @@ public class PrinterBackendCapabilitiesService(
             return Enumerable.Empty<PrinterBackendCapabilitiesDto>();
         }
 
-        var printers = await _repo.GetAllAsync(ct);
+        List<Printer> printers = await _repo.GetAllAsync(ct);
         var result = printers
             .Where(p => printerIds.Contains(p.Id))
             .Select(CreateCapabilitiesDto)
@@ -52,7 +52,7 @@ public class PrinterBackendCapabilitiesService(
     private PrinterBackendCapabilitiesDto CreateCapabilitiesDto(Printer printer)
     {
         var backend = (PrinterBackend)printer.Backend;
-        var capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
+        BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
 
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
@@ -68,7 +68,6 @@ public class PrinterBackendCapabilitiesService(
             SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
-            SupportsHistory: false // History is handled specially, set to false for now
-        );
+            SupportsHistory: false); // History is handled specially, set to false for now
     }
 }

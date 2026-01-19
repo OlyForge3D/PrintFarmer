@@ -86,7 +86,7 @@ public interface IGcodeRepository
     /// <param name="pageSize">Number of items per page</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Tuple of (files for current page, total count of all matching files)</returns>
-    Task<(List<GcodeFile> files, int totalCount)> QueryFilesAsync(
+    Task<(List<GcodeFile> Files, int TotalCount)> QueryFilesAsync(
         string? path,
         string? search,
         Guid[]? tagIds,

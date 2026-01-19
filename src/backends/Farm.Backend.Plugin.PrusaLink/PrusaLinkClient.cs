@@ -41,7 +41,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
 
-            // Determine if printer is online: 
+            // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions that include these fields)
             // - If those fields don't exist (null), just check that we got a valid status response
             bool isOnline = status != null &&
@@ -64,8 +64,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 job?.File?.Name,
                 thumbnailUrl,
                 null, // Camera stream URL would need camera configuration
-                null  // Camera snapshot URL would need camera configuration
-            );
+                null);  // Camera snapshot URL would need camera configuration
         }
         catch (Exception ex)
         {
@@ -133,9 +132,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 job.Progress,
                 job.File?.Name,
                 thumbnailUrl,
-                null, // Camera stream URL would need camera configuration  
-                null  // Camera snapshot URL would need camera configuration
-            );
+                null, // Camera stream URL would need camera configuration
+                null);  // Camera snapshot URL would need camera configuration
         }
         catch (Exception ex)
         {
@@ -181,8 +179,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
-        );
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
     }
 
     public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
@@ -306,7 +303,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries; FolderInfo.Children is an array so prefer Length checks
@@ -352,13 +349,16 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     /// Gets a list of file details including names and paths for metadata retrieval.
     /// Used internally for thumbnail extraction.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
+    /// <param name="apiKey">The API key for authentication.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         List<(string, string)> result = [];
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
             if (folderInfo is FolderInfo folder && folder.Children != null)
             {
                 foreach (FileInfoBase child in folder.Children)
@@ -408,6 +408,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     /// Gets detailed file information including metadata and thumbnail URLs.
     /// Used for retrieving thumbnail information for display.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
+    /// <param name="storagePath">The storage path (e.g., /local).</param>
+    /// <param name="filePath">The path to the file within the storage.</param>
+    /// <param name="apiKey">The API key for authentication.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
     {
         return await _apiClient.GetFileInfoAsync(baseUrl, storagePath, filePath, apiKey, ct: ct);
@@ -528,8 +533,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         try
         {
-            var printerInfo = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
-            var versionInfo = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
+            PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
+            VersionInfo versionInfo = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
 
             return new PrinterInformation
             {
@@ -592,7 +597,6 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public IPrusaLinkApiClient ApiClient => _apiClient;
 
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         // Use the new method that extracts file metadata including size
@@ -604,7 +608,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries with size information
@@ -642,6 +646,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                     {
                         Name = f.Display,
                         Path = f.Display,
+
                         // Legacy API (FileChild model) doesn't provide size, modified timestamp, or thumbnails
                         Size = null,
                         Modified = null,
@@ -694,7 +699,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         try
         {
-            var info = await GetPrinterInformationAsync(baseUrl, apiKey, ct);
+            PrinterInformation? info = await GetPrinterInformationAsync(baseUrl, apiKey, ct);
             return new StandardPrinterInfo
             {
                 Name = info?.Name ?? "Unknown",
@@ -707,167 +712,6 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             return new StandardPrinterInfo { Name = "Unknown", Firmware = "Unknown", Model = "Unknown" };
         }
     }
-}
-
-#pragma warning disable CA1056 // URI-like properties should not be strings (transport records)
-public record PrusaStatus(bool IsOnline, string? State);
-
-public record PrusaJob(
-    string? PrintState,
-    double? Progress,
-    string? JobName,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? ThumbnailUrl,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraStreamUrl,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraSnapshotUrl
-);
-
-public record PrusaCompositeStatus(
-    bool IsOnline,
-    string? State,
-    double? Progress,
-    string? JobName,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? ThumbnailUrl,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraStreamUrl,
-    [property: SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Transport model for JSON/UI; keep string and provide Uri accessors in shared DTOs")] string? CameraSnapshotUrl
-);
-#pragma warning restore CA1056
-
-// Simplified models and exception previously in extensions
-public class PrintJobProgress
-{
-    public int JobId { get; set; }
-
-    public string State { get; set; } = string.Empty;
-
-    public double Progress { get; set; }
-
-    public int TimePrinting { get; set; }
-
-    public int? TimeRemaining { get; set; }
-
-    public string? FileName { get; set; }
-
-    public bool InaccurateEstimates { get; set; }
-
-    public bool IsActive => State is JobStates.Printing or JobStates.Paused;
-
-    public bool IsFinished => State is JobStates.Finished or JobStates.Stopped;
-
-    public bool HasError => State == JobStates.Error;
-
-    public TimeSpan PrintingTime => TimeSpan.FromSeconds(TimePrinting);
-
-    public TimeSpan? RemainingTime => TimeRemaining.HasValue ? TimeSpan.FromSeconds(TimeRemaining.Value) : null;
-}
-
-public class SimplePrinterStatus
-{
-    public string State { get; set; } = string.Empty;
-
-    public bool IsOnline { get; set; }
-
-    public double? NozzleTemp { get; set; }
-
-    public double? NozzleTarget { get; set; }
-
-    public double? BedTemp { get; set; }
-
-    public double? BedTarget { get; set; }
-
-    public double? AxisX { get; set; }
-
-    public double? AxisY { get; set; }
-
-    public double? AxisZ { get; set; }
-
-    public int? FanSpeed { get; set; }
-
-    public int? FlowRate { get; set; }
-
-    public int? SpeedMultiplier { get; set; }
-
-    public bool IsPrinting => State == PrinterStates.Printing;
-
-    public bool IsPaused => State == PrinterStates.Paused;
-
-    public bool IsIdle => State == PrinterStates.Idle;
-
-    public bool HasError => State == PrinterStates.Error;
-
-    public bool NeedsAttention => State == PrinterStates.Attention;
-}
-
-public class PrinterInformation
-{
-    public string Name { get; set; } = string.Empty;
-
-    public string? Location { get; set; }
-
-    public string Serial { get; set; } = string.Empty;
-
-    public string? Hostname { get; set; }
-
-    public string FirmwareVersion { get; set; } = string.Empty;
-
-    public string PrusaLinkVersion { get; set; } = string.Empty;
-
-    public string ApiVersion { get; set; } = string.Empty;
-
-    public double NozzleDiameter { get; set; }
-
-    public int MinExtrusionTemp { get; set; }
-
-    public bool HasMmu { get; set; }
-
-    public bool SdCardReady { get; set; }
-
-    public bool HasActiveCamera { get; set; }
-
-    public bool SupportsUploadByPut { get; set; }
-}
-
-public class StorageInformation
-{
-    public string Name { get; set; } = string.Empty;
-
-    public string Type { get; set; } = string.Empty;
-
-    public string Path { get; set; } = string.Empty;
-
-    public bool Available { get; set; }
-
-    public bool ReadOnly { get; set; }
-
-    public long? FreeSpace { get; set; }
-
-    public long? TotalSpace { get; set; }
-
-    public long? PrintFileSize { get; set; }
-
-    public long? SystemFileSize { get; set; }
-
-    public double? UsagePercentage => TotalSpace.HasValue && TotalSpace > 0
-        ? (double)(TotalSpace.Value - (FreeSpace ?? 0)) / TotalSpace.Value * 100
-        : null;
-}
-
-public class PrusaLinkException : Exception
-{
-    public PrusaLinkError? ErrorDetails { get; }
-
-    public int StatusCode { get; }
-
-    public PrusaLinkException(string message) : base(message) { }
-
-    public PrusaLinkException(string message, Exception innerException) : base(message, innerException) { }
-
-    public PrusaLinkException(string message, int statusCode, PrusaLinkError? errorDetails = null) : base(message)
-    {
-        StatusCode = statusCode;
-        ErrorDetails = errorDetails;
-    }
-
-    public PrusaLinkException() { }
 }
 
 #pragma warning restore CS1066

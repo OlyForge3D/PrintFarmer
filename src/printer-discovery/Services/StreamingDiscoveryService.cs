@@ -131,18 +131,18 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
             _logger.LogInformation("[STREAMING-DISCOVERY] Excluding {Count} already registered printers", registeredUrls.Count);
 
             // Broadcast initial progress
-            await _broadcaster.BroadcastProgressAsync(new DiscoveryProgressDto(
+            await _broadcaster.BroadcastProgressAsync(
+                new DiscoveryProgressDto(
                 SessionId: sessionId,
                 CurrentNetwork: subnetArray.FirstOrDefault() ?? "Unknown",
-                CurrentIp: "",
+                CurrentIp: string.Empty,
                 TotalIps: totalIps,
                 ScannedIps: 0,
                 PrintersFound: 0,
                 PrintersExcluded: 0,
                 ProgressPercentage: 0,
                 Status: DiscoveryStatus.Scanning,
-                Message: $"Scanning {totalIps} IP addresses..."
-            ), cts.Token);
+                Message: $"Scanning {totalIps} IP addresses..."), cts.Token);
 
             List<DiscoveredPrinterDto> discovered = new();
             int excluded = 0;
@@ -163,7 +163,8 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
 
                 await semaphore.WaitAsync(cts.Token);
 
-                Task task = Task.Run(async () =>
+                Task task = Task.Run(
+                    async () =>
                 {
                     try
                     {
@@ -217,7 +218,8 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
 
                             try
                             {
-                                await _broadcaster.BroadcastProgressAsync(new DiscoveryProgressDto(
+                                await _broadcaster.BroadcastProgressAsync(
+                                    new DiscoveryProgressDto(
                                     SessionId: sessionId,
                                     CurrentNetwork: subnetArray.FirstOrDefault() ?? "Unknown",
                                     CurrentIp: ip,
@@ -227,8 +229,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                                     PrintersExcluded: excluded,
                                     ProgressPercentage: percentage,
                                     Status: DiscoveryStatus.Scanning,
-                                    Message: $"Scanned {currentScanned}/{totalIps} - Found {discovered.Count} printers"
-                                ), CancellationToken.None);
+                                    Message: $"Scanned {currentScanned}/{totalIps} - Found {discovered.Count} printers"), CancellationToken.None);
                             }
                             catch (Exception ex)
                             {
@@ -271,28 +272,29 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                 ? $"Discovery complete - Found {discovered.Count} new printers ({excluded} already registered) in {duration.TotalSeconds:F1}s"
                 : $"Discovery complete - Found {discovered.Count} printers in {duration.TotalSeconds:F1}s";
 
-            await _broadcaster.BroadcastProgressAsync(new DiscoveryProgressDto(
+            await _broadcaster.BroadcastProgressAsync(
+                new DiscoveryProgressDto(
                 SessionId: sessionId,
                 CurrentNetwork: "Complete",
-                CurrentIp: "",
+                CurrentIp: string.Empty,
                 TotalIps: totalIps,
                 ScannedIps: scanned,
                 PrintersFound: discovered.Count,
                 PrintersExcluded: excluded,
                 ProgressPercentage: 100,
                 Status: finalStatus,
-                Message: completionMessage
-            ), CancellationToken.None);
+                Message: completionMessage), CancellationToken.None);
 
-            await _broadcaster.BroadcastCompletedAsync(new DiscoveryCompletedDto(
+            await _broadcaster.BroadcastCompletedAsync(
+                new DiscoveryCompletedDto(
                 SessionId: sessionId,
                 TotalPrintersFound: discovered.Count,
                 TotalPrintersExcluded: excluded,
                 Duration: duration,
-                WasCancelled: cts.Token.IsCancellationRequested
-            ), CancellationToken.None);
+                WasCancelled: cts.Token.IsCancellationRequested), CancellationToken.None);
 
-            _logger.LogInformation("[STREAMING-DISCOVERY] Session {SessionId} completed: {Count} new printers, {Excluded} excluded in {Duration:F1}s",
+            _logger.LogInformation(
+                "[STREAMING-DISCOVERY] Session {SessionId} completed: {Count} new printers, {Excluded} excluded in {Duration:F1}s",
                 sessionId, discovered.Count, excluded, duration.TotalSeconds);
 
             return discovered;
@@ -323,6 +325,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                 }
 
                 SubnetParser network = SubnetParser.Parse(trimmed);
+
                 // Limit to reasonable number of addresses
                 int addressCount = (int)Math.Min(254, network.Total);
                 for (int i = 1; i < addressCount; i++)

@@ -25,6 +25,8 @@ public class OctoPrintDiscoveryProbe : INetworkDiscoveryProbe
     /// Score 75: Has "api" field (specific to OctoPrint endpoint, and NO Moonraker)
     /// Score 0: Moonraker detected in server element (prefer Moonraker probe)
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -112,7 +114,9 @@ public class OctoPrintDiscoveryProbe : INetworkDiscoveryProbe
 
                 return new ProbeResult(dto, confidence, reason);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return null;

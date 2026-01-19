@@ -1,9 +1,8 @@
-﻿namespace Farm.Web.Api.Controllers.Requests;
-
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
+namespace Farm.Web.Api.Controllers.Requests;
 /// <summary>
 /// Request object for creating a printer model.
 /// Note: Nozzle diameter and max hotend temp are now defined per-toolhead.

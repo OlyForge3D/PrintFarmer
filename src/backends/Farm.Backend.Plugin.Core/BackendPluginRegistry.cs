@@ -38,7 +38,7 @@ public class BackendPluginRegistry : IBackendPluginRegistry
     {
         lock (_lock)
         {
-            _plugins.TryGetValue(backendType, out var plugin);
+            _plugins.TryGetValue(backendType, out IBackendClientPlugin? plugin);
             return plugin;
         }
     }
@@ -77,7 +77,7 @@ public class BackendPluginRegistry : IBackendPluginRegistry
     {
         lock (_lock)
         {
-            return _plugins.TryGetValue(backendType, out var plugin) && plugin is IExtendedBackendPlugin extendedPlugin ? extendedPlugin : null;
+            return _plugins.TryGetValue(backendType, out IBackendClientPlugin? plugin) && plugin is IExtendedBackendPlugin extendedPlugin ? extendedPlugin : null;
         }
     }
 

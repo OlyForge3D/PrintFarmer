@@ -9,28 +9,6 @@ using Farm.Web.Api.Services.Slicing;
 
 namespace Farm.Web.Api.Services.JobDispatch;
 
-/// <summary>
-/// Service for dispatching jobs to available workers based on capabilities and load balancing
-/// </summary>
-public interface IJobDispatcherService
-{
-    /// <summary>
-    /// Attempt to dispatch the next queued job to an available worker
-    /// </summary>
-    /// <returns>True if a job was dispatched, false if no suitable worker was found</returns>
-    Task<bool> DispatchNextJobAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Dispatch a specific job to the best available worker
-    /// </summary>
-    Task<bool> DispatchJobAsync(Guid jobId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Find the best worker for a job based on capabilities and load
-    /// </summary>
-    Task<Worker?> FindBestWorkerForJobAsync(SliceJob job, CancellationToken cancellationToken = default);
-}
-
 public class JobDispatcherService(
     ISliceJobRepository jobRepository,
     IWorkerRepository workerRepository,
@@ -173,7 +151,10 @@ public class JobDispatcherService(
                 staleSeconds = parsed;
             }
         }
-        catch { }
+        catch
+        {
+        }
+
         DateTime cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(staleSeconds);
         availableWorkers = availableWorkers.Where(w => w.LastHeartbeat == null || w.LastHeartbeat >= cutoff).ToList();
 #pragma warning disable S2696 // Static field updated from instance method (used for worker availability metrics)
@@ -207,7 +188,6 @@ public class JobDispatcherService(
         // - Fewer active jobs = better
         // - Faster average processing time = better
         // - Worker with matching slicer engine capability = bonus
-
         Worker? bestWorker = null;
         double bestScore = double.MinValue;
 
