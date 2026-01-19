@@ -1054,7 +1054,20 @@ public class PrintersService(
                 ["name"] = t.Name,
                 ["index"] = t.Index,
                 ["nozzleDiameter"] = t.NozzleDiameter,
+                ["nozzleType"] = t.NozzleType,
                 ["maxHotendTemp"] = t.MaxHotendTemp,
+                ["maxFlowRate"] = t.MaxFlowRate,
+                ["toolheadType"] = t.ToolheadType,
+
+                // Component model references
+                ["hotendModelId"] = t.HotendModelId,
+                ["hotendModelName"] = t.HotendModel?.Name,
+                ["extruderModelId"] = t.ExtruderModelId,
+                ["extruderModelName"] = t.ExtruderModel?.Name,
+                ["toolheadModelDefId"] = t.ToolheadModelDefId,
+                ["toolheadModelDefName"] = t.ToolheadModelDef?.Name,
+                ["nozzleModelId"] = t.NozzleModelId,
+                ["nozzleModelName"] = t.NozzleModel?.Name,
                 ["supportedMaterials"] = t.SupportedMaterials,
                 ["isPrimary"] = t.IsPrimary
             }).ToList() ?? new List<Dictionary<string, object?>>()
@@ -1283,7 +1296,16 @@ public class PrintersService(
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
                     NozzleDiameter = toolheadDto.NozzleDiameter ?? primaryModelToolhead?.NozzleDiameter ?? 0.4,
+                    NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : primaryModelToolhead?.NozzleType.HasValue == true ? (int)primaryModelToolhead.NozzleType!.Value : null,
                     MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
+                    MaxFlowRate = toolheadDto.MaxFlowRate ?? primaryModelToolhead?.MaxFlowRate,
+                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : primaryModelToolhead?.ToolheadType.HasValue == true ? (int)primaryModelToolhead.ToolheadType!.Value : null,
+
+                    // Component model references
+                    HotendModelId = toolheadDto.HotendModelId ?? primaryModelToolhead?.HotendModelId,
+                    ExtruderModelId = toolheadDto.ExtruderModelId ?? primaryModelToolhead?.ExtruderModelId,
+                    ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? primaryModelToolhead?.ToolheadModelDefId,
+                    NozzleModelId = toolheadDto.NozzleModelId ?? primaryModelToolhead?.NozzleModelId,
                     SupportedMaterials = toolheadDto.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes,
                     IsPrimary = toolheadDto.IsPrimary
                 };
@@ -1309,7 +1331,16 @@ public class PrintersService(
                     Index = i,
                     IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
                     NozzleDiameter = templateToolhead?.NozzleDiameter ?? 0.4,
+                    NozzleType = templateToolhead?.NozzleType.HasValue == true ? (int)templateToolhead.NozzleType!.Value : null,
                     MaxHotendTemp = templateToolhead?.MaxHotendTemp,
+                    MaxFlowRate = templateToolhead?.MaxFlowRate,
+                    ToolheadType = templateToolhead?.ToolheadType.HasValue == true ? (int)templateToolhead.ToolheadType!.Value : null,
+
+                    // Component model references
+                    HotendModelId = templateToolhead?.HotendModelId,
+                    ExtruderModelId = templateToolhead?.ExtruderModelId,
+                    ToolheadModelDefId = templateToolhead?.ToolheadModelDefId,
+                    NozzleModelId = templateToolhead?.NozzleModelId,
                     SupportedMaterials = templateToolhead?.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes
                 };
                 p.Toolheads.Add(toolhead);

@@ -229,11 +229,32 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                     v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
 
-            // Foreign Key
+            // Foreign Key to Printer
             _ = b.HasOne(t => t.Printer)
              .WithMany(p => p.Toolheads)
              .HasForeignKey(t => t.PrinterId)
              .OnDelete(DeleteBehavior.Cascade);
+
+            // Foreign Keys to Component Models (optional relationships)
+            _ = b.HasOne(t => t.HotendModel)
+             .WithMany()
+             .HasForeignKey(t => t.HotendModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ExtruderModel)
+             .WithMany()
+             .HasForeignKey(t => t.ExtruderModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ToolheadModelDef)
+             .WithMany()
+             .HasForeignKey(t => t.ToolheadModelDefId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.NozzleModel)
+             .WithMany()
+             .HasForeignKey(t => t.NozzleModelId)
+             .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes
             _ = b.HasIndex(t => t.PrinterId);

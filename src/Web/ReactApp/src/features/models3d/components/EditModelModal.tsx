@@ -550,6 +550,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                 <BackendSelector
                   value={formData.defaultBackend}
                   onChange={(backend) => handleInputChange('defaultBackend', backend)}
+                  valueType="string"
                   className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
                 />
               </FormField>

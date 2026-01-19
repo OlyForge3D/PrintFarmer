@@ -244,22 +244,54 @@ public class ImportProcessorService : IImportProcessorService
 
         await _unitOfWork.Printers.AddAsync(p, ct);
 
-        // Create default toolhead for the imported printer
-        var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
+        // Create toolheads from import data or use default
+        if (dto.Toolheads != null && dto.Toolheads.Count > 0)
         {
-            Id = Guid.NewGuid(),
-            PrinterId = p.Id,
-            Name = "Extruder 1",
-            Index = 0,
-            IsPrimary = true,
-            NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
-            SupportedMaterials = dto.SupportedMaterials,
-            MaxHotendTemp = dto.MaxHotendTemp,
-            UpdatedAt = DateTime.UtcNow
-        };
+            // Import toolheads from DTO (exported data)
+            foreach (var toolheadDto in dto.Toolheads.OrderBy(t => t.Index))
+            {
+                var toolhead = new Farm.Infrastructure.Domain.Toolhead
+                {
+                    Id = toolheadDto.Id ?? Guid.NewGuid(),
+                    PrinterId = p.Id,
+                    Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
+                    Index = toolheadDto.Index,
+                    NozzleDiameter = toolheadDto.NozzleDiameter ?? dto.NozzleDiameter ?? 0.4,
+                    NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : null,
+                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? dto.MaxHotendTemp,
+                    MaxFlowRate = toolheadDto.MaxFlowRate,
+                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
+                    HotendModelId = toolheadDto.HotendModelId,
+                    ExtruderModelId = toolheadDto.ExtruderModelId,
+                    ToolheadModelDefId = toolheadDto.ToolheadModelDefId,
+                    NozzleModelId = toolheadDto.NozzleModelId,
+                    SupportedMaterials = toolheadDto.SupportedMaterials ?? dto.SupportedMaterials,
+                    IsPrimary = toolheadDto.IsPrimary,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                p.Toolheads.Add(toolhead);
+            }
+        }
+        else
+        {
+            // Create default toolhead for the imported printer
+            var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = p.Id,
+                Name = "Extruder 1",
+                Index = 0,
+                IsPrimary = true,
+                NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
+                SupportedMaterials = dto.SupportedMaterials,
+                MaxHotendTemp = dto.MaxHotendTemp,
+                UpdatedAt = DateTime.UtcNow
+            };
+            p.Toolheads.Add(defaultToolhead);
+        }
 
-        // TODO: Add toolhead via repository if one exists, or directly via context
-        // For now, we'll need to add it to the database - this may need a toolhead repository
+        await _unitOfWork.SaveChangesAsync(ct);
+
         return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
             Name: p.Name,

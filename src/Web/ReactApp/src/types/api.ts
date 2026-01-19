@@ -386,7 +386,15 @@ export interface UpdateToolheadDto {
   name?: string;
   index?: number;
   nozzleDiameter?: number;
+  nozzleType?: NozzleType;
   maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType;
+  // Component model references
+  hotendModelId?: string;
+  extruderModelId?: string;
+  toolheadModelDefId?: string;
+  nozzleModelId?: string;
   supportedMaterials?: string[];
   isPrimary?: boolean;
 }
@@ -535,7 +543,7 @@ export interface PrinterModelDto {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypes?: string[];
 
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
@@ -601,7 +609,19 @@ export interface ToolheadDto {
   name?: string;
   index: number;
   nozzleDiameter?: number;
+  nozzleType?: NozzleType;
   maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType;
+  // Component model references (IDs and resolved names from database)
+  hotendModelId?: string;
+  hotendModelName?: string;
+  extruderModelId?: string;
+  extruderModelName?: string;
+  toolheadModelDefId?: string;
+  toolheadModelDefName?: string;
+  nozzleModelId?: string;
+  nozzleModelName?: string;
   supportedMaterials?: string[];
   isPrimary: boolean;
   lastUpdated?: Date;
@@ -743,7 +763,7 @@ export interface UpdateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypeIds?: string[];
 
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
@@ -766,7 +786,7 @@ export interface CreateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypeIds?: string[];
 
   // Capability properties (nozzle diameter and max hotend temp are now on toolheads)

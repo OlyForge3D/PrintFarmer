@@ -724,13 +724,26 @@ public class PrintersController(
             p.IsAvailable,
             p.LastCapabilityUpdate);
 
-        // Map toolheads to DTOs
+        // Map toolheads to DTOs with hardware tracking fields
         ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(
             t.Id,
             t.Name,
             t.Index,
             t.NozzleDiameter,
+            t.NozzleType.HasValue ? (NozzleType)t.NozzleType.Value : null,
             t.MaxHotendTemp,
+            t.MaxFlowRate,
+            t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+
+            // Component model references
+            t.HotendModelId,
+            t.HotendModel?.Name,
+            t.ExtruderModelId,
+            t.ExtruderModel?.Name,
+            t.ToolheadModelDefId,
+            t.ToolheadModelDef?.Name,
+            t.NozzleModelId,
+            t.NozzleModel?.Name,
             t.SupportedMaterials,
             t.IsPrimary,
             t.UpdatedAt)).ToArray();
@@ -1277,7 +1290,16 @@ public class PrintersController(
                     }
 
                     toolhead.NozzleDiameter = toolheadDto.NozzleDiameter ?? toolhead.NozzleDiameter;
+                    toolhead.NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : toolhead.NozzleType;
                     toolhead.MaxHotendTemp = toolheadDto.MaxHotendTemp ?? toolhead.MaxHotendTemp;
+                    toolhead.MaxFlowRate = toolheadDto.MaxFlowRate ?? toolhead.MaxFlowRate;
+                    toolhead.ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : toolhead.ToolheadType;
+
+                    // Component model references
+                    toolhead.HotendModelId = toolheadDto.HotendModelId ?? toolhead.HotendModelId;
+                    toolhead.ExtruderModelId = toolheadDto.ExtruderModelId ?? toolhead.ExtruderModelId;
+                    toolhead.ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? toolhead.ToolheadModelDefId;
+                    toolhead.NozzleModelId = toolheadDto.NozzleModelId ?? toolhead.NozzleModelId;
                     toolhead.SupportedMaterials = toolheadDto.SupportedMaterials ?? toolhead.SupportedMaterials;
                     if (toolheadDto.IsPrimary.HasValue)
                     {

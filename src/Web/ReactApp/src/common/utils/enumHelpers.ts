@@ -1,4 +1,4 @@
-import { PrinterBackend, MotionType } from '@/types/api';
+import { PrinterBackend, MotionType, PrinterBackendString } from '@/types/api';
 
 /**
  * Utility type for enum option used in select dropdowns
@@ -9,7 +9,15 @@ export interface EnumOption {
 }
 
 /**
- * Get all PrinterBackend enum values as select options
+ * Utility type for string-based enum options (for API compatibility)
+ */
+export interface StringEnumOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Get all PrinterBackend enum values as select options (numeric values)
  * This automatically includes all backends defined in the enum
  */
 export function getPrinterBackendOptions(): EnumOption[] {
@@ -26,6 +34,53 @@ export function getPrinterBackendOptions(): EnumOption[] {
       value: backend,
       label: PrinterBackend[backend],
     }));
+}
+
+/**
+ * Get all PrinterBackend enum values as string options (for API compatibility)
+ * Returns string values like "Moonraker", "PrusaLink", etc.
+ */
+export function getPrinterBackendStringOptions(): StringEnumOption[] {
+  const orderedBackends: PrinterBackendString[] = [
+    'Moonraker',
+    'PrusaLink',
+    'SDCP',
+    'OctoPrint',
+  ];
+
+  return orderedBackends.map((backend) => ({
+    value: backend,
+    label: backend,
+  }));
+}
+
+/**
+ * Convert a PrinterBackendString to PrinterBackend (numeric enum)
+ */
+export function printerBackendStringToEnum(value: PrinterBackendString | undefined): PrinterBackend | undefined {
+  if (!value) return undefined;
+  const mapping: Record<PrinterBackendString, PrinterBackend> = {
+    'Moonraker': PrinterBackend.Moonraker,
+    'PrusaLink': PrinterBackend.PrusaLink,
+    'SDCP': PrinterBackend.SDCP,
+    'OctoPrint': PrinterBackend.OctoPrint,
+  };
+  return mapping[value];
+}
+
+/**
+ * Convert a PrinterBackend (numeric enum) to PrinterBackendString
+ */
+export function printerBackendEnumToString(value: PrinterBackend | undefined): PrinterBackendString | undefined {
+  if (value === undefined) return undefined;
+  const mapping: Record<PrinterBackend, PrinterBackendString | undefined> = {
+    [PrinterBackend.Unknown]: undefined,
+    [PrinterBackend.Moonraker]: 'Moonraker',
+    [PrinterBackend.PrusaLink]: 'PrusaLink',
+    [PrinterBackend.SDCP]: 'SDCP',
+    [PrinterBackend.OctoPrint]: 'OctoPrint',
+  };
+  return mapping[value];
 }
 
 /**

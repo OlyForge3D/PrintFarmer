@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto } from '@/types/api';
+import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, NozzleType, NozzleTypeLabels, ToolheadType, ToolheadTypeLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -24,6 +24,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | undefined>();
   const { data: models } = useModels(selectedManufacturer);
   const updateMutation = useUpdatePrinter();
+  
+  // Component model hooks for toolhead hardware customization
+  const { data: hotendModels } = useHotendModels();
+  const { data: extruderModels } = useExtruderModels();
+  const { data: toolheadModels } = useToolheadModels();
+  const { data: nozzleModels } = useNozzleModels();
 
   const [formData, setFormData] = useState<UpdatePrinterDto | null>(null);
   const [originalFormData, setOriginalFormData] = useState<UpdatePrinterDto | null>(null);
@@ -168,7 +174,15 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       if (current.name !== original.name) return true;
       if (current.index !== original.index) return true;
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
+      if (current.nozzleType !== original.nozzleType) return true;
       if (current.maxHotendTemp !== original.maxHotendTemp) return true;
+      if (current.maxFlowRate !== original.maxFlowRate) return true;
+      if (current.toolheadType !== original.toolheadType) return true;
+      // Component model IDs (database-backed)
+      if (current.hotendModelId !== original.hotendModelId) return true;
+      if (current.extruderModelId !== original.extruderModelId) return true;
+      if (current.toolheadModelDefId !== original.toolheadModelDefId) return true;
+      if (current.nozzleModelId !== original.nozzleModelId) return true;
       if (current.isPrimary !== original.isPrimary) return true;
       if (!valuesEqual(current.supportedMaterials, original.supportedMaterials)) return true;
     }
@@ -679,6 +693,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       {/* Toolhead Details - Expandable */}
                       {expandedToolheads.has(toolhead.id!) && (
                         <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
+                          {/* Basic Info */}
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <FormField label="Name" htmlFor={`toolhead-name-${index}`}>
                               <Input
@@ -688,6 +703,70 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                                 placeholder={`Toolhead ${index + 1}`}
                               />
                             </FormField>
+                            <FormField label="Toolhead Type" htmlFor={`toolhead-type-${index}`}>
+                              <Select
+                                id={`toolhead-type-${index}`}
+                                value={toolhead.toolheadType?.toString() ?? ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'toolheadType', e.target.value ? parseInt(e.target.value, 10) as ToolheadType : undefined)}
+                              >
+                                <option value="">Select type...</option>
+                                {Object.entries(ToolheadTypeLabels).map(([value, label]) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </Select>
+                            </FormField>
+                            <FormField label="Toolhead Model" htmlFor={`toolhead-model-${index}`}>
+                              <Select
+                                id={`toolhead-model-${index}`}
+                                value={toolhead.toolheadModelDefId || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'toolheadModelDefId', e.target.value || undefined)}
+                              >
+                                <option value="">Select toolhead model...</option>
+                                {toolheadModels?.map(tm => (
+                                  <option key={tm.id} value={tm.id}>
+                                    {tm.manufacturerName ? `${tm.manufacturerName} - ${tm.name}` : tm.name}
+                                  </option>
+                                ))}
+                              </Select>
+                            </FormField>
+                          </div>
+
+                          {/* Extruder and Hotend */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FormField label="Extruder" htmlFor={`toolhead-extruder-${index}`}>
+                              <Select
+                                id={`toolhead-extruder-${index}`}
+                                value={toolhead.extruderModelId || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'extruderModelId', e.target.value || undefined)}
+                              >
+                                <option value="">Select extruder...</option>
+                                {extruderModels?.map(em => (
+                                  <option key={em.id} value={em.id}>
+                                    {em.manufacturerName ? `${em.manufacturerName} - ${em.name}` : em.name}
+                                    {em.gearRatio ? ` (${em.gearRatio})` : ''}
+                                  </option>
+                                ))}
+                              </Select>
+                            </FormField>
+                            <FormField label="Hotend" htmlFor={`toolhead-hotend-${index}`}>
+                              <Select
+                                id={`toolhead-hotend-${index}`}
+                                value={toolhead.hotendModelId || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'hotendModelId', e.target.value || undefined)}
+                              >
+                                <option value="">Select hotend...</option>
+                                {hotendModels?.map(hm => (
+                                  <option key={hm.id} value={hm.id}>
+                                    {hm.manufacturerName ? `${hm.manufacturerName} - ${hm.name}` : hm.name}
+                                    {hm.isHighFlow ? ' (High Flow)' : ''}
+                                  </option>
+                                ))}
+                              </Select>
+                            </FormField>
+                          </div>
+
+                          {/* Nozzle */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <FormField label="Nozzle Diameter (mm)" htmlFor={`toolhead-nozzle-${index}`}>
                               <Input
                                 id={`toolhead-nozzle-${index}`}
@@ -698,6 +777,37 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                                 placeholder="0.4"
                               />
                             </FormField>
+                            <FormField label="Nozzle Type" htmlFor={`toolhead-nozzle-type-${index}`}>
+                              <Select
+                                id={`toolhead-nozzle-type-${index}`}
+                                value={toolhead.nozzleType?.toString() ?? ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleType', e.target.value ? parseInt(e.target.value, 10) as NozzleType : undefined)}
+                              >
+                                <option value="">Select nozzle type...</option>
+                                {Object.entries(NozzleTypeLabels).map(([value, label]) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </Select>
+                            </FormField>
+                            <FormField label="Nozzle Model" htmlFor={`toolhead-nozzle-model-${index}`}>
+                              <Select
+                                id={`toolhead-nozzle-model-${index}`}
+                                value={toolhead.nozzleModelId || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleModelId', e.target.value || undefined)}
+                              >
+                                <option value="">Select nozzle model...</option>
+                                {nozzleModels?.map(nm => (
+                                  <option key={nm.id} value={nm.id}>
+                                    {nm.manufacturerName ? `${nm.manufacturerName} - ${nm.name}` : nm.name}
+                                    {nm.isHardened ? ' (Hardened)' : ''}
+                                  </option>
+                                ))}
+                              </Select>
+                            </FormField>
+                          </div>
+
+                          {/* Performance */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <FormField label="Max Hotend Temp (°C)" htmlFor={`toolhead-max-temp-${index}`}>
                               <Input
                                 id={`toolhead-max-temp-${index}`}
@@ -707,7 +817,19 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                                 placeholder="300"
                               />
                             </FormField>
+                            <FormField label="Max Flow Rate (mm³/s)" htmlFor={`toolhead-max-flow-${index}`}>
+                              <Input
+                                id={`toolhead-max-flow-${index}`}
+                                type="number"
+                                step="0.1"
+                                value={toolhead.maxFlowRate?.toString() || ''}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'maxFlowRate', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                placeholder="15"
+                              />
+                            </FormField>
                           </div>
+
+                          {/* Supported Materials */}
                           <div>
                             <label className="block text-sm font-medium text-pf-text-secondary mb-1">
                               Supported Materials
@@ -718,6 +840,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                               onSelectionChange={(selectedTypes) => handleToolheadChange(toolhead.id!, 'supportedMaterials', selectedTypes)}
                             />
                           </div>
+
+                          {/* Index and Primary */}
                           <div className="flex items-center space-x-4">
                             <FormField label="Index" htmlFor={`toolhead-index-${index}`} className="w-20">
                               <Input
