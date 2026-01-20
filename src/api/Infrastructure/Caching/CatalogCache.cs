@@ -56,7 +56,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
         IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking()
-            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .Include(m => m.SupportedFilamentTypes)
             .Include(m => m.Toolheads).ThenInclude(t => t.HotendModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
@@ -78,7 +78,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                 m.MaxY,
                 m.MaxZ,
                 m.DefaultBackend.HasValue ? (PrinterBackend)m.DefaultBackend.Value : (PrinterBackend?)null,
-                m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+                m.SupportedFilamentTypes.Select(ft => ft.Name).ToArray(),
 
                 // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
                 m.HasHeatedBed,

@@ -30,8 +30,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
 
-    public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
-
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
     // G-code Library & Job Queue
@@ -410,18 +408,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(f => f.CreatedAt).IsRequired();
         });
 
-        _ = modelBuilder.Entity<PrinterModelFilamentType>(b =>
-        {
-            _ = b.HasKey(pf => new { pf.PrinterModelId, pf.FilamentTypeId });
-            _ = b.HasOne(pf => pf.PrinterModel)
-             .WithMany(p => p.SupportedFilamentTypes)
-             .HasForeignKey(pf => pf.PrinterModelId)
-             .OnDelete(DeleteBehavior.Cascade);
-            _ = b.HasOne(pf => pf.FilamentType)
-             .WithMany(f => f.PrinterModels)
-             .HasForeignKey(pf => pf.FilamentTypeId)
-             .OnDelete(DeleteBehavior.Cascade);
-        });
+        // Configure many-to-many relationship between PrinterModel and FilamentType using skip navigation
+        _ = modelBuilder.Entity<PrinterModel>()
+            .HasMany(p => p.SupportedFilamentTypes)
+            .WithMany(f => f.PrinterModels)
+            .UsingEntity("PrinterModelFilamentTypes");
 
         _ = modelBuilder.Entity<PrinterModelAlias>(b =>
         {

@@ -43,7 +43,7 @@ public class PrinterModel
 
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
 
-    public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
+    public ICollection<FilamentType> SupportedFilamentTypes { get; } = new List<FilamentType>();
 
     // Toolhead templates for multi-toolhead printers (contains nozzle diameter and max hotend temp)
     public ICollection<PrinterModelToolhead> Toolheads { get; } = new List<PrinterModelToolhead>();

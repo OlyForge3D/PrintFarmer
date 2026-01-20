@@ -521,6 +521,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, string supportedMaterials, _) in modelSeeds)
             {
                 PrinterModel? model = await _context.PrinterModels
+                    .Include(m => m.SupportedFilamentTypes)
                     .FirstOrDefaultAsync(m => m.Name == modelName &&
                                            m.Manufacturer != null &&
                                            m.Manufacturer.Name == manufacturerName);
@@ -532,16 +533,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     {
                         if (filamentTypes.TryGetValue(materialName, out FilamentType? filamentType))
                         {
-                            bool exists = await _context.PrinterModelFilamentTypes
-                                .AnyAsync(pmft => pmft.PrinterModelId == model.Id &&
-                                                pmft.FilamentTypeId == filamentType.Id);
-                            if (!exists)
+                            // Skip navigation - just add to the collection
+                            if (!model.SupportedFilamentTypes.Contains(filamentType))
                             {
-                                _ = _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
-                                {
-                                    PrinterModelId = model.Id,
-                                    FilamentTypeId = filamentType.Id
-                                });
+                                model.SupportedFilamentTypes.Add(filamentType);
                             }
                         }
                     }
