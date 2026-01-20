@@ -25,8 +25,8 @@ import { PrintersPage } from '@/features/printers/pages/PrintersPage';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
-import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
@@ -38,11 +38,8 @@ import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
-// Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
-import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
-import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -120,13 +117,15 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
-        <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
+        <Route path="logs" element={<Navigate to="/admin/system?tab=logs" replace />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<WorkerManagementPage />} />
-          <Route path="observability" element={<ObservabilityDashboard />} />
-          <Route path="file-health" element={<FileHealthDashboard />} />
+          <Route path="system" element={<SystemDashboardPage />} />
+          {/* Legacy routes - redirect to unified System Dashboard */}
+          <Route path="observability" element={<Navigate to="/admin/system?tab=observability" replace />} />
+          <Route path="file-health" element={<Navigate to="/admin/system?tab=file-health" replace />} />
           <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
           <Route path="tags" element={<TagAdminPage />} />
         </Route>

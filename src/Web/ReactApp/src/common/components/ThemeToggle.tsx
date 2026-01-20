@@ -2,7 +2,7 @@
 import React from 'react';
 import { SunIcon, MoonIcon, MonitorIcon } from '@/common/components/icons/MdiIcons';
 import { useTheme } from '@/contexts/ThemeContext';
-import type { ThemeName } from '@/contexts/ThemeContext';
+import type { Theme } from '@/contexts/ThemeContext';
 
 interface ThemeToggleProps {
   showLabels?: boolean;
@@ -20,7 +20,7 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { theme, setTheme, computedTheme } = useTheme();
 
-  const themes: { value: ThemeName; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  const themes: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { value: 'light', label: 'Light', icon: SunIcon },
     { value: 'github-dark', label: 'GitHub Dark', icon: MoonIcon },
     { value: 'printfarmer-dark', label: 'PrintFarmer Dark', icon: MoonIcon },
@@ -44,7 +44,7 @@ export function ThemeToggle({
       <div className={`relative ${className ?? ''}`}>
         <select
           value={theme}
-          onChange={(e) => setTheme(e.target.value as ThemeName)}
+          onChange={(e) => setTheme(e.target.value as Theme)}
           className={`appearance-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
           aria-label="Select theme"
         >
@@ -81,7 +81,6 @@ export function ThemeToggle({
               onChange={() => setTheme(value)}
               className="sr-only"
               aria-label={`Switch to ${label.toLowerCase()} theme`}
-              aria-checked={theme === value}
             />
             <Icon className={iconSizes[size]} aria-hidden="true" />
             {showLabels && <span className="hidden sm:inline">{label}</span>}
