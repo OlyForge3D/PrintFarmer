@@ -16,6 +16,17 @@ public class FilamentType
 
     public double? DefaultBedTemp { get; set; }
 
+    /// <summary>
+    /// Indicates if this filament type contains abrasive materials (e.g., carbon fiber, glass fiber, glow-in-the-dark).
+    /// Abrasive filaments require hardened nozzles to prevent excessive wear.
+    /// </summary>
+    public bool IsAbrasive { get; set; }
+
+    /// <summary>
+    /// Indicates if this filament type requires an enclosure for optimal printing (e.g., ABS, ASA, PC).
+    /// </summary>
+    public bool NeedsEnclosure { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<PrinterModelFilamentType> PrinterModels { get; } = new List<PrinterModelFilamentType>();

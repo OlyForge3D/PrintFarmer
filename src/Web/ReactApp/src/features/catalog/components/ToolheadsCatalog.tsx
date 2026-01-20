@@ -223,9 +223,13 @@ export function ToolheadsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Toolhead Models ({cards.length})
         </h2>
-        <Button onClick={handleAddClick} size="sm">
-          <PlusIcon className="w-4 h-4 mr-1" />
-          Add Toolhead
+        <Button 
+          onClick={handleAddClick} 
+          size="sm"
+          title="Add new toolhead model"
+          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+        >
+          Add
         </Button>
       </div>
 

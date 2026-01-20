@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, NozzleType, NozzleTypeLabels, ToolheadType, ToolheadTypeLabels } from '@/types/api';
 import { toast } from 'sonner';
@@ -7,8 +7,9 @@ import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
-import { Button, Input, Select, Textarea, FormField, Alert, Checkbox } from '@/common/components/ui';
+import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionButton } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
+import { generateUUID } from '@/utils/uuid';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -260,7 +261,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   const handleAddToolhead = () => {
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     const newIndex = toolheads.length;
     const newToolhead: UpdateToolheadDto = {
       id: newId,
@@ -648,47 +649,30 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       key={toolhead.id} 
                       className="border border-pf-border rounded-lg overflow-hidden"
                     >
-                      {/* Toolhead Header - Clickable */}
-                      <button
-                        type="button"
+                      {/* Toolhead Header - Clickable accordion */}
+                      <AccordionButton
+                        isExpanded={expandedToolheads.has(toolhead.id!)}
                         onClick={() => toggleToolheadExpanded(toolhead.id!)}
-                        className="w-full flex items-center justify-between p-3 bg-pf-bg-secondary hover:bg-pf-bg-tertiary transition-colors"
-                      >
-                        <div className="flex items-center space-x-3">
-                          {expandedToolheads.has(toolhead.id!) ? (
-                            <ChevronDownIcon className="w-5 h-5 text-pf-text-secondary" />
-                          ) : (
-                            <ChevronRightIcon className="w-5 h-5 text-pf-text-secondary" />
-                          )}
-                          <span className="font-medium text-pf-text-primary">
-                            {toolhead.name || `Toolhead ${index + 1}`}
-                          </span>
-                          {toolhead.isPrimary && (
-                            <span className="px-2 py-0.5 text-xs bg-pf-primary/20 text-pf-primary rounded-full">
-                              Primary
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-4 text-sm text-pf-text-secondary">
-                          {toolhead.nozzleDiameter && (
-                            <span>Ø{toolhead.nozzleDiameter}mm</span>
-                          )}
-                          {toolhead.maxHotendTemp && (
-                            <span>Max {toolhead.maxHotendTemp}°C</span>
-                          )}
-                          <button
-                            type="button"
+                        title={toolhead.name || `Toolhead ${index + 1}`}
+                        badge={toolhead.isPrimary ? 'Primary' : undefined}
+                        summary={[
+                          toolhead.nozzleDiameter && `Ø${toolhead.nozzleDiameter}mm`,
+                          toolhead.maxHotendTemp && `Max ${toolhead.maxHotendTemp}°C`,
+                        ].filter(Boolean).join(' • ') || undefined}
+                        actions={
+                          <Button
+                            variant="subtle"
+                            size="sm"
+                            iconCenter={<DeleteIcon className="w-4 h-4" />}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleRemoveToolhead(toolhead.id!);
                             }}
-                            className="p-1 text-pf-text-secondary hover:text-red-500 transition-colors"
+                            className="p-1 text-pf-text-secondary hover:text-red-500"
                             title="Remove toolhead"
-                          >
-                            <DeleteIcon className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </button>
+                          />
+                        }
+                      />
                       
                       {/* Toolhead Details - Expandable */}
                       {expandedToolheads.has(toolhead.id!) && (

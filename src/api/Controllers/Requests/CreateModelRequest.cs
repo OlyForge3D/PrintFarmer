@@ -13,7 +13,7 @@ public record CreateModelRequest(
     Guid ManufacturerId,
     [Required, MinLength(1)]
     string Name,
-    MotionType? Type,
+    MotionType? MotionType,
     double? MaxX,
     double? MaxY,
     double? MaxZ,

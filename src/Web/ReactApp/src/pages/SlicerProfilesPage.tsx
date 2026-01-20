@@ -21,6 +21,8 @@ import { Alert } from '@/components/ui/Alert';
 import { FormField } from '@/components/ui/FormField';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Textarea } from '@/components/ui/Textarea';
 
 export const SlicerProfilesPage: React.FC = () => {
   const qc = useQueryClient();
@@ -349,7 +351,9 @@ export const SlicerProfilesPage: React.FC = () => {
               setIsReseedingProfiles(true);
               try {
                 const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
-                console.log('Force reseed result:', result);
+                if (window.PrintFarmerDebug?.slicer) {
+                  console.log('Force reseed result:', result);
+                }
                 
                 if (result.imported === 0) {
                   let details = result.message || 'No profiles available from worker';
@@ -387,8 +391,8 @@ export const SlicerProfilesPage: React.FC = () => {
           <form onSubmit={onImport} className="bg-pf-panel rounded shadow p-4 flex flex-col gap-4">
             <h3 className="text-lg font-semibold">Import Profile</h3>
             <FormField label="Raw Profile JSON" required helper="Paste raw slicer profile JSON exported from your slicer.">
-              <textarea
-                className="border rounded p-2 h-48 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              <Textarea
+                className="h-48 font-mono text-xs"
                 placeholder={'{\n  "layer_height": 0.2, ...\n}'}
                 value={rawJson}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRawJson(e.target.value)}
@@ -420,18 +424,21 @@ export const SlicerProfilesPage: React.FC = () => {
               </Select>
             </FormField>
             <div className="flex flex-col gap-2 text-sm">
-              <label className="inline-flex items-center gap-2">
-                <input type="checkbox" checked={allowSystemOverride} onChange={e => setAllowSystemOverride(e.target.checked)} />
-                <span>Allow system override</span>
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <input type="checkbox" checked={setDefault} onChange={e => setSetDefault(e.target.checked)} />
-                <span>Set as default after import</span>
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
-                <span>Public (visible to other users)</span>
-              </label>
+              <Checkbox
+                label="Allow system override"
+                checked={allowSystemOverride}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAllowSystemOverride(e.target.checked)}
+              />
+              <Checkbox
+                label="Set as default after import"
+                checked={setDefault}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSetDefault(e.target.checked)}
+              />
+              <Checkbox
+                label="Public (visible to other users)"
+                checked={isPublic}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIsPublic(e.target.checked)}
+              />
             </div>
             {importError && <Alert type="error">{importError}</Alert>}
             <Button type="submit" loading={importMutation.isPending} variant="primary">Import Profile</Button>
@@ -517,62 +524,51 @@ export const SlicerProfilesPage: React.FC = () => {
                   <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] })}>Refresh</Button>
                 </div>
                 {(searchQuery || filterEngine !== 'all' || filterSource !== 'all' || selectedMachine) && (
-                  <button
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={() => {
                       setSearchQuery('');
                       setFilterEngine('all');
                       setFilterSource('all');
                       setSelectedMachine('');
                     }}
-                    className="text-sm text-pf-primary hover:underline"
                   >
                     Clear filters
-                  </button>
+                  </Button>
                 )}
               </div>
 
               {/* Profile Type Tabs */}
               <div className="flex gap-2 mt-4 border-b border-pf-border">
-                <button
+                <Button
+                  variant="tab"
+                  active={activeTab === 'all'}
                   onClick={() => setActiveTab('all')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'all'
-                      ? 'border-pf-primary text-pf-text-primary'
-                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
-                  }`}
                 >
                   All ({getTotalCount()})
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="tab"
+                  active={activeTab === 'machines'}
                   onClick={() => setActiveTab('machines')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'machines'
-                      ? 'border-pf-primary text-pf-text-primary'
-                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
-                  }`}
                 >
                   Machines ({filteredMachineProfiles.length})
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="tab"
+                  active={activeTab === 'filaments'}
                   onClick={() => setActiveTab('filaments')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'filaments'
-                      ? 'border-pf-primary text-pf-text-primary'
-                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
-                  }`}
                 >
                   Filaments ({filteredFilamentProfiles.length})
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="tab"
+                  active={activeTab === 'processes'}
                   onClick={() => setActiveTab('processes')}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === 'processes'
-                      ? 'border-pf-primary text-pf-text-primary'
-                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
-                  }`}
                 >
                   Processes ({filteredProcessProfiles.length})
-                </button>
+                </Button>
               </div>
             </div>
 

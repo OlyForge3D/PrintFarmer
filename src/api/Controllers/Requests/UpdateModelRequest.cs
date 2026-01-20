@@ -4,7 +4,7 @@ namespace Farm.Web.Api.Controllers.Requests;
 
 public record UpdateModelRequest(
     string Name,
-    MotionType? Type,
+    MotionType? MotionType,
     double? MaxX,
     double? MaxY,
     double? MaxZ,

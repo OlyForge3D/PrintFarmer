@@ -452,6 +452,45 @@ export const ToolheadTypeLabels: Record<ToolheadType, string> = {
   [ToolheadType.Custom]: 'Custom'
 };
 
+// ============== Nozzle Interface Types ==============
+/**
+ * Defines the nozzle thread/interface type that determines compatibility between hotends and nozzles.
+ * This is the physical interface standard - hotends and nozzles must match to be compatible.
+ */
+export enum NozzleInterfaceType {
+  /** Unknown or unspecified nozzle interface */
+  Unknown = 0,
+  /** E3D V6 standard thread (M6 x 1.0) - most common. Used by V6, Dragon, Rapido, Mosquito, CHC, most budget hotends */
+  V6 = 1,
+  /** E3D Volcano extended length (M6 x 1.0, longer melt zone) - for high-flow applications */
+  Volcano = 2,
+  /** E3D Revo quick-change system - no threading, magnetic/snap-fit */
+  Revo = 3,
+  /** Prusa Nextruder interface - proprietary for MK4/MK3.9S/CORE One */
+  Nextruder = 4,
+  /** BIQU H2 interface - proprietary for H2 hotend system */
+  H2 = 5,
+  /** Microswiss FlowTech interface - proprietary across their FlowTech line */
+  FlowTech = 6,
+  /** Bambu Lab proprietary interface - for X1/P1/A1 series */
+  BambuLab = 7,
+  /** Proprietary interface unique to a specific manufacturer/model */
+  Proprietary = 99
+}
+
+/** Labels for nozzle interface types */
+export const NozzleInterfaceTypeLabels: Record<NozzleInterfaceType, string> = {
+  [NozzleInterfaceType.Unknown]: 'Unknown',
+  [NozzleInterfaceType.V6]: 'V6 (M6 Thread)',
+  [NozzleInterfaceType.Volcano]: 'Volcano',
+  [NozzleInterfaceType.Revo]: 'Revo (Quick-Change)',
+  [NozzleInterfaceType.Nextruder]: 'Nextruder (Prusa)',
+  [NozzleInterfaceType.H2]: 'H2 (BIQU)',
+  [NozzleInterfaceType.FlowTech]: 'FlowTech (Microswiss)',
+  [NozzleInterfaceType.BambuLab]: 'Bambu Lab',
+  [NozzleInterfaceType.Proprietary]: 'Proprietary'
+};
+
 // ============== Component Model Definitions ==============
 // These are database-backed entities that allow extensible component tracking.
 // Instead of enums, we use ID/name pairs for hotends, extruders, toolheads, and nozzles.
@@ -466,6 +505,8 @@ export interface HotendModelDefinition {
   manufacturerName?: string;
   maxTemp?: number;
   isHighFlow: boolean;
+  /** Nozzle interface type determines which nozzles are compatible with this hotend */
+  nozzleInterface: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -494,6 +535,12 @@ export interface ToolheadModelDefinition {
   manufacturerName?: string;
   description?: string;
   url?: string;
+  /** Default hotend ID for this toolhead */
+  defaultHotendId?: string;
+  /** Default extruder ID for this toolhead */
+  defaultExtruderId?: string;
+  /** Default nozzle ID for this toolhead */
+  defaultNozzleId?: string;
 }
 
 /**
@@ -506,6 +553,8 @@ export interface NozzleModelDefinition {
   manufacturerName?: string;
   maxTemp?: number;
   isHardened: boolean;
+  /** Nozzle interface type - must match hotend's interface to be compatible */
+  nozzleInterface: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -520,6 +569,8 @@ export interface CreateHotendModelDto {
   manufacturerId: string;
   maxTemp?: number;
   isHighFlow?: boolean;
+  /** Nozzle interface type - defaults to V6 if not specified */
+  nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -532,6 +583,7 @@ export interface UpdateHotendModelDto {
   manufacturerId?: string;
   maxTemp?: number;
   isHighFlow?: boolean;
+  nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -588,6 +640,8 @@ export interface CreateNozzleModelDto {
   manufacturerId: string;
   maxTemp?: number;
   isHardened?: boolean;
+  /** Nozzle interface type - defaults to V6 if not specified */
+  nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -600,6 +654,7 @@ export interface UpdateNozzleModelDto {
   manufacturerId?: string;
   maxTemp?: number;
   isHardened?: boolean;
+  nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
 }
@@ -854,16 +909,28 @@ export interface FilamentTypeDto {
   id: string;
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials (e.g., carbon fiber, glass fiber) that require hardened nozzles. */
+  isAbrasive: boolean;
+  /** True if the filament requires an enclosure for optimal printing (e.g., ABS, ASA, Nylon). */
+  needsEnclosure: boolean;
 }
 
 export interface CreateFilamentTypeRequest {
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials requiring hardened nozzles. */
+  isAbrasive?: boolean;
+  /** True if the filament requires an enclosure for optimal printing. */
+  needsEnclosure?: boolean;
 }
 
 export interface UpdateFilamentTypeRequest {
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials requiring hardened nozzles. */
+  isAbrasive?: boolean;
+  /** True if the filament requires an enclosure for optimal printing. */
+  needsEnclosure?: boolean;
 }
 
 export interface SpoolmanFilamentImportResult {

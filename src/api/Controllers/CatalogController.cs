@@ -25,25 +25,16 @@ public class CatalogController(
     /// <summary>
     /// Gets all available printer manufacturers.
     /// </summary>
-    /// <param name="ifNoneMatch">Optional ETag for conditional GET</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all printer manufacturers ordered by name</returns>
     /// <response code="200">Returns the list of manufacturers</response>
     [HttpGet("manufacturers")]
     [ProducesResponseType(typeof(IEnumerable<ManufacturerDto>), 200)]
-    [ProducesResponseType(304)]
-    public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync([FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync(CancellationToken ct)
     {
         try
         {
-            (IReadOnlyList<ManufacturerDto>? list, string? etag) = await _catalogService.GetManufacturersAsync(ct);
-            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Split(',').Select(s => s.Trim()).Contains(etag, StringComparer.Ordinal))
-            {
-                Response.Headers["ETag"] = etag;
-                return StatusCode(StatusCodes.Status304NotModified);
-            }
-
-            Response.Headers["ETag"] = etag;
+            (IReadOnlyList<ManufacturerDto>? list, string? _) = await _catalogService.GetManufacturersAsync(ct);
             return Ok(list);
         }
         catch (Exception ex)
@@ -101,21 +92,9 @@ public class CatalogController(
 
     [HttpGet("printer-models")]
     [ProducesResponseType(typeof(IEnumerable<PrinterModelDto>), 200)]
-    [ProducesResponseType(304)]
-    public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, [FromHeader(Name = "If-None-Match")] string? ifNoneMatch, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
     {
-        (IReadOnlyList<PrinterModelDto>? list, string? etag) = await _catalogService.GetModelsAsync(manufacturerId, ct);
-        if (!string.IsNullOrEmpty(ifNoneMatch))
-        {
-            HashSet<string> clientEtags = ifNoneMatch.Split(',').Select(s => s.Trim()).ToHashSet(StringComparer.Ordinal);
-            if (etag is not null && clientEtags.Contains(etag))
-            {
-                Response.Headers["ETag"] = etag;
-                return StatusCode(StatusCodes.Status304NotModified);
-            }
-        }
-
-        Response.Headers["ETag"] = etag;
+        (IReadOnlyList<PrinterModelDto>? list, string? _) = await _catalogService.GetModelsAsync(manufacturerId, ct);
         return Ok(list);
     }
 
@@ -172,7 +151,7 @@ public class CatalogController(
     }
 
     [HttpPut("printer-models/{id:guid}")]
-    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModelRequest req, CancellationToken ct)
@@ -181,7 +160,7 @@ public class CatalogController(
         try
         {
             PrinterModelDto? updated = await _catalogService.UpdateModelAsync(id, req, ct);
-            return updated is null ? NotFound() : NoContent();
+            return updated is null ? NotFound() : Ok(updated);
         }
         catch (Exception ex)
         {

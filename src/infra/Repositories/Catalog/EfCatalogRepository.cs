@@ -125,7 +125,14 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MaxY,
             m.MaxZ,
             m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
-            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray())).ToList();
+            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+            m.HasHeatedBed,
+            m.HasEnclosure,
+            m.MultiMaterial,
+            m.NumberOfExtruders,
+            m.SupportsAutoLeveling,
+            m.MaxBedTemp,
+            m.MaxPrintSpeed)).ToList();
         return list;
     }
 
@@ -303,7 +310,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     }
 
     // ============ Component Model Methods ============
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default)
     {
         List<HotendModelDefinition> hotends = await _db.HotendModelDefinitions
             .Include(h => h.Manufacturer)
@@ -319,6 +326,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             h.Manufacturer?.Name,
             h.MaxTemp,
             h.IsHighFlow,
+            h.NozzleInterface,
             h.Description,
             h.Url)).ToList();
     }
@@ -343,7 +351,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             e.Url)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)>> GetToolheadModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url, Guid? DefaultHotendId, Guid? DefaultExtruderId, Guid? DefaultNozzleId)>> GetToolheadModelsAsync(CancellationToken ct = default)
     {
         List<ToolheadModelDefinition> toolheads = await _db.ToolheadModelDefinitions
             .Include(t => t.Manufacturer)
@@ -358,10 +366,13 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.ManufacturerId,
             t.Manufacturer?.Name,
             t.Description,
-            t.Url)).ToList();
+            t.Url,
+            t.DefaultHotendId,
+            t.DefaultExtruderId,
+            t.DefaultNozzleId)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
@@ -377,6 +388,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Manufacturer?.Name,
             n.MaxTemp,
             n.IsHardened,
+            n.NozzleInterface,
             n.Description,
             n.Url)).ToList();
     }
@@ -473,4 +485,66 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
         => _db.NozzleModelDefinitions.CountAsync(n => n.ManufacturerId == manufacturerId, ct);
+
+    // OEM component lookups - find "OEM Hotend" or "OEM Extruder" for a manufacturer
+    // Falls back to "Unknown" manufacturer if not found for the specific manufacturer
+    public async Task<Guid?> GetOemHotendIdAsync(Guid manufacturerId, CancellationToken ct = default)
+    {
+        // First try to find OEM hotend for the specific manufacturer
+        Guid? oemId = await _db.HotendModelDefinitions
+            .Where(h => h.ManufacturerId == manufacturerId && h.Name == "OEM Hotend")
+            .Select(h => (Guid?)h.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (oemId.HasValue)
+        {
+            return oemId;
+        }
+
+        // Fall back to Unknown manufacturer's OEM hotend
+        Guid? unknownMfgId = await _db.Manufacturers
+            .Where(m => m.Name == "Unknown")
+            .Select(m => (Guid?)m.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (!unknownMfgId.HasValue)
+        {
+            return null;
+        }
+
+        return await _db.HotendModelDefinitions
+            .Where(h => h.ManufacturerId == unknownMfgId && h.Name == "OEM Hotend")
+            .Select(h => (Guid?)h.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<Guid?> GetOemExtruderIdAsync(Guid manufacturerId, CancellationToken ct = default)
+    {
+        // First try to find OEM extruder for the specific manufacturer
+        Guid? oemId = await _db.ExtruderModelDefinitions
+            .Where(e => e.ManufacturerId == manufacturerId && e.Name == "OEM Extruder")
+            .Select(e => (Guid?)e.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (oemId.HasValue)
+        {
+            return oemId;
+        }
+
+        // Fall back to Unknown manufacturer's OEM extruder
+        Guid? unknownMfgId = await _db.Manufacturers
+            .Where(m => m.Name == "Unknown")
+            .Select(m => (Guid?)m.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (!unknownMfgId.HasValue)
+        {
+            return null;
+        }
+
+        return await _db.ExtruderModelDefinitions
+            .Where(e => e.ManufacturerId == unknownMfgId && e.Name == "OEM Extruder")
+            .Select(e => (Guid?)e.Id)
+            .FirstOrDefaultAsync(ct);
+    }
 }

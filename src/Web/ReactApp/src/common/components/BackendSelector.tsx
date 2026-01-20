@@ -58,6 +58,9 @@ export function BackendSelector(props: BackendSelectorProps) {
   if (valueType === 'string') {
     const { value, onChange } = props as StringBackendSelectorProps;
     
+    // Treat "Unknown" as undefined (unset) since it's not a valid selectable backend
+    const effectiveValue = value === 'Unknown' as unknown ? undefined : value;
+    
     const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const newValue = e.target.value === '' ? undefined : e.target.value as PrinterBackendString;
       onChange(newValue);
@@ -65,7 +68,7 @@ export function BackendSelector(props: BackendSelectorProps) {
 
     return (
       <Select
-        value={value ?? ''}
+        value={effectiveValue ?? ''}
         onChange={handleChange}
         aria-label={ariaLabel}
         className={className}

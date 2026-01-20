@@ -291,7 +291,7 @@ public class UpdateModelRequestTests
     {
         var request = new UpdateModelRequest(
             Name: "Prusa CORE One",
-            Type: null,
+            MotionType: null,
             MaxX: null,
             MaxY: null,
             MaxZ: null,
@@ -307,7 +307,7 @@ public class UpdateModelRequestTests
         Guid[] filamentIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
         var request = new UpdateModelRequest(
             Name: "Prusa CORE One",
-            Type: MotionType.Cartesian,
+            MotionType: MotionType.Cartesian,
             MaxX: 200,
             MaxY: 200,
             MaxZ: 200,
@@ -322,7 +322,7 @@ public class UpdateModelRequestTests
             MaxPrintSpeed: 200);
 
         request.Name.Should().Be("Prusa CORE One");
-        request.Type.Should().Be(MotionType.Cartesian);
+        request.MotionType.Should().Be(MotionType.Cartesian);
         request.MaxX.Should().Be(200);
         request.MaxY.Should().Be(200);
         request.MaxZ.Should().Be(200);
@@ -355,7 +355,7 @@ public class UpdateModelRequestTests
         foreach (MotionType motionType in motionTypes)
         {
             var request = new UpdateModelRequest("Model", motionType, null, null, null, null, null);
-            request.Type.Should().Be(motionType);
+            request.MotionType.Should().Be(motionType);
         }
     }
 

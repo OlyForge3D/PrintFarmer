@@ -42,7 +42,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.CreateModelAsync(
             req.ManufacturerId,
             req.Name,
-            req.Type,
+            req.MotionType,
             req.MaxX,
             req.MaxY,
             req.MaxZ,
@@ -63,7 +63,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.UpdateModelAsync(
             id,
             req.Name,
-            req.Type,
+            req.MotionType,
             req.MaxX,
             req.MaxY,
             req.MaxZ,

@@ -1,6 +1,7 @@
 // UI Component Library
 // This file exports all shared UI components for consistent styling across the application
 
+export { AccordionButton, type AccordionButtonProps } from './AccordionButton';
 export { Alert, type AlertProps } from './Alert';
 export { Badge, type BadgeProps, type BadgeVariant, type BadgeSize } from './Badge';
 export { Button, type ButtonVariant, type ButtonSize } from './Button';

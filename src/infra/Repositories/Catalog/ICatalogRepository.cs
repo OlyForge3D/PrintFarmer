@@ -50,13 +50,13 @@ public interface ICatalogRepository
     Task<List<Domain.PrinterModelAlias>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct = default);
 
     // Component model methods - Get
-    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)>> GetExtruderModelsAsync(CancellationToken ct = default);
 
-    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)>> GetToolheadModelsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url, Guid? DefaultHotendId, Guid? DefaultExtruderId, Guid? DefaultNozzleId)>> GetToolheadModelsAsync(CancellationToken ct = default);
 
-    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
 
     // Component model methods - Get By Id
     Task<Domain.HotendModelDefinition?> GetHotendModelByIdAsync(Guid id, CancellationToken ct = default);
@@ -95,4 +95,9 @@ public interface ICatalogRepository
     Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
 
     Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
+    // OEM component lookups - find stock/OEM parts for a manufacturer
+    Task<Guid?> GetOemHotendIdAsync(Guid manufacturerId, CancellationToken ct = default);
+
+    Task<Guid?> GetOemExtruderIdAsync(Guid manufacturerId, CancellationToken ct = default);
 }

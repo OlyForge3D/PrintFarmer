@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto } from '@/types/api';
-import { 
-  NozzleType, NozzleTypeLabels, 
-  ToolheadType, ToolheadTypeLabels
-} from '@/types/api';
+import { NozzleType, NozzleTypeLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { ModelAliasEditor, ModelAliasEditorRef } from '@/features/catalog/components/ModelAliasEditor';
@@ -17,7 +14,8 @@ import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { FormField } from '@/common/components/ui/FormField';
 import { Alert } from '@/common/components/ui/Alert';
-import { Select, Checkbox } from '@/common/components/ui';
+import { Select, Checkbox, AccordionButton } from '@/common/components/ui';
+import { generateUUID } from '@/utils/uuid';
 
 interface EditModelModalProps {
   model: PrinterModelDto | null;
@@ -219,6 +217,39 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     ));
   };
 
+  // Specialized handler for toolhead model selection - auto-populates extruder/hotend/nozzle
+  const handleToolheadModelSelect = (toolheadId: string, toolheadModelDefId: string | undefined) => {
+    setToolheads(prev => prev.map(th => {
+      if (th.id !== toolheadId) return th;
+      
+      if (!toolheadModelDefId) {
+        // Cleared selection - just update the toolhead model ID
+        return { ...th, toolheadModelDefId: undefined };
+      }
+      
+      // Find the selected toolhead model
+      const selectedToolheadModel = toolheadModels?.find(tm => tm.id === toolheadModelDefId);
+      if (!selectedToolheadModel) {
+        return { ...th, toolheadModelDefId };
+      }
+      
+      // Auto-populate from toolhead defaults
+      const updates: Partial<PrinterModelToolheadDto> = { toolheadModelDefId };
+      
+      if (selectedToolheadModel.defaultExtruderId) {
+        updates.extruderModelId = selectedToolheadModel.defaultExtruderId;
+      }
+      if (selectedToolheadModel.defaultHotendId) {
+        updates.hotendModelId = selectedToolheadModel.defaultHotendId;
+      }
+      if (selectedToolheadModel.defaultNozzleId) {
+        updates.nozzleModelId = selectedToolheadModel.defaultNozzleId;
+      }
+      
+      return { ...th, ...updates };
+    }));
+  };
+
   const toggleToolheadExpanded = (toolheadId: string) => {
     setExpandedToolheads(prev => {
       const next = new Set(prev);
@@ -232,7 +263,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
   };
 
   const handleAddToolhead = () => {
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     const newIndex = toolheads.length;
     const newToolhead: PrinterModelToolheadDto = {
       id: newId,
@@ -295,6 +326,12 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
       toolheads: toolheads.length > 0 ? toolheads : undefined
     };
     
+    // Debug: Log what's being sent
+    if (window.PrintFarmerDebug?.catalog) {
+      console.log('[EditModelModal] Submitting updateData:', JSON.stringify(updateData, null, 2));
+      console.log('[EditModelModal] formData.hasEnclosure:', formData.hasEnclosure);
+    }
+    
     try {
       if (isAddMode) {
         // For add mode, use create mutation and exclude the temp ID
@@ -304,8 +341,8 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
         }
         delete createData.id;
         await createMutation.mutateAsync(createData as unknown as UpdateModelRequest);
-        // Success for create mode
-        queryClient.invalidateQueries({ queryKey: ['printer-models'] });
+        // Success for create mode - force immediate refetch to bypass stale cache
+        await queryClient.refetchQueries({ queryKey: ['models'] });
         toast.success(`Model "${formData?.name}" created successfully`);
         onSuccess?.();
         onClose();
@@ -318,8 +355,8 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
           await aliasEditorRef.current.saveChanges();
         }
         
-        // Success for edit mode
-        queryClient.invalidateQueries({ queryKey: ['printer-models'] });
+        // Success for edit mode - force immediate refetch to bypass stale cache
+        await queryClient.refetchQueries({ queryKey: ['models'] });
         toast.success(`Model "${formData?.name}" updated successfully`);
         onSuccess?.();
         onClose();
@@ -585,53 +622,44 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   key={toolhead.id} 
                   className="border border-pf-border rounded-lg overflow-hidden"
                 >
-                  {/* Toolhead Header - Clickable */}
-                  <button
-                    type="button"
+                  {/* Toolhead Header - Clickable accordion */}
+                  <AccordionButton
+                    isExpanded={expandedToolheads.has(toolhead.id)}
                     onClick={() => toggleToolheadExpanded(toolhead.id)}
-                    className="w-full flex items-center justify-between p-3 bg-pf-bg-secondary hover:bg-pf-bg-tertiary transition-colors"
-                  >
-                    <div className="flex items-center space-x-3">
-                      {expandedToolheads.has(toolhead.id) ? (
-                        <ChevronDownIcon className="w-5 h-5 text-pf-text-secondary" />
-                      ) : (
-                        <ChevronRightIcon className="w-5 h-5 text-pf-text-secondary" />
-                      )}
-                      <span className="font-medium text-pf-text-primary">
+                    title={
+                      <span className="flex items-center gap-2">
                         {toolhead.name || `Toolhead ${index + 1}`}
+                        {toolhead.isPrimary && (
+                          <span className="text-xs px-1.5 py-0.5 bg-pf-accent/20 text-pf-accent rounded font-normal">
+                            Primary
+                          </span>
+                        )}
                       </span>
-                      {toolhead.isPrimary && (
-                        <span className="px-2 py-0.5 text-xs bg-pf-primary/20 text-pf-primary rounded-full">
-                          Primary
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-4 text-sm text-pf-text-secondary">
-                      {toolhead.nozzleDiameter && (
-                        <span>Ø{toolhead.nozzleDiameter}mm</span>
-                      )}
-                      {toolhead.maxHotendTemp && (
-                        <span>Max {toolhead.maxHotendTemp}°C</span>
-                      )}
-                      <button
-                        type="button"
+                    }
+                    summary={[
+                      toolhead.nozzleDiameter && `Ø${toolhead.nozzleDiameter}mm`,
+                      toolhead.maxHotendTemp && `Max ${toolhead.maxHotendTemp}°C`,
+                    ].filter(Boolean).join(' • ') || undefined}
+                    actions={
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        iconCenter={<DeleteIcon className="w-4 h-4" />}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRemoveToolhead(toolhead.id);
                         }}
-                        className="p-1 text-pf-text-secondary hover:text-red-500 transition-colors"
+                        className="p-1 text-pf-text-secondary hover:text-red-500"
                         title="Remove toolhead"
-                      >
-                        <DeleteIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </button>
+                      />
+                    }
+                  />
                   
                   {/* Toolhead Details - Expandable */}
                   {expandedToolheads.has(toolhead.id) && (
                     <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
-                      {/* Basic Info */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Identity: Name + Index + Primary */}
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_80px_auto] gap-4 items-end">
                         <FormField label="Name" htmlFor={`toolhead-name-${index}`}>
                           <Input
                             id={`toolhead-name-${index}`}
@@ -640,25 +668,44 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                             placeholder={`Toolhead ${index + 1}`}
                           />
                         </FormField>
-                        <FormField label="Toolhead Type" htmlFor={`toolhead-type-${index}`}>
-                          <Select
-                            id={`toolhead-type-${index}`}
-                            value={toolhead.toolheadType?.toString() ?? ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'toolheadType', e.target.value ? parseInt(e.target.value, 10) as ToolheadType : undefined)}
-                          >
-                            <option value="">Select type...</option>
-                            {Object.entries(ToolheadTypeLabels).map(([value, label]) => (
-                              <option key={value} value={value}>{label}</option>
-                            ))}
-                          </Select>
+                        <FormField label="Index" htmlFor={`toolhead-index-${index}`}>
+                          <Input
+                            id={`toolhead-index-${index}`}
+                            type="number"
+                            min="0"
+                            value={toolhead.index?.toString() ?? index.toString()}
+                            onChange={e => handleToolheadChange(toolhead.id, 'index', parseInt(e.target.value, 10) || 0)}
+                            title="Toolhead index (T0, T1, etc.)"
+                          />
                         </FormField>
+                        <div className="flex items-center h-[38px]">
+                          <Checkbox
+                            id={`toolhead-primary-${index}`}
+                            label="Primary"
+                            checked={toolhead.isPrimary ?? false}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setToolheads(prev => prev.map(th => ({
+                                  ...th,
+                                  isPrimary: th.id === toolhead.id
+                                })));
+                              } else {
+                                handleToolheadChange(toolhead.id, 'isPrimary', false);
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Toolhead Assembly: Model + Extruder + Hotend */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <FormField label="Toolhead Model" htmlFor={`toolhead-model-${index}`}>
                           <Select
                             id={`toolhead-model-${index}`}
                             value={toolhead.toolheadModelDefId || ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'toolheadModelDefId', e.target.value || undefined)}
+                            onChange={e => handleToolheadModelSelect(toolhead.id, e.target.value || undefined)}
                           >
-                            <option value="">Select toolhead model...</option>
+                            <option value="">Select toolhead...</option>
                             {toolheadModels?.map(tm => (
                               <option key={tm.id} value={tm.id}>
                                 {tm.manufacturerName ? `${tm.manufacturerName} - ${tm.name}` : tm.name}
@@ -666,10 +713,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                             ))}
                           </Select>
                         </FormField>
-                      </div>
-
-                      {/* Extruder and Hotend */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <FormField label="Extruder" htmlFor={`toolhead-extruder-${index}`}>
                           <Select
                             id={`toolhead-extruder-${index}`}
@@ -702,8 +745,23 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                         </FormField>
                       </div>
 
-                      {/* Nozzle */}
+                      {/* Nozzle Configuration */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <FormField label="Nozzle Model" htmlFor={`toolhead-nozzle-model-${index}`}>
+                          <Select
+                            id={`toolhead-nozzle-model-${index}`}
+                            value={toolhead.nozzleModelId || ''}
+                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleModelId', e.target.value || undefined)}
+                          >
+                            <option value="">Select nozzle...</option>
+                            {nozzleModels?.map(nm => (
+                              <option key={nm.id} value={nm.id}>
+                                {nm.manufacturerName ? `${nm.manufacturerName} - ${nm.name}` : nm.name}
+                                {nm.isHardened ? ' (Hardened)' : ''}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
                         <FormField label="Nozzle Diameter (mm)" htmlFor={`toolhead-nozzle-${index}`}>
                           <Input
                             id={`toolhead-nozzle-${index}`}
@@ -720,30 +778,15 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                             value={toolhead.nozzleType?.toString() ?? ''}
                             onChange={e => handleToolheadChange(toolhead.id, 'nozzleType', e.target.value ? parseInt(e.target.value, 10) as NozzleType : undefined)}
                           >
-                            <option value="">Select nozzle type...</option>
+                            <option value="">Select type...</option>
                             {Object.entries(NozzleTypeLabels).map(([value, label]) => (
                               <option key={value} value={value}>{label}</option>
                             ))}
                           </Select>
                         </FormField>
-                        <FormField label="Nozzle Model" htmlFor={`toolhead-nozzle-model-${index}`}>
-                          <Select
-                            id={`toolhead-nozzle-model-${index}`}
-                            value={toolhead.nozzleModelId || ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleModelId', e.target.value || undefined)}
-                          >
-                            <option value="">Select nozzle model...</option>
-                            {nozzleModels?.map(nm => (
-                              <option key={nm.id} value={nm.id}>
-                                {nm.manufacturerName ? `${nm.manufacturerName} - ${nm.name}` : nm.name}
-                                {nm.isHardened ? ' (Hardened)' : ''}
-                              </option>
-                            ))}
-                          </Select>
-                        </FormField>
                       </div>
 
-                      {/* Performance */}
+                      {/* Performance Specs */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <FormField label="Max Hotend Temp (°C)" htmlFor={`toolhead-max-temp-${index}`}>
                           <Input
@@ -776,38 +819,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                           selectedFilamentTypes={toolhead.supportedMaterials || []}
                           onSelectionChange={(selectedTypes) => handleToolheadChange(toolhead.id, 'supportedMaterials', selectedTypes)}
                         />
-                      </div>
-
-                      {/* Index and Primary */}
-                      <div className="flex items-center space-x-4">
-                        <FormField label="Index" htmlFor={`toolhead-index-${index}`} className="w-20">
-                          <Input
-                            id={`toolhead-index-${index}`}
-                            type="number"
-                            min="0"
-                            value={toolhead.index?.toString() ?? index.toString()}
-                            onChange={e => handleToolheadChange(toolhead.id, 'index', parseInt(e.target.value, 10) || 0)}
-                            title="Toolhead index (T0, T1, etc.)"
-                          />
-                        </FormField>
-                        <div className="pt-6">
-                          <Checkbox
-                            id={`toolhead-primary-${index}`}
-                            label="Primary Toolhead"
-                            checked={toolhead.isPrimary ?? false}
-                            onChange={e => {
-                              // When setting a toolhead as primary, unset others
-                              if (e.target.checked) {
-                                setToolheads(prev => prev.map(th => ({
-                                  ...th,
-                                  isPrimary: th.id === toolhead.id
-                                })));
-                              } else {
-                                handleToolheadChange(toolhead.id, 'isPrimary', false);
-                              }
-                            }}
-                          />
-                        </div>
                       </div>
                     </div>
                   )}

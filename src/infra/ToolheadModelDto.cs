@@ -15,4 +15,7 @@ public record ToolheadModelDto(
     Guid ManufacturerId,
     string? ManufacturerName = null,
     string? Description = null,
-    string? Url = null);
+    string? Url = null,
+    Guid? DefaultHotendId = null,
+    Guid? DefaultExtruderId = null,
+    Guid? DefaultNozzleId = null);

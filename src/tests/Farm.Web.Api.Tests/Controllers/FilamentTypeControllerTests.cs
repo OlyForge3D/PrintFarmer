@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockStartup.Setup(s => s.IsReady).Returns(true);
 
-            List<FilamentTypeDto> expected = new List<FilamentTypeDto> { new FilamentTypeDto(System.Guid.NewGuid(), "PLA", new TempTargets(200, 60)) };
+            List<FilamentTypeDto> expected = new List<FilamentTypeDto> { new FilamentTypeDto(System.Guid.NewGuid(), "PLA", new TempTargets(200, 60), false, false) };
             _ = mockService.Setup(s => s.GetFilamentTypesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             FilamentTypeController controller = new FilamentTypeController(mockService.Object, mockStartup.Object, mockLogger.Object);

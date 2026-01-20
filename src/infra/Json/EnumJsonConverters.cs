@@ -52,8 +52,8 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        // Serialize as integer for frontend compatibility
-        writer.WriteNumberValue((int)value);
+        // Serialize as string name for frontend compatibility (matches TypeScript PrinterBackendString)
+        writer.WriteStringValue(value.ToString());
     }
 }
 

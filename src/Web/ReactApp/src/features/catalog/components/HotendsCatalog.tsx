@@ -238,9 +238,13 @@ export function HotendsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Hotend Models ({cards.length})
         </h2>
-        <Button onClick={handleAddClick} size="sm">
-          <PlusIcon className="w-4 h-4 mr-1" />
-          Add Hotend
+        <Button 
+          onClick={handleAddClick}
+          title="Add new hotend model"
+          size="sm"
+          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+        >
+          Add
         </Button>
       </div>
 

@@ -103,11 +103,13 @@ namespace Farm.Web.Api.Services.Filament
                 Name = trimmed,
                 DefaultHotendTemp = req.DefaultTemperatures.Hotend,
                 DefaultBedTemp = req.DefaultTemperatures.Bed,
+                IsAbrasive = req.IsAbrasive,
+                NeedsEnclosure = req.NeedsEnclosure,
                 CreatedAt = DateTime.UtcNow
             };
             await _repo.AddFilamentTypeAsync(filamentType, ct);
             await _repo.SaveChangesAsync(ct);
-            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp));
+            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp), filamentType.IsAbrasive, filamentType.NeedsEnclosure);
         }
 
         /// <summary>
@@ -148,6 +150,8 @@ namespace Farm.Web.Api.Services.Filament
 
             entity.DefaultHotendTemp = req.DefaultTemperatures.Hotend;
             entity.DefaultBedTemp = req.DefaultTemperatures.Bed;
+            entity.IsAbrasive = req.IsAbrasive;
+            entity.NeedsEnclosure = req.NeedsEnclosure;
             await _repo.UpdateFilamentTypeAsync(entity, ct);
             await _repo.SaveChangesAsync(ct);
         }

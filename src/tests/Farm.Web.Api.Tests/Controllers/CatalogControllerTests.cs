@@ -43,16 +43,15 @@ public class CatalogControllerTests
             .ReturnsAsync((manufacturers, "etag123"));
 
         // Act
-        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync(null, CancellationToken.None);
+        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync(CancellationToken.None);
 
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(manufacturers, okResult.Value);
-        Assert.Equal("etag123", _controller.Response.Headers["ETag"].ToString());
     }
 
     [Fact]
-    public async Task GetManufacturersAsync_WithMatchingETag_ReturnsNotModified()
+    public async Task GetManufacturersAsync_WithEmptyList_ReturnsOkWithEmptyList()
     {
         // Arrange
         var manufacturers = new List<ManufacturerDto>();
@@ -61,11 +60,12 @@ public class CatalogControllerTests
             .ReturnsAsync((manufacturers, "etag123"));
 
         // Act
-        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync("etag123", CancellationToken.None);
+        ActionResult<IEnumerable<ManufacturerDto>> result = await _controller.GetManufacturersAsync(CancellationToken.None);
 
         // Assert
-        StatusCodeResult statusResult = Assert.IsType<StatusCodeResult>(result.Result);
-        Assert.Equal(304, statusResult.StatusCode);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var list = Assert.IsAssignableFrom<IEnumerable<ManufacturerDto>>(okResult.Value);
+        Assert.Empty(list);
     }
 
     [Fact]
@@ -147,12 +147,11 @@ public class CatalogControllerTests
             .ReturnsAsync((models, "etag456"));
 
         // Act
-        ActionResult<IEnumerable<PrinterModelDto>> result = await _controller.GetPrinterModelsAsync(null, null, CancellationToken.None);
+        ActionResult<IEnumerable<PrinterModelDto>> result = await _controller.GetPrinterModelsAsync(null, CancellationToken.None);
 
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(models, okResult.Value);
-        Assert.Equal("etag456", _controller.Response.Headers["ETag"].ToString());
     }
 
     [Fact]
@@ -181,7 +180,7 @@ public class CatalogControllerTests
         var request = new CreateModelRequest(
             ManufacturerId: manufacturerId,
             Name: "MK4",
-            Type: MotionType.Cartesian,
+            MotionType: MotionType.Cartesian,
             MaxX: 250,
             MaxY: 210,
             MaxZ: 220,
@@ -209,7 +208,7 @@ public class CatalogControllerTests
         var request = new CreateModelRequest(
             ManufacturerId: Guid.NewGuid(),
             Name: "MK4",
-            Type: null,
+            MotionType: null,
             MaxX: null,
             MaxY: null,
             MaxZ: null,
@@ -235,7 +234,7 @@ public class CatalogControllerTests
         var request = new CreateModelRequest(
             ManufacturerId: Guid.NewGuid(),
             Name: "MK4",
-            Type: null,
+            MotionType: null,
             MaxX: null,
             MaxY: null,
             MaxZ: null,

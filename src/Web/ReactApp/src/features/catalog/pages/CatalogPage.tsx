@@ -38,14 +38,14 @@ export function CatalogPage() {
           <Tabs.Tab id="printers" icon={<PrinterIcon className="h-4 w-4" />}>
             Printers
           </Tabs.Tab>
-          <Tabs.Tab id="hotends" icon={<ThermometerIcon className="h-4 w-4" />}>
-            Hotends
+          <Tabs.Tab id="toolheads" icon={<WrenchIcon className="h-4 w-4" />}>
+            Toolheads
           </Tabs.Tab>
           <Tabs.Tab id="extruders" icon={<SettingsIcon className="h-4 w-4" />}>
             Extruders
           </Tabs.Tab>
-          <Tabs.Tab id="toolheads" icon={<WrenchIcon className="h-4 w-4" />}>
-            Toolheads
+          <Tabs.Tab id="hotends" icon={<ThermometerIcon className="h-4 w-4" />}>
+            Hotends
           </Tabs.Tab>
           <Tabs.Tab id="nozzles" icon={<CircleIcon className="h-4 w-4" />}>
             Nozzles
@@ -55,14 +55,14 @@ export function CatalogPage() {
           <Tabs.Panel id="printers">
             <PrinterModelsCatalog />
           </Tabs.Panel>
-          <Tabs.Panel id="hotends">
-            <HotendsCatalog />
+          <Tabs.Panel id="toolheads">
+            <ToolheadsCatalog />
           </Tabs.Panel>
           <Tabs.Panel id="extruders">
             <ExtrudersCatalog />
           </Tabs.Panel>
-          <Tabs.Panel id="toolheads">
-            <ToolheadsCatalog />
+          <Tabs.Panel id="hotends">
+            <HotendsCatalog />
           </Tabs.Panel>
           <Tabs.Panel id="nozzles">
             <NozzlesCatalog />

@@ -496,7 +496,7 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, string? Description, string? Url)> hotends = await _repo.GetHotendModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> hotends = await _repo.GetHotendModelsAsync(ct);
             return hotends.Select(h => new HotendModelDto(
                 h.Id,
                 h.Name,
@@ -504,6 +504,7 @@ public class CatalogService(
                 h.ManufacturerName,
                 h.MaxTemp,
                 h.IsHighFlow,
+                h.NozzleInterface,
                 h.Description,
                 h.Url)).ToList();
         }
@@ -544,14 +545,17 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url)> toolheads = await _repo.GetToolheadModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url, Guid? DefaultHotendId, Guid? DefaultExtruderId, Guid? DefaultNozzleId)> toolheads = await _repo.GetToolheadModelsAsync(ct);
             return toolheads.Select(t => new ToolheadModelDto(
                 t.Id,
                 t.Name,
                 t.ManufacturerId,
                 t.ManufacturerName,
                 t.Description,
-                t.Url)).ToList();
+                t.Url,
+                t.DefaultHotendId,
+                t.DefaultExtruderId,
+                t.DefaultNozzleId)).ToList();
         }
         catch (Exception ex)
         {
@@ -566,7 +570,7 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
                 n.Name,
@@ -574,6 +578,7 @@ public class CatalogService(
                 n.ManufacturerName,
                 n.MaxTemp,
                 n.IsHardened,
+                n.NozzleInterface,
                 n.Description,
                 n.Url)).ToList();
         }
@@ -607,6 +612,7 @@ public class CatalogService(
             ManufacturerId = dto.ManufacturerId,
             MaxTemp = dto.MaxTemp,
             IsHighFlow = dto.IsHighFlow,
+            NozzleInterface = dto.NozzleInterface,
             Description = dto.Description,
             Url = dto.Url
         };
@@ -619,7 +625,7 @@ public class CatalogService(
         return new HotendModelDto(
             created!.Id, created.Name, created.ManufacturerId,
             created.Manufacturer?.Name, created.MaxTemp, created.IsHighFlow,
-            created.Description, created.Url);
+            created.NozzleInterface, created.Description, created.Url);
     }
 
     public async Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct)
@@ -656,6 +662,11 @@ public class CatalogService(
             model.IsHighFlow = dto.IsHighFlow.Value;
         }
 
+        if (dto.NozzleInterface.HasValue)
+        {
+            model.NozzleInterface = dto.NozzleInterface.Value;
+        }
+
         if (dto.Description is not null)
         {
             model.Description = dto.Description;
@@ -674,7 +685,7 @@ public class CatalogService(
         return new HotendModelDto(
             model!.Id, model.Name, model.ManufacturerId,
             model.Manufacturer?.Name, model.MaxTemp, model.IsHighFlow,
-            model.Description, model.Url);
+            model.NozzleInterface, model.Description, model.Url);
     }
 
     public async Task DeleteHotendModelAsync(Guid id, CancellationToken ct)
@@ -894,6 +905,7 @@ public class CatalogService(
             ManufacturerId = dto.ManufacturerId,
             MaxTemp = dto.MaxTemp,
             IsHardened = dto.IsHardened,
+            NozzleInterface = dto.NozzleInterface,
             Description = dto.Description,
             Url = dto.Url
         };
@@ -905,7 +917,7 @@ public class CatalogService(
         return new NozzleModelDto(
             created!.Id, created.Name, created.ManufacturerId,
             created.Manufacturer?.Name, created.MaxTemp, created.IsHardened,
-            created.Description, created.Url);
+            created.NozzleInterface, created.Description, created.Url);
     }
 
     public async Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct)
@@ -942,6 +954,11 @@ public class CatalogService(
             model.IsHardened = dto.IsHardened.Value;
         }
 
+        if (dto.NozzleInterface.HasValue)
+        {
+            model.NozzleInterface = dto.NozzleInterface.Value;
+        }
+
         if (dto.Description is not null)
         {
             model.Description = dto.Description;
@@ -960,7 +977,7 @@ public class CatalogService(
         return new NozzleModelDto(
             model!.Id, model.Name, model.ManufacturerId,
             model.Manufacturer?.Name, model.MaxTemp, model.IsHardened,
-            model.Description, model.Url);
+            model.NozzleInterface, model.Description, model.Url);
     }
 
     public async Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)

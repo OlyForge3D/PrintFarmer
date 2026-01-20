@@ -122,14 +122,6 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
     });
   }, [jobDetails.id, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
 
-  const handleClose = useCallback(() => {
-    if (hasChanges) {
-      setShowUnsavedConfirm(true);
-      return;
-    }
-    doClose();
-  }, [hasChanges]);
-
   const doClose = useCallback(() => {
     setIsEditing(false);
     setHasChanges(false);
@@ -137,6 +129,14 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
     setShowUnsavedConfirm(false);
     onClose();
   }, [onClose]);
+
+  const handleClose = useCallback(() => {
+    if (hasChanges) {
+      setShowUnsavedConfirm(true);
+      return;
+    }
+    doClose();
+  }, [hasChanges, doClose]);
 
   if (!isOpen) return null;
 

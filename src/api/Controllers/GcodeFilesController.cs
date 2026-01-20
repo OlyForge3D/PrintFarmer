@@ -12,11 +12,9 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
-using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -598,7 +596,6 @@ public class GcodeFilesController(
     [HttpGet("download")]
     [HttpHead("download")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
-    [ProducesResponseType(304)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> DownloadAsync([FromQuery] string path)
     {
@@ -610,41 +607,9 @@ public class GcodeFilesController(
                 return NotFound();
             }
 
-            // ETag and conditional request handling remains in controller
-            // (requires access to Request/Response headers and HTTP context)
-            (string _, string? fullFilePath, string _) = ResolveAndValidatePath(path, treatAsFile: true);
-            System.IO.FileInfo info = new(fullFilePath);
-            DateTime lastWriteUtc = info.LastWriteTimeUtc;
-            bool useWeak = Environment.GetEnvironmentVariable("GCODE_WEAK_ETAGS") == "1";
-            string etag = GenerateEtag(info, useWeak);
-
-            RequestHeaders typedHeaders = Request.GetTypedHeaders();
-            IList<EntityTagHeaderValue> ifNoneMatch = typedHeaders.IfNoneMatch;
-            if (ifNoneMatch != null && ifNoneMatch.Any(t => string.Equals(t.Tag.ToString(), etag, StringComparison.Ordinal)))
-            {
-                Response.Headers["ETag"] = etag;
-                Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
-                return StatusCode(StatusCodes.Status304NotModified);
-            }
-
-            DateTimeOffset? ifModifiedSince = typedHeaders.IfModifiedSince;
-            if (ifModifiedSince.HasValue)
-            {
-                DateTime ims = ifModifiedSince.Value.UtcDateTime;
-                if (lastWriteUtc <= ims || (lastWriteUtc - ims) < TimeSpan.FromSeconds(1))
-                {
-                    Response.Headers["ETag"] = etag;
-                    Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
-                    return StatusCode(StatusCodes.Status304NotModified);
-                }
-            }
-
-            Response.Headers["ETag"] = etag;
-            Response.Headers["Last-Modified"] = lastWriteUtc.ToString("R", CultureInfo.InvariantCulture);
-
             if (HttpContext.Request.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
             {
-                Response.ContentLength = info.Length;
+                Response.ContentLength = result.Value.Bytes.Length;
                 return new StatusCodeResult(200);
             }
 
@@ -931,12 +896,6 @@ public class GcodeFilesController(
         {
             return (root, candidate, "/" + string.Join('/', segments));
         }
-    }
-
-    private static string GenerateEtag(System.IO.FileInfo info, bool weak = false)
-    {
-        string core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
-        return weak ? $"W/\"{core}\"" : $"\"{core}\"";
     }
 
     /// <summary>

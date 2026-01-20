@@ -16,5 +16,6 @@ public record NozzleModelDto(
     string? ManufacturerName = null,
     int? MaxTemp = null,
     bool IsHardened = false,
+    NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
     string? Url = null);

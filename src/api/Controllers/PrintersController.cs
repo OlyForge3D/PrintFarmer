@@ -1167,7 +1167,7 @@ public class PrintersController(
             CreateModelRequest createReq = new CreateModelRequest(
                 ManufacturerId: manufacturerId,
                 Name: mname,
-                Type: null,
+                MotionType: null,
                 MaxX: null,
                 MaxY: null,
                 MaxZ: null,

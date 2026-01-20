@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -36,7 +37,9 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name, m.Url, m.Description)).ToListAsync(ct);
-        string etag = ComputeWeakEtag(list.Select(m => m.Id.ToString("N") + ":" + m.Name));
+
+        // Hash the entire serialized list - any field change will change the ETag
+        string etag = ComputeEtagFromObject(list);
         _ = _cache.Set(ManufacturersKey, (list, etag), _options.ListTtl);
         return (list, etag);
     }
@@ -112,8 +115,9 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.NozzleModel != null ? t.NozzleModel.Name : null,
                     t.SupportedMaterials,
                     t.IsPrimary)).ToArray())).ToListAsync(ct);
-        IEnumerable<string> etagInput = list.Select(m => m.Id.ToString("N") + ":" + m.Name).Prepend(manufacturerId?.ToString("N") ?? "all");
-        string etag = ComputeWeakEtag(etagInput);
+
+        // Hash the entire serialized list - any field change will change the ETag
+        string etag = ComputeEtagFromObject(list);
         _ = _cache.Set(key, (list, etag), _options.ListTtl);
         return (list, etag);
     }
@@ -125,20 +129,24 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
 
     public void InvalidateModels(Guid? manufacturerId = null)
     {
+        // Always invalidate the "all models" cache since it could contain models from any manufacturer
+        _cache.Remove(ModelsAllKey);
+
+        // Also invalidate the manufacturer-specific cache if provided
         if (manufacturerId is Guid mid)
         {
             _cache.Remove(ModelsKey(mid));
         }
-        else
-        {
-            _cache.Remove(ModelsAllKey);
-        }
     }
 
-    private static string ComputeWeakEtag(IEnumerable<string> parts)
+    /// <summary>
+    /// Computes a weak ETag by serializing the object to JSON and hashing it.
+    /// Any field change will produce a different ETag.
+    /// </summary>
+    private static string ComputeEtagFromObject<T>(T obj)
     {
-        string joined = string.Join('|', parts);
-        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(joined));
+        string json = JsonSerializer.Serialize(obj);
+        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         string hash = Convert.ToHexString(bytes, 0, 8);
         return $"W/\"{hash}\"";
     }

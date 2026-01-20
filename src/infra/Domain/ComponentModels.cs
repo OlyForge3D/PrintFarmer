@@ -31,6 +31,40 @@ public abstract class HardwareModel
 }
 
 /// <summary>
+/// Defines the nozzle thread/interface type that determines compatibility between hotends and nozzles.
+/// This is the physical interface standard - hotends and nozzles must match to be compatible.
+/// </summary>
+public enum NozzleInterfaceType
+{
+    /// <summary>Unknown or unspecified nozzle interface.</summary>
+    Unknown = 0,
+
+    /// <summary>E3D V6 standard thread (M6 x 1.0) - most common. Used by V6, Dragon, Rapido, Mosquito, CHC, most budget hotends.</summary>
+    V6 = 1,
+
+    /// <summary>E3D Volcano extended length (M6 x 1.0, longer melt zone) - for high-flow applications.</summary>
+    Volcano = 2,
+
+    /// <summary>E3D Revo quick-change system - no threading, magnetic/snap-fit.</summary>
+    Revo = 3,
+
+    /// <summary>Prusa Nextruder interface - proprietary for MK4/MK3.9S/CORE One.</summary>
+    Nextruder = 4,
+
+    /// <summary>BIQU H2 interface - proprietary for H2 hotend system.</summary>
+    H2 = 5,
+
+    /// <summary>Microswiss FlowTech interface - proprietary across their FlowTech line.</summary>
+    FlowTech = 6,
+
+    /// <summary>Bambu Lab proprietary interface - for X1/P1/A1 series.</summary>
+    BambuLab = 7,
+
+    /// <summary>Proprietary interface unique to a specific manufacturer/model.</summary>
+    Proprietary = 99
+}
+
+/// <summary>
 /// A hotend model definition (e.g., Dragon, Rapido, Mosquito).
 /// References manufacturer for brand association.
 /// </summary>
@@ -45,6 +79,11 @@ public class HotendModelDefinition : HardwareModel
     /// Whether this is a high-flow variant.
     /// </summary>
     public bool IsHighFlow { get; set; }
+
+    /// <summary>
+    /// The nozzle interface type this hotend uses (determines compatible nozzles).
+    /// </summary>
+    public NozzleInterfaceType NozzleInterface { get; set; } = NozzleInterfaceType.V6;
 }
 
 /// <summary>
@@ -71,8 +110,30 @@ public class ExtruderModelDefinition : HardwareModel
 /// </summary>
 public class ToolheadModelDefinition : HardwareModel
 {
-    // No additional properties - toolheads only have base properties
-    // ManufacturerId inherited as nullable from HardwareModel
+    /// <summary>
+    /// Default hotend model for this toolhead (optional).
+    /// When a user selects this toolhead, this hotend is auto-populated.
+    /// </summary>
+    public Guid? DefaultHotendId { get; set; }
+
+    /// <summary>
+    /// Default extruder model for this toolhead (optional).
+    /// When a user selects this toolhead, this extruder is auto-populated.
+    /// </summary>
+    public Guid? DefaultExtruderId { get; set; }
+
+    /// <summary>
+    /// Default nozzle model for this toolhead (optional).
+    /// When a user selects this toolhead, this nozzle is auto-populated.
+    /// </summary>
+    public Guid? DefaultNozzleId { get; set; }
+
+    // Navigation properties
+    public HotendModelDefinition? DefaultHotend { get; set; }
+
+    public ExtruderModelDefinition? DefaultExtruder { get; set; }
+
+    public NozzleModelDefinition? DefaultNozzle { get; set; }
 }
 
 /// <summary>
@@ -90,4 +151,9 @@ public class NozzleModelDefinition : HardwareModel
     /// Whether this nozzle is hardened for abrasive filaments.
     /// </summary>
     public bool IsHardened { get; set; }
+
+    /// <summary>
+    /// The nozzle interface type (determines which hotends this nozzle fits).
+    /// </summary>
+    public NozzleInterfaceType NozzleInterface { get; set; } = NozzleInterfaceType.V6;
 }

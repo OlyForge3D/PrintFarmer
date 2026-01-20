@@ -238,9 +238,13 @@ export function NozzlesCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Nozzle Models ({cards.length})
         </h2>
-        <Button onClick={handleAddClick} size="sm">
-          <PlusIcon className="w-4 h-4 mr-1" />
-          Add Nozzle
+        <Button 
+          onClick={handleAddClick} 
+          size="sm"
+          title="Add new nozzle model"
+          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+        >
+          Add
         </Button>
       </div>
 

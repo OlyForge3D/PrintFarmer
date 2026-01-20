@@ -6,8 +6,8 @@ using Farm.Infrastructure.Annotations;
 
 namespace Farm.Infrastructure.Domain;
 
-// Explicit table mapping to ensure EF Core creates the expected "Models" table during test initialization.
-[Table("Models")]
+// Explicit table mapping to ensure EF Core creates the expected "PrinterModels" table during test initialization.
+[Table("PrinterModels")]
 public class PrinterModel
 {
     public Guid Id { get; set; }

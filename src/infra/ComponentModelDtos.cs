@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 // ============================================================================
 // COMPONENT MODEL CREATE/UPDATE DTOs
@@ -14,6 +16,7 @@
 /// <param name="ManufacturerId">ID of the manufacturer</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
 /// <param name="IsHighFlow">Whether this is a high-flow variant</param>
+/// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product URL</param>
 public record CreateHotendModelDto(
@@ -21,6 +24,7 @@ public record CreateHotendModelDto(
     Guid ManufacturerId,
     int? MaxTemp = null,
     bool IsHighFlow = false,
+    NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
     string? Url = null);
 
@@ -33,6 +37,7 @@ public record UpdateHotendModelDto(
     Guid? ManufacturerId = null,
     int? MaxTemp = null,
     bool? IsHighFlow = null,
+    NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,
     string? Url = null);
 
@@ -78,11 +83,17 @@ public record UpdateExtruderModelDto(
 /// </summary>
 /// <param name="Name">Name of the toolhead model (e.g., "StealthBurner", "DragonBurner")</param>
 /// <param name="ManufacturerId">ID of the manufacturer</param>
+/// <param name="DefaultHotendId">Optional default hotend for this toolhead</param>
+/// <param name="DefaultExtruderId">Optional default extruder for this toolhead</param>
+/// <param name="DefaultNozzleId">Optional default nozzle for this toolhead</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product/documentation URL</param>
 public record CreateToolheadModelDto(
     string Name,
     Guid ManufacturerId,
+    Guid? DefaultHotendId = null,
+    Guid? DefaultExtruderId = null,
+    Guid? DefaultNozzleId = null,
     string? Description = null,
     string? Url = null);
 
@@ -93,6 +104,9 @@ public record CreateToolheadModelDto(
 public record UpdateToolheadModelDefDto(
     string? Name = null,
     Guid? ManufacturerId = null,
+    Guid? DefaultHotendId = null,
+    Guid? DefaultExtruderId = null,
+    Guid? DefaultNozzleId = null,
     string? Description = null,
     string? Url = null);
 
@@ -107,6 +121,7 @@ public record UpdateToolheadModelDefDto(
 /// <param name="ManufacturerId">ID of the manufacturer</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
 /// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments</param>
+/// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product URL</param>
 public record CreateNozzleModelDto(
@@ -114,6 +129,7 @@ public record CreateNozzleModelDto(
     Guid ManufacturerId,
     int? MaxTemp = null,
     bool IsHardened = false,
+    NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
     string? Url = null);
 
@@ -126,6 +142,7 @@ public record UpdateNozzleModelDto(
     Guid? ManufacturerId = null,
     int? MaxTemp = null,
     bool? IsHardened = null,
+    NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,
     string? Url = null);
 
