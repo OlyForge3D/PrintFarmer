@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto } from '@/types/api';
-import { NozzleType, NozzleTypeLabels } from '@/types/api';
+import { NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { ModelAliasEditor, ModelAliasEditorRef } from '@/features/catalog/components/ModelAliasEditor';
@@ -406,9 +406,9 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
 
   // Determine the title based on mode
   const getModalTitle = () => {
-    if (isCloneMode) return 'Clone Printer Model';
+    if (isCloneMode) return `Clone Printer Model: ${model?.name ?? ''}`;
     if (isAddMode) return 'Add Printer Model';
-    return 'Edit Printer Model';
+    return `Edit Printer Model: ${model?.name ?? ''}`;
   };
 
   return (
@@ -776,10 +776,10 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                           <Select
                             id={`toolhead-nozzle-type-${index}`}
                             value={toolhead.nozzleType?.toString() ?? ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleType', e.target.value ? parseInt(e.target.value, 10) as NozzleType : undefined)}
+                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleType', e.target.value || undefined)}
                           >
                             <option value="">Select type...</option>
-                            {Object.entries(NozzleTypeLabels).map(([value, label]) => (
+                            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
                               <option key={value} value={value}>{label}</option>
                             ))}
                           </Select>

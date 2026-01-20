@@ -1,19 +1,32 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
+import clsx from 'clsx';
+
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+
+const sizeClasses: Record<ModalSize, string> = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+  xl: 'max-w-xl',
+  full: 'max-w-4xl',
+};
 
 export interface ModalProps {
   /** Whether the modal is open */
   isOpen: boolean;
   /** Callback when modal should close (backdrop click, escape key, or close button) */
   onClose: () => void;
-  /** Modal title */
-  title: string;
+  /** Modal title (optional - header hidden if no title and showCloseButton is false) */
+  title?: string;
   /** Modal content */
   children: React.ReactNode;
   /** Optional footer content (buttons, etc.) */
   footer?: React.ReactNode;
-  /** Optional custom width class (default: max-w-2xl) */
+  /** Size preset for modal width (alternative to width prop) */
+  size?: ModalSize;
+  /** Optional custom width class - takes precedence over size (default: max-w-2xl) */
   width?: string;
   /** Optional custom max height class (default: max-h-[90vh]) */
   maxHeight?: string;
@@ -23,6 +36,14 @@ export interface ModalProps {
   titleIcon?: React.ReactNode;
   /** Optional close button aria-label */
   closeAriaLabel?: string;
+  /** Whether clicking the backdrop closes the modal (default: false for controlled behavior) */
+  closeOnBackdrop?: boolean;
+  /** Whether pressing Escape closes the modal (default: true) */
+  closeOnEscape?: boolean;
+  /** Whether to show the close button (default: true) */
+  showCloseButton?: boolean;
+  /** Additional className for the modal content */
+  className?: string;
 }
 
 /**
@@ -61,15 +82,33 @@ export function Modal({
   title,
   children,
   footer,
-  width = 'max-w-2xl',
+  size,
+  width,
   maxHeight = 'max-h-[90vh]',
   isDisabled = false,
   titleIcon,
-  closeAriaLabel = 'Close modal'
+  closeAriaLabel = 'Close modal',
+  closeOnBackdrop = false,
+  closeOnEscape = true,
+  showCloseButton = true,
+  className,
 }: ModalProps) {
+  // Compute width class - explicit width takes precedence, then size, then default
+  const widthClass = width ?? (size ? sizeClasses[size] : 'max-w-2xl');
+
+  // Handle backdrop click
+  const handleBackdropClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (closeOnBackdrop && e.target === e.currentTarget && !isDisabled) {
+        onClose();
+      }
+    },
+    [closeOnBackdrop, isDisabled, onClose]
+  );
+
   // Handle Escape key globally with stopPropagation to prevent parent modals from closing
   useEffect(() => {
-    if (!isOpen || isDisabled) return;
+    if (!isOpen || isDisabled || !closeOnEscape) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -81,42 +120,68 @@ export function Modal({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isDisabled, onClose]);
+  }, [isOpen, isDisabled, closeOnEscape, onClose]);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const showHeader = title || showCloseButton;
 
   return (
     <div 
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      role="presentation"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={title ? 'modal-title' : undefined}
     >
       <div 
-        className={`bg-pf-bg-1 rounded-xl shadow-xl border border-pf-border ${width} w-full ${maxHeight} overflow-hidden flex flex-col`}
+        className={clsx(
+          'bg-pf-bg-1 rounded-xl shadow-xl border border-pf-border w-full overflow-hidden flex flex-col',
+          widthClass,
+          maxHeight,
+          className
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            {titleIcon && (
-              <div className="flex-shrink-0">
-                {titleIcon}
-              </div>
+        {showHeader && (
+          <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-3">
+              {titleIcon && (
+                <div className="flex-shrink-0">
+                  {titleIcon}
+                </div>
+              )}
+              {title && (
+                <h2 id="modal-title" className="text-lg font-semibold text-pf-text-primary">
+                  {title}
+                </h2>
+              )}
+            </div>
+            {showCloseButton && (
+              <Button
+                onClick={onClose}
+                disabled={isDisabled}
+                variant="subtle"
+                size="sm"
+                aria-label={closeAriaLabel}
+                className="!p-1 !h-auto"
+              >
+                <CloseIcon className="w-6 h-6" />
+              </Button>
             )}
-            <h2 className="text-lg font-semibold text-pf-text-primary">
-              {title}
-            </h2>
           </div>
-          <Button
-            onClick={onClose}
-            disabled={isDisabled}
-            variant="subtle"
-            size="sm"
-            aria-label={closeAriaLabel}
-            className="!p-1 !h-auto"
-          >
-            <CloseIcon className="w-6 h-6" />
-          </Button>
-        </div>
+        )}
 
         {/* Content */}
         <div className="overflow-y-auto flex-1 px-6 py-6">

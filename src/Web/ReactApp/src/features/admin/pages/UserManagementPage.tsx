@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { DeleteIcon, SearchIcon, EditIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/common/components/ui';
+import { Button, Input, Select, FormField, Alert, Checkbox } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';

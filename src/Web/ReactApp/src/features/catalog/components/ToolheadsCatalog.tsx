@@ -1,8 +1,17 @@
-import React, { useState, useCallback } from 'react';
-import { Modal, Button, Input, FormField, Textarea } from '@/common/components/ui';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Button, Input, FormField, Textarea, Select } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ToolheadModelCardData } from '@/common/components/ComponentModelCard';
-import { useToolheadModels, useCreateToolheadModel, useUpdateToolheadModel, useDeleteToolheadModel } from '@/common/hooks/useApi';
+import { 
+  useToolheadModels, 
+  useCreateToolheadModel, 
+  useUpdateToolheadModel, 
+  useDeleteToolheadModel,
+  useHotendModels,
+  useExtruderModels,
+  useNozzleModels,
+} from '@/common/hooks/useApi';
 import { CatalogContext, type ToolheadModelDefinition, type CreateToolheadModelDto, type UpdateToolheadModelDefDto } from '@/types/api';
 import { PlusIcon } from '@/common/components/icons/MdiIcons';
 
@@ -30,6 +39,9 @@ interface ToolheadFormState {
   manufacturerName?: string;
   description: string;
   url: string;
+  defaultHotendId: string;
+  defaultExtruderId: string;
+  defaultNozzleId: string;
 }
 
 const emptyForm: ToolheadFormState = {
@@ -37,6 +49,9 @@ const emptyForm: ToolheadFormState = {
   manufacturerId: '',
   description: '',
   url: '',
+  defaultHotendId: '',
+  defaultExtruderId: '',
+  defaultNozzleId: '',
 };
 
 /**
@@ -45,12 +60,49 @@ const emptyForm: ToolheadFormState = {
  * Features:
  * - Grid display of all toolhead models
  * - Add new toolhead with grouped manufacturer selector
- * - Edit existing toolheads
+ * - Edit existing toolheads with component associations
  * - Delete toolheads with confirmation
  */
 export function ToolheadsCatalog() {
   // Data queries
   const { data: toolheadModels, isLoading, isError } = useToolheadModels();
+  const { data: hotendModels } = useHotendModels();
+  const { data: extruderModels } = useExtruderModels();
+  const { data: nozzleModels } = useNozzleModels();
+
+  // Build options for component selectors (grouped by manufacturer)
+  const hotendOptions = useMemo(() => {
+    if (!hotendModels) return [];
+    const grouped = new Map<string, { id: string; name: string; mfgName: string }[]>();
+    hotendModels.forEach(h => {
+      const mfg = h.manufacturerName ?? 'Unknown';
+      if (!grouped.has(mfg)) grouped.set(mfg, []);
+      grouped.get(mfg)!.push({ id: h.id, name: h.name, mfgName: mfg });
+    });
+    return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [hotendModels]);
+
+  const extruderOptions = useMemo(() => {
+    if (!extruderModels) return [];
+    const grouped = new Map<string, { id: string; name: string; mfgName: string }[]>();
+    extruderModels.forEach(e => {
+      const mfg = e.manufacturerName ?? 'Unknown';
+      if (!grouped.has(mfg)) grouped.set(mfg, []);
+      grouped.get(mfg)!.push({ id: e.id, name: e.name, mfgName: mfg });
+    });
+    return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [extruderModels]);
+
+  const nozzleOptions = useMemo(() => {
+    if (!nozzleModels) return [];
+    const grouped = new Map<string, { id: string; name: string; mfgName: string }[]>();
+    nozzleModels.forEach(n => {
+      const mfg = n.manufacturerName ?? 'Unknown';
+      if (!grouped.has(mfg)) grouped.set(mfg, []);
+      grouped.get(mfg)!.push({ id: n.id, name: n.name, mfgName: mfg });
+    });
+    return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [nozzleModels]);
 
   // Mutations
   const createMutation = useCreateToolheadModel();
@@ -82,6 +134,9 @@ export function ToolheadsCatalog() {
       manufacturerName: model.manufacturerName,
       description: model.description ?? '',
       url: model.url ?? '',
+      defaultHotendId: model.defaultHotendId ?? '',
+      defaultExtruderId: model.defaultExtruderId ?? '',
+      defaultNozzleId: model.defaultNozzleId ?? '',
     });
     setFormErrors({});
     setEditingModel(model);
@@ -158,6 +213,10 @@ export function ToolheadsCatalog() {
       manufacturerId: formState.manufacturerId,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
+      // Send null to clear, undefined to leave unchanged, or the ID to set
+      defaultHotendId: formState.defaultHotendId || null,
+      defaultExtruderId: formState.defaultExtruderId || null,
+      defaultNozzleId: formState.defaultNozzleId || null,
     };
 
     try {
@@ -259,16 +318,26 @@ export function ToolheadsCatalog() {
         onClose={handleCloseAddModal}
         title="Add Toolhead"
         size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={handleCloseAddModal}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleAdd}
+              disabled={createMutation.isPending}
+            >
+              {createMutation.isPending ? 'Creating...' : 'Create Toolhead'}
+            </Button>
+          </div>
+        }
       >
         <ToolheadForm
           formState={formState}
           formErrors={formErrors}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
-          onSubmit={handleAdd}
-          onCancel={handleCloseAddModal}
-          isSubmitting={createMutation.isPending}
-          submitLabel="Create Toolhead"
         />
       </Modal>
 
@@ -277,17 +346,31 @@ export function ToolheadsCatalog() {
         isOpen={!!editingModel}
         onClose={handleCloseEditModal}
         title={`Edit Toolhead: ${editingModel?.name ?? ''}`}
-        size="md"
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={handleCloseEditModal}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleUpdate}
+              disabled={updateMutation.isPending}
+            >
+              {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        }
       >
         <ToolheadForm
           formState={formState}
           formErrors={formErrors}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
-          onSubmit={handleUpdate}
-          onCancel={handleCloseEditModal}
-          isSubmitting={updateMutation.isPending}
-          submitLabel="Save Changes"
+          showComponentAssociations
+          hotendOptions={hotendOptions}
+          extruderOptions={extruderOptions}
+          nozzleOptions={nozzleOptions}
         />
       </Modal>
 
@@ -329,10 +412,14 @@ interface ToolheadFormProps {
   formErrors: Partial<Record<keyof ToolheadFormState, string>>;
   onFieldChange: (field: keyof ToolheadFormState, value: string) => void;
   onManufacturerChange: (manufacturerId: string | undefined, manufacturerName?: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-  isSubmitting: boolean;
-  submitLabel: string;
+  /** If true, show component association fields (for edit mode) */
+  showComponentAssociations?: boolean;
+  /** Grouped hotend options: [manufacturerName, items[]][] */
+  hotendOptions?: [string, { id: string; name: string; mfgName: string }[]][];
+  /** Grouped extruder options: [manufacturerName, items[]][] */
+  extruderOptions?: [string, { id: string; name: string; mfgName: string }[]][];
+  /** Grouped nozzle options: [manufacturerName, items[]][] */
+  nozzleOptions?: [string, { id: string; name: string; mfgName: string }[]][];
 }
 
 function ToolheadForm({
@@ -340,38 +427,41 @@ function ToolheadForm({
   formErrors,
   onFieldChange,
   onManufacturerChange,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-  submitLabel,
+  showComponentAssociations = false,
+  hotendOptions = [],
+  extruderOptions = [],
+  nozzleOptions = [],
 }: ToolheadFormProps) {
   return (
     <div className="space-y-4">
-      <FormField
-        label="Manufacturer"
-        required
-        error={formErrors.manufacturerId}
-      >
-        <ManufacturerSelector
-          value={formState.manufacturerId || undefined}
-          onChange={onManufacturerChange}
-          context={CatalogContext.Toolheads}
+      {/* Two-column grid for basic fields */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField
+          label="Manufacturer"
           required
-          placeholder="Select manufacturer..."
-        />
-      </FormField>
+          error={formErrors.manufacturerId}
+        >
+          <ManufacturerSelector
+            value={formState.manufacturerId || undefined}
+            onChange={onManufacturerChange}
+            context={CatalogContext.Toolheads}
+            required
+            placeholder="Select manufacturer..."
+          />
+        </FormField>
 
-      <FormField
-        label="Name"
-        required
-        error={formErrors.name}
-      >
-        <Input
-          value={formState.name}
-          onChange={(e) => onFieldChange('name', e.target.value)}
-          placeholder="e.g., Stealthburner"
-        />
-      </FormField>
+        <FormField
+          label="Name"
+          required
+          error={formErrors.name}
+        >
+          <Input
+            value={formState.name}
+            onChange={(e) => onFieldChange('name', e.target.value)}
+            placeholder="e.g., Stealthburner"
+          />
+        </FormField>
+      </div>
 
       <FormField
         label="Description"
@@ -397,18 +487,74 @@ function ToolheadForm({
         />
       </FormField>
 
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="secondary" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={onSubmit}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? 'Saving...' : submitLabel}
-        </Button>
-      </div>
+      {/* Component Associations - only shown in edit mode */}
+      {showComponentAssociations && (
+        <div className="border-t border-pf-border pt-4 mt-4">
+          <h4 className="text-sm font-medium text-pf-text-primary mb-2">
+            Default Components
+          </h4>
+          <p className="text-xs text-pf-text-secondary mb-4">
+            Optionally associate default components with this toolhead. These will be used as defaults when creating printers with this toolhead.
+          </p>
+
+          {/* Three-column grid for component selects */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField label="Default Hotend">
+              <Select
+                value={formState.defaultHotendId}
+                onChange={(e) => onFieldChange('defaultHotendId', e.target.value)}
+              >
+                <option value="">— None —</option>
+                {hotendOptions.map(([mfgName, items]) => (
+                  <optgroup key={mfgName} label={mfgName}>
+                    {items.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+            </FormField>
+
+            <FormField label="Default Extruder">
+              <Select
+                value={formState.defaultExtruderId}
+                onChange={(e) => onFieldChange('defaultExtruderId', e.target.value)}
+              >
+                <option value="">— None —</option>
+                {extruderOptions.map(([mfgName, items]) => (
+                  <optgroup key={mfgName} label={mfgName}>
+                    {items.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+            </FormField>
+
+            <FormField label="Default Nozzle">
+              <Select
+                value={formState.defaultNozzleId}
+                onChange={(e) => onFieldChange('defaultNozzleId', e.target.value)}
+              >
+                <option value="">— None —</option>
+                {nozzleOptions.map(([mfgName, items]) => (
+                  <optgroup key={mfgName} label={mfgName}>
+                    {items.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

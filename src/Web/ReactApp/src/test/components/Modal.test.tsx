@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 
 describe('Modal', () => {
   describe('Visibility', () => {
@@ -90,10 +90,10 @@ describe('Modal', () => {
   });
 
   describe('Backdrop Click', () => {
-    it('should close on backdrop click by default', () => {
+    it('should close on backdrop click when closeOnBackdrop is true', () => {
       const onClose = vi.fn();
       render(
-        <Modal isOpen={true} onClose={onClose}>
+        <Modal isOpen={true} onClose={onClose} closeOnBackdrop={true}>
           <p>Content</p>
         </Modal>
       );
@@ -104,6 +104,22 @@ describe('Modal', () => {
       fireEvent.click(backdrop);
 
       expect(onClose).toHaveBeenCalled();
+    });
+
+    it('should NOT close on backdrop click by default (closeOnBackdrop defaults to false)', () => {
+      const onClose = vi.fn();
+      render(
+        <Modal isOpen={true} onClose={onClose}>
+          <p>Content</p>
+        </Modal>
+      );
+
+      // The dialog element IS the backdrop in this component
+      const backdrop = screen.getByRole('dialog');
+      fireEvent.click(backdrop);
+
+      // Default is false, so onClose should not be called
+      expect(onClose).not.toHaveBeenCalled();
     });
 
     it('should not close when clicking on modal content', () => {
@@ -189,14 +205,26 @@ describe('Modal', () => {
       expect(contentDiv).toBeInTheDocument();
     });
 
-    it('should apply medium size class by default', () => {
+    it('should apply medium size class when size="md"', () => {
+      render(
+        <Modal isOpen={true} onClose={vi.fn()} size="md">
+          <p data-testid="content">Content</p>
+        </Modal>
+      );
+
+      const contentDiv = screen.getByTestId('content').closest('.max-w-md');
+      expect(contentDiv).toBeInTheDocument();
+    });
+
+    it('should apply default max-w-2xl when no size is specified', () => {
       render(
         <Modal isOpen={true} onClose={vi.fn()}>
           <p data-testid="content">Content</p>
         </Modal>
       );
 
-      const contentDiv = screen.getByTestId('content').closest('.max-w-md');
+      // Default without size prop is max-w-2xl
+      const contentDiv = screen.getByTestId('content').closest('.max-w-2xl');
       expect(contentDiv).toBeInTheDocument();
     });
 

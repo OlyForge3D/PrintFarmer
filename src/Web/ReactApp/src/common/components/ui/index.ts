@@ -12,7 +12,6 @@ export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
-export { Modal, type ModalProps, type ModalSize } from './Modal';
 export { MovementInput, type MovementInputProps } from './MovementInput';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Radio, type RadioProps } from './Radio';

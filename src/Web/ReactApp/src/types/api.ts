@@ -440,6 +440,19 @@ export const NozzleTypeLabels: Record<NozzleType, string> = {
 };
 
 /**
+ * String-keyed nozzle type labels for use with JSON string enum serialization.
+ * Backend sends NozzleType as string ("Brass", "HardenedSteel", etc.)
+ */
+export const NozzleTypeStringLabels: Record<string, string> = {
+  'Brass': 'Brass',
+  'HardenedSteel': 'Hardened Steel',
+  'StainlessSteel': 'Stainless Steel',
+  'TungstenCarbide': 'Tungsten Carbide',
+  'Abrasive': 'Abrasive',
+  'Unknown': 'Unknown'
+};
+
+/**
  * Toolhead type - stock vs custom/aftermarket
  */
 export enum ToolheadType {
@@ -450,6 +463,15 @@ export enum ToolheadType {
 export const ToolheadTypeLabels: Record<ToolheadType, string> = {
   [ToolheadType.Stock]: 'Stock',
   [ToolheadType.Custom]: 'Custom'
+};
+
+/**
+ * String-keyed toolhead type labels for use with JSON string enum serialization.
+ * Backend sends ToolheadType as string ("Stock", "Custom")
+ */
+export const ToolheadTypeStringLabels: Record<string, string> = {
+  'Stock': 'Stock',
+  'Custom': 'Custom'
 };
 
 // ============== Nozzle Interface Types ==============
@@ -630,6 +652,12 @@ export interface UpdateToolheadModelDefDto {
   manufacturerId?: string;
   description?: string;
   url?: string;
+  /** Default hotend ID for this toolhead */
+  defaultHotendId?: string | null;
+  /** Default extruder ID for this toolhead */
+  defaultExtruderId?: string | null;
+  /** Default nozzle ID for this toolhead */
+  defaultNozzleId?: string | null;
 }
 
 /**
@@ -697,10 +725,10 @@ export interface PrinterModelToolheadDto {
   name: string;
   index: number;
   nozzleDiameter?: number;
-  nozzleType?: NozzleType;
+  nozzleType?: NozzleType | string;
   maxHotendTemp?: number;
   maxFlowRate?: number;
-  toolheadType?: ToolheadType;
+  toolheadType?: ToolheadType | string;
   // Component model references (IDs and resolved names from database)
   hotendModelId?: string;
   hotendModelName?: string;
@@ -788,10 +816,10 @@ export interface ToolheadDto {
   name?: string;
   index: number;
   nozzleDiameter?: number;
-  nozzleType?: NozzleType;
+  nozzleType?: NozzleType | string;
   maxHotendTemp?: number;
   maxFlowRate?: number;
-  toolheadType?: ToolheadType;
+  toolheadType?: ToolheadType | string;
   // Component model references (IDs and resolved names from database)
   hotendModelId?: string;
   hotendModelName?: string;

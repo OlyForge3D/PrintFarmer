@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, NozzleType, NozzleTypeLabels, ToolheadType, ToolheadTypeLabels } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, NozzleTypeStringLabels, ToolheadType, ToolheadTypeLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -765,10 +765,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                               <Select
                                 id={`toolhead-nozzle-type-${index}`}
                                 value={toolhead.nozzleType?.toString() ?? ''}
-                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleType', e.target.value ? parseInt(e.target.value, 10) as NozzleType : undefined)}
+                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleType', e.target.value || undefined)}
                               >
                                 <option value="">Select nozzle type...</option>
-                                {Object.entries(NozzleTypeLabels).map(([value, label]) => (
+                                {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
                                   <option key={value} value={value}>{label}</option>
                                 ))}
                               </Select>

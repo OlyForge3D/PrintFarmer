@@ -5,7 +5,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge } from '@/common/components/ui/Badge';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 import { Label } from '@/common/components/ui/Label';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';

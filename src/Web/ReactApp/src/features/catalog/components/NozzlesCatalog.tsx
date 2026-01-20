@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { Modal, Button, Input, FormField, Checkbox, Textarea } from '@/common/components/ui';
+import { Button, Input, FormField, Checkbox, Textarea } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
 import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';

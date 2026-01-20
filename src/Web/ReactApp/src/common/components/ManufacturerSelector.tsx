@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { Select, Input, Button, Modal } from '@/common/components/ui';
+import { Select, Input, Button } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { CatalogContext, ManufacturerWithCount } from '@/types/api';
 import { useManufacturersByContext, useCreateManufacturer, useManufacturers } from '@/common/hooks/useApi';
 
