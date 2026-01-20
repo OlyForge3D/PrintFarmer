@@ -183,6 +183,8 @@ public static class ServiceCollectionExtensions
         // YAML seed data services
         _ = services.AddScoped<IYamlSeedDataReader, YamlSeedDataReader>();
         _ = services.AddScoped<IDataSeedService, DataSeedService>();
+        _ = services.AddScoped<IDataExportService, DataExportService>();
+        _ = services.AddScoped<IDataImportService, DataImportService>();
 
         // Network URL rewriting (stateless, safe as Singleton)
         _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
