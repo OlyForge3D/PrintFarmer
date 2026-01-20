@@ -4,7 +4,7 @@ This directory contains a jscodeshift codemod to help automate wrapping noisy co
 and replacing raw JSX JSON dumps with a safer `renderUnknown(...)` render helper.
 
 - Prerequisites
-- Node.js >=22.0 (required for this project)
+- Node.js >=24.0 (required for this project)
 - Install jscodeshift globally or use npx (recommended)
 
 Dry-run (recommended):

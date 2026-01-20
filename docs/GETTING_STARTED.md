@@ -4,7 +4,7 @@ A quick guide to set up PrintFarmer for local development.
 
 ## Prerequisites
 
-- **Node.js** 22.0 or later
+- **Node.js** 24.0 or later
 - **.NET SDK** 10.0.102 or later
 - **npm** 10.0 or later
 - **Git**

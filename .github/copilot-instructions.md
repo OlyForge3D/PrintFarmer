@@ -33,7 +33,7 @@
 
 ### Prerequisites
 - .NET SDK 10.0 or later (verified working with 10.0.102) - for API backend
-- Node.js 18+ and npm - for React frontend
+- Node.js 24+ and npm - for React frontend
 - Windows/macOS/Linux supported
 
 **CRITICAL**: If .NET 10 SDK is not installed, install it first:
@@ -48,7 +48,7 @@ export PATH="$HOME/.dotnet:$PATH"
 **Verify setup:**
 ```powershell
 dotnet --info
-node --version  # Should be 18+
+node --version  # Should be 24+
 npm --version
 ```
 
@@ -795,8 +795,8 @@ These instructions have been thoroughly tested and validated with .NET 10.0.102 
 # 1. Ensure .NET 10.0.102 is installed
 dotnet --info  # Should show 10.0.102
 
-# 2. Ensure Node.js 18+ is installed
-node --version  # Should be 18+
+# 2. Ensure Node.js 24+ is installed
+node --version  # Should be 24+
 npm --version
 
 # 3. Navigate to working directory

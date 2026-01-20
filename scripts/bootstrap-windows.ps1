@@ -1,6 +1,6 @@
 <#
 Bootstrap script for Windows (PowerShell)
-Installs prerequisites to build and run PrintFarmer: .NET SDK 10.x, Node.js (recommended v20.19.0), npm, git.
+Installs prerequisites to build and run PrintFarmer: .NET SDK 10.x, Node.js (recommended v24.13.0), npm, git.
 Uses winget when available, falls back to direct installer using the Microsoft dotnet-install.ps1 if needed.
 Run this script from an elevated PowerShell (Run as Administrator).
 #>
@@ -86,8 +86,8 @@ if (-not (Test-IsElevated)) {
 }
 
 $REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '10.0.102'
-# Default to Node 20 major for frontend toolchain
-$REQ_NODE_MAJOR = $env:NODE_VERSION -or '20'
+# Default to Node 24 major LTS for frontend toolchain
+$REQ_NODE_MAJOR = $env:NODE_VERSION -or '24'
 
 # Check for winget and Chocolatey availability
 Write-Info "Checking winget availability..."

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap script for Ubuntu (20.04/22.04/24.04)
-# Installs prerequisites to build and run PrintFarmer (dotnet 10.0.x, Node.js >=20.19, npm, git, build-essential)
+# Installs prerequisites to build and run PrintFarmer (dotnet 10.0.x, Node.js >=24.13, npm, git, build-essential)
 # Designed to be idempotent and safe to run multiple times.
 
 set -euo pipefail
@@ -32,8 +32,8 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.x}
-# Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
-NODE_VERSION=${NODE_VERSION:-20}
+# Default to Node 24.x LTS to match frontend toolchain requirements
+NODE_VERSION=${NODE_VERSION:-24}
 
 print() { echo -e "[bootstrap] $*"; }
 print() { echo -e "[bootstrap] $*"; }
