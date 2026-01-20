@@ -36,6 +36,7 @@ namespace Farm.Web.Api.Controllers
             _printJobQueueService = printJobQueueService;
         }
 
+#pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
         [HttpPost("files/local")]
         [AllowAnonymous]
         [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
@@ -113,6 +114,7 @@ namespace Farm.Web.Api.Controllers
                 return StatusCode(500, new { message = "Upload failed" });
             }
         }
+#pragma warning restore S6932
 
         /// <summary>
         /// OctoPrint API: Get version information

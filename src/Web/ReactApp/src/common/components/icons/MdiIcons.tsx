@@ -440,6 +440,32 @@ export function ArrowUpIcon({ className = 'w-4 h-4', ariaLabel = 'Move up' }: Om
 }
 
 /**
+ * Chevron up icon
+ * 
+ * Material Design icon component for upward movement/collapse actions.
+ * 
+ * @component
+ * @preview ![chevron-up](https://unpkg.com/@mdi/svg@7.4.47/svg/chevron-up.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/chevron-up.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ChevronUpIcon className="w-5 h-5" ariaLabel="Collapse" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ChevronUpIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron up' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronUp} />
+    </svg>
+  );
+}
+
+/**
  * Arrow down icon
  * 
  * Material Design icon component for downward movement/decrease actions.
@@ -2129,6 +2155,33 @@ export function ClockIcon({ className = 'w-4 h-4', ariaLabel = 'Time' }: Omit<Ic
  * @see — https://materialdesignicons.com - Material Design Icons Library
  */
 export function XCircleIcon({ className = 'w-4 h-4', ariaLabel = 'Cancel' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCloseCircle} />
+    </svg>
+  );
+}
+
+/**
+ * Clear filters icon
+ * 
+ * Material Design icon component for clearing filters/resetting.
+ * Uses the same close-circle icon as XCircleIcon.
+ * 
+ * @component
+ * @preview ![close-circle](https://unpkg.com/@mdi/svg@7.4.47/svg/close-circle.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/close-circle.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ClearFiltersIcon className="w-5 h-5" ariaLabel="Clear filters" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ClearFiltersIcon({ className = 'w-4 h-4', ariaLabel = 'Clear filters' }: Omit<IconProps, 'isOn'>) {
   return (
     <svg
       className={className}
