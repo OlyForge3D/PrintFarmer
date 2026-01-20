@@ -1,0 +1,1066 @@
+# PrintFarmer Printer Models Seed Data
+# Format: YAML (human-readable, supports comments)
+# Schema: printfarmer/printer-models/v1
+#
+# This file defines printer model specifications for seeding the database.
+# Users can customize this file without recompiling the application.
+#
+# Field Descriptions:
+# - name: Model name (must be unique per manufacturer)
+# - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
+# - buildVolume: Print volume dimensions in millimeters
+#   - x: Width (left to right)
+#   - y: Depth (front to back)
+#   - z: Height (bottom to top)
+# - defaultBackend: Default printer backend type (Moonraker, PrusaLink, SDCP, OctoPrint)
+# - motionType: Motion system type (Cartesian, CoreXY, Delta, Unknown)
+# - hasHeatedBed: true if printer has a heated bed
+# - hasEnclosure: true if printer has an enclosure
+# - multiMaterial: true if printer supports multi-material printing
+# - numberOfExtruders: Number of extruders/toolheads
+# - supportsAutoLeveling: true if printer has automatic bed leveling
+# - maxBedTemp: Maximum bed temperature in °C (optional)
+# - maxPrintSpeed: Maximum print speed in mm/s (optional)
+# - supportedMaterials: List of compatible filament types (references filament-types.yaml)
+# - aliases: List of slicer-specific model names for compatibility
+#   - slicerModelName: Model name as it appears in slicer
+#   - slicerType: Slicer software name (OrcaSlicer, PrusaSlicer, etc.)
+
+# Unknown/Generic Model
+- name: Unknown Model
+  manufacturer: Unknown
+  buildVolume:
+    x: 200
+    y: 200
+    z: 200
+  defaultBackend: null
+  motionType: Unknown
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: false
+  maxBedTemp: 120
+  maxPrintSpeed: 100
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+
+# Flashforge Models
+- name: Flashforge AD5X
+  manufacturer: Flashforge
+  buildVolume:
+    x: 220
+    y: 220
+    z: 220
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+
+# Sovol Models
+- name: Sovol SV08
+  manufacturer: Sovol
+  buildVolume:
+    x: 350
+    y: 350
+    z: 350
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+
+- name: Sovol SV08 MAX
+  manufacturer: Sovol
+  buildVolume:
+    x: 500
+    y: 500
+    z: 500
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+
+- name: Sovol Zero
+  manufacturer: Sovol
+  buildVolume:
+    x: 150
+    y: 150
+    z: 150
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 100
+  maxPrintSpeed: 150
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+
+# Eryone Models
+- name: Thinker X400
+  manufacturer: Eryone
+  buildVolume:
+    x: 400
+    y: 400
+    z: 400
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+
+# Elegoo Models
+- name: Elegoo Centauri
+  manufacturer: Elegoo
+  buildVolume:
+    x: 256
+    y: 256
+    z: 256
+  defaultBackend: SDCP
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+- name: Elegoo Centauri Carbon
+  manufacturer: Elegoo
+  buildVolume:
+    x: 256
+    y: 256
+    z: 256
+  defaultBackend: SDCP
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+# PrintersForAnts Models (Community Voron derivatives)
+- name: SaladFork 120
+  manufacturer: PrintersForAnts
+  buildVolume:
+    x: 120
+    y: 120
+    z: 120
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+- name: SaladFork 180
+  manufacturer: PrintersForAnts
+  buildVolume:
+    x: 180
+    y: 180
+    z: 165
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+- name: Micron 120
+  manufacturer: PrintersForAnts
+  buildVolume:
+    x: 120
+    y: 120
+    z: 120
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+- name: Micron 180
+  manufacturer: PrintersForAnts
+  buildVolume:
+    x: 180
+    y: 180
+    z: 165
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+
+# Voron Models
+- name: Voron 0.1
+  manufacturer: Voron
+  buildVolume:
+    x: 120
+    y: 120
+    z: 120
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron 0.1
+      slicerType: OrcaSlicer
+
+- name: Voron 2.4 250
+  manufacturer: Voron
+  buildVolume:
+    x: 250
+    y: 250
+    z: 250
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron 2.4 250
+      slicerType: OrcaSlicer
+
+- name: Voron 2.4 300
+  manufacturer: Voron
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron 2.4 300
+      slicerType: OrcaSlicer
+
+- name: Voron 2.4 350
+  manufacturer: Voron
+  buildVolume:
+    x: 350
+    y: 350
+    z: 350
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron 2.4 350
+      slicerType: OrcaSlicer
+
+- name: Voron Switchwire 250
+  manufacturer: Voron
+  buildVolume:
+    x: 250
+    y: 210
+    z: 240
+  defaultBackend: Moonraker
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron Switchwire 250
+      slicerType: OrcaSlicer
+
+- name: Voron Trident 250
+  manufacturer: Voron
+  buildVolume:
+    x: 250
+    y: 250
+    z: 250
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron Trident 250
+      slicerType: OrcaSlicer
+
+- name: Voron Trident 300
+  manufacturer: Voron
+  buildVolume:
+    x: 300
+    y: 300
+    z: 250
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron Trident 300
+      slicerType: OrcaSlicer
+
+- name: Voron Trident 350
+  manufacturer: Voron
+  buildVolume:
+    x: 350
+    y: 350
+    z: 250
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Voron Trident 350
+      slicerType: OrcaSlicer
+
+# Ratrig V-Core Models
+- name: RatRig V-Core 3 200
+  manufacturer: Ratrig
+  buildVolume:
+    x: 200
+    y: 200
+    z: 200
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 3 200
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 3 300
+  manufacturer: Ratrig
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 3 300
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 3 400
+  manufacturer: Ratrig
+  buildVolume:
+    x: 400
+    y: 400
+    z: 400
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 3 400
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 3 500
+  manufacturer: Ratrig
+  buildVolume:
+    x: 500
+    y: 500
+    z: 500
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 3 500
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 300
+  manufacturer: Ratrig
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 300
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 400
+  manufacturer: Ratrig
+  buildVolume:
+    x: 400
+    y: 400
+    z: 400
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 400
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 500
+  manufacturer: Ratrig
+  buildVolume:
+    x: 500
+    y: 500
+    z: 500
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 500
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 HYBRID 300
+  manufacturer: Ratrig
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 HYBRID 300
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 HYBRID 400
+  manufacturer: Ratrig
+  buildVolume:
+    x: 400
+    y: 400
+    z: 400
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 HYBRID 400
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 HYBRID 500
+  manufacturer: Ratrig
+  buildVolume:
+    x: 500
+    y: 500
+    z: 500
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 HYBRID 500
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 IDEX 300
+  manufacturer: Ratrig
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 IDEX 300
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 IDEX 400
+  manufacturer: Ratrig
+  buildVolume:
+    x: 400
+    y: 400
+    z: 400
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 IDEX 400
+      slicerType: OrcaSlicer
+
+- name: RatRig V-Core 4 IDEX 500
+  manufacturer: Ratrig
+  buildVolume:
+    x: 500
+    y: 500
+    z: 500
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: true
+  numberOfExtruders: 2
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 300
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: RatRig V-Core 4 IDEX 500
+      slicerType: OrcaSlicer
+
+# Phrozen Models
+- name: Phrozen Arco
+  manufacturer: Phrozen
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+
+# Qidi Models
+- name: QIDI X-Plus 4
+  manufacturer: Qidi
+  buildVolume:
+    x: 305
+    y: 305
+    z: 280
+  defaultBackend: Moonraker
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 110
+  maxPrintSpeed: 600
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+    - Nylon
+
+# Prusa Models
+- name: Prusa MINI
+  manufacturer: Prusa
+  buildVolume:
+    x: 180
+    y: 180
+    z: 180
+  defaultBackend: PrusaLink
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 100
+  maxPrintSpeed: 180
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Prusa MINI
+      slicerType: OrcaSlicer
+
+- name: Prusa MK3S
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 210
+    z: 210
+  defaultBackend: PrusaLink
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+  aliases:
+    - slicerModelName: Prusa MK3S
+      slicerType: OrcaSlicer
+
+- name: Prusa MK3.5
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 210
+    z: 210
+  defaultBackend: PrusaLink
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+  aliases:
+    - slicerModelName: Prusa MK3.5
+      slicerType: OrcaSlicer
+
+- name: Prusa MK4
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 210
+    z: 220
+  defaultBackend: PrusaLink
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+  aliases:
+    - slicerModelName: Prusa MK4
+      slicerType: OrcaSlicer
+
+- name: Prusa MK4S
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 210
+    z: 220
+  defaultBackend: PrusaLink
+  motionType: Cartesian
+  hasHeatedBed: true
+  hasEnclosure: false
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+  aliases:
+    - slicerModelName: Prusa MK4S
+      slicerType: OrcaSlicer
+
+- name: Prusa CORE One
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 220
+    z: 270
+  defaultBackend: PrusaLink
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+  aliases:
+    - slicerModelName: Prusa CORE One
+      slicerType: OrcaSlicer
+
+- name: Prusa CORE One L
+  manufacturer: Prusa
+  buildVolume:
+    x: 300
+    y: 300
+    z: 300
+  defaultBackend: PrusaLink
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: false
+  numberOfExtruders: 1
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 250
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+
+- name: Prusa XL
+  manufacturer: Prusa
+  buildVolume:
+    x: 250
+    y: 220
+    z: 270
+  defaultBackend: PrusaLink
+  motionType: CoreXY
+  hasHeatedBed: true
+  hasEnclosure: true
+  multiMaterial: true
+  numberOfExtruders: 5
+  supportsAutoLeveling: true
+  maxBedTemp: 120
+  maxPrintSpeed: 200
+  supportedMaterials:
+    - PLA
+    - PETG
+    - ABS
+    - ASA
+    - PC
+    - TPU
+  aliases:
+    - slicerModelName: Prusa XL
+      slicerType: OrcaSlicer
