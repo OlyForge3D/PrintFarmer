@@ -79,7 +79,7 @@ public class DataExportService : IDataExportService
                 IsAvailable = p.IsAvailable
             }).ToList();
 
-            _logger.LogInformation("[DataExport] Printers export complete: {Count} printers", (object)exportData.Count);
+            _logger.LogInformation($"[DataExport] Printers export complete: {exportData.Count} printers");
             return exportData;
         }
         catch (Exception ex)
@@ -136,8 +136,8 @@ public class DataExportService : IDataExportService
         {
             Id = f.Id,
             Name = f.Name,
-            DefaultHotendTemp = f.DefaultHotendTemp,
-            DefaultBedTemp = f.DefaultBedTemp,
+            DefaultHotendTemp = f.DefaultHotendTemp.HasValue ? (int)Math.Round(f.DefaultHotendTemp.Value) : 0,
+            DefaultBedTemp = f.DefaultBedTemp.HasValue ? (int)Math.Round(f.DefaultBedTemp.Value) : 0,
             IsAbrasive = f.IsAbrasive,
             NeedsEnclosure = f.NeedsEnclosure
         }).ToList();

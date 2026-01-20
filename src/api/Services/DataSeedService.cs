@@ -46,7 +46,7 @@ public class DataSeedService : IDataSeedService
         {
             List<ManufacturerSeedDto> manufacturersData = await _yamlReader.ReadManufacturersAsync();
 
-            _logger.LogInformation("[SeedData] Seeding {Count} manufacturers from YAML", manufacturersData.Count);
+            _logger.LogInformation($"[SeedData] Seeding {manufacturersData.Count} manufacturers from YAML");
 
             foreach (ManufacturerSeedDto dto in manufacturersData)
             {
@@ -81,7 +81,7 @@ public class DataSeedService : IDataSeedService
         {
             List<FilamentTypeSeedDto> filamentsData = await _yamlReader.ReadFilamentTypesAsync();
 
-            _logger.LogInformation("[SeedData] Seeding {Count} filament types from YAML", filamentsData.Count);
+            _logger.LogInformation($"[SeedData] Seeding {filamentsData.Count} filament types from YAML");
 
             foreach (FilamentTypeSeedDto dto in filamentsData)
             {
@@ -130,7 +130,7 @@ public class DataSeedService : IDataSeedService
                 return;
             }
 
-            _logger.LogInformation("[SeedData] Seeding {Count} printer models from YAML", modelsData.Count);
+            _logger.LogInformation($"[SeedData] Seeding {modelsData.Count} printer models from YAML");
 
             // Build manufacturer lookup
             Dictionary<string, Guid> manufacturers = await _context.Manufacturers
@@ -245,7 +245,7 @@ public class DataSeedService : IDataSeedService
             return;
         }
 
-        _logger.LogInformation("[SeedData] Seeding {Count} hotend models", hotends.Count);
+        _logger.LogInformation($"[SeedData] Seeding {hotends.Count} hotend models");
 
         foreach (HotendModelSeedDto dto in hotends)
         {
@@ -287,7 +287,7 @@ public class DataSeedService : IDataSeedService
             return;
         }
 
-        _logger.LogInformation("[SeedData] Seeding {Count} extruder models", extruders.Count);
+        _logger.LogInformation($"[SeedData] Seeding {extruders.Count} extruder models");
 
         foreach (ExtruderModelSeedDto dto in extruders)
         {
@@ -329,7 +329,7 @@ public class DataSeedService : IDataSeedService
             return;
         }
 
-        _logger.LogInformation("[SeedData] Seeding {Count} toolhead models", toolheads.Count);
+        _logger.LogInformation($"[SeedData] Seeding {toolheads.Count} toolhead models");
 
         foreach (ToolheadModelSeedDto dto in toolheads)
         {
@@ -369,7 +369,7 @@ public class DataSeedService : IDataSeedService
             return;
         }
 
-        _logger.LogInformation("[SeedData] Seeding {Count} nozzle models", nozzles.Count);
+        _logger.LogInformation($"[SeedData] Seeding {nozzles.Count} nozzle models");
 
         foreach (NozzleModelSeedDto dto in nozzles)
         {
