@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Button, Input, FormField, Checkbox } from '@/common/components/ui';
+import { Button, Input, FormField, Checkbox, Card, Badge } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { 
@@ -12,7 +12,7 @@ import {
 import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequest, TempTargets } from '@/types/api';
 
 /**
- * Card display for filament type
+ * Card display for filament type - uses consistent Card styling with other catalog tabs
  */
 interface FilamentTypeCardProps {
   filament: FilamentTypeDto;
@@ -23,62 +23,98 @@ interface FilamentTypeCardProps {
 
 function FilamentTypeCard({ filament, onEdit, onDelete, isDeleting }: FilamentTypeCardProps) {
   return (
-    <div className="bg-pf-card border border-pf-border rounded-lg p-4 hover:border-pf-primary/50 transition-colors">
-      <div className="flex justify-between items-start mb-3">
-        <h3 className="font-semibold text-pf-text-primary text-lg">{filament.name}</h3>
-        <div className="flex gap-1">
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => onEdit(filament)}
-            title="Edit filament type"
-          >
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => onDelete(filament)}
-            disabled={isDeleting}
-            className="text-red-400 hover:text-red-300"
-            title="Delete filament type"
-          >
-            {isDeleting ? '...' : 'Delete'}
-          </Button>
-        </div>
-      </div>
-      
-      <div className="space-y-2 text-sm">
-        {/* Temperature info */}
-        <div className="flex gap-4">
-          <div className="text-pf-text-secondary">
-            <span className="text-pf-text-muted">Hotend:</span>{' '}
-            <span className="text-orange-400">{filament.defaultTemperatures?.hotend ?? '—'}°C</span>
+    <Card className="h-full flex flex-col">
+      <div className="p-4 flex-1">
+        {/* Header: Name and Actions */}
+        <div className="flex justify-between items-start">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+              {filament.name}
+            </h3>
           </div>
-          <div className="text-pf-text-secondary">
-            <span className="text-pf-text-muted">Bed:</span>{' '}
-            <span className="text-blue-400">{filament.defaultTemperatures?.bed ?? '—'}°C</span>
+
+          {/* Action Buttons */}
+          <div className="flex gap-1 ml-2 flex-shrink-0">
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => onEdit(filament)}
+              disabled={isDeleting}
+              aria-label={`Edit ${filament.name}`}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => onDelete(filament)}
+              disabled={isDeleting}
+              aria-label={`Delete ${filament.name}`}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/20"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </Button>
           </div>
         </div>
-        
-        {/* Properties */}
-        <div className="flex flex-wrap gap-2">
+
+        {/* Temperature badges */}
+        <div className="flex flex-wrap gap-2 mt-2">
+          {filament.defaultTemperatures?.hotend && (
+            <Badge variant="default" size="sm">
+              Hotend {filament.defaultTemperatures.hotend}°C
+            </Badge>
+          )}
+          {filament.defaultTemperatures?.bed && (
+            <Badge variant="default" size="sm">
+              Bed {filament.defaultTemperatures.bed}°C
+            </Badge>
+          )}
+        </div>
+
+        {/* Property badges */}
+        <div className="flex flex-wrap gap-2 mt-2">
           {filament.isAbrasive && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            <Badge variant="warning" size="sm">
               Abrasive
-            </span>
+            </Badge>
           )}
           {filament.needsEnclosure && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30">
+            <Badge variant="info" size="sm">
               Needs Enclosure
-            </span>
+            </Badge>
           )}
           {!filament.isAbrasive && !filament.needsEnclosure && (
-            <span className="text-pf-text-muted text-xs">Standard</span>
+            <span className="text-sm text-gray-500 dark:text-gray-400">Standard</span>
           )}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
