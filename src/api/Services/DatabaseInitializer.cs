@@ -1980,18 +1980,19 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             return;
         }
 
-        // Build name-to-ID lookup dictionaries for all component types
-        Dictionary<string, Guid> hotendLookup = await _context.HotendModelDefinitions
+        // Build (ManufacturerId, Name) to ID lookup dictionaries for all component types
+        // Using composite key allows same name from different manufacturers (e.g., "Brass Nozzle" from Generic vs Phaetus)
+        Dictionary<(Guid MfgId, string Name), Guid> hotendLookup = await _context.HotendModelDefinitions
             .AsNoTracking()
-            .ToDictionaryAsync(h => h.Name, h => h.Id);
+            .ToDictionaryAsync(h => (h.ManufacturerId, h.Name), h => h.Id);
 
-        Dictionary<string, Guid> extruderLookup = await _context.ExtruderModelDefinitions
+        Dictionary<(Guid MfgId, string Name), Guid> extruderLookup = await _context.ExtruderModelDefinitions
             .AsNoTracking()
-            .ToDictionaryAsync(e => e.Name, e => e.Id);
+            .ToDictionaryAsync(e => (e.ManufacturerId, e.Name), e => e.Id);
 
-        Dictionary<string, Guid> nozzleLookup = await _context.NozzleModelDefinitions
+        Dictionary<(Guid MfgId, string Name), Guid> nozzleLookup = await _context.NozzleModelDefinitions
             .AsNoTracking()
-            .ToDictionaryAsync(n => n.Name, n => n.Id);
+            .ToDictionaryAsync(n => (n.ManufacturerId, n.Name), n => n.Id);
 
         int updated = 0;
         foreach ((string toolheadName, string mfgName, string? hotendName, string? extruderName, string? nozzleName) in mappings)
@@ -2018,10 +2019,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 continue;
             }
 
-            // Resolve component names to IDs
-            Guid? hotendId = hotendName != null && hotendLookup.TryGetValue(hotendName, out Guid hid) ? hid : null;
-            Guid? extruderId = extruderName != null && extruderLookup.TryGetValue(extruderName, out Guid eid) ? eid : null;
-            Guid? nozzleId = nozzleName != null && nozzleLookup.TryGetValue(nozzleName, out Guid nid) ? nid : null;
+            // Resolve component names to IDs using composite key (ManufacturerId, Name)
+            Guid? hotendId = hotendName != null && hotendLookup.TryGetValue((mfgId, hotendName), out Guid hid) ? hid : null;
+            Guid? extruderId = extruderName != null && extruderLookup.TryGetValue((mfgId, extruderName), out Guid eid) ? eid : null;
+            Guid? nozzleId = nozzleName != null && nozzleLookup.TryGetValue((mfgId, nozzleName), out Guid nid) ? nid : null;
 
             // Log warnings for unresolved references
             if (hotendName != null && hotendId == null)
