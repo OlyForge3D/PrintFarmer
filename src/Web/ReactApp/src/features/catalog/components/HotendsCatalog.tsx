@@ -1,11 +1,23 @@
-import React, { useState, useCallback } from 'react';
-import { Button, Input, FormField, Checkbox, Textarea } from '@/common/components/ui';
+import React, { useState, useCallback, useMemo } from 'react';
+import { 
+  Button, 
+  Input, 
+  FormField, 
+  Checkbox, 
+  Textarea,
+  Badge,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type HotendModelCardData } from '@/common/components/ComponentModelCard';
 import { useHotendModels, useCreateHotendModel, useUpdateHotendModel, useDeleteHotendModel } from '@/common/hooks/useApi';
 import { CatalogContext, type HotendModelDefinition, type CreateHotendModelDto, type UpdateHotendModelDto } from '@/types/api';
-import { PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
  * Converts a HotendModelDefinition to the card display format
@@ -70,6 +82,43 @@ export function HotendsCatalog() {
   const [deletingModel, setDeletingModel] = useState<HotendModelDefinition | null>(null);
   const [formState, setFormState] = useState<HotendFormState>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof HotendFormState, string>>>({});
+
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('hotends');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<HotendModelCardData>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'manufacturer',
+      header: 'Manufacturer',
+      sortable: true,
+      sort: (a, b) => (a.manufacturerName ?? '').localeCompare(b.manufacturerName ?? ''),
+      render: (item) => item.manufacturerName ?? '—',
+    },
+    {
+      key: 'maxTemp',
+      header: 'Max Temp',
+      sortable: true,
+      sort: (a, b) => (a.maxTemp ?? 0) - (b.maxTemp ?? 0),
+      render: (item) => item.maxTemp != null ? `${item.maxTemp}°C` : '—',
+    },
+    {
+      key: 'properties',
+      header: 'Properties',
+      sortable: true,
+      sort: (a, b) => (a.isHighFlow ? 1 : 0) - (b.isHighFlow ? 1 : 0),
+      render: (item) => item.isHighFlow 
+        ? <Badge variant="success" size="sm">High Flow</Badge>
+        : <span className="text-sm text-pf-text-muted">Standard</span>,
+    },
+  ], []);
 
   // Open add modal
   const handleAddClick = useCallback(() => {
@@ -239,23 +288,26 @@ export function HotendsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Hotend Models ({cards.length})
         </h2>
-        <Button 
-          onClick={handleAddClick}
-          title="Add new hotend model"
-          size="sm"
-          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
-        >
-          Add
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleAddClick}
+            title="Add new hotend model"
+            size="sm"
+            iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+          >
+            Add
+          </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
+        </div>
       </div>
 
-      {/* Grid of hotend cards */}
+      {/* Grid or Table view of hotend cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No hotend models defined yet.</p>
           <p className="mt-2">Click "Add Hotend" to create your first one.</p>
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cards.map(card => (
             <ComponentModelCard
@@ -267,6 +319,35 @@ export function HotendsCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={cards}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingModel?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Add Hotend Modal */}

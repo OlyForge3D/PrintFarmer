@@ -1,5 +1,15 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Button, Input, FormField, Textarea, Select } from '@/common/components/ui';
+import { 
+  Button, 
+  Input, 
+  FormField, 
+  Textarea, 
+  Select,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ToolheadModelCardData } from '@/common/components/ComponentModelCard';
@@ -13,7 +23,8 @@ import {
   useNozzleModels,
 } from '@/common/hooks/useApi';
 import { CatalogContext, type ToolheadModelDefinition, type CreateToolheadModelDto, type UpdateToolheadModelDefDto } from '@/types/api';
-import { PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
  * Converts a ToolheadModelDefinition to the card display format
@@ -115,6 +126,35 @@ export function ToolheadsCatalog() {
   const [deletingModel, setDeletingModel] = useState<ToolheadModelDefinition | null>(null);
   const [formState, setFormState] = useState<ToolheadFormState>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ToolheadFormState, string>>>({});
+
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('toolheads');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<ToolheadModelCardData>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'manufacturer',
+      header: 'Manufacturer',
+      sortable: true,
+      sort: (a, b) => (a.manufacturerName ?? '').localeCompare(b.manufacturerName ?? ''),
+      render: (item) => item.manufacturerName ?? '—',
+    },
+    {
+      key: 'description',
+      header: 'Description',
+      sortable: true,
+      sort: (a, b) => (a.description ?? '').localeCompare(b.description ?? ''),
+      cellClassName: 'max-w-md truncate',
+      render: (item) => item.description ?? '—',
+    },
+  ], []);
 
   // Open add modal
   const handleAddClick = useCallback(() => {
@@ -273,7 +313,8 @@ export function ToolheadsCatalog() {
     );
   }
 
-  const cards = (toolheadModels ?? []).map(toCardData);
+  const unsortedCards = (toolheadModels ?? []).map(toCardData);
+  const cards = unsortedCards;
 
   return (
     <div className="space-y-4">
@@ -282,23 +323,26 @@ export function ToolheadsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Toolhead Models ({cards.length})
         </h2>
-        <Button 
-          onClick={handleAddClick} 
-          size="sm"
-          title="Add new toolhead model"
-          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
-        >
-          Add
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleAddClick} 
+            size="sm"
+            title="Add new toolhead model"
+            iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+          >
+            Add
+          </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
+        </div>
       </div>
 
-      {/* Grid of toolhead cards */}
+      {/* Grid or Table view of toolhead cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No toolhead models defined yet.</p>
           <p className="mt-2">Click "Add Toolhead" to create your first one.</p>
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cards.map(card => (
             <ComponentModelCard
@@ -310,6 +354,35 @@ export function ToolheadsCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={cards}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingModel?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Add Toolhead Modal */}

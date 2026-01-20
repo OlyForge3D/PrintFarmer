@@ -1,11 +1,23 @@
-import React, { useState, useCallback } from 'react';
-import { Button, Input, FormField, Select, Textarea } from '@/common/components/ui';
+import React, { useState, useCallback, useMemo } from 'react';
+import { 
+  Button, 
+  Input, 
+  FormField, 
+  Select, 
+  Textarea,
+  Badge,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
 import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';
 import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels } from '@/types/api';
-import { PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
  * Converts a NozzleModelDefinition to the card display format
@@ -70,6 +82,43 @@ export function NozzlesCatalog() {
   const [deletingModel, setDeletingModel] = useState<NozzleModelDefinition | null>(null);
   const [formState, setFormState] = useState<NozzleFormState>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof NozzleFormState, string>>>({});
+
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('nozzles');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<NozzleModelCardData>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'manufacturer',
+      header: 'Manufacturer',
+      sortable: true,
+      sort: (a, b) => (a.manufacturerName ?? '').localeCompare(b.manufacturerName ?? ''),
+      render: (item) => item.manufacturerName ?? '—',
+    },
+    {
+      key: 'maxTemp',
+      header: 'Max Temp',
+      sortable: true,
+      sort: (a, b) => (a.maxTemp ?? 0) - (b.maxTemp ?? 0),
+      render: (item) => item.maxTemp != null ? `${item.maxTemp}°C` : '—',
+    },
+    {
+      key: 'material',
+      header: 'Material',
+      sortable: true,
+      sort: (a, b) => (a.isHardened ? 1 : 0) - (b.isHardened ? 1 : 0),
+      render: (item) => item.isHardened 
+        ? <Badge variant="warning" size="sm">Hardened</Badge>
+        : <span className="text-sm text-pf-text-muted">Standard</span>,
+    },
+  ], []);
 
   // Open add modal
   const handleAddClick = useCallback(() => {
@@ -239,23 +288,26 @@ export function NozzlesCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Nozzle Models ({cards.length})
         </h2>
-        <Button 
-          onClick={handleAddClick} 
-          size="sm"
-          title="Add new nozzle model"
-          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
-        >
-          Add
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleAddClick} 
+            size="sm"
+            title="Add new nozzle model"
+            iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+          >
+            Add
+          </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
+        </div>
       </div>
 
-      {/* Grid of nozzle cards */}
+      {/* Grid or Table view of nozzle cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No nozzle models defined yet.</p>
           <p className="mt-2">Click "Add Nozzle" to create your first one.</p>
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cards.map(card => (
             <ComponentModelCard
@@ -267,6 +319,35 @@ export function NozzlesCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={cards}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingModel?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Add Nozzle Modal */}

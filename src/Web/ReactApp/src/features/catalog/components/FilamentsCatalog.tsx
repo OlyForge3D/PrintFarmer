@@ -1,7 +1,19 @@
-import { useState, useCallback } from 'react';
-import { Button, Input, FormField, Checkbox, Card, Badge } from '@/common/components/ui';
+import { useState, useCallback, useMemo } from 'react';
+import { 
+  Button, 
+  Input, 
+  FormField, 
+  Checkbox, 
+  Card, 
+  Badge,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-import { PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { 
   useFilamentTypes, 
   useCreateFilamentType, 
@@ -164,6 +176,57 @@ export function FilamentsCatalog() {
   const [formState, setFormState] = useState<FilamentFormState>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof FilamentFormState, string>>>({});
 
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('filaments');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<FilamentTypeDto>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'hotendTemp',
+      header: 'Hotend Temp',
+      sortable: true,
+      sort: (a, b) => (a.defaultTemperatures?.hotend ?? 0) - (b.defaultTemperatures?.hotend ?? 0),
+      render: (item) => item.defaultTemperatures?.hotend != null 
+        ? `${item.defaultTemperatures.hotend}°C` 
+        : '—',
+    },
+    {
+      key: 'bedTemp',
+      header: 'Bed Temp',
+      sortable: true,
+      sort: (a, b) => (a.defaultTemperatures?.bed ?? 0) - (b.defaultTemperatures?.bed ?? 0),
+      render: (item) => item.defaultTemperatures?.bed != null 
+        ? `${item.defaultTemperatures.bed}°C` 
+        : '—',
+    },
+    {
+      key: 'properties',
+      header: 'Properties',
+      sortable: true,
+      sort: (a, b) => {
+        const aProps = (a.isAbrasive ? 1 : 0) + (a.needsEnclosure ? 1 : 0);
+        const bProps = (b.isAbrasive ? 1 : 0) + (b.needsEnclosure ? 1 : 0);
+        return aProps - bProps;
+      },
+      render: (item) => (
+        <div className="flex flex-wrap gap-1">
+          {item.isAbrasive && <Badge variant="warning" size="sm">Abrasive</Badge>}
+          {item.needsEnclosure && <Badge variant="info" size="sm">Needs Enclosure</Badge>}
+          {!item.isAbrasive && !item.needsEnclosure && (
+            <span className="text-sm text-pf-text-muted">Standard</span>
+          )}
+        </div>
+      ),
+    },
+  ], []);
+
   // Open add modal
   const handleAddClick = useCallback(() => {
     setFormState(emptyForm);
@@ -316,16 +379,16 @@ export function FilamentsCatalog() {
     );
   }
 
-  const sortedFilaments = [...(filamentTypes ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const filaments = filamentTypes ?? [];
 
   return (
     <div className="space-y-4">
       {/* Header with Add and Import buttons */}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-pf-text-primary">
-          Filament Types ({sortedFilaments.length})
+          Filament Types ({filaments.length})
         </h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button 
             onClick={handleImportFromSpoolman}
             title="Import filament types from Spoolman"
@@ -344,18 +407,19 @@ export function FilamentsCatalog() {
           >
             Add
           </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
         </div>
       </div>
 
-      {/* Grid of filament cards */}
-      {sortedFilaments.length === 0 ? (
+      {/* Grid or Table view of filament cards */}
+      {filaments.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No filament types defined yet.</p>
           <p className="mt-2">Click "Add" to create your first one, or "Import from Spoolman" to import existing types.</p>
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {sortedFilaments.map(filament => (
+          {filaments.map(filament => (
             <FilamentTypeCard
               key={filament.id}
               filament={filament}
@@ -365,6 +429,35 @@ export function FilamentsCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={filaments}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingFilament?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Add Filament Modal */}
