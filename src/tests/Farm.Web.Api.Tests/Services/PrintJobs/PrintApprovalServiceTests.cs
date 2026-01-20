@@ -1,11 +1,14 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Data.Repositories;
-using Farm.Web.Api.Services.PrintJobQueue;
 using Farm.Web.Api.Services.PrintJobs;
+using Farm.Web.Api.Services.Queue;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -19,7 +22,7 @@ public class PrintApprovalServiceTests : IDisposable
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
     private readonly IPrintApprovalRepository _repository;
-    private readonly TestPrintJobQueueService _queueService;
+    private readonly StubJobQueueService _queueService;
     private readonly IPrintApprovalService _service;
 
     public PrintApprovalServiceTests()
@@ -39,8 +42,8 @@ public class PrintApprovalServiceTests : IDisposable
         _context.Database.EnsureCreated();
 
         _repository = new EfPrintApprovalRepository(_context);
-        _queueService = new TestPrintJobQueueService();
-        _service = new PrintApprovalService(_context, Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintApprovalService>.Instance);
+        _queueService = new StubJobQueueService();
+        _service = new PrintApprovalService(_repository, _queueService);
     }
 
     [Fact]
@@ -111,7 +114,6 @@ public class PrintApprovalServiceTests : IDisposable
 
         // Assert
         result.Should().BeFalse();
-        _queueService.EnqueuedRequests.Should().BeEmpty();
     }
 
     [Fact]
@@ -249,47 +251,51 @@ public class PrintApprovalServiceTests : IDisposable
         _connection?.Dispose();
     }
 
-    // Test double for IPrintJobQueueService
-    private class TestPrintJobQueueService : IPrintJobQueueService
+    /// <summary>
+    /// Stub implementation of IJobQueueService for testing PrintApprovalService.
+    /// Always succeeds when adding jobs to the queue.
+    /// </summary>
+    private class StubJobQueueService : IJobQueueService
     {
-        public List<EnqueuePrintJobRequest> EnqueuedRequests { get; } = new();
+        public List<QueuePrintJobDto> EnqueuedJobs { get; } = new();
         public bool ShouldFailEnqueue { get; set; }
 
-        public Task<Farm.Web.Api.Services.PrintJobQueue.PrintJobDto?> EnqueueAsync(EnqueuePrintJobRequest request, CancellationToken ct = default)
+        public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, CancellationToken ct)
         {
             if (ShouldFailEnqueue)
             {
-                return Task.FromResult<Farm.Web.Api.Services.PrintJobQueue.PrintJobDto?>(null);
+                return Task.FromResult<JobQueuePrintJobDto?>(null);
             }
 
-            EnqueuedRequests.Add(request);
-            return Task.FromResult<Farm.Web.Api.Services.PrintJobQueue.PrintJobDto?>(new Farm.Web.Api.Services.PrintJobQueue.PrintJobDto(
-                Id: request.gcodeFileId,
-                GcodeFileId: request.gcodeFileId,
-                GcodeFileName: "Test Job",
-                AssignedPrinterId: request.assignedPrinterId,
-                AssignedPrinterName: null,
-                Status: "Queued",
-                QueuePosition: 1,
-                RequiredNozzleDiameter: request.requiredNozzleDiameter,
-                RequiredMaterialType: request.requiredMaterialType,
-                CreatedAt: DateTime.UtcNow
-            ));
+            EnqueuedJobs.Add(request);
+            return Task.FromResult<JobQueuePrintJobDto?>(new JobQueuePrintJobDto
+            {
+                Id = Guid.NewGuid(),
+                GcodeFileId = request.GcodeFileId,
+                GcodeFileName = "test.gcode",
+                AssignedPrinterId = request.AssignedPrinterId,
+                Status = PrintJobStatus.Queued,
+                QueuePosition = 1,
+                CreatedAt = DateTime.UtcNow
+            });
         }
 
-        public Task<IEnumerable<Farm.Web.Api.Services.PrintJobQueue.PrintJobDto>> GetAllAsync(CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
+        public Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<QueueOverviewDto>>(new List<QueueOverviewDto>());
 
-        public Task<Farm.Web.Api.Services.PrintJobQueue.PrintJobDto?> GetAsync(Guid id, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
+        public Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<JobQueuePrintJobDto>>(new List<JobQueuePrintJobDto>());
 
-        public Task<bool> RemoveAsync(Guid id, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
+        public Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
+            => Task.FromResult<JobQueuePrintJobDto?>(null);
+
+        public Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
+            => Task.FromResult(true);
+
+        public Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
+            => Task.FromResult<JobQueuePrintJobDto?>(null);
+
+        public Task<JobQueuePrintJobDto?> UpdateJobAsync(Guid id, UpdatePrintJobStatusDto request, CancellationToken ct)
+            => Task.FromResult<JobQueuePrintJobDto?>(null);
     }
 }

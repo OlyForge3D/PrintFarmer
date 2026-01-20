@@ -1,21 +1,21 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Microsoft.Extensions.Logging;
+using Farm.Web.Api.Data.Repositories;
+using Farm.Web.Api.Services.Queue;
 
 namespace Farm.Web.Api.Services.PrintJobs
 {
-    public class PrintApprovalService(
-        AppDbContext dbContext,
-        ILogger<PrintApprovalService> logger) : IPrintApprovalService
+    public class PrintApprovalService(IPrintApprovalRepository repo, IJobQueueService queueService) : IPrintApprovalService
     {
-        private readonly AppDbContext _dbContext = dbContext;
-        private readonly ILogger<PrintApprovalService> _logger = logger;
+        private readonly IPrintApprovalRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        private readonly IJobQueueService _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
 
         public async Task<Guid> CreatePendingApprovalAsync(Guid printJobId, Guid? printerId, string? requestedBy)
         {
-            var approval = new PrintApproval
+            var pa = new PrintApproval
             {
                 Id = Guid.NewGuid(),
                 PrintJobId = printJobId,
@@ -24,38 +24,34 @@ namespace Farm.Web.Api.Services.PrintJobs
                 CreatedAt = DateTimeOffset.UtcNow
             };
 
-            _dbContext.Set<PrintApproval>().Add(approval);
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Created pending approval {ApprovalId} for print job {PrintJobId}",
-                approval.Id,
-                printJobId);
-
-            return approval.Id;
+            await _repo.AddAsync(pa);
+            return pa.Id;
         }
 
         public async Task<bool> ApproveAsync(Guid approvalId, string? approvedBy)
         {
-            PrintApproval? approval = await _dbContext.Set<PrintApproval>().FindAsync(approvalId);
-
-            if (approval == null)
+            PrintApproval? approval = await _repo.GetAsync(approvalId);
+            if (approval is null)
             {
-                _logger.LogWarning("Approval {ApprovalId} not found", approvalId);
                 return false;
             }
 
-            // Remove the approval (approved jobs don't need the approval record anymore)
-            _dbContext.Set<PrintApproval>().Remove(approval);
-            await _dbContext.SaveChangesAsync();
+            var req = new QueuePrintJobDto
+            {
+                GcodeFileId = approval.PrintJobId,
+                AssignedPrinterId = approval.PrinterId,
+                Priority = PrintJobPriority.Normal,
+                RequiredNozzleDiameter = null,
+                RequiredMaterialType = null
+            };
+            JobQueuePrintJobDto? enqueued = await _queueService.AddJobToQueueAsync(req, CancellationToken.None);
+            if (enqueued is not null)
+            {
+                await _repo.RemoveAsync(approval);
+                return true;
+            }
 
-            _logger.LogInformation(
-                "Approved print job {PrintJobId} (approval {ApprovalId}) by {ApprovedBy}",
-                approval.PrintJobId,
-                approvalId,
-                approvedBy ?? "system");
-
-            return true;
+            return false;
         }
     }
 }

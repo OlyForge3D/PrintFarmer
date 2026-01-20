@@ -249,8 +249,8 @@ public static class ServiceCollectionExtensions
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
-        // New PrintJobQueue adapter service (DB-backed via existing JobQueueService)
-        _ = services.AddScoped<Farm.Web.Api.Services.PrintJobQueue.IPrintJobQueueService, Farm.Web.Api.Services.PrintJobQueue.PrintJobQueueAdapter>();
+        // Print approval repository
+        _ = services.AddScoped<Farm.Web.Api.Data.Repositories.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
