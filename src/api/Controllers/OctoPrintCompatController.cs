@@ -1,8 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.OctoPrint;
+using Farm.Web.Api.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,20 +21,20 @@ namespace Farm.Web.Api.Controllers
         private readonly IOctoPrintAuthService _authService;
         private readonly OctoPrintSettings _settings;
         private readonly IGcodeFilesService _gcodeFilesService;
-        private readonly IPrintJobQueueService _printJobQueueService;
+        private readonly IJobQueueService _jobQueueService;
 
         public OctoPrintCompatController(
             ILogger<OctoPrintCompatController> logger,
             IOctoPrintAuthService authService,
             IOptions<OctoPrintSettings> settings,
             IGcodeFilesService gcodeFilesService,
-            IPrintJobQueueService printJobQueueService)
+            IJobQueueService jobQueueService)
         {
             _logger = logger;
             _authService = authService;
             _settings = settings.Value;
             _gcodeFilesService = gcodeFilesService;
-            _printJobQueueService = printJobQueueService;
+            _jobQueueService = jobQueueService;
         }
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
@@ -91,8 +93,16 @@ namespace Farm.Web.Api.Controllers
                         return StatusCode(500, new { message = "Uploaded file not indexed yet" });
                     }
 
-                    var enqueueReq = new EnqueuePrintJobRequest(gcodeFileGuid, printerId, null, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
-                    Services.PrintJobQueue.PrintJobDto? job = await _printJobQueueService.EnqueueAsync(enqueueReq, HttpContext.RequestAborted);
+                    var enqueueReq = new QueuePrintJobDto
+                    {
+                        GcodeFileId = gcodeFileGuid,
+                        AssignedPrinterId = printerId,
+                        Priority = PrintJobPriority.Normal,
+                        RequiredNozzleDiameter = (decimal?)uploadDto.ExtractedNozzleDiameter,
+                        RequiredMaterialType = uploadDto.RequiredMaterial
+                    };
+
+                    JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, HttpContext.RequestAborted);
                     if (job is null)
                     {
                         return StatusCode(500, new { message = "Failed to create print job" });
