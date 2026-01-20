@@ -27,6 +27,7 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
+import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
@@ -128,6 +129,7 @@ function AuthenticatedAppRoutes() {
           <Route path="file-health" element={<Navigate to="/admin/system?tab=file-health" replace />} />
           <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
           <Route path="tags" element={<TagAdminPage />} />
+          <Route path="data" element={<DataManagementPage />} />
         </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
