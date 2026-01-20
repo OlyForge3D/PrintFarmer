@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Models.Admin;
@@ -116,10 +116,10 @@ public class DataImportServiceTests
         result.Success.Should().BeTrue();
         result.Warnings.Should().Contain(w => w.Contains("deleted"));
         result.Statistics.ManufacturersImported.Should().Be(1);
-        
+
         var oldManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Old Manufacturer");
         oldManufacturer.Should().BeNull(); // Should be deleted
-        
+
         var newManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "New Manufacturer");
         newManufacturer.Should().NotBeNull(); // Should be added
     }
@@ -155,7 +155,7 @@ public class DataImportServiceTests
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.FilamentTypesImported.Should().Be(1);
-        
+
         var filamentType = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == "Test PLA");
         filamentType.Should().NotBeNull();
         filamentType!.DefaultHotendTemp.Should().Be(210);
@@ -236,7 +236,7 @@ public class DataImportServiceTests
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.PrinterModelsImported.Should().Be(1);
-        
+
         var printerModel = await _context.PrinterModels.FirstOrDefaultAsync(p => p.Name == "Test Printer");
         printerModel.Should().NotBeNull();
         printerModel!.MaxX.Should().Be(250);
@@ -278,7 +278,7 @@ public class DataImportServiceTests
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.ManufacturersImported.Should().Be(1);
-        
+
         var manufacturers = await _context.Manufacturers.ToListAsync();
         manufacturers.Should().HaveCount(2); // 1 existing + 1 from backup
         manufacturers.Should().Contain(m => m.Name == "New Manufacturer From Backup");

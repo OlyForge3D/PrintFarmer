@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
@@ -27,7 +27,7 @@ public class YamlSeedDataTests
         _loggerMock = new Mock<IUnifiedLoggingService>();
         _configMock = new Mock<IConfiguration>();
         _configMock.Setup(c => c["SeedData:Path"]).Returns("data/seed/");
-        
+
         _yamlReader = new YamlSeedDataReader(_loggerMock.Object, _configMock.Object);
     }
 
@@ -54,7 +54,7 @@ public class YamlSeedDataTests
         // Assert
         filamentTypes.Should().NotBeNull();
         filamentTypes.Should().NotBeEmpty();
-        
+
         var pla = filamentTypes.FirstOrDefault(f => f.Name == "PLA");
         pla.Should().NotBeNull();
         pla!.DefaultHotendTemp.Should().BeGreaterThan(0);
@@ -71,7 +71,7 @@ public class YamlSeedDataTests
         // Assert
         printerModels.Should().NotBeNull();
         printerModels.Should().NotBeEmpty();
-        
+
         var prusaMk4 = printerModels.FirstOrDefault(p => p.Name.Contains("MK4"));
         prusaMk4.Should().NotBeNull();
         prusaMk4!.Manufacturer.Should().NotBeEmpty();
@@ -88,7 +88,7 @@ public class YamlSeedDataTests
         // Assert
         hotends.Should().NotBeNull();
         hotends.Should().NotBeEmpty();
-        
+
         var hotend = hotends.First();
         hotend.Name.Should().NotBeEmpty();
         hotend.Manufacturer.Should().NotBeEmpty();
@@ -104,7 +104,7 @@ public class YamlSeedDataTests
         // Assert
         extruders.Should().NotBeNull();
         extruders.Should().NotBeEmpty();
-        
+
         var extruder = extruders.First();
         extruder.Name.Should().NotBeEmpty();
         extruder.Manufacturer.Should().NotBeEmpty();
@@ -119,7 +119,7 @@ public class YamlSeedDataTests
         // Assert
         toolheads.Should().NotBeNull();
         toolheads.Should().NotBeEmpty();
-        
+
         var toolhead = toolheads.First();
         toolhead.Name.Should().NotBeEmpty();
         toolhead.Manufacturer.Should().NotBeEmpty();
@@ -134,7 +134,7 @@ public class YamlSeedDataTests
         // Assert
         nozzles.Should().NotBeNull();
         nozzles.Should().NotBeEmpty();
-        
+
         var nozzle = nozzles.First();
         nozzle.Name.Should().NotBeEmpty();
         nozzle.Manufacturer.Should().NotBeEmpty();

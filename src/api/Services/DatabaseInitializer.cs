@@ -168,11 +168,11 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             await _dataSeedService.SeedManufacturersAsync();
             await _dataSeedService.SeedPrinterModelsAsync();
             await _dataSeedService.SeedComponentModelsAsync();
-            
+
             // Still need to seed these from existing methods (not yet externalized)
             await SeedAuthenticationDataAsync();
             await SeedRootFoldersAsync();
-            
+
             _logger.LogInformation("[DB] Successfully seeded from YAML files");
             return;
         }

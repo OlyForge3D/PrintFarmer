@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Models.Admin;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -46,10 +46,10 @@ public class AdminDataController : ControllerBase
         {
             _logger.LogInformation("[AdminData] Catalog export requested");
             CatalogExportDto catalog = await _exportService.ExportCatalogAsync(ct);
-            
+
             // Set filename header for download
             Response.Headers["Content-Disposition"] = $"attachment; filename=\"catalog-{DateTime.UtcNow:yyyyMMddHHmmss}.json\"";
-            
+
             return Ok(catalog);
         }
         catch (Exception ex)
@@ -83,7 +83,7 @@ public class AdminDataController : ControllerBase
 
             _logger.LogInformation("[AdminData] Catalog import requested in mode: {Mode}", request.Mode.ToString());
             ImportResponseDto response = await _importService.ImportCatalogAsync(request.Catalog, request.Mode, ct);
-            
+
             return Ok(response);
         }
         catch (Exception ex)
@@ -109,10 +109,10 @@ public class AdminDataController : ControllerBase
         {
             _logger.LogInformation("[AdminData] Printers export requested");
             List<PrinterExportDto> printers = await _exportService.ExportPrintersAsync(ct);
-            
+
             // Set filename header for download
             Response.Headers["Content-Disposition"] = $"attachment; filename=\"printers-{DateTime.UtcNow:yyyyMMddHHmmss}.json\"";
-            
+
             return Ok(printers);
         }
         catch (Exception ex)
@@ -138,10 +138,10 @@ public class AdminDataController : ControllerBase
         {
             _logger.LogInformation("[AdminData] Full backup export requested");
             FullBackupExportDto backup = await _exportService.ExportFullBackupAsync(ct);
-            
+
             // Set filename header for download
             Response.Headers["Content-Disposition"] = $"attachment; filename=\"backup-full-{DateTime.UtcNow:yyyyMMddHHmmss}.json\"";
-            
+
             return Ok(backup);
         }
         catch (Exception ex)
@@ -175,7 +175,7 @@ public class AdminDataController : ControllerBase
 
             _logger.LogInformation("[AdminData] Full backup import requested in mode: {Mode}", request.Mode.ToString());
             ImportResponseDto response = await _importService.ImportFullBackupAsync(request.Backup, request.Mode, ct);
-            
+
             return Ok(response);
         }
         catch (Exception ex)
@@ -201,9 +201,10 @@ public class AdminDataController : ControllerBase
         {
             _logger.LogInformation("[AdminData] Seed data reload requested");
             await _seedService.SeedAllAsync();
-            
-            return Ok(new { 
-                success = true, 
+
+            return Ok(new
+            {
+                success = true,
                 message = "Seed data reloaded successfully from YAML files",
                 completedAt = DateTime.UtcNow
             });
