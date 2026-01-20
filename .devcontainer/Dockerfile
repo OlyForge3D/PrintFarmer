@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/typescript-node:22-bookworm
 
-# Install dotnet 9.0.302 using the official dotnet-install script
-ARG DOTNET_VERSION=9.0.302
+# Install dotnet 10.0.102 using the official dotnet-install script
+ARG DOTNET_VERSION=10.0.102
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV PATH="$DOTNET_ROOT:$PATH:$HOME/.dotnet"
 

@@ -1,6 +1,6 @@
 <#
 Bootstrap script for Windows (PowerShell)
-Installs prerequisites to build and run PrintFarmer: .NET SDK 9.x, Node.js (recommended v20.19.0), npm, git.
+Installs prerequisites to build and run PrintFarmer: .NET SDK 10.x, Node.js (recommended v20.19.0), npm, git.
 Uses winget when available, falls back to direct installer using the Microsoft dotnet-install.ps1 if needed.
 Run this script from an elevated PowerShell (Run as Administrator).
 #>
@@ -85,7 +85,7 @@ if (-not (Test-IsElevated)) {
     $global:AllowPerCommandElevation = $false
 }
 
-$REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '9.0.302'
+$REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '10.0.102'
 # Default to Node 20 major for frontend toolchain
 $REQ_NODE_MAJOR = $env:NODE_VERSION -or '20'
 
@@ -175,7 +175,7 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         Write-Success ".NET install attempted via dotnet-install.ps1"
     } catch {
         Write-Warn "Automatic dotnet install failed: $_"
-        Write-Warn "Please install .NET SDK ${REQ_DOTNET_VERSION} manually from https://dotnet.microsoft.com/download/dotnet/9.0"
+        Write-Warn "Please install .NET SDK ${REQ_DOTNET_VERSION} manually from https://dotnet.microsoft.com/download/dotnet/10.0"
         exit 2
     } finally {
         if (Test-Path $tmp) { Remove-Item $tmp -Force }

@@ -146,9 +146,9 @@ function Show-Help {
 # Define base images to manage
 $script:BaseImages = @(
     # .NET SDK for build stages (required for multi-stage builds during docker compose up)
-    "mcr.microsoft.com/dotnet/sdk:9.0",
-    # .NET API runtime (ASP.NET 9.0 for API service and slicer worker base)
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim",
+    "mcr.microsoft.com/dotnet/sdk:10.0",
+    # .NET API runtime (ASP.NET 10.0 for API service and slicer worker base)
+    "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim",
     # Ubuntu for OrcaSlicer binaries extraction stage
     "ubuntu:24.04",
     # Node.js for frontend (React build and runtime) - upgraded to v22 for compatibility
@@ -569,9 +569,9 @@ function Pull-BaseImages {
     Write-Header "Pulling Base Container Images"
     
     Write-Info "Pulling essential images for PrintFarmer core services:"
-    Write-Info "  - .NET SDK 9.0 (multi-stage builds during deployment)"
-    Write-Info "  - .NET ASP.NET 9.0 (API runtime)"
-    Write-Info "  - Node.js 18 Alpine (React frontend)"
+    Write-Info "  - .NET SDK 10.0 (multi-stage builds during deployment)"
+    Write-Info "  - .NET ASP.NET 10.0 (API runtime)"
+    Write-Info "  - Node.js 22 Alpine (React frontend)"
     Write-Info "  - PostgreSQL 16 Alpine (database)"
     Write-Info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
     Write-Info ""

@@ -39,16 +39,16 @@ $images = @(
         tarName = "node-22-alpine-upgraded.tar"
     },
     @{
-        base = "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim"
+        base = "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim"
         dockerfile = "Dockerfile.base-aspnet"
-        tag = "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
-        tarName = "aspnet-9.0-bookworm-slim-upgraded.tar"
+        tag = "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim-upgraded"
+        tarName = "aspnet-10.0-bookworm-slim-upgraded.tar"
     },
     @{
-        base = "mcr.microsoft.com/dotnet/sdk:9.0"
+        base = "mcr.microsoft.com/dotnet/sdk:10.0"
         dockerfile = "Dockerfile.base-sdk"
-        tag = "mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-        tarName = "dotnet-sdk-9.0-upgraded.tar"
+        tag = "mcr.microsoft.com/dotnet/sdk:10.0-upgraded"
+        tarName = "dotnet-sdk-10.0-upgraded.tar"
     },
     @{
         base = "postgres:16-alpine"
@@ -142,8 +142,8 @@ Write-Host "To deploy offline:" -ForegroundColor Yellow
 Write-Host "  1. Transfer all .tar files from $CacheDir to offline system"
 Write-Host "  2. Run: docker load -i ubuntu-24.04-upgraded.tar"
 Write-Host "  3. Run: docker load -i node-22-alpine-upgraded.tar"
-Write-Host "  4. Run: docker load -i aspnet-9.0-bookworm-slim-upgraded.tar"
-Write-Host "  5. Run: docker load -i dotnet-sdk-9.0-upgraded.tar"
+Write-Host "  4. Run: docker load -i aspnet-10.0-bookworm-slim-upgraded.tar"
+Write-Host "  5. Run: docker load -i dotnet-sdk-10.0-upgraded.tar"
 Write-Host "  6. Run: docker load -i postgres-16-alpine-upgraded.tar"
 Write-Host "  7. Run: docker load -i nginx-alpine-upgraded.tar"
 Write-Host "  8. Then deploy: .\scripts\deploy-docker.ps1 --pull=missing"

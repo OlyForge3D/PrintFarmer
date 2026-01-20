@@ -556,8 +556,8 @@ if command -v docker &> /dev/null; then
 fi
 
 # Verify .NET version
-if ! dotnet --version | grep -q "^9\.0\."; then
-  error ".NET SDK 9.0+ required. Current version: $(dotnet --version)"
+if ! dotnet --version | grep -q "^10\.0\."; then
+  error ".NET SDK 10.0+ required. Current version: $(dotnet --version)"
 fi
 
 # Verify Node.js version
