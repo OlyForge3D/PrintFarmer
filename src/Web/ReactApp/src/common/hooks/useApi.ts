@@ -4,6 +4,7 @@ import {
   ApiError,
   CatalogContext,
   CreateExtruderModelDto,
+  CreateFilamentTypeRequest,
   CreateHotendModelDto,
   CreateNozzleModelDto,
   CreatePrinterDto,
@@ -734,6 +735,40 @@ export function useImportFilamentTypesFromSpoolman() {
       // Invalidate both filament types and presets since new types were added
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useCreateFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (dto: CreateFilamentTypeRequest) => apiClient.createFilamentType(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+    },
+  });
+}
+
+export function useUpdateFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: CreateFilamentTypeRequest }) => 
+      apiClient.updateFilamentType(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+    },
+  });
+}
+
+export function useDeleteFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteFilamentType(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
     },
   });
 }

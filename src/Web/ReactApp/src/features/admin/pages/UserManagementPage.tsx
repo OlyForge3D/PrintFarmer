@@ -172,8 +172,6 @@ export function UserManagementPage() {
       clearTimeout(handle);
       ctrl.abort();
     };
-    // Note: emailStatus/usernameStatus intentionally NOT in deps to avoid infinite loop
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newUser.username, newUser.email, showCreateModal]);
 
   const validateForm = () => {

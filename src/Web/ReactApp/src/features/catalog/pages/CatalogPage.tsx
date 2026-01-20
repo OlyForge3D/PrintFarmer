@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DatabaseIcon, PrinterIcon, ThermometerIcon, SettingsIcon, WrenchIcon, CircleIcon } from '@/common/components/icons/MdiIcons';
+import { DatabaseIcon, PrinterIcon, ThermometerIcon, SettingsIcon, WrenchIcon, CircleIcon, LayersTripleOutlineIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Tabs } from '@/common/components/ui/Tabs';
 import { PrinterModelsCatalog } from '@/features/catalog/components/PrinterModelsCatalog';
@@ -7,14 +7,16 @@ import { HotendsCatalog } from '@/features/catalog/components/HotendsCatalog';
 import { ExtrudersCatalog } from '@/features/catalog/components/ExtrudersCatalog';
 import { ToolheadsCatalog } from '@/features/catalog/components/ToolheadsCatalog';
 import { NozzlesCatalog } from '@/features/catalog/components/NozzlesCatalog';
+import { FilamentsCatalog } from '@/features/catalog/components/FilamentsCatalog';
 
-type CatalogTab = 'printers' | 'hotends' | 'extruders' | 'toolheads' | 'nozzles';
+type CatalogTab = 'printers' | 'hotends' | 'extruders' | 'toolheads' | 'nozzles' | 'filaments';
 
 /**
  * CatalogPage - Tabbed catalog management page
  * 
  * Provides tabs for managing different catalog types:
  * - Printers: Manufacturers and printer models
+ * - Filaments: Filament types (PLA, PETG, ABS, etc.)
  * - Hotends: Hotend models and specifications
  * - Extruders: Extruder models and specifications  
  * - Toolheads: Toolhead models
@@ -38,6 +40,9 @@ export function CatalogPage() {
           <Tabs.Tab id="printers" icon={<PrinterIcon className="h-4 w-4" />}>
             Printers
           </Tabs.Tab>
+          <Tabs.Tab id="filaments" icon={<LayersTripleOutlineIcon className="h-4 w-4" />}>
+            Filaments
+          </Tabs.Tab>
           <Tabs.Tab id="toolheads" icon={<WrenchIcon className="h-4 w-4" />}>
             Toolheads
           </Tabs.Tab>
@@ -54,6 +59,9 @@ export function CatalogPage() {
         <Tabs.Panels className="min-h-[600px]">
           <Tabs.Panel id="printers">
             <PrinterModelsCatalog />
+          </Tabs.Panel>
+          <Tabs.Panel id="filaments">
+            <FilamentsCatalog />
           </Tabs.Panel>
           <Tabs.Panel id="toolheads">
             <ToolheadsCatalog />
