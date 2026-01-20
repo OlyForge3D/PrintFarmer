@@ -17,7 +17,7 @@ public class DataImportServiceTests
 
     public DataImportServiceTests()
     {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(databaseName: $"TestDb_{Guid.NewGuid()}")
             .Options;
         _context = new AppDbContext(options);
@@ -45,12 +45,12 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.ManufacturersImported.Should().Be(1);
-        var manufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "New Manufacturer");
+        Manufacturer? manufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "New Manufacturer");
         manufacturer.Should().NotBeNull();
     }
 
@@ -78,12 +78,12 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.ManufacturersImported.Should().Be(1); // Only the new one
-        var manufacturers = await _context.Manufacturers.ToListAsync();
+        List<Manufacturer> manufacturers = await _context.Manufacturers.ToListAsync();
         manufacturers.Should().HaveCount(2); // 1 existing + 1 new
     }
 
@@ -110,17 +110,17 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Replace);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Replace);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Warnings.Should().Contain(w => w.Contains("deleted"));
         result.Statistics.ManufacturersImported.Should().Be(1);
 
-        var oldManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Old Manufacturer");
+        Manufacturer? oldManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Old Manufacturer");
         oldManufacturer.Should().BeNull(); // Should be deleted
 
-        var newManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "New Manufacturer");
+        Manufacturer? newManufacturer = await _context.Manufacturers.FirstOrDefaultAsync(m => m.Name == "New Manufacturer");
         newManufacturer.Should().NotBeNull(); // Should be added
     }
 
@@ -150,13 +150,13 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.FilamentTypesImported.Should().Be(1);
 
-        var filamentType = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == "Test PLA");
+        FilamentType? filamentType = await _context.FilamentTypes.FirstOrDefaultAsync(f => f.Name == "Test PLA");
         filamentType.Should().NotBeNull();
         filamentType!.DefaultHotendTemp.Should().Be(210);
         filamentType.DefaultBedTemp.Should().Be(65);
@@ -190,7 +190,7 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeFalse();
@@ -231,13 +231,13 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportCatalogAsync(catalog, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.PrinterModelsImported.Should().Be(1);
 
-        var printerModel = await _context.PrinterModels.FirstOrDefaultAsync(p => p.Name == "Test Printer");
+        PrinterModel? printerModel = await _context.PrinterModels.FirstOrDefaultAsync(p => p.Name == "Test Printer");
         printerModel.Should().NotBeNull();
         printerModel!.MaxX.Should().Be(250);
         printerModel.MotionType.Should().Be(0); // Cartesian
@@ -273,13 +273,13 @@ public class DataImportServiceTests
         };
 
         // Act
-        var result = await _importService.ImportFullBackupAsync(backup, ImportMode.Merge);
+        ImportResponseDto result = await _importService.ImportFullBackupAsync(backup, ImportMode.Merge);
 
         // Assert
         result.Success.Should().BeTrue();
         result.Statistics.ManufacturersImported.Should().Be(1);
 
-        var manufacturers = await _context.Manufacturers.ToListAsync();
+        List<Manufacturer> manufacturers = await _context.Manufacturers.ToListAsync();
         manufacturers.Should().HaveCount(2); // 1 existing + 1 from backup
         manufacturers.Should().Contain(m => m.Name == "New Manufacturer From Backup");
     }

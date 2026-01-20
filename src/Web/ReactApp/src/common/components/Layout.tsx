@@ -23,7 +23,8 @@ import {
   WrenchIcon,
   TrendingUpIcon,
   LocationIcon,
-  KeyIcon
+  KeyIcon,
+  DatabaseIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -134,15 +135,15 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Settings',
-    href: '/settings',
-    icon: GearIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
     name: 'Data Management',
     href: '/admin/data',
     icon: DatabaseIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Settings',
+    href: '/settings',
+    icon: GearIcon,
     requiredRole: 'farm_admin'
   },
 ];

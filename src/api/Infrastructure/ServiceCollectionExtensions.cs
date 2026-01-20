@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using AutoMapper;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
@@ -15,6 +16,7 @@ using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
@@ -483,9 +485,9 @@ public static class ServiceCollectionExtensions
         // IMPORTANT: Must be SCOPED because backend clients (e.g., IMoonrakerClient) are scoped services
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendClientFactory>(provider =>
         {
-            var serviceProvider = provider;
-            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
-            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            IServiceProvider serviceProvider = provider;
+            IBackendPluginRegistry pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
 
             return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
         });
@@ -496,9 +498,9 @@ public static class ServiceCollectionExtensions
         // IMPORTANT: Must be SCOPED because it depends on IBackendClientFactory which is scoped
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendCapabilityFactory>(provider =>
         {
-            var clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
-            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
-            var pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            IBackendClientFactory clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
+            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            IBackendPluginRegistry? pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
 
             return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
         });
@@ -506,9 +508,9 @@ public static class ServiceCollectionExtensions
         // Register the factory for getting printer status clients from plugins
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusClientFactory>(provider =>
         {
-            var serviceProvider = provider;
-            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
-            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            IServiceProvider serviceProvider = provider;
+            IBackendPluginRegistry pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
 
             return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
         });

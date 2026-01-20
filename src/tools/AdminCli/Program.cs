@@ -305,7 +305,7 @@ internal static class Program
                     .ToList();
 
                 Console.WriteLine("\nTop Manufacturers by Machine Profiles:");
-                foreach (var group in manufacturerGroups)
+                foreach (IGrouping<string, MachineProfileDto>? group in manufacturerGroups)
                 {
                     Console.WriteLine($"  {group.Key,-30} {group.Count(),5:N0} machines");
                 }
@@ -350,18 +350,18 @@ internal static class Program
                 var csv = new StringBuilder();
                 _ = csv.AppendLine("ProfileType,Name,Manufacturer,NozzleDiameter,Quality,CompatiblePrinters");
 
-                foreach (var m in machines)
+                foreach (MachineProfileDto m in machines)
                 {
                     _ = csv.AppendLine($"machine,\"{m.Name}\",\"{m.Manufacturer}\",{m.NozzleDiameter?.ToString(CultureInfo.InvariantCulture) ?? string.Empty},\"{string.Empty}\",\"{string.Empty}\"");
                 }
 
-                foreach (var f in filaments)
+                foreach (FilamentProfileDto f in filaments)
                 {
                     string compatible = f.CompatiblePrinters != null ? string.Join(";", f.CompatiblePrinters) : string.Empty;
                     _ = csv.AppendLine($"filament,\"{f.Name}\",\"{f.Manufacturer}\",{string.Empty},{string.Empty},\"{compatible}\"");
                 }
 
-                foreach (var p in processes)
+                foreach (ProcessProfileDto p in processes)
                 {
                     string compatible = p.CompatiblePrinters != null ? string.Join(";", p.CompatiblePrinters) : string.Empty;
                     _ = csv.AppendLine($"process,\"{p.Name}\",{string.Empty},{string.Empty},\"{p.Quality}\",\"{compatible}\"");

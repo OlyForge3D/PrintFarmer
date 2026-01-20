@@ -13,10 +13,11 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
+
 // Services
-import { apiClient } from '@/services/api';
 import { assetService } from '@/services/assetService';
 import { printerSignalRService } from '@/services/printer-signalr';
+import { apiClient } from '@/services/api';
 
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
@@ -26,8 +27,6 @@ import { LocationManagementAdminPage } from '@/features/admin/pages/LocationMana
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
-import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
-import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
@@ -39,8 +38,10 @@ import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
+// Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -118,18 +119,13 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="profile/api-keys" element={<ApiKeysPage />} />
-        <Route path="logs" element={<Navigate to="/admin/system?tab=logs" replace />} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<WorkerManagementPage />} />
-          <Route path="system" element={<SystemDashboardPage />} />
-          {/* Legacy routes - redirect to unified System Dashboard */}
-          <Route path="observability" element={<Navigate to="/admin/system?tab=observability" replace />} />
-          <Route path="file-health" element={<Navigate to="/admin/system?tab=file-health" replace />} />
+          <Route path="file-health" element={<FileHealthDashboard />} />
           <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
           <Route path="tags" element={<TagAdminPage />} />
-          <Route path="data" element={<DataManagementPage />} />
         </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
@@ -148,14 +144,11 @@ function App() {
 
   // Initialize asset service on app startup
   useEffect(() => {
-    const initPromise = assetService?.initialize?.();
-    if (initPromise) {
-      initPromise.catch(err => {
-        logger.warn('Failed to initialize asset service', {
-          error: err instanceof Error ? err.message : String(err)
-        });
+    assetService.initialize().catch(err => {
+      logger.warn('Failed to initialize asset service', {
+        error: err instanceof Error ? err.message : String(err)
       });
-    }
+    });
   }, [logger]);
 
   // Eagerly establish SignalR connections on app startup for faster realtime updates
@@ -175,7 +168,6 @@ function App() {
   useEffect(() => {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
-      setCheckingSetup(true);
       try {
         const data = await apiClient.getSetupStatus();
         setSetupComplete(!data.needsSetup);
@@ -216,13 +208,7 @@ function App() {
             <QueryClientProvider client={queryClient}>
               <SlicerUIProvider>
                 <SetupWizard onComplete={handleSetupComplete} />
-              <Toaster 
-                position="top-right" 
-                duration={3000}
-                visibleToasts={2}
-                theme="system"
-                gap={8}
-              />
+                <Toaster position="top-right" richColors />
               </SlicerUIProvider>
             </QueryClientProvider>
           </AuthProvider>
@@ -259,13 +245,7 @@ function App() {
                 <AuthenticatedAppRoutes />
               </Router>
               <ReactQueryDevtools initialIsOpen={false} />
-              <Toaster 
-                position="top-right" 
-                duration={3000}
-                visibleToasts={2}
-                theme="system"
-                gap={8}
-              />
+              <Toaster position="top-right" richColors />
             </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>

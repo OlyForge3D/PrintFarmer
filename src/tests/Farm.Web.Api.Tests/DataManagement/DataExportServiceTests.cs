@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Models.Admin;
 using Farm.Web.Api.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,7 @@ public class DataExportServiceTests
 
     public DataExportServiceTests()
     {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(databaseName: $"TestDb_{Guid.NewGuid()}")
             .Options;
         _context = new AppDbContext(options);
@@ -44,7 +45,7 @@ public class DataExportServiceTests
         await _context.SaveChangesAsync();
 
         // Act
-        var catalog = await _exportService.ExportCatalogAsync();
+        CatalogExportDto catalog = await _exportService.ExportCatalogAsync();
 
         // Assert
         catalog.Should().NotBeNull();
@@ -57,7 +58,7 @@ public class DataExportServiceTests
     public async Task ExportCatalogAsync_EmptyDatabase_ReturnsEmptyCatalog()
     {
         // Act
-        var catalog = await _exportService.ExportCatalogAsync();
+        CatalogExportDto catalog = await _exportService.ExportCatalogAsync();
 
         // Assert
         catalog.Should().NotBeNull();
@@ -91,7 +92,7 @@ public class DataExportServiceTests
         await _context.SaveChangesAsync();
 
         // Act
-        var printers = await _exportService.ExportPrintersAsync();
+        List<PrinterExportDto> printers = await _exportService.ExportPrintersAsync();
 
         // Assert
         printers.Should().BeEmpty(); // No actual printer instances, just models
@@ -106,7 +107,7 @@ public class DataExportServiceTests
         await _context.SaveChangesAsync();
 
         // Act
-        var backup = await _exportService.ExportFullBackupAsync();
+        FullBackupExportDto backup = await _exportService.ExportFullBackupAsync();
 
         // Assert
         backup.Should().NotBeNull();
@@ -141,11 +142,11 @@ public class DataExportServiceTests
         await _context.SaveChangesAsync();
 
         // Act
-        var catalog = await _exportService.ExportCatalogAsync();
+        CatalogExportDto catalog = await _exportService.ExportCatalogAsync();
 
         // Assert
         catalog.PrinterModels.Should().Contain(p => p.Name == "Voron 2.4 350");
-        var exportedModel = catalog.PrinterModels.First(p => p.Name == "Voron 2.4 350");
+        PrinterModelExportDto exportedModel = catalog.PrinterModels.First(p => p.Name == "Voron 2.4 350");
         exportedModel.ManufacturerName.Should().Be("Voron");
         exportedModel.MaxX.Should().Be(350);
         exportedModel.MaxY.Should().Be(350);

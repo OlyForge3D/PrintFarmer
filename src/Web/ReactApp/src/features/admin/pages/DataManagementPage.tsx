@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button } from '@/common/components/ui';
+import { Button, Radio, FileUpload } from '@/common/components/ui';
 import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
 import { 
   exportCatalog, 
@@ -82,8 +82,8 @@ export function DataManagementPage() {
     }
   };
 
-  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleImportFile = async (files: FileList | null) => {
+    const file = files?.[0];
     if (!file) return;
 
     setLoading(true);
@@ -119,8 +119,6 @@ export function DataManagementPage() {
       }
     } finally {
       setLoading(false);
-      // Reset file input
-      event.target.value = '';
     }
   };
 
@@ -239,10 +237,9 @@ export function DataManagementPage() {
             </label>
             <div className="space-y-2">
               <label className="flex items-start cursor-pointer">
-                <input
-                  type="radio"
+                <Radio
                   name="importMode"
-                  value={ImportMode.Merge}
+                  value={ImportMode.Merge.toString()}
                   checked={importMode === ImportMode.Merge}
                   onChange={(e) => setImportMode(Number(e.target.value))}
                   className="mt-1 mr-3"
@@ -257,10 +254,9 @@ export function DataManagementPage() {
                 </div>
               </label>
               <label className="flex items-start cursor-pointer">
-                <input
-                  type="radio"
+                <Radio
                   name="importMode"
-                  value={ImportMode.Replace}
+                  value={ImportMode.Replace.toString()}
                   checked={importMode === ImportMode.Replace}
                   onChange={(e) => setImportMode(Number(e.target.value))}
                   className="mt-1 mr-3"
@@ -282,13 +278,12 @@ export function DataManagementPage() {
             <label htmlFor="import-file" className="block text-sm font-medium text-pf-text-primary mb-2">
               Select Import File
             </label>
-            <input
+            <FileUpload
               id="import-file"
-              type="file"
               accept=".json"
               onChange={handleImportFile}
               disabled={loading}
-              className="block w-full text-sm text-pf-text-primary file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-pf-accent file:text-white hover:file:bg-pf-accent/90 cursor-pointer"
+              className="block w-full"
             />
             <p className="text-xs text-pf-text-secondary mt-2">
               Accepts JSON files exported from PrintFarmer (catalog or full backup)

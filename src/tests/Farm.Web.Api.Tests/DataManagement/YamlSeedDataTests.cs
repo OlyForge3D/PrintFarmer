@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Models.SeedData;
 using Farm.Web.Api.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,7 @@ public class YamlSeedDataTests
 
     public YamlSeedDataTests()
     {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(databaseName: $"TestDb_{Guid.NewGuid()}")
             .Options;
         _context = new AppDbContext(options);
@@ -35,7 +36,7 @@ public class YamlSeedDataTests
     public async Task ReadManufacturersAsync_ValidYamlFile_ReturnsManufacturers()
     {
         // Act
-        var manufacturers = await _yamlReader.ReadManufacturersAsync();
+        List<ManufacturerSeedDto> manufacturers = await _yamlReader.ReadManufacturersAsync();
 
         // Assert
         manufacturers.Should().NotBeNull();
@@ -49,13 +50,13 @@ public class YamlSeedDataTests
     public async Task ReadFilamentTypesAsync_ValidYamlFile_ReturnsFilamentTypes()
     {
         // Act
-        var filamentTypes = await _yamlReader.ReadFilamentTypesAsync();
+        List<FilamentTypeSeedDto> filamentTypes = await _yamlReader.ReadFilamentTypesAsync();
 
         // Assert
         filamentTypes.Should().NotBeNull();
         filamentTypes.Should().NotBeEmpty();
 
-        var pla = filamentTypes.FirstOrDefault(f => f.Name == "PLA");
+        FilamentTypeSeedDto? pla = filamentTypes.FirstOrDefault(f => f.Name == "PLA");
         pla.Should().NotBeNull();
         pla!.DefaultHotendTemp.Should().BeGreaterThan(0);
         pla.DefaultBedTemp.Should().BeGreaterThan(0);
@@ -66,13 +67,13 @@ public class YamlSeedDataTests
     public async Task ReadPrinterModelsAsync_ValidYamlFile_ReturnsPrinterModels()
     {
         // Act
-        var printerModels = await _yamlReader.ReadPrinterModelsAsync();
+        List<PrinterModelSeedDto> printerModels = await _yamlReader.ReadPrinterModelsAsync();
 
         // Assert
         printerModels.Should().NotBeNull();
         printerModels.Should().NotBeEmpty();
 
-        var prusaMk4 = printerModels.FirstOrDefault(p => p.Name.Contains("MK4"));
+        PrinterModelSeedDto? prusaMk4 = printerModels.FirstOrDefault(p => p.Name.Contains("MK4"));
         prusaMk4.Should().NotBeNull();
         prusaMk4!.Manufacturer.Should().NotBeEmpty();
         prusaMk4.BuildVolume.Should().NotBeNull();
@@ -83,13 +84,13 @@ public class YamlSeedDataTests
     public async Task ReadHotendsAsync_ValidYamlFile_ReturnsHotends()
     {
         // Act
-        var hotends = await _yamlReader.ReadHotendsAsync();
+        List<HotendModelSeedDto> hotends = await _yamlReader.ReadHotendsAsync();
 
         // Assert
         hotends.Should().NotBeNull();
         hotends.Should().NotBeEmpty();
 
-        var hotend = hotends.First();
+        HotendModelSeedDto hotend = hotends.First();
         hotend.Name.Should().NotBeEmpty();
         hotend.Manufacturer.Should().NotBeEmpty();
         hotend.MaxTemp.Should().BeGreaterThan(0);
@@ -99,13 +100,13 @@ public class YamlSeedDataTests
     public async Task ReadExtrudersAsync_ValidYamlFile_ReturnsExtruders()
     {
         // Act
-        var extruders = await _yamlReader.ReadExtrudersAsync();
+        List<ExtruderModelSeedDto> extruders = await _yamlReader.ReadExtrudersAsync();
 
         // Assert
         extruders.Should().NotBeNull();
         extruders.Should().NotBeEmpty();
 
-        var extruder = extruders.First();
+        ExtruderModelSeedDto extruder = extruders.First();
         extruder.Name.Should().NotBeEmpty();
         extruder.Manufacturer.Should().NotBeEmpty();
     }
@@ -114,13 +115,13 @@ public class YamlSeedDataTests
     public async Task ReadToolheadsAsync_ValidYamlFile_ReturnsToolheads()
     {
         // Act
-        var toolheads = await _yamlReader.ReadToolheadsAsync();
+        List<ToolheadModelSeedDto> toolheads = await _yamlReader.ReadToolheadsAsync();
 
         // Assert
         toolheads.Should().NotBeNull();
         toolheads.Should().NotBeEmpty();
 
-        var toolhead = toolheads.First();
+        ToolheadModelSeedDto toolhead = toolheads.First();
         toolhead.Name.Should().NotBeEmpty();
         toolhead.Manufacturer.Should().NotBeEmpty();
     }
@@ -129,13 +130,13 @@ public class YamlSeedDataTests
     public async Task ReadNozzlesAsync_ValidYamlFile_ReturnsNozzles()
     {
         // Act
-        var nozzles = await _yamlReader.ReadNozzlesAsync();
+        List<NozzleModelSeedDto> nozzles = await _yamlReader.ReadNozzlesAsync();
 
         // Assert
         nozzles.Should().NotBeNull();
         nozzles.Should().NotBeEmpty();
 
-        var nozzle = nozzles.First();
+        NozzleModelSeedDto nozzle = nozzles.First();
         nozzle.Name.Should().NotBeEmpty();
         nozzle.Manufacturer.Should().NotBeEmpty();
     }
@@ -149,7 +150,7 @@ public class YamlSeedDataTests
         var reader = new YamlSeedDataReader(_loggerMock.Object, configMock.Object);
 
         // Act
-        var manufacturers = await reader.ReadManufacturersAsync();
+        List<ManufacturerSeedDto> manufacturers = await reader.ReadManufacturersAsync();
 
         // Assert
         manufacturers.Should().NotBeNull();

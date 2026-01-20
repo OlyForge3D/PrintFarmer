@@ -1,9 +1,8 @@
-import { useState, useOptimistic, useTransition } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
-import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -33,19 +32,6 @@ export function ApiKeysPage() {
     },
     enabled: !!userId,
   });
-
-  // React 19: useTransition for async delete operations
-  const [,startTransition] = useTransition();
-  
-  // React 19: useOptimistic for optimistic key deletion
-  const [optimisticKeys, addOptimisticDelete] = useOptimistic<ApiKeyDto[], string>(
-    apiKeys,
-    (state, deletedKeyId) => state.filter(k => k.id !== deletedKeyId)
-  );
-
-  // State for confirmation modals
-  const [keyToDelete, setKeyToDelete] = useState<{ id: string; name: string } | null>(null);
-  const [keyToRotate, setKeyToRotate] = useState<{ id: string; name: string } | null>(null);
 
   // Create API key mutation
   const createMutation = useMutation({
@@ -121,41 +107,15 @@ export function ApiKeysPage() {
   };
 
   const handleDelete = (keyId: string, keyName: string) => {
-    setKeyToDelete({ id: keyId, name: keyName });
-  };
-
-  const confirmDelete = () => {
-    if (!keyToDelete) return;
-
-    const keyId = keyToDelete.id;
-    setKeyToDelete(null);
-
-    // React 19: Use startTransition for optimistic deletion
-    startTransition(async () => {
-      try {
-        // Optimistically remove the key immediately
-        addOptimisticDelete(keyId);
-        
-        // Execute deletion in background
-        await deleteMutation.mutateAsync({ keyId });
-      } catch (error) {
-        // State rolls back automatically via useOptimistic on error
-        if (window.PrintFarmerDebug?.profile) {
-          console.error('Failed to delete API key:', error);
-        }
-      }
-    });
+    if (confirm(`Are you sure you want to delete API key "${keyName}"? This cannot be undone.`)) {
+      deleteMutation.mutate({ keyId });
+    }
   };
 
   const handleRotate = (keyId: string, keyName: string) => {
-    setKeyToRotate({ id: keyId, name: keyName });
-  };
-
-  const confirmRotate = () => {
-    if (!keyToRotate) return;
-
-    rotateMutation.mutate({ keyId: keyToRotate.id });
-    setKeyToRotate(null);
+    if (confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
+      rotateMutation.mutate({ keyId });
+    }
   };
 
   const copyToClipboard = (text: string) => {
@@ -271,14 +231,14 @@ export function ApiKeysPage() {
           {/* API Keys List */}
           {isLoading ? (
             <div className="text-center text-pf-text-secondary py-8">Loading API keys...</div>
-          ) : optimisticKeys.length === 0 ? (
+          ) : apiKeys.length === 0 ? (
             <div className="text-center text-pf-text-secondary py-8">
               <KeyIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
               <p>No API keys yet. Create one to get started!</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {optimisticKeys.map((apiKey: ApiKeyDto) => (
+              {apiKeys.map((apiKey: ApiKeyDto) => (
                 <div
                   key={apiKey.id}
                   className="flex items-center justify-between p-4 bg-pf-bg-2 rounded border border-pf-border"
@@ -341,29 +301,6 @@ export function ApiKeysPage() {
           </p>
         </div>
       </div>
-
-      {/* Delete Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={!!keyToDelete}
-        title="Delete API Key?"
-        message={`Are you sure you want to delete API key "${keyToDelete?.name}"? This cannot be undone.`}
-        confirmButtonText="Delete"
-        cancelButtonText="Cancel"
-        isDangerous
-        onConfirm={confirmDelete}
-        onCancel={() => setKeyToDelete(null)}
-      />
-
-      {/* Rotate Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={!!keyToRotate}
-        title="Rotate API Key?"
-        message={`Are you sure you want to rotate API key "${keyToRotate?.name}"? The old key will stop working immediately.`}
-        confirmButtonText="Rotate Key"
-        cancelButtonText="Cancel"
-        onConfirm={confirmRotate}
-        onCancel={() => setKeyToRotate(null)}
-      />
     </PageTemplate>
   );
 }

@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Models.Admin;
