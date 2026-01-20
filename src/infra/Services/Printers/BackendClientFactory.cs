@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 

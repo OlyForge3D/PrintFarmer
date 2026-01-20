@@ -836,7 +836,7 @@ app.MapGet("/api/debug/db-info", async (
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),
-        [nameof(db.Actions)] = await db.Actions.CountAsync(ct),
+        [nameof(db.UserActions)] = await db.UserActions.CountAsync(ct),
         [nameof(db.RolePermissions)] = await db.RolePermissions.CountAsync(ct),
         [nameof(db.UserRoles)] = await db.UserRoles.CountAsync(ct)
     };

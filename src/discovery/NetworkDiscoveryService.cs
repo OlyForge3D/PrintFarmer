@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Discovery;

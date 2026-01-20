@@ -35,7 +35,7 @@ public class RegisterDiscoveredPrinterDto
             IpAddress = IpAddress,
             ServerUrl = $"http://{IpAddress}:{Port}",
             OriginalServerUrl = null,
-            Backend = Enum.TryParse(PrinterBackend, ignoreCase: true, out PrinterBackend b) ? b : global::Farm.Infrastructure.PrinterBackend.Moonraker,
+            Backend = Enum.TryParse(PrinterBackend, ignoreCase: true, out PrinterBackend b) ? b : Farm.Infrastructure.Domain.PrinterBackend.Moonraker,
             BackendPort = Port,
             FrontendPort = null,
             DiscoveredAt = DiscoveredAt,

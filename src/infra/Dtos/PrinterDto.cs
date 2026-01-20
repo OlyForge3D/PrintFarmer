@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// Full printer representation including current status, coordinates, temperatures and optional spool information.

@@ -431,7 +431,7 @@ public sealed class MoonrakerSubscriptionService(
                 return false;
             }
 
-            if (current.Backend != (int)Farm.Infrastructure.PrinterBackend.Moonraker)
+            if (current.Backend != (int)Farm.Infrastructure.Domain.PrinterBackend.Moonraker)
             {
                 _logger.LogInformation($"Printer {printerId} backend changed from Moonraker (Backend={current.Backend})");
                 return false;

@@ -1,4 +1,6 @@
-﻿// Serialization constructors removed (legacy binary serialization not required)
+using Farm.Infrastructure.Domain;
+
+// Serialization constructors removed (legacy binary serialization not required)
 namespace Farm.Infrastructure;
 
 /// <summary>

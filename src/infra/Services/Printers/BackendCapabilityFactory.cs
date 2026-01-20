@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Printers;

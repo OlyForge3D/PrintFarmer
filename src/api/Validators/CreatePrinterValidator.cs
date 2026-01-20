@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using FluentValidation;
 
 namespace Farm.Web.Api.Validators;

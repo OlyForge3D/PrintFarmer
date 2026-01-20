@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.Moonraker;
 

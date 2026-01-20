@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// Utility helpers for printer backend operations.

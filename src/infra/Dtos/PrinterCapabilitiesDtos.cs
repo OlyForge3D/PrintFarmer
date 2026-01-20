@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using Farm.Infrastructure.Annotations;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 

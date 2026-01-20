@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 

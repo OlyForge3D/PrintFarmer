@@ -103,7 +103,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Resource> Resources => Set<Resource>();
 
-    public DbSet<Domain.Action> Actions => Set<Domain.Action>();
+    public DbSet<UserAction> UserActions => Set<UserAction>();
 
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
 
@@ -810,8 +810,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(r => r.IsActive);
         });
 
-        // Action Entity Configuration
-        _ = modelBuilder.Entity<Domain.Action>(b =>
+        // UserAction Entity Configuration
+        _ = modelBuilder.Entity<UserAction>(b =>
         {
             _ = b.HasKey(a => a.Id);
             _ = b.Property(a => a.Name).IsRequired().HasMaxLength(50);
@@ -839,7 +839,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Cascade);
 
             _ = b.HasOne(rp => rp.Action)
-                .WithMany(a => a.RolePermissions)
+                .WithMany(ua => ua.RolePermissions)
                 .HasForeignKey(rp => rp.ActionId)
                 .OnDelete(DeleteBehavior.Cascade);
 

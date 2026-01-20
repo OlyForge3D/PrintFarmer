@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers.Requests;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;

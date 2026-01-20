@@ -20,7 +20,7 @@ public class RolePermission
 
     public Guid ActionId { get; set; }
 
-    public Action Action { get; set; } = null!;
+    public UserAction Action { get; set; } = null!;
 
     public bool Granted { get; set; } = true;
 

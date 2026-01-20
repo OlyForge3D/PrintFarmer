@@ -1,52 +1,55 @@
-# Copilot Processing: Catalog UI Redesign - Phase 4 Complete
+# Copilot Processing: Toolhead Component Auto-Population
 
-**Session Start**: Implementing tabbed catalog interface with component catalogs
-**Phase**: ✅ Complete
+**Session Start**: Implementing toolhead component auto-population and nozzle interface types
+**Phase**: 🔄 In Progress
 
-## 🔄 CATALOG UI REDESIGN - PHASE 4 COMPLETE ✅
+## 🔄 TOOLHEAD COMPONENT AUTO-POPULATION
 
-**Objective**: Refactor CatalogPage to use tabbed interface with separate tabs for Printers, Hotends, Extruders, Toolheads, and Nozzles
-**Status**: ✅ COMPLETE
+**Objective**: 
+1. Reorder catalog tabs: Printers | Toolheads | Extruders | Hotends | Nozzles
+2. Auto-populate Extruder/Hotend/Nozzle when Toolhead is selected in printer model modal
+3. Seed Generic Brass nozzles for V6 and Volcano interfaces
+4. Add NozzleInterfaceType to nozzle seeding
 
-### Implementation Summary
+### Implementation Progress
 
-**New Components Created**:
-- ✅ `PrinterModelsCatalog.tsx` - Extracted from CatalogPage, manages manufacturers and printer models with Master-Detail layout
-- ✅ `HotendsCatalog.tsx` - Full CRUD for hotend models with grid display, Add/Edit/Delete modals
-- ✅ `ExtrudersCatalog.tsx` - Full CRUD for extruder models with gear ratio and direct drive fields
-- ✅ `ToolheadsCatalog.tsx` - Full CRUD for toolhead models
-- ✅ `NozzlesCatalog.tsx` - Full CRUD for nozzle models with max temp and hardened fields
-- ✅ `ManufacturerSelector.tsx` - Reusable grouped dropdown with "With Items" vs "All Others" groups and Add New modal
-- ✅ `ComponentModelCard.tsx` - Generic card component for displaying component models with type-specific badges
+**Completed**:
+- ✅ Added DefaultHotendId, DefaultExtruderId, DefaultNozzleId to ToolheadModelDefinition domain model
+- ✅ Updated TypeScript ToolheadModelDefinition interface with new fields
+- ✅ Updated ToolheadModelDto to include default component IDs
+- ✅ Updated ICatalogRepository.GetToolheadModelsAsync return type
+- ✅ Updated EfCatalogRepository.GetToolheadModelsAsync to include default component IDs
+- ✅ Updated CatalogService to map new fields to DTO
+- ✅ Reordered CatalogPage tabs to: Printers | Toolheads | Extruders | Hotends | Nozzles
+- ✅ Added `handleToolheadModelSelect` handler in EditModelModal for auto-population
+- ✅ Updated toolhead model select to use new handler
+- ✅ Added NozzleInterfaceType to nozzle seed data (all 46 nozzle entries updated)
+- ✅ Added Generic Volcano Brass/Hardened Steel nozzles for high-flow hotends
 
-**CatalogPage Refactored**:
-- ✅ Now uses Tabs component with 5 tabs: Printers, Hotends, Extruders, Toolheads, Nozzles
-- ✅ Each tab renders its respective catalog component
-- ✅ Clean separation of concerns between page layout and catalog functionality
-
-**Backend Enhancements (from previous sessions)**:
-- ✅ All Update DTOs now include optional `ManufacturerId` for manufacturer changes (reduced friction per user request)
-- ✅ CatalogService validates new manufacturer exists before allowing change
-- ✅ Re-fetches model with new manufacturer navigation after update
-
-### Files Created/Modified
-
-**Created**:
-1. `src/Web/ReactApp/src/features/catalog/components/PrinterModelsCatalog.tsx` - Master-detail printer/manufacturer management
-2. `src/Web/ReactApp/src/features/catalog/components/HotendsCatalog.tsx` - Hotend model CRUD
-3. `src/Web/ReactApp/src/features/catalog/components/ExtrudersCatalog.tsx` - Extruder model CRUD
-4. `src/Web/ReactApp/src/features/catalog/components/ToolheadsCatalog.tsx` - Toolhead model CRUD
-5. `src/Web/ReactApp/src/features/catalog/components/NozzlesCatalog.tsx` - Nozzle model CRUD
-6. `src/Web/ReactApp/src/features/catalog/components/ManufacturerSelector.tsx` - Reusable manufacturer dropdown
-7. `src/Web/ReactApp/src/features/catalog/components/ComponentModelCard.tsx` - Generic component card
-
-**Modified**:
-1. `src/Web/ReactApp/src/features/catalog/pages/CatalogPage.tsx` - Now tabbed interface using all catalog components
+**Files Modified**:
+1. `/src/infra/Domain/ComponentModels.cs` - Added DefaultHotendId, DefaultExtruderId, DefaultNozzleId to ToolheadModelDefinition
+2. `/src/Web/ReactApp/src/types/api.ts` - Updated ToolheadModelDefinition interface
+3. `/src/infra/ToolheadModelDto.cs` - Added default component IDs
+4. `/src/infra/Repositories/Catalog/ICatalogRepository.cs` - Updated GetToolheadModelsAsync signature
+5. `/src/infra/Repositories/Catalog/EfCatalogRepository.cs` - Updated implementation
+6. `/src/infra/Services/Catalog/CatalogService.cs` - Updated mapping
+7. `/src/infra/ComponentModelDtos.cs` - Added to Create/Update DTOs
+8. `/src/Web/ReactApp/src/features/catalog/pages/CatalogPage.tsx` - Reordered tabs
+9. `/src/Web/ReactApp/src/features/models3d/components/EditModelModal.tsx` - Added auto-populate logic
+10. `/src/api/Services/DatabaseInitializer.cs` - Updated nozzle seeding with NozzleInterfaceType
 
 ### Build Status
-✅ **React Build**: Passed (10.04s, 3989 modules)
-✅ **React Tests**: 474/474 passed (only Playwright e2e config issues, unrelated to changes)
-✅ **TypeScript**: 0 errors
+✅ **API Build**: Passed (47s)
+✅ **React Build**: Passed (10.23s)
+
+### Remaining Tasks
+- [ ] Run tests to verify changes
+- [ ] Update DatabaseInitializer to set default components on toolhead seeds
+- [ ] Test auto-populate functionality in UI
+
+---
+
+## Previous Session Summary
 
 ### User Experience
 

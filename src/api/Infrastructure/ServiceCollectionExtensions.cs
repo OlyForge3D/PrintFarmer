@@ -4,6 +4,7 @@ using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;

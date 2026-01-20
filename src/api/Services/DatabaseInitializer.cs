@@ -1582,7 +1582,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         NozzleType = null,     // Will be populated when user specifies
                         MaxHotendTemp = model.MaxBedTemp,  // Use bed temp as conservative proxy; user can override
                         MaxFlowRate = null,    // Will be populated when user specifies
-                        ToolheadType = (int)Farm.Infrastructure.ToolheadType.Stock,
+                        ToolheadType = (int)ToolheadType.Stock,
                         HotendModelId = hotendId,
                         ExtruderModelId = extruderId,
                         ToolheadModelDefId = toolheadId,
@@ -1616,7 +1616,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         ArgumentNullException.ThrowIfNull(_context);
         try
         {
-            _ = await _context.Actions.AnyAsync();
+            _ = await _context.UserActions.AnyAsync();
         }
         catch (Exception)
         {
@@ -1643,9 +1643,9 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         };
         foreach (var action in actions)
         {
-            if (!await _context.Actions.AnyAsync(a => a.Name == action.Name))
+            if (!await _context.UserActions.AnyAsync(a => a.Name == action.Name))
             {
-                _ = _context.Actions.Add(new Farm.Infrastructure.Domain.Action
+                _ = _context.UserActions.Add(new UserAction
                 {
                     Id = Guid.NewGuid(),
                     Name = action.Name,
@@ -1762,7 +1762,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         if (adminRole != null)
         {
             List<Resource> allResources = await _context.Resources.ToListAsync();
-            Farm.Infrastructure.Domain.Action? adminAction = await _context.Actions.FirstOrDefaultAsync(a => a.Name == "admin");
+            UserAction? adminAction = await _context.UserActions.FirstOrDefaultAsync(a => a.Name == "admin");
             if (adminAction != null)
             {
                 foreach (Resource resource in allResources)
@@ -1800,7 +1800,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             foreach ((string? resourceName, string? actionName) in userPermissions)
             {
                 Resource? resource = await _context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
-                Farm.Infrastructure.Domain.Action? action = await _context.Actions.FirstOrDefaultAsync(a => a.Name == actionName);
+                UserAction? action = await _context.UserActions.FirstOrDefaultAsync(a => a.Name == actionName);
                 if (resource != null && action != null)
                 {
                     if (!await _context.RolePermissions.AnyAsync(rp =>

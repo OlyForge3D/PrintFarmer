@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace PrinterDiscovery.Services;
 

@@ -7,6 +7,7 @@ using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Discovery;

@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 // Serialization constructors removed (legacy binary serialization not required)
 namespace Farm.Infrastructure;

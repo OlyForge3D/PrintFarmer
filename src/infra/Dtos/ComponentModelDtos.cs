@@ -3,11 +3,109 @@
 namespace Farm.Infrastructure;
 
 // ============================================================================
-// COMPONENT MODEL CREATE/UPDATE DTOs
-// Used for CRUD operations on hardware component definitions (hotends, extruders, etc.)
-// Response DTOs are defined in their respective files (HotendModelDto.cs, etc.)
+// COMPONENT MODEL DTOs
+// Response and CRUD DTOs for hardware component definitions (hotends, extruders,
+// toolheads, nozzles). Used by the catalog API for managing printer components.
 // ============================================================================
-#region Hotend Model DTOs
+#region Response DTOs
+
+/// <summary>
+/// Hotend model catalog entry returned from API queries.
+/// Contains all hotend properties including manufacturer details and nozzle compatibility.
+/// </summary>
+/// <param name="Id">Unique identifier for this hotend model.</param>
+/// <param name="Name">Name of the hotend model (e.g., "Dragon HF", "Mosquito").</param>
+/// <param name="ManufacturerId">ID of the manufacturer.</param>
+/// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
+/// <param name="MaxTemp">Maximum temperature rating in °C.</param>
+/// <param name="IsHighFlow">Whether this is a high-flow variant.</param>
+/// <param name="NozzleInterface">Nozzle interface type that determines compatible nozzles.</param>
+/// <param name="Description">Optional description or notes.</param>
+/// <param name="Url">Optional product page URL.</param>
+public record HotendModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    int? MaxTemp = null,
+    bool IsHighFlow = false,
+    NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
+    string? Description = null,
+    string? Url = null);
+
+/// <summary>
+/// Extruder model catalog entry returned from API queries.
+/// Contains extruder properties including gear ratio and drive type.
+/// </summary>
+/// <param name="Id">Unique identifier for this extruder model.</param>
+/// <param name="Name">Name of the extruder model (e.g., "BMG", "Orbiter 2.0").</param>
+/// <param name="ManufacturerId">ID of the manufacturer.</param>
+/// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
+/// <param name="GearRatio">Gear ratio (e.g., "3:1", "7.5:1").</param>
+/// <param name="IsDirectDrive">Whether this is a direct drive extruder.</param>
+/// <param name="Description">Optional description or notes.</param>
+/// <param name="Url">Optional product page URL.</param>
+public record ExtruderModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    string? GearRatio = null,
+    bool IsDirectDrive = true,
+    string? Description = null,
+    string? Url = null);
+
+/// <summary>
+/// Toolhead model catalog entry returned from API queries.
+/// Contains toolhead properties including default component associations.
+/// </summary>
+/// <param name="Id">Unique identifier for this toolhead model.</param>
+/// <param name="Name">Name of the toolhead model (e.g., "StealthBurner", "DragonBurner").</param>
+/// <param name="ManufacturerId">ID of the manufacturer.</param>
+/// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
+/// <param name="Description">Optional description or notes.</param>
+/// <param name="Url">Optional product or documentation URL.</param>
+/// <param name="DefaultHotendId">Default hotend for this toolhead (auto-populated on selection).</param>
+/// <param name="DefaultExtruderId">Default extruder for this toolhead (auto-populated on selection).</param>
+/// <param name="DefaultNozzleId">Default nozzle for this toolhead (auto-populated on selection).</param>
+public record ToolheadModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    string? Description = null,
+    string? Url = null,
+    Guid? DefaultHotendId = null,
+    Guid? DefaultExtruderId = null,
+    Guid? DefaultNozzleId = null);
+
+/// <summary>
+/// Nozzle model catalog entry returned from API queries.
+/// Contains nozzle properties including temperature rating and interface type.
+/// </summary>
+/// <param name="Id">Unique identifier for this nozzle model.</param>
+/// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium").</param>
+/// <param name="ManufacturerId">ID of the manufacturer.</param>
+/// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
+/// <param name="MaxTemp">Maximum temperature rating in °C.</param>
+/// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments.</param>
+/// <param name="NozzleInterface">Nozzle interface type that determines compatible hotends.</param>
+/// <param name="Description">Optional description or notes.</param>
+/// <param name="Url">Optional product page URL.</param>
+public record NozzleModelDto(
+    Guid Id,
+    string Name,
+    Guid ManufacturerId,
+    string? ManufacturerName = null,
+    int? MaxTemp = null,
+    bool IsHardened = false,
+    NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
+    string? Description = null,
+    string? Url = null);
+
+#endregion
+
+#region Create/Update DTOs - Hotend
 
 /// <summary>
 /// DTO for creating a new hotend model definition.

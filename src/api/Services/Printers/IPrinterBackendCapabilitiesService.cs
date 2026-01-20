@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Printers;
 

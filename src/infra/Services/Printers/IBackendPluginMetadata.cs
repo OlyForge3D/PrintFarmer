@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Lightweight abstraction for backend plugin metadata.

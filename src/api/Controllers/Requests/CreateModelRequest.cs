@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace Farm.Web.Api.Controllers.Requests;

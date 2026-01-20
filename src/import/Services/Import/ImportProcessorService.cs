@@ -312,7 +312,7 @@ public class ImportProcessorService : IImportProcessorService
             BedTemp: null,
             HotendTarget: null,
             BedTarget: null,
-            Backend: (Farm.Infrastructure.PrinterBackend)p.Backend,
+            Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress,

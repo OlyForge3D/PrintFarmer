@@ -6,7 +6,7 @@ using Farm.Infrastructure.Annotations;
 
 namespace Farm.Infrastructure.Domain;
 
-public class Action
+public class UserAction
 {
     public Guid Id { get; set; }
 

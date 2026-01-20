@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Catalog;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Web.Api.Controllers.Requests;
 
 namespace Farm.Web.Api.Services.Catalog;

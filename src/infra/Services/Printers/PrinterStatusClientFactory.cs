@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 

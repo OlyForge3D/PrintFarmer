@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Contracts.Printers.PrusaLink;
 
