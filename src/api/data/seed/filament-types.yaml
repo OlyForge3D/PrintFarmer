@@ -1,0 +1,215 @@
+# PrintFarmer Filament Type Seed Data
+# Schema: printfarmer/filament-types/v1
+#
+# This file defines supported filament types with default temperature settings
+# and material characteristics.
+#
+# Format:
+# - name: Filament type name (e.g., "PLA", "PETG", "ABS")
+#   defaultHotendTemp: Default hotend temperature in Celsius
+#   defaultBedTemp: Default bed temperature in Celsius
+#   isAbrasive: Whether filament contains abrasive particles (requires hardened nozzle)
+#   needsEnclosure: Whether filament requires an enclosure for optimal printing
+
+# Standard filaments
+- name: PLA
+  defaultHotendTemp: 205
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: PLA+
+  defaultHotendTemp: 210
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: PETG
+  defaultHotendTemp: 240
+  defaultBedTemp: 85
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: ABS
+  defaultHotendTemp: 245
+  defaultBedTemp: 100
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: ASA
+  defaultHotendTemp: 250
+  defaultBedTemp: 100
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: TPU
+  defaultHotendTemp: 220
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: TPU-95A
+  defaultHotendTemp: 230
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: TPU-85A
+  defaultHotendTemp: 215
+  defaultBedTemp: 50
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: FLEX
+  defaultHotendTemp: 225
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+# Engineering filaments
+- name: PC
+  defaultHotendTemp: 270
+  defaultBedTemp: 110
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: PCTG
+  defaultHotendTemp: 235
+  defaultBedTemp: 80
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: PET
+  defaultHotendTemp: 235
+  defaultBedTemp: 80
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: PP
+  defaultHotendTemp: 230
+  defaultBedTemp: 85
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: PHAT
+  defaultHotendTemp: 240
+  defaultBedTemp: 90
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: Nylon
+  defaultHotendTemp: 260
+  defaultBedTemp: 70
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: PA6
+  defaultHotendTemp: 260
+  defaultBedTemp: 80
+  isAbrasive: false
+  needsEnclosure: true
+
+- name: PA12
+  defaultHotendTemp: 250
+  defaultBedTemp: 75
+  isAbrasive: false
+  needsEnclosure: true
+
+# Carbon fiber composites (abrasive - requires hardened nozzle)
+- name: PLA-CF
+  defaultHotendTemp: 220
+  defaultBedTemp: 60
+  isAbrasive: true
+  needsEnclosure: false
+
+- name: PETG-CF
+  defaultHotendTemp: 255
+  defaultBedTemp: 85
+  isAbrasive: true
+  needsEnclosure: false
+
+- name: PET-CF
+  defaultHotendTemp: 255
+  defaultBedTemp: 85
+  isAbrasive: true
+  needsEnclosure: false
+
+- name: ABS-CF
+  defaultHotendTemp: 260
+  defaultBedTemp: 100
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: ASA-CF
+  defaultHotendTemp: 260
+  defaultBedTemp: 100
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: PA6-CF
+  defaultHotendTemp: 280
+  defaultBedTemp: 90
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: PA12-CF
+  defaultHotendTemp: 270
+  defaultBedTemp: 85
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: PC-CF
+  defaultHotendTemp: 280
+  defaultBedTemp: 110
+  isAbrasive: true
+  needsEnclosure: true
+
+# Glass fiber composites (abrasive - requires hardened nozzle)
+- name: ABS-GF
+  defaultHotendTemp: 255
+  defaultBedTemp: 100
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: ASA-GF
+  defaultHotendTemp: 255
+  defaultBedTemp: 100
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: PA6-GF
+  defaultHotendTemp: 275
+  defaultBedTemp: 90
+  isAbrasive: true
+  needsEnclosure: true
+
+- name: PP-GF
+  defaultHotendTemp: 240
+  defaultBedTemp: 85
+  isAbrasive: true
+  needsEnclosure: true
+
+# Specialty filaments
+- name: Wood
+  defaultHotendTemp: 210
+  defaultBedTemp: 65
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: Glow-in-the-Dark
+  defaultHotendTemp: 210
+  defaultBedTemp: 60
+  isAbrasive: true  # Contains phosphorescent particles
+  needsEnclosure: false
+
+- name: Silk PLA
+  defaultHotendTemp: 210
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
+
+- name: Matte PLA
+  defaultHotendTemp: 205
+  defaultBedTemp: 60
+  isAbrasive: false
+  needsEnclosure: false
