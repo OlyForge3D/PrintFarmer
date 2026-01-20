@@ -104,7 +104,7 @@ public class YamlSeedDataReader : IYamlSeedDataReader
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SeedData] Error reading YAML file {FilePath} for {DataType}: {Message}", filePath, dataType, ex.Message);
+            _logger.LogError(ex, "[SeedData] Error reading YAML file for {DataType}: {Message}", dataType, ex.Message);
             throw new InvalidOperationException($"Failed to read {dataType} from YAML file: {filePath}", ex);
         }
     }
