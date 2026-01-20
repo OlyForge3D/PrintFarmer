@@ -95,9 +95,4 @@ public interface ICatalogRepository
     Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
 
     Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
-
-    // OEM component lookups - find stock/OEM parts for a manufacturer
-    Task<Guid?> GetOemHotendIdAsync(Guid manufacturerId, CancellationToken ct = default);
-
-    Task<Guid?> GetOemExtruderIdAsync(Guid manufacturerId, CancellationToken ct = default);
 }

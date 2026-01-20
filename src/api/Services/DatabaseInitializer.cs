@@ -675,20 +675,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             // ===== HOTEND MODELS =====
             var hotendSeeds = new (string Name, string Mfg, int MaxTemp, bool IsHighFlow, string Desc, string? Url)[]
             {
-                // Stock/OEM options - for unmodified/default hotends per manufacturer
-                ("OEM Hotend", "Unknown", 280, false, "Generic stock hotend for unknown printers", null),
-                ("OEM Hotend", "Elegoo", 300, false, "Factory hotend for Elegoo printers", null),
-                ("OEM Hotend", "Eryone", 300, false, "Factory hotend for Eryone printers", null),
-                ("OEM Hotend", "Flashforge", 280, false, "Factory hotend for Flashforge printers", null),
-                ("OEM Hotend", "Phrozen", 280, false, "Factory hotend for Phrozen printers", null),
-                ("OEM Hotend", "PrintersForAnts", 300, false, "Factory hotend for PrintersForAnts printers", null),
-                ("OEM Hotend", "Prusa", 290, false, "Factory hotend for Prusa printers", "https://www.prusa3d.com"),
-                ("OEM Hotend", "Qidi", 300, true, "Factory hotend for Qidi printers", null),
-                ("OEM Hotend", "Sovol", 300, false, "Factory hotend for Sovol printers", null),
-                ("OEM Hotend", "Ratrig", 300, false, "Factory hotend for Ratrig printers", null),
-                ("OEM Hotend", "Voron", 300, false, "Factory hotend for Voron printers (varies by build)", null),
-                ("OEM Hotend", "Bambu Lab", 300, true, "Factory hotend for Bambu Lab printers", "https://bambulab.com"),
-
                 // Bambu Lab - Model-specific hotends
                 ("X1 Series Hotend", "Bambu Lab", 300, true, "Stock hotend for Bambu Lab X1, X1C, X1E series with ceramic heater", "https://bambulab.com/en/x1"),
                 ("P1 Series Hotend", "Bambu Lab", 300, true, "Stock hotend for Bambu Lab P1P, P1S series", "https://bambulab.com/en/p1"),
@@ -818,25 +804,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             // ===== EXTRUDER MODELS =====
             var extruderSeeds = new (string Name, string Mfg, string GearRatio, bool IsDirectDrive, string Desc, string? Url)[]
             {
-                // Stock/OEM options - for unmodified/default extruders per manufacturer
-                ("OEM Extruder", "Unknown", "N/A", false, "Generic stock extruder for unknown printers", null),
-                ("OEM Extruder", "Elegoo", "3:1", true, "Factory extruder for Elegoo printers", null),
-                ("OEM Extruder", "Eryone", "3:1", true, "Factory extruder for Eryone printers", null),
-                ("OEM Extruder", "Flashforge", "3:1", false, "Factory extruder for Flashforge printers", null),
-                ("OEM Extruder", "Phrozen", "3:1", false, "Factory extruder for Phrozen printers", null),
-                ("OEM Extruder", "PrintersForAnts", "3:1", true, "Factory extruder for PrintersForAnts printers", null),
-                ("OEM Extruder", "Prusa", "3:1", true, "Factory extruder for Prusa printers", "https://www.prusa3d.com"),
-
                 // Prusa - Specific extruder models
                 ("MK3S Extruder", "Prusa", "3:1", true, "Stock extruder for MK3S/MK3S+, compatible with V6-style hotends", "https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/"),
                 ("Mini Extruder", "Prusa", "3:1", false, "Bowden extruder for Prusa Mini/Mini+, mounted on frame", "https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/"),
                 ("Nextruder Extruder", "Prusa", "4:1", true, "Planetary gearbox extruder in Nextruder toolhead for MK3.9S, MK4, MK4S, CORE One", "https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/"),
-
-                ("OEM Extruder", "Qidi", "3:1", true, "Factory extruder for Qidi printers", null),
-                ("OEM Extruder", "Sovol", "3:1", true, "Factory extruder for Sovol printers", null),
-                ("OEM Extruder", "Ratrig", "3:1", true, "Factory extruder for Ratrig printers", null),
-                ("OEM Extruder", "Voron", "3:1", true, "Factory extruder for Voron printers (varies by build)", null),
-                ("OEM Extruder", "Bambu Lab", "3:1", true, "Factory extruder for Bambu Lab printers", "https://bambulab.com"),
 
                 // Bambu Lab - Model-specific extruders
                 ("X1 Series Extruder", "Bambu Lab", "3.5:1", true, "Stock direct drive extruder for X1, X1C, X1E", "https://bambulab.com/en/x1"),
@@ -934,33 +905,17 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             // Note: Many toolheads are community designs without a specific manufacturer
             var toolheadSeeds = new (string Name, string? Mfg, string Desc, string? Url)[]
             {
-                // Stock/OEM options - for unmodified/default toolheads per manufacturer
-                ("OEM Toolhead", "Unknown", "Generic stock toolhead for unknown printers", null),
-                ("OEM Toolhead", "Elegoo", "Factory toolhead for Elegoo printers", null),
-                ("OEM Toolhead", "Eryone", "Factory toolhead for Eryone printers", null),
-                ("OEM Toolhead", "Flashforge", "Factory toolhead for Flashforge printers", null),
-                ("OEM Toolhead", "Phrozen", "Factory toolhead for Phrozen printers", null),
-                ("OEM Toolhead", "Prusa", "Factory toolhead for Prusa printers", "https://www.prusa3d.com"),
-
-                // Prusa - Specific toolhead models
+                // Prusa - Model-specific toolheads
+                ("MK3S Toolhead", "Prusa", "Stock toolhead for Prusa MK3S/MK3S+ with E3D V6-style hotend", "https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/"),
+                ("Mini Toolhead", "Prusa", "Stock bowden toolhead for Prusa Mini/Mini+", "https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/"),
                 ("Nextruder", "Prusa", "Integrated direct drive toolhead for MK3.9S, MK4, MK4S, CORE One", "https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/"),
-
-                ("OEM Toolhead", "Qidi", "Factory toolhead for Qidi printers", null),
-                ("OEM Toolhead", "Sovol", "Factory toolhead for Sovol printers", null),
-                ("OEM Toolhead", "Ratrig", "Factory toolhead for Ratrig printers", null),
-                ("OEM Toolhead", "Bambu Lab", "Factory toolhead for Bambu Lab printers", "https://bambulab.com"),
+                ("XL Toolhead", "Prusa", "Toolchanger-compatible toolhead for Prusa XL", "https://www.prusa3d.com/product/original-prusa-xl/"),
 
                 // Bambu Lab - Model-specific toolheads
                 ("X1 Series Toolhead", "Bambu Lab", "Stock toolhead for Bambu Lab X1, X1C, X1E series", "https://bambulab.com/en/x1"),
                 ("P1 Series Toolhead", "Bambu Lab", "Stock toolhead for Bambu Lab P1P, P1S series", "https://bambulab.com/en/p1"),
                 ("A1 Toolhead", "Bambu Lab", "Stock toolhead for Bambu Lab A1 series", "https://bambulab.com/en/a1"),
                 ("A1 Mini Toolhead", "Bambu Lab", "Compact toolhead for Bambu Lab A1 Mini", "https://bambulab.com/en/a1-mini"),
-
-                // Prusa - Model-specific toolheads
-                ("MK3S Toolhead", "Prusa", "Stock toolhead for Prusa MK3S/MK3S+ with E3D V6-style hotend", "https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/"),
-                ("Mini Toolhead", "Prusa", "Stock bowden toolhead for Prusa Mini/Mini+", "https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/"),
-                ("Nextruder", "Prusa", "Integrated direct drive toolhead for MK3.9S, MK4, MK4S, CORE One", "https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/"),
-                ("XL Toolhead", "Prusa", "Toolchanger-compatible toolhead for Prusa XL", "https://www.prusa3d.com/product/original-prusa-xl/"),
 
                 // Creality - Model-specific toolheads
                 ("Sprite Pro Toolhead", "Creality", "Sprite Pro toolhead for Ender-3 S1 and derivatives", "https://www.creality.com"),
@@ -974,8 +929,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
                 // Sovol - Model-specific toolheads
                 ("SV08 Toolhead", "Sovol", "Stock toolhead for Sovol SV08", "https://sovol3d.com"),
-                ("OEM Toolhead", "Creality", "Factory toolhead for Creality printers", null),
-                ("OEM Toolhead", "Anycubic", "Factory toolhead for Anycubic printers", null),
 
                 // Voron official/community
                 ("StealthBurner", "Voron", "Enclosed direct drive toolhead for Voron", "https://github.com/VoronDesign/Voron-Stealthburner"),
@@ -1332,24 +1285,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 .GroupBy(n => n.Name)
                 .Select(g => g.First())
                 .ToDictionaryAsync(n => n.Name, n => n.Id);
-
-            // Build lookup for OEM components by manufacturer ID (fallback)
-            // Use GroupBy to handle potential duplicates (e.g., if OEM Hotend was seeded twice for same manufacturer)
-            Dictionary<Guid, Guid> oemHotendByManufacturer = (await _context.HotendModelDefinitions
-                .Where(h => h.Name == "OEM Hotend")
-                .ToListAsync())
-                .GroupBy(h => h.ManufacturerId)
-                .ToDictionary(g => g.Key, g => g.First().Id);
-            Dictionary<Guid, Guid> oemExtruderByManufacturer = (await _context.ExtruderModelDefinitions
-                .Where(e => e.Name == "OEM Extruder")
-                .ToListAsync())
-                .GroupBy(e => e.ManufacturerId)
-                .ToDictionary(g => g.Key, g => g.First().Id);
-            Dictionary<Guid, Guid> oemToolheadByManufacturer = (await _context.ToolheadModelDefinitions
-                .Where(t => t.Name == "OEM Toolhead")
-                .ToListAsync())
-                .GroupBy(t => t.ManufacturerId)
-                .ToDictionary(g => g.Key, g => g.First().Id);
 
             // Get "Unknown" manufacturer ID for fallback
             Guid unknownMfgId = await _context.Manufacturers
@@ -2046,7 +1981,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
 
         // Build name-to-ID lookup dictionaries for all component types
-        // This is the same pattern that would be used when loading from external files
         Dictionary<string, Guid> hotendLookup = await _context.HotendModelDefinitions
             .AsNoTracking()
             .ToDictionaryAsync(h => h.Name, h => h.Id);
