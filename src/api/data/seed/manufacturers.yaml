@@ -1,0 +1,43 @@
+# PrintFarmer Manufacturer Seed Data
+# Schema: printfarmer/manufacturers/v1
+#
+# This file contains manufacturer definitions for 3D printers and components.
+# Manufacturers are referenced by name in other seed files (printer-models.yaml, components/*.yaml).
+#
+# Format:
+# - name: Manufacturer display name (e.g., "Prusa", "Voron", "Bambu Lab")
+#
+# Default manufacturers provided for seeding new installations.
+# Users can add custom manufacturers by editing this file and reloading seed data.
+
+- name: Unknown  # Default for unidentified manufacturers - must be first
+- name: Generic  # For generic/unbranded components
+- name: Elegoo
+- name: Eryone
+- name: Flashforge
+- name: Phrozen
+- name: PrintersForAnts  # Community derivative of Voron
+- name: Prusa
+- name: Qidi
+- name: Sovol
+- name: Ratrig
+- name: Voron
+- name: Creality
+- name: Anycubic
+- name: Bambu Lab  # Popular ecosystem for hotend adaptations
+
+# Component manufacturers (hotends, extruders, nozzles, toolheads)
+- name: Phaetus            # Dragon, Rapido series
+- name: Slice Engineering  # Mosquito, Copperhead, Mako
+- name: E3D                # V6, Revo series
+- name: Bondtech           # BMG, LGX series
+- name: TriangleLabs       # CHC clones, nozzles
+- name: West3D             # Undertaker nozzles
+- name: BIQU               # Panda Revo, H2
+- name: LDO                # Motors, kits
+- name: Orbiter            # Orbiter extruders
+- name: Microswiss         # All-metal hotends
+- name: DropEffect         # NextG hotends
+- name: Mellow             # NF-Zone, CNC parts
+- name: Fysetc             # Budget boards and parts
+- name: Community          # OpenSource community contributors
