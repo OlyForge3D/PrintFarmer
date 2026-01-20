@@ -64,7 +64,7 @@ import {
   GcodeHarvestResultDto,
   BulkImportResponse,
 } from "@/types/api";
-import type { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
+import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
 export class ApiClient {
@@ -2211,7 +2211,7 @@ export class ApiClient {
   /**
    * Get password policy settings
    */
-  async getPasswordPolicy(): Promise<Response> {
+  async getPasswordPolicy(): Promise<AxiosResponse> {
     return this.client.get('/settings/security/password-policy');
   }
 
@@ -2420,7 +2420,7 @@ export class ApiClient {
   /**
    * Update password policy settings
    */
-  async updatePasswordPolicy(policy: Record<string, unknown>): Promise<Response> {
+  async updatePasswordPolicy(policy: Record<string, unknown>): Promise<AxiosResponse> {
     return this.client.put('/settings/security/password-policy', policy);
   }
 

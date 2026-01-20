@@ -139,8 +139,8 @@ export function UserManagementPage() {
 
     // If both empty, reset statuses
     if (!username && !email) {
-      if (usernameStatus !== 'idle') setUsernameStatus('idle');
-      if (emailStatus !== 'idle') setEmailStatus('idle');
+      setUsernameStatus('idle');
+      setEmailStatus('idle');
       return;
     }
 
@@ -172,7 +172,9 @@ export function UserManagementPage() {
       clearTimeout(handle);
       ctrl.abort();
     };
-  }, [newUser.username, newUser.email, showCreateModal, emailStatus, usernameStatus]);
+    // Note: emailStatus/usernameStatus intentionally NOT in deps to avoid infinite loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newUser.username, newUser.email, showCreateModal]);
 
   const validateForm = () => {
     const errs: CreateUserFormState['errors'] = {};
@@ -275,6 +277,25 @@ export function UserManagementPage() {
       setShowCreateModal(true);
     }
   });
+
+  // Load users and roles on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [usersData, rolesData] = await Promise.all([
+          apiClient.getUsers(),
+          apiClient.getRoles()
+        ]);
+        setUsers((usersData as unknown) as User[]);
+        setRoles((rolesData as unknown) as Role[]);
+      } catch (error) {
+        console.error('Error loading user management data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
 
   // Keyboard shortcut: 'k' to create new user
   useEffect(() => {
