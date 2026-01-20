@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, NozzleTypeStringLabels, ToolheadType, ToolheadTypeLabels } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, ToolheadType, ToolheadTypeLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -175,11 +175,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       if (current.name !== original.name) return true;
       if (current.index !== original.index) return true;
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
-      if (current.nozzleType !== original.nozzleType) return true;
       if (current.maxHotendTemp !== original.maxHotendTemp) return true;
       if (current.maxFlowRate !== original.maxFlowRate) return true;
       if (current.toolheadType !== original.toolheadType) return true;
-      // Component model IDs (database-backed)
+      // Component model IDs (database-backed) - nozzle type comes from nozzle model
       if (current.hotendModelId !== original.hotendModelId) return true;
       if (current.extruderModelId !== original.extruderModelId) return true;
       if (current.toolheadModelDefId !== original.toolheadModelDefId) return true;
@@ -750,7 +749,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                           </div>
 
                           {/* Nozzle */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <FormField label="Nozzle Diameter (mm)" htmlFor={`toolhead-nozzle-${index}`}>
                               <Input
                                 id={`toolhead-nozzle-${index}`}
@@ -760,18 +759,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                                 onChange={e => handleToolheadChange(toolhead.id!, 'nozzleDiameter', e.target.value ? parseFloat(e.target.value) : undefined)}
                                 placeholder="0.4"
                               />
-                            </FormField>
-                            <FormField label="Nozzle Type" htmlFor={`toolhead-nozzle-type-${index}`}>
-                              <Select
-                                id={`toolhead-nozzle-type-${index}`}
-                                value={toolhead.nozzleType?.toString() ?? ''}
-                                onChange={e => handleToolheadChange(toolhead.id!, 'nozzleType', e.target.value || undefined)}
-                              >
-                                <option value="">Select nozzle type...</option>
-                                {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
-                                  <option key={value} value={value}>{label}</option>
-                                ))}
-                              </Select>
                             </FormField>
                             <FormField label="Nozzle Model" htmlFor={`toolhead-nozzle-model-${index}`}>
                               <Select

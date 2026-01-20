@@ -977,7 +977,7 @@ public class PrintersService(
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
-                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter,
+                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleModel?.Diameter ?? 0.4,
                     SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                     MaxBuildVolumeX = p.MaxBuildVolumeX,
                     MaxBuildVolumeY = p.MaxBuildVolumeY,
@@ -1053,13 +1053,12 @@ public class PrintersService(
                 ["id"] = t.Id,
                 ["name"] = t.Name,
                 ["index"] = t.Index,
-                ["nozzleDiameter"] = t.NozzleDiameter,
-                ["nozzleType"] = t.NozzleType,
+                ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
                 ["maxHotendTemp"] = t.MaxHotendTemp,
                 ["maxFlowRate"] = t.MaxFlowRate,
                 ["toolheadType"] = t.ToolheadType,
 
-                // Component model references
+                // Component model references - nozzle type comes from NozzleModel.NozzleType
                 ["hotendModelId"] = t.HotendModelId,
                 ["hotendModelName"] = t.HotendModel?.Name,
                 ["extruderModelId"] = t.ExtruderModelId,
@@ -1068,6 +1067,9 @@ public class PrintersService(
                 ["toolheadModelDefName"] = t.ToolheadModelDef?.Name,
                 ["nozzleModelId"] = t.NozzleModelId,
                 ["nozzleModelName"] = t.NozzleModel?.Name,
+
+                // Include nozzle type from the nozzle model for API compatibility
+                ["nozzleType"] = t.NozzleModel?.NozzleType,
                 ["supportedMaterials"] = t.SupportedMaterials,
                 ["isPrimary"] = t.IsPrimary
             }).ToList() ?? new List<Dictionary<string, object?>>()
@@ -1295,13 +1297,11 @@ public class PrintersService(
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    NozzleDiameter = toolheadDto.NozzleDiameter ?? primaryModelToolhead?.NozzleDiameter ?? 0.4,
-                    NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : primaryModelToolhead?.NozzleType.HasValue == true ? (int)primaryModelToolhead.NozzleType!.Value : null,
                     MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
                     MaxFlowRate = toolheadDto.MaxFlowRate ?? primaryModelToolhead?.MaxFlowRate,
                     ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : primaryModelToolhead?.ToolheadType.HasValue == true ? (int)primaryModelToolhead.ToolheadType!.Value : null,
 
-                    // Component model references
+                    // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = toolheadDto.HotendModelId ?? primaryModelToolhead?.HotendModelId,
                     ExtruderModelId = toolheadDto.ExtruderModelId ?? primaryModelToolhead?.ExtruderModelId,
                     ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? primaryModelToolhead?.ToolheadModelDefId,
@@ -1330,13 +1330,11 @@ public class PrintersService(
                     Name = templateToolhead?.Name ?? $"Extruder {i + 1}",
                     Index = i,
                     IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
-                    NozzleDiameter = templateToolhead?.NozzleDiameter ?? 0.4,
-                    NozzleType = templateToolhead?.NozzleType.HasValue == true ? (int)templateToolhead.NozzleType!.Value : null,
                     MaxHotendTemp = templateToolhead?.MaxHotendTemp,
                     MaxFlowRate = templateToolhead?.MaxFlowRate,
                     ToolheadType = templateToolhead?.ToolheadType.HasValue == true ? (int)templateToolhead.ToolheadType!.Value : null,
 
-                    // Component model references
+                    // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = templateToolhead?.HotendModelId,
                     ExtruderModelId = templateToolhead?.ExtruderModelId,
                     ToolheadModelDefId = templateToolhead?.ToolheadModelDefId,
@@ -1463,9 +1461,10 @@ public class PrintersService(
                 // Find matching toolhead template by index, otherwise use default
                 PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
 
-                if (matchingTemplate?.NozzleDiameter != null && (forceOverwrite || toolhead.NozzleDiameter == null))
+                // Apply NozzleModelId from template (nozzle diameter is derived from the nozzle model)
+                if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
                 {
-                    toolhead.NozzleDiameter = matchingTemplate.NozzleDiameter;
+                    toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }

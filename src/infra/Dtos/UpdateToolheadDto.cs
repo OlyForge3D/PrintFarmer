@@ -14,8 +14,6 @@ public record UpdateToolheadDto(
     Guid Id,
     string? Name = null,
     int? Index = null,
-    double? NozzleDiameter = null,
-    NozzleType? NozzleType = null,
     int? MaxHotendTemp = null,
     double? MaxFlowRate = null,
     ToolheadType? ToolheadType = null,

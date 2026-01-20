@@ -93,7 +93,7 @@ namespace Farm.Web.Api.Services.Queue
                     CurrentJobId = currentJob?.Id,
                     CurrentJobName = currentJob?.Name,
                     EstimatedCompletionTime = CalculateEstimatedCompletionTime(queuedJobs, currentJob),
-                    NozzleDiameter = primaryToolhead?.NozzleDiameter,
+                    NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                     SupportedMaterials = supportedMaterials
                 });
             }
@@ -434,11 +434,11 @@ namespace Farm.Web.Api.Services.Queue
 
             foreach (Printer printer in printers)
             {
-                // Check nozzle diameter - now per-toolhead, check if any toolhead matches
+                // Check nozzle diameter - now per-toolhead, check if any toolhead's nozzle model matches
                 if (request.RequiredNozzleDiameter.HasValue)
                 {
                     double requiredDiameter = (double)request.RequiredNozzleDiameter;
-                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.NozzleDiameter.HasValue && Math.Abs(t.NozzleDiameter.Value - requiredDiameter) <= 0.01) ?? false;
+                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.NozzleModel != null && Math.Abs(t.NozzleModel.Diameter - requiredDiameter) <= 0.01) ?? false;
                     if (!hasCompatibleToolhead)
                     {
                         continue;

@@ -976,90 +976,90 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             }
 
             // ===== NOZZLE MODELS =====
-            // Format: (Name, Mfg, MaxTemp, IsHardened, NozzleInterface, Description, Url)
-            var nozzleSeeds = new (string Name, string Mfg, int MaxTemp, bool IsHardened, NozzleInterfaceType Interface, string Desc, string? Url)[]
+            // Format: (Name, Mfg, MaxTemp, NozzleType, NozzleInterface, Description, Url)
+            var nozzleSeeds = new (string Name, string Mfg, int MaxTemp, NozzleType NozzleType, NozzleInterfaceType Interface, string Desc, string? Url)[]
             {
                 // Generic nozzles for V6 interface (standard E3D-style thread)
-                ("Brass Nozzle", "Generic", 300, false, NozzleInterfaceType.V6, "Standard brass nozzle, not suitable for abrasive filaments", null),
-                ("Hardened Steel Nozzle", "Generic", 500, true, NozzleInterfaceType.V6, "Generic hardened steel nozzle for abrasive filaments", null),
-                ("Stainless Steel Nozzle", "Generic", 300, false, NozzleInterfaceType.V6, "Generic stainless steel nozzle", null),
+                ("Brass Nozzle", "Generic", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Standard brass nozzle, not suitable for abrasive filaments", null),
+                ("Hardened Steel Nozzle", "Generic", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Generic hardened steel nozzle for abrasive filaments", null),
+                ("Stainless Steel Nozzle", "Generic", 300, NozzleType.StainlessSteel, NozzleInterfaceType.V6, "Generic stainless steel nozzle", null),
 
                 // Generic nozzles for Volcano interface (extended melt zone)
-                ("Volcano Brass Nozzle", "Generic", 300, false, NozzleInterfaceType.Volcano, "Generic Volcano-length brass nozzle for high flow", null),
-                ("Volcano Hardened Steel Nozzle", "Generic", 500, true, NozzleInterfaceType.Volcano, "Generic Volcano-length hardened steel nozzle", null),
+                ("Volcano Brass Nozzle", "Generic", 300, NozzleType.Brass, NozzleInterfaceType.Volcano, "Generic Volcano-length brass nozzle for high flow", null),
+                ("Volcano Hardened Steel Nozzle", "Generic", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Generic Volcano-length hardened steel nozzle", null),
 
                 // Slice Engineering (V6 interface)
-                ("Vanadium", "Slice Engineering", 500, true, NozzleInterfaceType.V6, "Extreme wear resistance", "https://www.sliceengineering.com/products/vanadium-nozzle"),
-                ("BridgeMaster", "Slice Engineering", 300, false, NozzleInterfaceType.V6, "Optimized for bridging", "https://www.sliceengineering.com/products/bridgemaster-nozzle"),
-                ("GammaMaster", "Slice Engineering", 300, true, NozzleInterfaceType.V6, "Precision nozzle", "https://www.sliceengineering.com/products/gammamaster-nozzle"),
+                ("Vanadium", "Slice Engineering", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Extreme wear resistance", "https://www.sliceengineering.com/products/vanadium-nozzle"),
+                ("BridgeMaster", "Slice Engineering", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Optimized for bridging", "https://www.sliceengineering.com/products/bridgemaster-nozzle"),
+                ("GammaMaster", "Slice Engineering", 300, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Precision nozzle", "https://www.sliceengineering.com/products/gammamaster-nozzle"),
 
                 // West3D
-                ("Undertaker", "West3D", 500, true, NozzleInterfaceType.V6, "High flow hardened nozzle", "https://west3d.com/products/undertaker-nozzle"),
-                ("Undertaker Volcano", "West3D", 500, true, NozzleInterfaceType.Volcano, "Volcano-style Undertaker", "https://west3d.com/products/undertaker-volcano-nozzle"),
+                ("Undertaker", "West3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "High flow hardened nozzle", "https://west3d.com/products/undertaker-nozzle"),
+                ("Undertaker Volcano", "West3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Volcano-style Undertaker", "https://west3d.com/products/undertaker-volcano-nozzle"),
 
                 // E3D - V6/Volcano threaded nozzles
-                ("V6 Brass", "E3D", 300, false, NozzleInterfaceType.V6, "Standard brass nozzle for V6 hotends, not for abrasives", "https://e3d-online.com/products/v6-brass-nozzle"),
-                ("V6 Hardened Steel", "E3D", 500, true, NozzleInterfaceType.V6, "Abrasion resistant nozzle for V6 hotends", "https://e3d-online.com/products/v6-hardened-steel-nozzle"),
-                ("V6 Plated Copper", "E3D", 500, false, NozzleInterfaceType.V6, "Nickel-plated copper for excellent thermal conductivity", "https://e3d-online.com/products/v6-plated-copper-nozzle"),
-                ("Volcano Brass", "E3D", 300, false, NozzleInterfaceType.Volcano, "Extended melt zone brass nozzle for high flow", "https://e3d-online.com/products/volcano-nozzle"),
-                ("Volcano Hardened Steel", "E3D", 500, true, NozzleInterfaceType.Volcano, "Volcano nozzle for abrasive filaments", "https://e3d-online.com/products/volcano-hardened-steel-nozzle"),
-                ("NozzleX", "E3D", 500, true, NozzleInterfaceType.V6, "WS2 coated hardened steel, excellent release and wear resistance", "https://e3d-online.com/products/nozzle-x"),
-                ("NozzleX Volcano", "E3D", 500, true, NozzleInterfaceType.Volcano, "NozzleX coating on Volcano-length nozzle", "https://e3d-online.com/products/nozzle-x-volcano"),
+                ("V6 Brass", "E3D", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Standard brass nozzle for V6 hotends, not for abrasives", "https://e3d-online.com/products/v6-brass-nozzle"),
+                ("V6 Hardened Steel", "E3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Abrasion resistant nozzle for V6 hotends", "https://e3d-online.com/products/v6-hardened-steel-nozzle"),
+                ("V6 Plated Copper", "E3D", 500, NozzleType.Brass, NozzleInterfaceType.V6, "Nickel-plated copper for excellent thermal conductivity", "https://e3d-online.com/products/v6-plated-copper-nozzle"),
+                ("Volcano Brass", "E3D", 300, NozzleType.Brass, NozzleInterfaceType.Volcano, "Extended melt zone brass nozzle for high flow", "https://e3d-online.com/products/volcano-nozzle"),
+                ("Volcano Hardened Steel", "E3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Volcano nozzle for abrasive filaments", "https://e3d-online.com/products/volcano-hardened-steel-nozzle"),
+                ("NozzleX", "E3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "WS2 coated hardened steel, excellent release and wear resistance", "https://e3d-online.com/products/nozzle-x"),
+                ("NozzleX Volcano", "E3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "NozzleX coating on Volcano-length nozzle", "https://e3d-online.com/products/nozzle-x-volcano"),
 
                 // E3D - Revo quick-swap nozzles (RapidChange system)
-                ("Revo Brass", "E3D", 300, false, NozzleInterfaceType.Revo, "Quick-swap brass nozzle for Revo hotends", "https://e3d-online.com/products/revo-nozzle"),
-                ("Revo High Flow", "E3D", 300, false, NozzleInterfaceType.Revo, "Revo nozzle with extended melt zone for faster printing", "https://e3d-online.com/products/revo-high-flow-nozzle"),
-                ("Revo ObXidian", "E3D", 500, true, NozzleInterfaceType.Revo, "Hardened Revo nozzle for abrasive materials like CF and GF", "https://e3d-online.com/products/revo-obxidian-nozzle"),
-                ("Revo Micro", "E3D", 250, false, NozzleInterfaceType.Revo, "Compact Revo nozzle for Revo Micro hotend", "https://e3d-online.com/products/revo-micro-nozzle"),
+                ("Revo Brass", "E3D", 300, NozzleType.Brass, NozzleInterfaceType.Revo, "Quick-swap brass nozzle for Revo hotends", "https://e3d-online.com/products/revo-nozzle"),
+                ("Revo High Flow", "E3D", 300, NozzleType.Brass, NozzleInterfaceType.Revo, "Revo nozzle with extended melt zone for faster printing", "https://e3d-online.com/products/revo-high-flow-nozzle"),
+                ("Revo ObXidian", "E3D", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Revo, "Hardened Revo nozzle for abrasive materials like CF and GF", "https://e3d-online.com/products/revo-obxidian-nozzle"),
+                ("Revo Micro", "E3D", 250, NozzleType.Brass, NozzleInterfaceType.Revo, "Compact Revo nozzle for Revo Micro hotend", "https://e3d-online.com/products/revo-micro-nozzle"),
 
                 // TriangleLabs - Hardened nozzles
-                ("ZS Nozzle", "TriangleLabs", 500, true, NozzleInterfaceType.V6, "Hardened steel V6-compatible nozzle", "https://www.aliexpress.com/item/1005001347220543.html"),
-                ("ZS Volcano", "TriangleLabs", 500, true, NozzleInterfaceType.Volcano, "Hardened steel Volcano-length nozzle", "https://www.aliexpress.com/item/1005001347220543.html"),
-                ("Ruby Nozzle", "TriangleLabs", 500, true, NozzleInterfaceType.V6, "Ruby-tipped nozzle for extreme abrasion resistance", "https://www.aliexpress.com/item/1005001543676594.html"),
-                ("Tungsten Carbide", "TriangleLabs", 500, true, NozzleInterfaceType.V6, "Budget tungsten carbide nozzle", "https://www.aliexpress.com/item/1005003456789012.html"),
+                ("ZS Nozzle", "TriangleLabs", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Hardened steel V6-compatible nozzle", "https://www.aliexpress.com/item/1005001347220543.html"),
+                ("ZS Volcano", "TriangleLabs", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Hardened steel Volcano-length nozzle", "https://www.aliexpress.com/item/1005001347220543.html"),
+                ("Ruby Nozzle", "TriangleLabs", 500, NozzleType.Abrasive, NozzleInterfaceType.V6, "Ruby-tipped nozzle for extreme abrasion resistance", "https://www.aliexpress.com/item/1005001543676594.html"),
+                ("Tungsten Carbide", "TriangleLabs", 500, NozzleType.TungstenCarbide, NozzleInterfaceType.V6, "Budget tungsten carbide nozzle", "https://www.aliexpress.com/item/1005003456789012.html"),
 
                 // TriangleLabs - CHC nozzles (CHC uses V6 thread)
-                ("CHC Nozzle", "TriangleLabs", 500, false, NozzleInterfaceType.V6, "For CHC ceramic heater hotends", "https://www.aliexpress.com/item/1005004566533274.html"),
-                ("CHC Hardened", "TriangleLabs", 500, true, NozzleInterfaceType.V6, "Hardened CHC nozzle for abrasives", "https://www.aliexpress.com/item/1005004566533274.html"),
+                ("CHC Nozzle", "TriangleLabs", 500, NozzleType.Brass, NozzleInterfaceType.V6, "For CHC ceramic heater hotends", "https://www.aliexpress.com/item/1005004566533274.html"),
+                ("CHC Hardened", "TriangleLabs", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Hardened CHC nozzle for abrasives", "https://www.aliexpress.com/item/1005004566533274.html"),
 
                 // TriangleLabs - Standard nozzles
-                ("V6 Brass", "TriangleLabs", 300, false, NozzleInterfaceType.V6, "Budget brass V6-compatible nozzle", "https://www.aliexpress.com/item/32851848033.html"),
-                ("V6 Hardened Steel", "TriangleLabs", 500, true, NozzleInterfaceType.V6, "Budget hardened steel V6 nozzle", "https://www.aliexpress.com/item/32851848033.html"),
-                ("Volcano Brass", "TriangleLabs", 300, false, NozzleInterfaceType.Volcano, "Budget brass Volcano nozzle", "https://www.aliexpress.com/item/32851848033.html"),
-                ("Volcano Hardened Steel", "TriangleLabs", 500, true, NozzleInterfaceType.Volcano, "Budget hardened Volcano nozzle", "https://www.aliexpress.com/item/32851848033.html"),
+                ("V6 Brass", "TriangleLabs", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Budget brass V6-compatible nozzle", "https://www.aliexpress.com/item/32851848033.html"),
+                ("V6 Hardened Steel", "TriangleLabs", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Budget hardened steel V6 nozzle", "https://www.aliexpress.com/item/32851848033.html"),
+                ("Volcano Brass", "TriangleLabs", 300, NozzleType.Brass, NozzleInterfaceType.Volcano, "Budget brass Volcano nozzle", "https://www.aliexpress.com/item/32851848033.html"),
+                ("Volcano Hardened Steel", "TriangleLabs", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Budget hardened Volcano nozzle", "https://www.aliexpress.com/item/32851848033.html"),
 
                 // Phaetus - Dragon/V6 compatible nozzles
-                ("PS Nozzle", "Phaetus", 300, false, NozzleInterfaceType.V6, "Plated steel nozzle, non-stick surface", "https://www.phaetus.com/products/ps-nozzle"),
-                ("Hardened Steel", "Phaetus", 500, true, NozzleInterfaceType.V6, "Hardened steel for abrasive filaments", "https://www.phaetus.com/products/hardened-steel-nozzle"),
-                ("Tungsten Carbide", "Phaetus", 500, true, NozzleInterfaceType.V6, "Maximum wear resistance for highly abrasive materials", "https://www.phaetus.com/products/tungsten-carbide-nozzle"),
-                ("Brass Nozzle", "Phaetus", 300, false, NozzleInterfaceType.V6, "Standard brass nozzle for Dragon/V6 hotends", "https://www.phaetus.com/products/brass-nozzle"),
+                ("PS Nozzle", "Phaetus", 300, NozzleType.StainlessSteel, NozzleInterfaceType.V6, "Plated steel nozzle, non-stick surface", "https://www.phaetus.com/products/ps-nozzle"),
+                ("Hardened Steel", "Phaetus", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Hardened steel for abrasive filaments", "https://www.phaetus.com/products/hardened-steel-nozzle"),
+                ("Tungsten Carbide", "Phaetus", 500, NozzleType.TungstenCarbide, NozzleInterfaceType.V6, "Maximum wear resistance for highly abrasive materials", "https://www.phaetus.com/products/tungsten-carbide-nozzle"),
+                ("Brass Nozzle", "Phaetus", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Standard brass nozzle for Dragon/V6 hotends", "https://www.phaetus.com/products/brass-nozzle"),
 
                 // Phaetus - Rapido-specific nozzles (Rapido uses V6 thread)
-                ("Rapido Brass", "Phaetus", 300, false, NozzleInterfaceType.V6, "Brass nozzle for Rapido hotends", "https://www.phaetus.com/products/rapido-nozzle"),
-                ("Rapido Hardened Steel", "Phaetus", 500, true, NozzleInterfaceType.V6, "Hardened steel for Rapido with abrasives", "https://www.phaetus.com/products/rapido-hardened-nozzle"),
-                ("Rapido Tungsten Carbide", "Phaetus", 500, true, NozzleInterfaceType.V6, "Maximum wear resistance Rapido nozzle", "https://www.phaetus.com/products/rapido-tc-nozzle"),
+                ("Rapido Brass", "Phaetus", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Brass nozzle for Rapido hotends", "https://www.phaetus.com/products/rapido-nozzle"),
+                ("Rapido Hardened Steel", "Phaetus", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Hardened steel for Rapido with abrasives", "https://www.phaetus.com/products/rapido-hardened-nozzle"),
+                ("Rapido Tungsten Carbide", "Phaetus", 500, NozzleType.TungstenCarbide, NozzleInterfaceType.V6, "Maximum wear resistance Rapido nozzle", "https://www.phaetus.com/products/rapido-tc-nozzle"),
 
                 // Bondtech - CHT (Clone Hotend Technology) high flow nozzles
-                ("CHT Brass", "Bondtech", 300, false, NozzleInterfaceType.V6, "High flow brass nozzle with multi-channel design", "https://www.bondtech.se/product/bondtech-cht-nozzle/"),
-                ("CHT Coated", "Bondtech", 500, true, NozzleInterfaceType.V6, "CHT with hardened coating for abrasive filaments", "https://www.bondtech.se/product/bondtech-cht-coated-nozzle/"),
-                ("CHT BiMetal", "Bondtech", 500, true, NozzleInterfaceType.V6, "Copper core with hardened steel tip for best of both worlds", "https://www.bondtech.se/product/bondtech-cht-bimetal-nozzle/"),
-                ("CHT Volcano", "Bondtech", 300, false, NozzleInterfaceType.Volcano, "CHT design in Volcano length for maximum flow", "https://www.bondtech.se/product/bondtech-cht-volcano-nozzle/"),
-                ("CHT Volcano Coated", "Bondtech", 500, true, NozzleInterfaceType.Volcano, "Coated CHT Volcano for abrasives", "https://www.bondtech.se/product/bondtech-cht-volcano-coated-nozzle/"),
+                ("CHT Brass", "Bondtech", 300, NozzleType.Brass, NozzleInterfaceType.V6, "High flow brass nozzle with multi-channel design", "https://www.bondtech.se/product/bondtech-cht-nozzle/"),
+                ("CHT Coated", "Bondtech", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "CHT with hardened coating for abrasive filaments", "https://www.bondtech.se/product/bondtech-cht-coated-nozzle/"),
+                ("CHT BiMetal", "Bondtech", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Copper core with hardened steel tip for best of both worlds", "https://www.bondtech.se/product/bondtech-cht-bimetal-nozzle/"),
+                ("CHT Volcano", "Bondtech", 300, NozzleType.Brass, NozzleInterfaceType.Volcano, "CHT design in Volcano length for maximum flow", "https://www.bondtech.se/product/bondtech-cht-volcano-nozzle/"),
+                ("CHT Volcano Coated", "Bondtech", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Volcano, "Coated CHT Volcano for abrasives", "https://www.bondtech.se/product/bondtech-cht-volcano-coated-nozzle/"),
 
                 // Bambu Lab - Model-specific nozzles (proprietary quick-swap system)
-                ("Bambu Brass Nozzle", "Bambu Lab", 300, false, NozzleInterfaceType.Proprietary, "Standard brass nozzle for Bambu Lab printers, quick-swap compatible", "https://bambulab.com"),
-                ("Bambu Hardened Steel Nozzle", "Bambu Lab", 500, true, NozzleInterfaceType.Proprietary, "Hardened steel nozzle for abrasive filaments on Bambu printers", "https://bambulab.com"),
-                ("Bambu Stainless Steel Nozzle", "Bambu Lab", 300, false, NozzleInterfaceType.Proprietary, "Stainless steel nozzle for corrosion resistance", "https://bambulab.com"),
+                ("Bambu Brass Nozzle", "Bambu Lab", 300, NozzleType.Brass, NozzleInterfaceType.Proprietary, "Standard brass nozzle for Bambu Lab printers, quick-swap compatible", "https://bambulab.com"),
+                ("Bambu Hardened Steel Nozzle", "Bambu Lab", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Proprietary, "Hardened steel nozzle for abrasive filaments on Bambu printers", "https://bambulab.com"),
+                ("Bambu Stainless Steel Nozzle", "Bambu Lab", 300, NozzleType.StainlessSteel, NozzleInterfaceType.Proprietary, "Stainless steel nozzle for corrosion resistance", "https://bambulab.com"),
 
                 // Prusa - Model-specific nozzles
-                ("Prusa V6 Brass Nozzle", "Prusa", 300, false, NozzleInterfaceType.V6, "Stock brass nozzle for MK3S and earlier models", "https://www.prusa3d.com"),
-                ("Prusa Hardened Steel Nozzle", "Prusa", 500, true, NozzleInterfaceType.V6, "Hardened steel nozzle for MK3S/MK4 with abrasives", "https://www.prusa3d.com"),
-                ("Nextruder Brass Nozzle", "Prusa", 300, false, NozzleInterfaceType.Proprietary, "Quick-swap brass nozzle for Nextruder toolhead", "https://www.prusa3d.com"),
-                ("Nextruder Hardened Steel Nozzle", "Prusa", 500, true, NozzleInterfaceType.Proprietary, "Quick-swap hardened steel for Nextruder with abrasives", "https://www.prusa3d.com"),
-                ("Nextruder High Flow Nozzle", "Prusa", 300, false, NozzleInterfaceType.Proprietary, "High flow nozzle for Nextruder, extended melt zone", "https://www.prusa3d.com"),
+                ("Prusa V6 Brass Nozzle", "Prusa", 300, NozzleType.Brass, NozzleInterfaceType.V6, "Stock brass nozzle for MK3S and earlier models", "https://www.prusa3d.com"),
+                ("Prusa Hardened Steel Nozzle", "Prusa", 500, NozzleType.HardenedSteel, NozzleInterfaceType.V6, "Hardened steel nozzle for MK3S/MK4 with abrasives", "https://www.prusa3d.com"),
+                ("Nextruder Brass Nozzle", "Prusa", 300, NozzleType.Brass, NozzleInterfaceType.Proprietary, "Quick-swap brass nozzle for Nextruder toolhead", "https://www.prusa3d.com"),
+                ("Nextruder Hardened Steel Nozzle", "Prusa", 500, NozzleType.HardenedSteel, NozzleInterfaceType.Proprietary, "Quick-swap hardened steel for Nextruder with abrasives", "https://www.prusa3d.com"),
+                ("Nextruder High Flow Nozzle", "Prusa", 300, NozzleType.Brass, NozzleInterfaceType.Proprietary, "High flow nozzle for Nextruder, extended melt zone", "https://www.prusa3d.com"),
             };
 
-            foreach ((string name, string mfg, int maxTemp, bool isHardened, NozzleInterfaceType nozzleInterface, string desc, string? url) in nozzleSeeds)
+            foreach ((string name, string mfg, int maxTemp, NozzleType nozzleType, NozzleInterfaceType nozzleInterface, string desc, string? url) in nozzleSeeds)
             {
                 if (!mfgLookup.TryGetValue(mfg, out Guid mfgId))
                 {
@@ -1076,7 +1076,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         Name = name,
                         ManufacturerId = mfgId,
                         MaxTemp = maxTemp,
-                        IsHardened = isHardened,
+                        NozzleType = nozzleType,
                         NozzleInterface = nozzleInterface,
                         Description = desc,
                         Url = url
@@ -1493,7 +1493,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                             Name = modelNozzleName,
                             ManufacturerId = mfgId,
                             MaxTemp = 300,
-                            IsHardened = false,
+                            NozzleType = NozzleType.Brass,  // Default to brass for stock nozzles
                             Description = $"Stock nozzle for {modelName}"
                         };
                         _context.NozzleModelDefinitions.Add(newNozzle);
@@ -1513,15 +1513,13 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         Name = numExtruders == 1 ? "Primary" : $"Extruder {i + 1}",
                         Index = i,
                         IsPrimary = i == 0,
-                        NozzleDiameter = 0.4,  // Default nozzle size
-                        NozzleType = null,     // Will be populated when user specifies
                         MaxHotendTemp = model.MaxBedTemp,  // Use bed temp as conservative proxy; user can override
                         MaxFlowRate = null,    // Will be populated when user specifies
                         ToolheadType = (int)ToolheadType.Stock,
                         HotendModelId = hotendId,
                         ExtruderModelId = extruderId,
                         ToolheadModelDefId = toolheadId,
-                        NozzleModelId = nozzleId
+                        NozzleModelId = nozzleId  // Nozzle diameter is derived from the nozzle model
                     };
 
                     _context.PrinterModelToolheads.Add(toolhead);

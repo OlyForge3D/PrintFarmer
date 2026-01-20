@@ -706,7 +706,7 @@ public class PrintersController(
             Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
             p.Id,
             p.Name,
-            primaryToolhead?.NozzleDiameter,
+            primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
             primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
             p.MaxBuildVolumeY,
@@ -729,13 +729,12 @@ public class PrintersController(
             t.Id,
             t.Name,
             t.Index,
-            t.NozzleDiameter,
-            t.NozzleType.HasValue ? (NozzleType)t.NozzleType.Value : null,
+            t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
             t.MaxHotendTemp,
             t.MaxFlowRate,
             t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
-            // Component model references
+            // Component model references - nozzle diameter comes from NozzleModel.Diameter
             t.HotendModelId,
             t.HotendModel?.Name,
             t.ExtruderModelId,
@@ -1289,8 +1288,7 @@ public class PrintersController(
                         toolhead.Index = toolheadDto.Index.Value;
                     }
 
-                    toolhead.NozzleDiameter = toolheadDto.NozzleDiameter ?? toolhead.NozzleDiameter;
-                    toolhead.NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : toolhead.NozzleType;
+                    // Nozzle diameter is derived from NozzleModel, update NozzleModelId instead
                     toolhead.MaxHotendTemp = toolheadDto.MaxHotendTemp ?? toolhead.MaxHotendTemp;
                     toolhead.MaxFlowRate = toolheadDto.MaxFlowRate ?? toolhead.MaxFlowRate;
                     toolhead.ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : toolhead.ToolheadType;
@@ -1316,7 +1314,7 @@ public class PrintersController(
             Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
             if (primaryToolhead != null)
             {
-                primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
+                // Nozzle diameter is derived from NozzleModel, can't update directly
                 primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
                 primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
                 primaryToolhead.UpdatedAt = DateTime.UtcNow;

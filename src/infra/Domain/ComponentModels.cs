@@ -143,14 +143,26 @@ public class ToolheadModelDefinition : HardwareModel
 public class NozzleModelDefinition : HardwareModel
 {
     /// <summary>
+    /// Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8, 1.0).
+    /// </summary>
+    public double Diameter { get; set; } = 0.4;
+
+    /// <summary>
     /// Maximum temperature rating in °C.
     /// </summary>
     public int? MaxTemp { get; set; }
 
     /// <summary>
-    /// Whether this nozzle is hardened for abrasive filaments.
+    /// The material type of this nozzle (Brass, HardenedSteel, StainlessSteel, etc.).
     /// </summary>
-    public bool IsHardened { get; set; }
+    public NozzleType NozzleType { get; set; } = NozzleType.Brass;
+
+    /// <summary>
+    /// Whether this nozzle is hardened for abrasive filaments.
+    /// Computed from NozzleType - not persisted to database.
+    /// </summary>
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public bool IsHardened => NozzleType is NozzleType.HardenedSteel or NozzleType.TungstenCarbide or NozzleType.Abrasive;
 
     /// <summary>
     /// The nozzle interface type (determines which hotends this nozzle fits).

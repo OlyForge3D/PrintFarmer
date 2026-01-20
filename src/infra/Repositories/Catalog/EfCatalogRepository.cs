@@ -90,13 +90,11 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 PrinterModelId = modelId,
                 Name = th.Name,
                 Index = th.Index,
-                NozzleDiameter = th.NozzleDiameter,
-                NozzleType = th.NozzleType.HasValue ? (int)th.NozzleType.Value : null,
                 MaxHotendTemp = th.MaxHotendTemp,
                 MaxFlowRate = th.MaxFlowRate,
                 ToolheadType = th.ToolheadType.HasValue ? (int)th.ToolheadType.Value : null,
 
-                // Component model references (Guids)
+                // Component model references - nozzle diameter is derived from NozzleModel.Diameter
                 HotendModelId = th.HotendModelId,
                 ExtruderModelId = th.ExtruderModelId,
                 ToolheadModelDefId = th.ToolheadModelDefId,
@@ -169,13 +167,11 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.Id,
                     t.Name,
                     t.Index,
-                    t.NozzleDiameter,
-                    t.NozzleType.HasValue ? (NozzleType)t.NozzleType.Value : null,
                     t.MaxHotendTemp,
                     t.MaxFlowRate,
                     t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
-                    // Component model references (IDs and names)
+                    // Component model references - nozzle diameter comes from NozzleModel.Diameter
                     t.HotendModelId,
                     t.HotendModel?.Name,
                     t.ExtruderModelId,
@@ -184,6 +180,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.ToolheadModelDef?.Name,
                     t.NozzleModelId,
                     t.NozzleModel?.Name,
+                    t.NozzleModel?.Diameter,
                     t.SupportedMaterials,
                     t.IsPrimary)).OrderBy(t => t.Index).ToArray());
     }
@@ -372,7 +369,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.DefaultNozzleId)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
@@ -386,7 +383,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Name,
             n.ManufacturerId,
             n.Manufacturer?.Name,
+            n.Diameter,
             n.MaxTemp,
+            n.NozzleType,
             n.IsHardened,
             n.NozzleInterface,
             n.Description,

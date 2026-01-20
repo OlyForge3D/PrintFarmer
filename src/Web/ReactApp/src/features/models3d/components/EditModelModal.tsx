@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto } from '@/types/api';
-import { NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { ModelAliasEditor, ModelAliasEditorRef } from '@/features/catalog/components/ModelAliasEditor';
@@ -179,11 +178,10 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
       if (current.name !== original.name) return true;
       if (current.index !== original.index) return true;
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
-      if (current.nozzleType !== original.nozzleType) return true;
       if (current.maxHotendTemp !== original.maxHotendTemp) return true;
       if (current.maxFlowRate !== original.maxFlowRate) return true;
       if (current.toolheadType !== original.toolheadType) return true;
-      // Component model IDs (database-backed)
+      // Component model IDs (database-backed) - nozzle type comes from nozzle model
       if (current.hotendModelId !== original.hotendModelId) return true;
       if (current.extruderModelId !== original.extruderModelId) return true;
       if (current.toolheadModelDefId !== original.toolheadModelDefId) return true;
@@ -215,6 +213,31 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     setToolheads(prev => prev.map(th => 
       th.id === toolheadId ? { ...th, [field]: value } : th
     ));
+  };
+
+  // Specialized handler for nozzle model selection - auto-populates nozzle type from nozzle model
+  const handleNozzleModelSelect = (toolheadId: string, nozzleModelId: string | undefined) => {
+    setToolheads(prev => prev.map(th => {
+      if (th.id !== toolheadId) return th;
+      
+      if (!nozzleModelId) {
+        // Cleared selection - just update the nozzle model ID
+        return { ...th, nozzleModelId: undefined };
+      }
+      
+      // Find the selected nozzle model
+      const selectedNozzleModel = nozzleModels?.find(nm => nm.id === nozzleModelId);
+      if (!selectedNozzleModel) {
+        return { ...th, nozzleModelId };
+      }
+      
+      // Use the actual nozzle type from the nozzle model definition
+      const nozzleType = typeof selectedNozzleModel.nozzleType === 'string' 
+        ? selectedNozzleModel.nozzleType 
+        : 'Brass';
+      
+      return { ...th, nozzleModelId, nozzleType };
+    }));
   };
 
   // Specialized handler for toolhead model selection - auto-populates extruder/hotend/nozzle
@@ -751,7 +774,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                           <Select
                             id={`toolhead-nozzle-model-${index}`}
                             value={toolhead.nozzleModelId || ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleModelId', e.target.value || undefined)}
+                            onChange={e => handleNozzleModelSelect(toolhead.id, e.target.value || undefined)}
                           >
                             <option value="">Select nozzle...</option>
                             {nozzleModels?.map(nm => (
@@ -771,18 +794,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                             onChange={e => handleToolheadChange(toolhead.id, 'nozzleDiameter', e.target.value ? parseFloat(e.target.value) : undefined)}
                             placeholder="0.4"
                           />
-                        </FormField>
-                        <FormField label="Nozzle Type" htmlFor={`toolhead-nozzle-type-${index}`}>
-                          <Select
-                            id={`toolhead-nozzle-type-${index}`}
-                            value={toolhead.nozzleType?.toString() ?? ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'nozzleType', e.target.value || undefined)}
-                          >
-                            <option value="">Select type...</option>
-                            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
-                              <option key={value} value={value}>{label}</option>
-                            ))}
-                          </Select>
                         </FormField>
                       </div>
 

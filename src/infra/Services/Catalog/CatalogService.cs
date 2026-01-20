@@ -570,13 +570,15 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
                 n.Name,
                 n.ManufacturerId,
                 n.ManufacturerName,
+                n.Diameter,
                 n.MaxTemp,
+                n.NozzleType,
                 n.IsHardened,
                 n.NozzleInterface,
                 n.Description,
@@ -903,8 +905,9 @@ public class CatalogService(
             Id = Guid.NewGuid(),
             Name = dto.Name.Trim(),
             ManufacturerId = dto.ManufacturerId,
+            Diameter = dto.Diameter,
             MaxTemp = dto.MaxTemp,
-            IsHardened = dto.IsHardened,
+            NozzleType = dto.NozzleType,
             NozzleInterface = dto.NozzleInterface,
             Description = dto.Description,
             Url = dto.Url
@@ -916,7 +919,7 @@ public class CatalogService(
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
             created!.Id, created.Name, created.ManufacturerId,
-            created.Manufacturer?.Name, created.MaxTemp, created.IsHardened,
+            created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType, created.IsHardened,
             created.NozzleInterface, created.Description, created.Url);
     }
 
@@ -944,14 +947,19 @@ public class CatalogService(
             model.ManufacturerId = dto.ManufacturerId.Value;
         }
 
+        if (dto.Diameter.HasValue)
+        {
+            model.Diameter = dto.Diameter.Value;
+        }
+
         if (dto.MaxTemp.HasValue)
         {
             model.MaxTemp = dto.MaxTemp;
         }
 
-        if (dto.IsHardened.HasValue)
+        if (dto.NozzleType.HasValue)
         {
-            model.IsHardened = dto.IsHardened.Value;
+            model.NozzleType = dto.NozzleType.Value;
         }
 
         if (dto.NozzleInterface.HasValue)
@@ -976,7 +984,7 @@ public class CatalogService(
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
         return new NozzleModelDto(
             model!.Id, model.Name, model.ManufacturerId,
-            model.Manufacturer?.Name, model.MaxTemp, model.IsHardened,
+            model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType, model.IsHardened,
             model.NozzleInterface, model.Description, model.Url);
     }
 

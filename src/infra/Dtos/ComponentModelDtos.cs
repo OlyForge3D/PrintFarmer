@@ -81,14 +81,16 @@ public record ToolheadModelDto(
 
 /// <summary>
 /// Nozzle model catalog entry returned from API queries.
-/// Contains nozzle properties including temperature rating and interface type.
+/// Contains nozzle properties including diameter, temperature rating and interface type.
 /// </summary>
 /// <param name="Id">Unique identifier for this nozzle model.</param>
 /// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium").</param>
 /// <param name="ManufacturerId">ID of the manufacturer.</param>
 /// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
+/// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8).</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C.</param>
-/// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments.</param>
+/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, etc.).</param>
+/// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments (computed from NozzleType).</param>
 /// <param name="NozzleInterface">Nozzle interface type that determines compatible hotends.</param>
 /// <param name="Description">Optional description or notes.</param>
 /// <param name="Url">Optional product page URL.</param>
@@ -97,7 +99,9 @@ public record NozzleModelDto(
     string Name,
     Guid ManufacturerId,
     string? ManufacturerName = null,
+    double Diameter = 0.4,
     int? MaxTemp = null,
+    NozzleType NozzleType = NozzleType.Brass,
     bool IsHardened = false,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
@@ -217,16 +221,18 @@ public record UpdateToolheadModelDefDto(
 /// </summary>
 /// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium")</param>
 /// <param name="ManufacturerId">ID of the manufacturer</param>
+/// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8)</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
-/// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments</param>
+/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, etc.)</param>
 /// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product URL</param>
 public record CreateNozzleModelDto(
     string Name,
     Guid ManufacturerId,
+    double Diameter = 0.4,
     int? MaxTemp = null,
-    bool IsHardened = false,
+    NozzleType NozzleType = NozzleType.Brass,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
     string? Url = null);
@@ -238,8 +244,9 @@ public record CreateNozzleModelDto(
 public record UpdateNozzleModelDto(
     string? Name = null,
     Guid? ManufacturerId = null,
+    double? Diameter = null,
     int? MaxTemp = null,
-    bool? IsHardened = null,
+    NozzleType? NozzleType = null,
     NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,
     string? Url = null);

@@ -8,13 +8,12 @@ namespace Farm.Infrastructure;
 
 /// <summary>
 /// Toolhead template for a printer model (used when creating new printers from this model).
+/// Nozzle diameter is now derived from the referenced NozzleModel, not stored on the toolhead.
 /// </summary>
 public record PrinterModelToolheadDto(
     Guid Id,
     string Name,
     int Index,
-    double? NozzleDiameter = null,
-    NozzleType? NozzleType = null,
     int? MaxHotendTemp = null,
     double? MaxFlowRate = null,
     ToolheadType? ToolheadType = null,
@@ -28,5 +27,6 @@ public record PrinterModelToolheadDto(
     string? ToolheadModelDefName = null,
     Guid? NozzleModelId = null,
     string? NozzleModelName = null,
+    double? NozzleDiameter = null,  // Derived from NozzleModel.Diameter
     string[]? SupportedMaterials = null,
     bool IsPrimary = false);

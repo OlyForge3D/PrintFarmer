@@ -32,17 +32,6 @@ public class Toolhead
     public int Index { get; set; }
 
     /// <summary>
-    /// Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8, 1.0).
-    /// </summary>
-    public double? NozzleDiameter { get; set; }
-
-    /// <summary>
-    /// Nozzle material type (Brass, HardenedSteel, StainlessSteel, TungstenCarbide, Abrasive).
-    /// Stored as int; cast to NozzleType enum.
-    /// </summary>
-    public int? NozzleType { get; set; }
-
-    /// <summary>
     /// Maximum hotend temperature in °C for this toolhead.
     /// </summary>
     public int? MaxHotendTemp { get; set; }

@@ -98,13 +98,11 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.Id,
                     t.Name,
                     t.Index,
-                    t.NozzleDiameter,
-                    t.NozzleType.HasValue ? (NozzleType)t.NozzleType.Value : null,
                     t.MaxHotendTemp,
                     t.MaxFlowRate,
                     t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
-                    // Component model references (IDs and names)
+                    // Component model references - nozzle diameter comes from NozzleModel.Diameter
                     t.HotendModelId,
                     t.HotendModel != null ? t.HotendModel.Name : null,
                     t.ExtruderModelId,
@@ -113,6 +111,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.ToolheadModelDef != null ? t.ToolheadModelDef.Name : null,
                     t.NozzleModelId,
                     t.NozzleModel != null ? t.NozzleModel.Name : null,
+                    t.NozzleModel != null ? t.NozzleModel.Diameter : null,
                     t.SupportedMaterials,
                     t.IsPrimary)).ToArray())).ToListAsync(ct);
 

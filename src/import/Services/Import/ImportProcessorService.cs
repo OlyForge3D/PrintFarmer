@@ -256,15 +256,13 @@ public class ImportProcessorService : IImportProcessorService
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    NozzleDiameter = toolheadDto.NozzleDiameter ?? dto.NozzleDiameter ?? 0.4,
-                    NozzleType = toolheadDto.NozzleType.HasValue ? (int)toolheadDto.NozzleType.Value : null,
                     MaxHotendTemp = toolheadDto.MaxHotendTemp ?? dto.MaxHotendTemp,
                     MaxFlowRate = toolheadDto.MaxFlowRate,
                     ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
                     HotendModelId = toolheadDto.HotendModelId,
                     ExtruderModelId = toolheadDto.ExtruderModelId,
                     ToolheadModelDefId = toolheadDto.ToolheadModelDefId,
-                    NozzleModelId = toolheadDto.NozzleModelId,
+                    NozzleModelId = toolheadDto.NozzleModelId,  // Nozzle diameter derived from nozzle model
                     SupportedMaterials = toolheadDto.SupportedMaterials ?? dto.SupportedMaterials,
                     IsPrimary = toolheadDto.IsPrimary,
                     UpdatedAt = DateTime.UtcNow
@@ -282,7 +280,8 @@ public class ImportProcessorService : IImportProcessorService
                 Name = "Extruder 1",
                 Index = 0,
                 IsPrimary = true,
-                NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
+
+                // NozzleDiameter is now derived from NozzleModelId - use default nozzle model if needed
                 SupportedMaterials = dto.SupportedMaterials,
                 MaxHotendTemp = dto.MaxHotendTemp,
                 UpdatedAt = DateTime.UtcNow

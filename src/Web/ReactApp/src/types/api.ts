@@ -386,7 +386,6 @@ export interface UpdateToolheadDto {
   name?: string;
   index?: number;
   nozzleDiameter?: number;
-  nozzleType?: NozzleType;
   maxHotendTemp?: number;
   maxFlowRate?: number;
   toolheadType?: ToolheadType;
@@ -574,6 +573,9 @@ export interface NozzleModelDefinition {
   manufacturerId: string;
   manufacturerName?: string;
   maxTemp?: number;
+  /** The material type of this nozzle */
+  nozzleType: NozzleType | string;
+  /** Whether this nozzle is hardened for abrasive filaments (computed from nozzleType) */
   isHardened: boolean;
   /** Nozzle interface type - must match hotend's interface to be compatible */
   nozzleInterface: NozzleInterfaceType;
@@ -667,7 +669,8 @@ export interface CreateNozzleModelDto {
   name: string;
   manufacturerId: string;
   maxTemp?: number;
-  isHardened?: boolean;
+  /** The material type of this nozzle - defaults to Brass if not specified */
+  nozzleType?: NozzleType | string;
   /** Nozzle interface type - defaults to V6 if not specified */
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
@@ -681,7 +684,8 @@ export interface UpdateNozzleModelDto {
   name?: string;
   manufacturerId?: string;
   maxTemp?: number;
-  isHardened?: boolean;
+  /** The material type of this nozzle */
+  nozzleType?: NozzleType | string;
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
@@ -725,7 +729,6 @@ export interface PrinterModelToolheadDto {
   name: string;
   index: number;
   nozzleDiameter?: number;
-  nozzleType?: NozzleType | string;
   maxHotendTemp?: number;
   maxFlowRate?: number;
   toolheadType?: ToolheadType | string;
@@ -816,7 +819,6 @@ export interface ToolheadDto {
   name?: string;
   index: number;
   nozzleDiameter?: number;
-  nozzleType?: NozzleType | string;
   maxHotendTemp?: number;
   maxFlowRate?: number;
   toolheadType?: ToolheadType | string;

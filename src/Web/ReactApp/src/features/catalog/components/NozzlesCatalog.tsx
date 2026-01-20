@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
-import { Button, Input, FormField, Checkbox, Textarea } from '@/common/components/ui';
+import { Button, Input, FormField, Select, Textarea } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
 import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';
-import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto } from '@/types/api';
+import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels } from '@/types/api';
 import { PlusIcon } from '@/common/components/icons/MdiIcons';
 
 /**
@@ -32,7 +32,7 @@ interface NozzleFormState {
   manufacturerId: string;
   manufacturerName?: string;
   maxTemp: string;
-  isHardened: boolean;
+  nozzleType: string;
   description: string;
   url: string;
 }
@@ -41,7 +41,7 @@ const emptyForm: NozzleFormState = {
   name: '',
   manufacturerId: '',
   maxTemp: '',
-  isHardened: false,
+  nozzleType: 'Brass',
   description: '',
   url: '',
 };
@@ -88,7 +88,7 @@ export function NozzlesCatalog() {
       manufacturerId: model.manufacturerId,
       manufacturerName: model.manufacturerName,
       maxTemp: model.maxTemp?.toString() ?? '',
-      isHardened: model.isHardened,
+      nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
       description: model.description ?? '',
       url: model.url ?? '',
     });
@@ -150,7 +150,7 @@ export function NozzlesCatalog() {
       name: formState.name.trim(),
       manufacturerId: formState.manufacturerId,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
-      isHardened: formState.isHardened,
+      nozzleType: formState.nozzleType,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
     };
@@ -171,7 +171,7 @@ export function NozzlesCatalog() {
       name: formState.name.trim(),
       manufacturerId: formState.manufacturerId,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
-      isHardened: formState.isHardened,
+      nozzleType: formState.nozzleType,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
     };
@@ -197,7 +197,7 @@ export function NozzlesCatalog() {
   }, [deletingModel, deleteMutation, handleCloseDeleteModal]);
 
   // Handle form field changes
-  const handleFieldChange = useCallback((field: keyof NozzleFormState, value: string | boolean) => {
+  const handleFieldChange = useCallback((field: keyof NozzleFormState, value: string) => {
     setFormState(prev => ({ ...prev, [field]: value }));
     setFormErrors(prev => ({ ...prev, [field]: undefined }));
   }, []);
@@ -343,7 +343,7 @@ export function NozzlesCatalog() {
 interface NozzleFormProps {
   formState: NozzleFormState;
   formErrors: Partial<Record<keyof NozzleFormState, string>>;
-  onFieldChange: (field: keyof NozzleFormState, value: string | boolean) => void;
+  onFieldChange: (field: keyof NozzleFormState, value: string) => void;
   onManufacturerChange: (manufacturerId: string | undefined, manufacturerName?: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -402,14 +402,17 @@ function NozzleForm({
           />
         </FormField>
 
-        <FormField label="">
-          <div className="flex items-center h-10">
-            <Checkbox
-              checked={formState.isHardened}
-              onChange={(e) => onFieldChange('isHardened', e.target.checked)}
-              label="Hardened Steel"
-            />
-          </div>
+        <FormField label="Nozzle Type">
+          <Select
+            value={formState.nozzleType}
+            onChange={(e) => onFieldChange('nozzleType', e.target.value)}
+          >
+            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
         </FormField>
       </div>
 

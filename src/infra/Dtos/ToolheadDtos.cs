@@ -24,16 +24,6 @@ public class CreateToolheadDto
     public int Index { get; set; }
 
     /// <summary>
-    /// Nozzle diameter in millimeters.
-    /// </summary>
-    public double? NozzleDiameter { get; set; }
-
-    /// <summary>
-    /// Nozzle material type (Brass, HardenedSteel, StainlessSteel, TungstenCarbide, Abrasive).
-    /// </summary>
-    public NozzleType? NozzleType { get; set; }
-
-    /// <summary>
     /// Maximum hotend temperature in °C.
     /// </summary>
     public int? MaxHotendTemp { get; set; }
@@ -106,13 +96,13 @@ public class CreateToolheadDto
 /// <summary>
 /// Toolhead data for reading/display purposes.
 /// Includes resolved component model names for display.
+/// Nozzle diameter is now derived from NozzleModel.Diameter, not stored on toolhead.
 /// </summary>
 public record ToolheadDto(
     Guid Id,
     string? Name,
     int Index,
-    double? NozzleDiameter,
-    NozzleType? NozzleType,
+    double? NozzleDiameter,  // Derived from NozzleModel.Diameter
     int? MaxHotendTemp,
     double? MaxFlowRate,
     ToolheadType? ToolheadType,

@@ -218,7 +218,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(t => t.Id);
             _ = b.Property(t => t.Name).HasMaxLength(128);
             _ = b.Property(t => t.Index).IsRequired();
-            _ = b.Property(t => t.NozzleDiameter).IsRequired();
             _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
             _ = b.Property(t => t.UpdatedAt).IsRequired();
@@ -267,7 +266,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(t => t.Id);
             _ = b.Property(t => t.Name).HasMaxLength(128);
             _ = b.Property(t => t.Index).IsRequired();
-            _ = b.Property(t => t.NozzleDiameter).HasDefaultValue(0.4);
             _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
 
@@ -1546,7 +1544,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(n => n.Name).IsRequired().HasMaxLength(128);
             _ = b.Property(n => n.Description).HasMaxLength(512);
             _ = b.Property(n => n.MaxTemp).HasDefaultValue(500);
-            _ = b.Property(n => n.IsHardened).HasDefaultValue(false);
+
+            // IsHardened is a computed property marked [NotMapped] - do not configure it here
 
             // Foreign Key to Manufacturer
             _ = b.HasOne(n => n.Manufacturer)
