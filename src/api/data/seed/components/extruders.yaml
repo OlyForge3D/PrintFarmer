@@ -1,0 +1,329 @@
+# PrintFarmer Extruder Models Seed Data
+# Format: YAML (human-readable, supports comments)
+# Schema: printfarmer/components/extruders/v1
+#
+# This file defines extruder model specifications for seeding the database.
+# Users can customize this file without recompiling the application.
+#
+# Field Descriptions:
+# - name: Extruder model name (must be unique per manufacturer)
+# - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
+# - gearRatio: Gear reduction ratio (e.g., "3:1", "5.18:1", "7.5:1")
+# - isDirectDrive: true if extruder is mounted on the toolhead, false for bowden
+# - description: Brief description of the extruder model and its characteristics
+# - url: Product or information URL (optional)
+
+# Prusa Extruders
+- name: MK3S Extruder
+  manufacturer: Prusa
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Stock extruder for MK3S/MK3S+, compatible with V6-style hotends
+  url: https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/
+
+- name: Mini Extruder
+  manufacturer: Prusa
+  gearRatio: "3:1"
+  isDirectDrive: false
+  description: Bowden extruder for Prusa Mini/Mini+, mounted on frame
+  url: https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/
+
+- name: Nextruder Extruder
+  manufacturer: Prusa
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Planetary gearbox extruder in Nextruder toolhead for MK3.9S, MK4, MK4S, CORE One
+  url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
+
+# Bambu Lab Extruders
+- name: X1 Series Extruder
+  manufacturer: Bambu Lab
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock direct drive extruder for X1, X1C, X1E
+  url: https://bambulab.com/en/x1
+
+- name: P1 Series Extruder
+  manufacturer: Bambu Lab
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock direct drive extruder for P1P, P1S
+  url: https://bambulab.com/en/p1
+
+- name: A1 Extruder
+  manufacturer: Bambu Lab
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock direct drive extruder for A1
+  url: https://bambulab.com/en/a1
+
+- name: A1 Mini Extruder
+  manufacturer: Bambu Lab
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Compact direct drive extruder for A1 Mini
+  url: https://bambulab.com/en/a1-mini
+
+# Creality Extruders
+- name: Sprite Pro
+  manufacturer: Creality
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Dual-gear direct drive extruder with all-metal hotend
+  url: https://www.creality.com
+
+- name: K1 Extruder
+  manufacturer: Creality
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: High-speed direct drive extruder for K1 series
+  url: https://www.creality.com
+
+# Qidi Extruders
+- name: X-Plus 4 Extruder
+  manufacturer: Qidi
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: High-speed direct drive extruder for X-Plus 4
+  url: https://www.qidi3d.com
+
+# Elegoo Extruders
+- name: Centauri Extruder
+  manufacturer: Elegoo
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock extruder for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+# Sovol Extruders
+- name: SV08 Extruder
+  manufacturer: Sovol
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock extruder for Sovol SV08
+  url: https://sovol3d.com
+
+# Bondtech BMG Series (Dual drive extruders)
+- name: BMG
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Dual-drive extruder, industry standard for reliable extrusion
+  url: https://www.bondtech.se/product/bmg-extruder/
+
+- name: BMG-M
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: BMG mirrored version for multi-material setups
+  url: https://www.bondtech.se/product/bmg-m-extruder/
+
+# Bondtech LGX Series (Large gears, ~5.18:1 effective ratio)
+- name: LGX
+  manufacturer: Bondtech
+  gearRatio: "5.18:1"
+  isDirectDrive: true
+  description: Large gears extruder with excellent grip on flexible filaments
+  url: https://www.bondtech.se/product/lgx-large-gears-extruder/
+
+- name: LGX Lite
+  manufacturer: Bondtech
+  gearRatio: "5.18:1"
+  isDirectDrive: true
+  description: Lightweight LGX with reduced mass for faster acceleration
+  url: https://www.bondtech.se/product/lgx-lite-large-gears-extruder/
+
+- name: LGX Lite ACE
+  manufacturer: Bondtech
+  gearRatio: "5.18:1"
+  isDirectDrive: true
+  description: LGX Lite with integrated ADXL345 accelerometer
+  url: https://www.bondtech.se/product/lgx-lite-ace/
+
+- name: LGX Shortcut
+  manufacturer: Bondtech
+  gearRatio: "5.18:1"
+  isDirectDrive: true
+  description: Compact LGX variant for tight spaces, often paired with Mosquito hotend
+  url: https://www.bondtech.se/product/lgx-shortcut/
+
+# Bondtech DDX Series (Direct Drive X) integrated systems
+- name: DDX v3
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Direct Drive X system, replaces stock Creality extruder
+  url: https://www.bondtech.se/product/ddx-v3/
+
+- name: DDX-PH
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: DDX for Prusa MK3/MK3S with Phaetus Dragon compatibility
+  url: https://www.bondtech.se/product/ddx-ph/
+
+# Bondtech Prusa Mini upgrade
+- name: IFS Extruder for Prusa Mini
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Direct drive upgrade for Prusa Mini/Mini+, replaces stock bowden setup
+  url: https://www.bondtech.se/product/ifs-extruder-for-prusa-mini/
+
+# Bondtech Voron compatible
+- name: CW2
+  manufacturer: Bondtech
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Clockwork 2 compatible extruder for Voron StealthBurner
+  url: https://www.bondtech.se/product/cw2-extruder/
+
+# Orbiter Extruders
+- name: Orbiter 1.5
+  manufacturer: Orbiter
+  gearRatio: "7.5:1"
+  isDirectDrive: true
+  description: Lightweight planetary gearbox
+  url: https://www.orbiterprojects.com/orbiter-v1-5/
+
+- name: Orbiter 2.0
+  manufacturer: Orbiter
+  gearRatio: "7.5:1"
+  isDirectDrive: true
+  description: Improved filament path
+  url: https://www.orbiterprojects.com/orbiter-v2-0/
+
+# Sherpa Mini / Sherpa Micro
+- name: Sherpa Mini
+  manufacturer: Annex Engineering
+  gearRatio: "50:1"
+  isDirectDrive: true
+  description: Compact planetary gear extruder for Voron and custom printers
+  url: https://github.com/Annex-Engineering/Sherpa_Mini-Extruder
+
+- name: Sherpa Micro
+  manufacturer: Annex Engineering
+  gearRatio: "50:1"
+  isDirectDrive: true
+  description: Ultra-compact extruder for small toolheads
+  url: https://github.com/Annex-Engineering/Sherpa_Micro-Extruder
+
+# E3D Titan Series
+- name: Titan
+  manufacturer: E3D
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Original dual-drive extruder from E3D
+  url: https://e3d-online.com/products/titan-extruder
+
+- name: Titan Aero
+  manufacturer: E3D
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Integrated Titan extruder with V6 hotend
+  url: https://e3d-online.com/products/titan-aero
+
+- name: Hemera Extruder
+  manufacturer: E3D
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Integrated direct drive extruder and hotend system
+  url: https://e3d-online.com/products/hemera
+
+- name: Hemera XS Extruder
+  manufacturer: E3D
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Compact version of Hemera for space-constrained printers
+  url: https://e3d-online.com/products/hemera-xs
+
+# TriangleLabs Clones
+- name: BMG Clone
+  manufacturer: TriangleLabs
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Bondtech BMG compatible extruder
+  url: https://www.aliexpress.com/item/32917029058.html
+
+- name: LGX Clone
+  manufacturer: TriangleLabs
+  gearRatio: "5.18:1"
+  isDirectDrive: true
+  description: Bondtech LGX compatible extruder
+  url: https://www.aliexpress.com/item/1005003109446553.html
+
+# BIQU Extruders
+- name: H2
+  manufacturer: BIQU
+  gearRatio: "7:1"
+  isDirectDrive: true
+  description: Integrated extruder and hotend
+  url: https://biqu.equipment/products/biqu-h2-extruder
+
+- name: H2 V2S
+  manufacturer: BIQU
+  gearRatio: "7:1"
+  isDirectDrive: true
+  description: Updated H2 design
+  url: https://biqu.equipment/products/biqu-h2-v2s-extruder
+
+# Trianglelab VZ-HextrudORT
+- name: VZ-HextrudORT
+  manufacturer: TriangleLabs
+  gearRatio: "7.5:1"
+  isDirectDrive: true
+  description: Compact high-reduction extruder for Voron
+  url: https://www.aliexpress.com/item/1005004069042558.html
+
+# Voron Design
+- name: Clockwork 1
+  manufacturer: Voron
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Original Voron extruder design
+  url: https://github.com/VoronDesign/Voron-2
+
+- name: Clockwork 2
+  manufacturer: Voron
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Updated Voron extruder with improved filament path
+  url: https://github.com/VoronDesign/Voron-Stealthburner
+
+- name: Mini Clockwork
+  manufacturer: Voron
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Compact extruder for Voron V0
+  url: https://github.com/VoronDesign/Voron-0
+
+# Microswiss
+- name: Direct Drive Extruder
+  manufacturer: Microswiss
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Direct drive conversion for Ender 3 and similar
+  url: https://store.micro-swiss.com/products/micro-swiss-direct-drive-extruder
+
+# Trianglelab DDE
+- name: DDE
+  manufacturer: TriangleLabs
+  gearRatio: "5:1"
+  isDirectDrive: true
+  description: Dual-drive direct extruder
+  url: https://www.aliexpress.com/item/1005001928155613.html
+
+# Mellow Fly SHT Series (integrated with toolboards)
+- name: Fly SHT36
+  manufacturer: Mellow
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Compact extruder with integrated CAN toolboard
+  url: https://www.aliexpress.com/item/1005003809591240.html
+
+- name: Fly SHT42
+  manufacturer: Mellow
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Standard size extruder with integrated CAN toolboard
+  url: https://www.aliexpress.com/item/1005003809591240.html

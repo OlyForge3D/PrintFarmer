@@ -1,0 +1,148 @@
+# PrintFarmer Toolhead Models Seed Data
+# Format: YAML (human-readable, supports comments)
+# Schema: printfarmer/components/toolheads/v1
+#
+# This file defines toolhead model specifications for seeding the database.
+# Users can customize this file without recompiling the application.
+#
+# Field Descriptions:
+# - name: Toolhead model name (must be unique per manufacturer)
+# - manufacturer: Manufacturer name (must match entry in manufacturers.yaml, or null for community designs)
+# - description: Brief description of the toolhead model and its characteristics
+# - url: Product or information URL (optional)
+
+# Prusa Toolheads
+- name: MK3S Toolhead
+  manufacturer: Prusa
+  description: Stock toolhead for Prusa MK3S/MK3S+ with E3D V6-style hotend
+  url: https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/
+
+- name: Mini Toolhead
+  manufacturer: Prusa
+  description: Stock bowden toolhead for Prusa Mini/Mini+
+  url: https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/
+
+- name: Nextruder
+  manufacturer: Prusa
+  description: Integrated direct drive toolhead for MK3.9S, MK4, MK4S, CORE One
+  url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
+
+- name: XL Toolhead
+  manufacturer: Prusa
+  description: Toolchanger-compatible toolhead for Prusa XL
+  url: https://www.prusa3d.com/product/original-prusa-xl/
+
+# Bambu Lab Toolheads
+- name: X1 Series Toolhead
+  manufacturer: Bambu Lab
+  description: Stock toolhead for Bambu Lab X1, X1C, X1E series
+  url: https://bambulab.com/en/x1
+
+- name: P1 Series Toolhead
+  manufacturer: Bambu Lab
+  description: Stock toolhead for Bambu Lab P1P, P1S series
+  url: https://bambulab.com/en/p1
+
+- name: A1 Toolhead
+  manufacturer: Bambu Lab
+  description: Stock toolhead for Bambu Lab A1 series
+  url: https://bambulab.com/en/a1
+
+- name: A1 Mini Toolhead
+  manufacturer: Bambu Lab
+  description: Compact toolhead for Bambu Lab A1 Mini
+  url: https://bambulab.com/en/a1-mini
+
+# Creality Toolheads
+- name: Sprite Pro Toolhead
+  manufacturer: Creality
+  description: Sprite Pro toolhead for Ender-3 S1 and derivatives
+  url: https://www.creality.com
+
+- name: K1 Toolhead
+  manufacturer: Creality
+  description: High-speed toolhead for K1 series
+  url: https://www.creality.com
+
+# Qidi Toolheads
+- name: X-Plus 4 Toolhead
+  manufacturer: Qidi
+  description: High-speed toolhead for Qidi X-Plus 4
+  url: https://www.qidi3d.com
+
+# Elegoo Toolheads
+- name: Centauri Toolhead
+  manufacturer: Elegoo
+  description: Stock toolhead for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+# Sovol Toolheads
+- name: SV08 Toolhead
+  manufacturer: Sovol
+  description: Stock toolhead for Sovol SV08
+  url: https://sovol3d.com
+
+# Voron Official Toolheads
+- name: StealthBurner
+  manufacturer: Voron
+  description: Enclosed direct drive toolhead for Voron
+  url: https://github.com/VoronDesign/Voron-Stealthburner
+
+- name: Mini StealthBurner
+  manufacturer: Voron
+  description: Compact StealthBurner for V0
+  url: https://github.com/VoronDesign/Voron-0
+
+# Community Toolheads (PrintersForAnts)
+- name: DragonBurner
+  manufacturer: PrintersForAnts
+  description: Popular community toolhead design
+  url: https://github.com/chirpy2605/voron/tree/main/V0/Dragon_Burner
+
+- name: AntHead
+  manufacturer: PrintersForAnts
+  description: Compact design for Micron and other mini printers
+  url: https://github.com/PrintersForAnts/AntHead
+
+- name: MiniAB
+  manufacturer: PrintersForAnts
+  description: Afterburner-based mini toolhead
+  url: https://github.com/PrintersForAnts/Mini-AfterSherpa
+
+# Community Toolheads (Various)
+- name: Xol
+  manufacturer: Community
+  description: High performance community toolhead
+  url: https://github.com/Armchair-Heavy-Industries/Xol-Toolhead
+
+- name: Archetype
+  manufacturer: Community
+  description: Modern community toolhead
+  url: https://github.com/Armchair-Heavy-Industries/Archetype
+
+- name: Jabberwocky
+  manufacturer: Community
+  description: Community toolhead for V0
+  url: https://github.com/Diyshift/Jabberwocky
+
+# RatRig Toolheads
+- name: EVA
+  manufacturer: Ratrig
+  description: Universal toolhead system
+  url: https://github.com/EVA-3D/eva-main
+
+- name: EVA 3
+  manufacturer: Ratrig
+  description: Latest EVA revision
+  url: https://github.com/EVA-3D/eva-main
+
+# E3D Toolheads
+- name: Hemera Toolhead
+  manufacturer: E3D
+  description: Official Hemera mounting
+  url: https://e3d-online.com/products/e3d-hemera
+
+- name: Revo Toolhead
+  manufacturer: E3D
+  description: Quick-swap capable toolhead
+  url: https://e3d-online.com/products/revo-voron

@@ -2689,6 +2689,31 @@ export class ApiClient {
     );
     return response.data;
   }
+
+  // ===== User API Keys methods =====
+  async listUserApiKeys(userId: string): Promise<unknown[]> {
+    const response = await this.client.get(`/users/${userId}/apikeys`);
+    return response.data;
+  }
+
+  async createUserApiKey(userId: string, request: unknown): Promise<unknown> {
+    const response = await this.client.post(`/users/${userId}/apikeys`, request);
+    return response.data;
+  }
+
+  async toggleUserApiKey(userId: string, keyId: string): Promise<unknown> {
+    const response = await this.client.patch(`/users/${userId}/apikeys/${keyId}/toggle`);
+    return response.data;
+  }
+
+  async deleteUserApiKey(userId: string, keyId: string): Promise<void> {
+    await this.client.delete(`/users/${userId}/apikeys/${keyId}`);
+  }
+
+  async rotateUserApiKey(userId: string, keyId: string): Promise<unknown> {
+    const response = await this.client.post(`/users/${userId}/apikeys/${keyId}/rotate`);
+    return response.data;
+  }
 }
 
 // Export singleton instance

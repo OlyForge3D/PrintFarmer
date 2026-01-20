@@ -6,12 +6,18 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.PrintJobs
 {
-    public class PrintApprovalService(
-        AppDbContext dbContext,
-        ILogger<PrintApprovalService> logger) : IPrintApprovalService
+    public class PrintApprovalService : IPrintApprovalService
     {
-        private readonly AppDbContext _dbContext = dbContext;
-        private readonly ILogger<PrintApprovalService> _logger = logger;
+        private readonly AppDbContext _dbContext;
+        private readonly ILogger<PrintApprovalService> _logger;
+
+        public PrintApprovalService(
+            AppDbContext dbContext,
+            ILogger<PrintApprovalService> logger)
+        {
+            _dbContext = dbContext;
+            _logger = logger;
+        }
 
         public async Task<Guid> CreatePendingApprovalAsync(Guid printJobId, Guid? printerId, string? requestedBy)
         {
