@@ -47,7 +47,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default)
     {
-        return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery().FirstOrDefaultAsync(m => m.Id == id, ct);
+        return await _db.PrinterModels.Include(m => m.SupportedFilamentTypes).AsSplitQuery().FirstOrDefaultAsync(m => m.Id == id, ct);
     }
 
     public async Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default)
@@ -58,13 +58,17 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             return;
         }
 
-        // Remove existing
-        _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
+        // Clear existing filament types
+        model.SupportedFilamentTypes.Clear();
 
-        // Add new
+        // Load and add new filament types
         foreach (Guid filamentTypeId in filamentTypeIds)
         {
-            _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
+            FilamentType? filamentType = await _db.FilamentTypes.FindAsync(new object[] { filamentTypeId }, ct);
+            if (filamentType is not null)
+            {
+                model.SupportedFilamentTypes.Add(filamentType);
+            }
         }
     }
 
@@ -107,7 +111,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public async Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default)
     {
-        IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery();
+        IQueryable<PrinterModel> q = _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).AsSplitQuery();
         if (manufacturerId.HasValue)
         {
             q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
@@ -123,7 +127,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MaxY,
             m.MaxZ,
             m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
-            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+            m.SupportedFilamentTypes.Select(ft => ft.Name).ToArray(),
             m.HasHeatedBed,
             m.HasEnclosure,
             m.MultiMaterial,
@@ -137,7 +141,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
     {
         PrinterModel? model = await _db.PrinterModels.AsNoTracking()
-            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .Include(m => m.SupportedFilamentTypes)
             .Include(m => m.Toolheads).ThenInclude(t => t.HotendModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
@@ -155,7 +159,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 model.MaxY,
                 model.MaxZ,
                 model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
-                model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+                model.SupportedFilamentTypes.Select(ft => ft.Name).ToArray(),
                 model.HasHeatedBed,
                 model.HasEnclosure,
                 model.MultiMaterial,

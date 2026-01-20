@@ -29,7 +29,7 @@ public class FilamentType
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public ICollection<PrinterModelFilamentType> PrinterModels { get; } = new List<PrinterModelFilamentType>();
+    public ICollection<PrinterModel> PrinterModels { get; } = new List<PrinterModel>();
 
     public bool IsActive { get; set; } = true;
 }

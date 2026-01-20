@@ -823,7 +823,6 @@ app.MapGet("/api/debug/db-info", async (
         [nameof(db.Manufacturers)] = await db.Manufacturers.CountAsync(ct),
         [nameof(db.PrinterModels)] = await db.PrinterModels.CountAsync(ct),
         [nameof(db.FilamentTypes)] = await db.FilamentTypes.CountAsync(ct),
-        [nameof(db.PrinterModelFilamentTypes)] = await db.PrinterModelFilamentTypes.CountAsync(ct),
         [nameof(db.SpoolmanConfigs)] = await db.SpoolmanConfigs.CountAsync(ct),
         [nameof(db.GcodeFiles)] = await db.GcodeFiles.CountAsync(ct),
         [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
