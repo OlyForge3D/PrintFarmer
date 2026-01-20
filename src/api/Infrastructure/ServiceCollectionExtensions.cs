@@ -584,9 +584,9 @@ public static class ServiceCollectionExtensions
             _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
         }
 
-        // Gcode upload settings and quota
-        _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
-        _ = services.AddSingleton<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
+        // Gcode upload settings and quota - use persisted settings from ISettingsService
+        _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
+        _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
     }
 
     #endregion

@@ -7,6 +7,7 @@ namespace Farm.Web.Api.Services.Workers;
 /// Settings for automatic stale worker cleanup
 /// </summary>
 [AppSetting(StaleWorkerCleanupSettings.SectionName)]
+[SettingDisplay(Name = "Stale Worker Cleanup", Description = "Automatic cleanup of inactive slicer workers.", Icon = "pf-icon-worker", Group = "Slicing", Order = 4)]
 public class StaleWorkerCleanupSettings : IAppSetting
 {
     public const string SectionName = "StaleWorkerCleanup";

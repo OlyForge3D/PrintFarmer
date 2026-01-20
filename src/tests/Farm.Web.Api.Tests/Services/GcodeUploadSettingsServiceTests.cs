@@ -1,131 +1,42 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Services;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services;
 
-public class GcodeUploadSettingsTests
+/// <summary>
+/// Tests for InMemoryGcodeUploadQuotaService which tracks per-user upload quotas
+/// and reads limits from ISettingsService.
+/// </summary>
+public class InMemoryGcodeUploadQuotaServiceTests
 {
-    [Fact]
-    public void InMemoryGcodeUploadSettings_DefaultConstructor_InitializesWithDefaultExtensions()
-    {
-        // Act
-        var settings = new InMemoryGcodeUploadSettings();
+    private readonly Mock<ISettingsService> _mockSettingsService;
 
-        // Assert
-        IReadOnlyCollection<string> extensions = settings.GetAllowedExtensions();
-        Assert.Contains(".gcode", extensions);
-        Assert.Contains(".bgcode", extensions);
+    public InMemoryGcodeUploadQuotaServiceTests()
+    {
+        _mockSettingsService = new Mock<ISettingsService>();
+    }
+
+    private InMemoryGcodeUploadQuotaService CreateService(long dailyLimitBytes = 2L * 1024 * 1024 * 1024)
+    {
+        var settings = new GcodeUploadSettings
+        {
+            DailyUploadLimitBytes = dailyLimitBytes,
+            AllowedExtensions = [".gcode"]
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(settings);
+        return new InMemoryGcodeUploadQuotaService(_mockSettingsService.Object);
     }
 
     [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_UpdatesList()
+    public void TryAddUsage_WithinQuota_ReturnsTrue()
     {
         // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        string[] newExtensions = new[] { ".g", ".G", ".nc", ".ngc" };
-
-        // Act
-        settings.UpdateAllowedExtensions(newExtensions);
-
-        // Assert
-        IReadOnlyCollection<string> extensions = settings.GetAllowedExtensions();
-        Assert.Equal(4, extensions.Count);
-        Assert.Contains(".g", extensions);
-        Assert.Contains(".nc", extensions);
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_NormalizesExtensions()
-    {
-        // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        string[] extensions = new[] { "gcode", "bgcode", ".g" }; // Missing dot prefix on first two
-
-        // Act
-        settings.UpdateAllowedExtensions(extensions);
-
-        // Assert
-        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
-        Assert.Contains(".gcode", result);
-        Assert.Contains(".bgcode", result);
-        Assert.Contains(".g", result);
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_HandlesWhitespace()
-    {
-        // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        string[] extensions = new[] { " .gcode ", "  .g  ", "\t.nc\t" };
-
-        // Act
-        settings.UpdateAllowedExtensions(extensions);
-
-        // Assert
-        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
-        Assert.Contains(".gcode", result);
-        Assert.Contains(".g", result);
-        Assert.Contains(".nc", result);
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_FilterEmptyStrings()
-    {
-        // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        string[] extensions = new[] { ".gcode", "", "   ", ".g" };
-
-        // Act
-        settings.UpdateAllowedExtensions(extensions);
-
-        // Assert
-        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
-        Assert.Equal(2, result.Count);
-        Assert.Contains(".gcode", result);
-        Assert.Contains(".g", result);
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_ClearsAndReplaces()
-    {
-        // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        Assert.Contains(".gcode", settings.GetAllowedExtensions());
-
-        // Act
-        settings.UpdateAllowedExtensions(new[] { ".xyz", ".abc" });
-
-        // Assert
-        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
-        Assert.DoesNotContain(".gcode", result);
-        Assert.Contains(".xyz", result);
-        Assert.Contains(".abc", result);
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadSettings_UpdateAllowedExtensions_IsCaseInsensitive()
-    {
-        // Arrange
-        var settings = new InMemoryGcodeUploadSettings();
-        string[] extensions = new[] { ".GCODE", ".G", ".Nc" };
-
-        // Act
-        settings.UpdateAllowedExtensions(extensions);
-        IReadOnlyCollection<string> result = settings.GetAllowedExtensions();
-
-        // Assert
-        Assert.Equal(3, result.Count);
-        // Note: May be normalized to lower or keep original case, but should be present
-        Assert.Contains(result, e => e.Equals(".gcode", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result, e => e.Equals(".g", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result, e => e.Equals(".nc", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_WithinQuota_ReturnsTrue()
-    {
-        // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000); // 1MB limit
+        var quota = CreateService(1_000_000); // 1MB limit
         const string userId = "user1";
 
         // Act
@@ -138,10 +49,10 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_ExceedsQuota_ReturnsFalse()
+    public void TryAddUsage_ExceedsQuota_ReturnsFalse()
     {
         // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000); // 1MB limit
+        var quota = CreateService(1_000_000); // 1MB limit
         const string userId = "user1";
 
         // Act
@@ -154,10 +65,10 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_MultipleAdds_Accumulates()
+    public void TryAddUsage_MultipleAdds_Accumulates()
     {
         // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000); // 1MB limit
+        var quota = CreateService(1_000_000); // 1MB limit
         const string userId = "user1";
 
         // Act
@@ -171,10 +82,10 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_DifferentUsers_SeperateLimits()
+    public void TryAddUsage_DifferentUsers_SeparateLimits()
     {
         // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000); // 1MB per user per day
+        var quota = CreateService(1_000_000); // 1MB per user per day
 
         // Act
         quota.TryAddUsage("user1", 800_000, out long used1, out _);
@@ -187,10 +98,10 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_NullUserIdTreatedAsAnonymous()
+    public void TryAddUsage_NullUserIdTreatedAsAnonymous()
     {
         // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000);
+        var quota = CreateService(1_000_000);
 
         // Act
         quota.TryAddUsage(null!, 500_000, out long used1, out _);
@@ -202,10 +113,10 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_TryAddUsage_ZeroBytes_Succeeds()
+    public void TryAddUsage_ZeroBytes_Succeeds()
     {
         // Arrange
-        var quota = new InMemoryGcodeUploadQuotaService(1_000_000);
+        var quota = CreateService(1_000_000);
 
         // Act
         bool result = quota.TryAddUsage("user1", 0, out long used, out _);
@@ -216,10 +127,13 @@ public class GcodeUploadSettingsTests
     }
 
     [Fact]
-    public void InMemoryGcodeUploadQuotaService_DefaultConstructor_Uses2GB()
+    public void TryAddUsage_WhenSettingsServiceReturnsNull_UsesDefaultLimit()
     {
-        // Arrange & Act
-        var quota = new InMemoryGcodeUploadQuotaService();
+        // Arrange
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns((GcodeUploadSettings?)null);
+        var quota = new InMemoryGcodeUploadQuotaService(_mockSettingsService.Object);
 
         // Act
         quota.TryAddUsage("user1", 1_000_000_000, out _, out long limit); // 1GB
@@ -227,4 +141,26 @@ public class GcodeUploadSettingsTests
         // Assert
         Assert.Equal(2L * 1024 * 1024 * 1024, limit); // 2GB default
     }
+
+    [Fact]
+    public void TryAddUsage_ReadsLimitFromSettingsService()
+    {
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            DailyUploadLimitBytes = 5_000_000_000, // 5GB custom limit
+            AllowedExtensions = [".gcode"]
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(settings);
+        var quota = new InMemoryGcodeUploadQuotaService(_mockSettingsService.Object);
+
+        // Act
+        quota.TryAddUsage("user1", 1_000_000, out _, out long limit);
+
+        // Assert
+        Assert.Equal(5_000_000_000, limit);
+    }
 }
+

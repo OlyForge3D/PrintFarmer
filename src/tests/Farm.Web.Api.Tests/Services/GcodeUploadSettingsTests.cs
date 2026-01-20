@@ -1,183 +1,273 @@
-﻿using Farm.Web.Api.Services;
+﻿using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Services;
 using FluentAssertions;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Services;
 
-public class InMemoryGcodeUploadSettingsTests : IDisposable
+/// <summary>
+/// Tests for PersistedGcodeUploadSettingsAdapter which bridges IGcodeUploadSettings
+/// to the persisted GcodeUploadSettings via ISettingsService.
+/// </summary>
+public class PersistedGcodeUploadSettingsAdapterTests
 {
-    private readonly InMemoryGcodeUploadSettings _settings;
-    private readonly string? _originalEnv;
+    private readonly Mock<ISettingsService> _mockSettingsService;
+    private readonly PersistedGcodeUploadSettingsAdapter _adapter;
 
-    public InMemoryGcodeUploadSettingsTests()
+    public PersistedGcodeUploadSettingsAdapterTests()
     {
-        // Store original env var
-        _originalEnv = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
-        // Clear it for consistent tests
-        Environment.SetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS", null);
-        _settings = new InMemoryGcodeUploadSettings();
-    }
-
-    public void Dispose()
-    {
-        // Restore original env var
-        Environment.SetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS", _originalEnv);
+        _mockSettingsService = new Mock<ISettingsService>();
+        _adapter = new PersistedGcodeUploadSettingsAdapter(_mockSettingsService.Object);
     }
 
     [Fact]
-    public void Constructor_WithoutEnvironmentVariable_SetsDefaultExtensions()
+    public void GetAllowedExtensions_ReturnsExtensionsFromSettingsService()
     {
-        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode", ".bgcode", ".ufp"]
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(settings);
 
+        // Act
+        IReadOnlyCollection<string> extensions = _adapter.GetAllowedExtensions();
+
+        // Assert
+        extensions.Should().HaveCount(3);
         extensions.Should().Contain(".gcode");
         extensions.Should().Contain(".bgcode");
-        extensions.Count.Should().Be(2);
+        extensions.Should().Contain(".ufp");
     }
 
     [Fact]
-    public void AllowedExtensions_Returns_ReadOnlyCollection()
+    public void GetAllowedExtensions_WhenSettingsServiceReturnsNull_ReturnsDefaultExtensions()
     {
-        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
+        // Arrange - when settings service returns null, adapter uses defaults
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns((GcodeUploadSettings?)null);
 
-        extensions.Should().NotBeNull();
+        // Act
+        IReadOnlyCollection<string> extensions = _adapter.GetAllowedExtensions();
+
+        // Assert - defaults to [".gcode"]
+        extensions.Should().NotBeEmpty();
+        extensions.Should().Contain(".gcode");
+    }
+
+    [Fact]
+    public void GetAllowedExtensions_WhenExtensionsNull_ReturnsDefaultExtensions()
+    {
+        // Arrange - when AllowedExtensions is null, the GcodeUploadSettings normalizes to defaults
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = null!
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(settings);
+
+        // Act
+        IReadOnlyCollection<string> extensions = _adapter.GetAllowedExtensions();
+
+        // Assert - defaults to [".gcode"]
+        extensions.Should().NotBeEmpty();
+        extensions.Should().Contain(".gcode");
+    }
+
+    [Fact]
+    public void GetAllowedExtensions_ReturnsReadOnlyCollection()
+    {
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode"]
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(settings);
+
+        // Act
+        IReadOnlyCollection<string> extensions = _adapter.GetAllowedExtensions();
+
+        // Assert
         extensions.Should().BeAssignableTo<IReadOnlyCollection<string>>();
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_ReplacesPreviousExtensions()
+    public void UpdateAllowedExtensions_SavesViaSettingsService()
     {
-        string[] newExtensions = new[] { ".gcode", ".bgcode", ".ufp" };
+        // Arrange
+        string[] newExtensions = [".gcode", ".bgcode"];
+        var existingSettings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode"]
+        };
+        _mockSettingsService
+            .Setup(s => s.Get<GcodeUploadSettings>())
+            .Returns(existingSettings);
+        _mockSettingsService
+            .Setup(s => s.Save(It.IsAny<GcodeUploadSettings>()))
+            .Verifiable();
 
-        _settings.UpdateAllowedExtensions(newExtensions);
+        // Act
+        _adapter.UpdateAllowedExtensions(newExtensions);
 
-        IReadOnlyCollection<string> updated = _settings.GetAllowedExtensions();
-        updated.Should().Contain(".gcode");
-        updated.Should().Contain(".bgcode");
-        updated.Should().Contain(".ufp");
+        // Assert
+        _mockSettingsService.Verify(s => s.Save(It.Is<GcodeUploadSettings>(
+            settings => settings.AllowedExtensions.Contains(".gcode") &&
+                        settings.AllowedExtensions.Contains(".bgcode"))), Times.Once);
+    }
+}
+
+/// <summary>
+/// Tests for the GcodeUploadSettings normalization logic that ensures
+/// extensions are properly formatted and deduplicated.
+/// </summary>
+public class GcodeUploadSettingsNormalizationTests
+{
+    [Fact]
+    public void AllowedExtensions_NormalizesExtensions_ToLowercase()
+    {
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".GCODE", ".BgCode", ".UFP"]
+        };
+
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
+
+        // Assert
+        extensions.Should().AllSatisfy(e => e.Should().Be(e.ToLowerInvariant()));
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_WithEmptyList_ClearsExtensions()
+    public void AllowedExtensions_AutoAddsLeadingDot()
     {
-        _settings.UpdateAllowedExtensions(new string[] { });
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = ["gcode", "bgcode", "ufp"]
+        };
 
-        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
-        extensions.Should().BeEmpty();
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
+
+        // Assert
+        extensions.Should().AllSatisfy(e => e.Should().StartWith("."));
+        extensions.Should().Contain(".gcode");
+        extensions.Should().Contain(".bgcode");
+        extensions.Should().Contain(".ufp");
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_WithDuplicates_HandlesDuplicates()
+    public void AllowedExtensions_RemovesDuplicates()
     {
-        string[] extensions = new[] { ".gcode", ".gcode", ".bgcode", ".bgcode" };
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode", ".GCODE", ".GCode", ".bgcode", ".BGCODE"]
+        };
 
-        _settings.UpdateAllowedExtensions(extensions);
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
 
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().Contain(".gcode");
-        result.Should().Contain(".bgcode");
-        result.Count.Should().Be(2);
+        // Assert
+        extensions.Should().HaveCount(2);
+        extensions.Should().Contain(".gcode");
+        extensions.Should().Contain(".bgcode");
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_IsCaseInsensitive()
+    public void AllowedExtensions_TrimsWhitespace()
     {
-        string[] extensions = new[] { ".GCODE", ".BgCode" };
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = ["  .gcode  ", " bgcode ", "  .ufp"]
+        };
 
-        _settings.UpdateAllowedExtensions(extensions);
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
 
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().HaveCount(2);
+        // Assert
+        extensions.Should().AllSatisfy(e => e.Should().NotStartWith(" ").And.NotEndWith(" "));
+        extensions.Should().Contain(".gcode");
+        extensions.Should().Contain(".bgcode");
+        extensions.Should().Contain(".ufp");
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_AutoAddsDotsToExtensions()
+    public void AllowedExtensions_WithEmptyList_ReturnsDefaultExtensions()
     {
-        string[] extensions = new[] { "gcode", "bgcode" };
+        // Arrange - when setting empty list, the normalization returns defaults
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = []
+        };
 
-        _settings.UpdateAllowedExtensions(extensions);
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
 
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().AllSatisfy(e => e.Should().StartWith("."));
+        // Assert - defaults to [".gcode"]
+        extensions.Should().NotBeEmpty();
+        extensions.Should().Contain(".gcode");
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_WithMixedDotNotation()
+    public void AllowedExtensions_WithMixedDotNotation_NormalizesAll()
     {
-        string[] extensions = new[] { ".gcode", "bgcode", ".ufp", "txt" };
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode", "bgcode", ".UFP", "txt"]
+        };
 
-        _settings.UpdateAllowedExtensions(extensions);
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
 
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().AllSatisfy(e => e.Should().StartWith("."));
-        result.Should().HaveCount(4);
+        // Assert
+        extensions.Should().AllSatisfy(e => e.Should().StartWith("."));
+        extensions.Should().HaveCount(4);
     }
 
     [Fact]
-    public void AllowedExtensions_ReturnsNewCollectionEachTime()
+    public void AllowedExtensions_WithNull_ReturnsDefaultExtensions()
     {
-        IReadOnlyCollection<string> extensions1 = _settings.GetAllowedExtensions();
-        IReadOnlyCollection<string> extensions2 = _settings.GetAllowedExtensions();
+        // Arrange - when setting null, the normalization returns defaults
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = null!
+        };
 
-        // Collections should have same content but be different instances
-        extensions1.Should().Equal(extensions2);
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
+
+        // Assert - defaults to [".gcode"]
+        extensions.Should().NotBeEmpty();
+        extensions.Should().Contain(".gcode");
     }
 
     [Fact]
-    public void UpdateAllowedExtensions_CanBeCalledMultipleTimes()
+    public void AllowedExtensions_FiltersOutEmptyStrings()
     {
-        string[] extensions1 = new[] { ".gcode" };
-        _settings.UpdateAllowedExtensions(extensions1);
-        IReadOnlyCollection<string> result1 = _settings.GetAllowedExtensions();
+        // Arrange
+        var settings = new GcodeUploadSettings
+        {
+            AllowedExtensions = [".gcode", "", "  ", ".bgcode"]
+        };
 
-        string[] extensions2 = new[] { ".gcode", ".bgcode" };
-        _settings.UpdateAllowedExtensions(extensions2);
-        IReadOnlyCollection<string> result2 = _settings.GetAllowedExtensions();
+        // Act
+        IList<string> extensions = settings.AllowedExtensions;
 
-        result1.Should().HaveCount(1);
-        result2.Should().HaveCount(2);
-    }
-
-    [Fact]
-    public void UpdateAllowedExtensions_PreservesOrderApproximately()
-    {
-        string[] extensions = new[] { ".ufp", ".bgcode", ".gcode" };
-
-        _settings.UpdateAllowedExtensions(extensions);
-
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().HaveCount(3);
-        result.Should().Contain(".ufp");
-        result.Should().Contain(".bgcode");
-        result.Should().Contain(".gcode");
-    }
-
-    [Fact]
-    public void UpdateAllowedExtensions_WithSpecialCharacters()
-    {
-        string[] extensions = new[] { ".gcode", ".g-code", ".g_code" };
-
-        _settings.UpdateAllowedExtensions(extensions);
-
-        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
-        result.Should().Contain(".gcode");
-        result.Should().Contain(".g-code");
-        result.Should().Contain(".g_code");
-    }
-
-    [Fact]
-    public void AllowedExtensions_IsNotNull()
-    {
-        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
-
-        extensions.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void UpdateAllowedExtensions_WithNull_HandlesSafely()
-    {
-        Action act = () => _settings.UpdateAllowedExtensions(null!);
-
-        // This may throw ArgumentNullException or handle gracefully
-        // depending on implementation
-        act.Should().Throw<ArgumentNullException>();
+        // Assert
+        extensions.Should().HaveCount(2);
+        extensions.Should().NotContain("");
+        extensions.Should().NotContain(".");
     }
 }
