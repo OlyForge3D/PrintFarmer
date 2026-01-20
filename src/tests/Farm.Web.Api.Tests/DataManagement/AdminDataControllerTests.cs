@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.DataManagement;
 
-public class AdminDataControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class AdminDataControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
@@ -16,6 +16,17 @@ public class AdminDataControllerTests : IClassFixture<CustomWebApplicationFactor
     {
         _factory = factory;
         _client = factory.CreateClient();
+    }
+
+    public async Task InitializeAsync()
+    {
+        // Reset database before each test to ensure isolation
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public Task DisposeAsync()
+    {
+        return Task.CompletedTask;
     }
 
     [Fact]
