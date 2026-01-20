@@ -411,8 +411,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // Configure many-to-many relationship between PrinterModel and FilamentType using skip navigation
         _ = modelBuilder.Entity<PrinterModel>()
             .HasMany(p => p.SupportedFilamentTypes)
-            .WithMany(f => f.PrinterModels)
-            .UsingEntity("PrinterModelFilamentTypes");
+            .WithMany(f => f.PrinterModels);
 
         _ = modelBuilder.Entity<PrinterModelAlias>(b =>
         {
