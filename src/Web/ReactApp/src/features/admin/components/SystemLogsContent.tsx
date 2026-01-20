@@ -225,7 +225,7 @@ export function SystemLogsContent() {
           <tbody>
             {logs.map((log, index) => (
               <React.Fragment key={log.id}>
-                <tr className={index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} style={{borderBottom: '1px solid var(--pf-border)'}}>
+                <tr className={`${index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} border-b border-pf-border`}>
                   <td className="p-2 text-center">
                     <Button
                       variant="subtle"
