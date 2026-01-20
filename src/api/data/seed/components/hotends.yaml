@@ -1,0 +1,463 @@
+# PrintFarmer Hotend Models Seed Data
+# Format: YAML (human-readable, supports comments)
+# Schema: printfarmer/components/hotends/v1
+#
+# This file defines hotend model specifications for seeding the database.
+# Users can customize this file without recompiling the application.
+#
+# Field Descriptions:
+# - name: Hotend model name (must be unique per manufacturer)
+# - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
+# - maxTemp: Maximum operating temperature in °C
+# - isHighFlow: true if hotend is optimized for high volumetric flow rates
+# - description: Brief description of the hotend model and its characteristics
+# - url: Product or information URL (optional)
+
+# Bambu Lab Hotends
+- name: X1 Series Hotend
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Bambu Lab X1, X1C, X1E series with ceramic heater
+  url: https://bambulab.com/en/x1
+
+- name: P1 Series Hotend
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Bambu Lab P1P, P1S series
+  url: https://bambulab.com/en/p1
+
+- name: A1 Hotend
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Bambu Lab A1 series, commonly adapted to other printers
+  url: https://bambulab.com/en/a1
+
+- name: A1 Mini Hotend
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  isHighFlow: false
+  description: Compact hotend for Bambu Lab A1 Mini
+  url: https://bambulab.com/en/a1-mini
+
+# Prusa Hotends
+- name: MK3S Hotend
+  manufacturer: Prusa
+  maxTemp: 300
+  isHighFlow: false
+  description: V6-style hotend for MK3S/MK3S+ with PTFE-lined heatbreak
+  url: https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/
+
+- name: Mini Hotend
+  manufacturer: Prusa
+  maxTemp: 280
+  isHighFlow: false
+  description: Compact hotend for Prusa Mini/Mini+
+  url: https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/
+
+- name: Nextruder Hotend
+  manufacturer: Prusa
+  maxTemp: 300
+  isHighFlow: true
+  description: Integrated hotend in Nextruder toolhead for MK3.9S, MK4, MK4S
+  url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
+
+- name: CORE One Hotend
+  manufacturer: Prusa
+  maxTemp: 300
+  isHighFlow: true
+  description: High-flow hotend for Prusa CORE One, based on Nextruder
+  url: https://www.prusa3d.com/product/prusa-core-one/
+
+- name: XL Hotend
+  manufacturer: Prusa
+  maxTemp: 300
+  isHighFlow: true
+  description: Toolchanger-compatible hotend for Prusa XL
+  url: https://www.prusa3d.com/product/original-prusa-xl/
+
+# Creality Hotends
+- name: Sprite Hotend
+  manufacturer: Creality
+  maxTemp: 300
+  isHighFlow: false
+  description: All-metal hotend in Sprite Pro extruder for Ender-3 S1, K1
+  url: https://www.creality.com
+
+- name: K1 Hotend
+  manufacturer: Creality
+  maxTemp: 300
+  isHighFlow: true
+  description: High-speed ceramic heater hotend for K1 series
+  url: https://www.creality.com
+
+- name: K1 Max Hotend
+  manufacturer: Creality
+  maxTemp: 300
+  isHighFlow: true
+  description: Large format high-speed hotend for K1 Max
+  url: https://www.creality.com
+
+# Qidi Hotends
+- name: X-Plus 4 Hotend
+  manufacturer: Qidi
+  maxTemp: 350
+  isHighFlow: true
+  description: High-temp ceramic heater hotend for X-Plus 4
+  url: https://www.qidi3d.com
+
+- name: Q1 Pro Hotend
+  manufacturer: Qidi
+  maxTemp: 350
+  isHighFlow: true
+  description: High-temp hotend for Q1 Pro
+  url: https://www.qidi3d.com
+
+# Elegoo Hotends
+- name: Centauri Hotend
+  manufacturer: Elegoo
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+# Sovol Hotends
+- name: SV08 Hotend
+  manufacturer: Sovol
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Sovol SV08
+  url: https://sovol3d.com
+
+# Phaetus Dragon Series
+- name: Dragon Standard Flow
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: false
+  description: Popular all-metal hotend with precision bi-metal heat break
+  url: https://www.phaetus.com/products/dragon-hotend-standard-flow
+
+- name: Dragon High Flow
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: true
+  description: High flow variant with larger melt zone for faster prints
+  url: https://www.phaetus.com/products/dragon-hotend-high-flow
+
+- name: Dragon ACE
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: false
+  description: Dragon with integrated ADXL345 accelerometer for input shaping
+  url: https://www.phaetus.com/products/dragon-ace
+
+- name: Dragon UHF
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: true
+  description: Ultra high flow Dragon for maximum extrusion rates
+  url: https://www.phaetus.com/products/dragon-uhf
+
+# Phaetus Dragonfly Series
+- name: Dragonfly BMO
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: false
+  description: Compact bi-metal hotend, V6-compatible mounting
+  url: https://www.phaetus.com/products/dragonfly-bmo
+
+- name: Dragonfly BMS
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: false
+  description: Bi-metal hotend with shorter profile for tight spaces
+  url: https://www.phaetus.com/products/dragonfly-bms
+
+- name: Dragonfly HIC
+  manufacturer: Phaetus
+  maxTemp: 500
+  isHighFlow: false
+  description: High-performance integrated cooling variant
+  url: https://www.phaetus.com/products/dragonfly-hic
+
+# Phaetus Rapido Series
+- name: Rapido
+  manufacturer: Phaetus
+  maxTemp: 450
+  isHighFlow: false
+  description: Compact volcano-style hotend with 115W ceramic heater
+  url: https://www.phaetus.com/products/rapido-hotend
+
+- name: Rapido HF
+  manufacturer: Phaetus
+  maxTemp: 450
+  isHighFlow: true
+  description: High flow Rapido variant for faster printing
+  url: https://www.phaetus.com/products/rapido-hotend
+
+- name: Rapido 2
+  manufacturer: Phaetus
+  maxTemp: 450
+  isHighFlow: true
+  description: Updated Rapido with improved heater and flow
+  url: https://www.phaetus.com/products/rapido-2-hotend
+
+- name: Rapido 2 Plus
+  manufacturer: Phaetus
+  maxTemp: 450
+  isHighFlow: true
+  description: Large format high flow hotend for big printers
+  url: https://www.phaetus.com/products/rapido-2-plus
+
+# Slice Engineering
+- name: Mosquito
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  isHighFlow: false
+  description: Premium all-metal hotend
+  url: https://www.sliceengineering.com/products/mosquito-hotend
+
+- name: Mosquito Magnum
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  isHighFlow: true
+  description: High flow Mosquito
+  url: https://www.sliceengineering.com/products/mosquito-magnum-hotend
+
+- name: Mosquito Magnum+
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  isHighFlow: true
+  description: Enhanced Magnum with better cooling
+  url: https://www.sliceengineering.com/products/mosquito-magnum-plus-hotend
+
+- name: Copperhead
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  isHighFlow: false
+  description: Bi-metal heat break with copper block
+  url: https://www.sliceengineering.com/products/copperhead-heat-break
+
+- name: Mako
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  isHighFlow: true
+  description: Compact high flow hotend
+  url: https://www.sliceengineering.com/products/mako-hotend
+
+# E3D V6 Series
+- name: V6
+  manufacturer: E3D
+  maxTemp: 285
+  isHighFlow: false
+  description: Classic all-metal hotend, industry standard
+  url: https://e3d-online.com/products/v6-all-metal-hotend
+
+- name: V6 Volcano
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: true
+  description: High flow V6 variant with extended melt zone
+  url: https://e3d-online.com/products/volcano-hotend
+
+- name: V6 SuperVolcano
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: true
+  description: Maximum flow for large format printing
+  url: https://e3d-online.com/products/supervolcano-hotend
+
+# E3D Revo Series
+- name: Revo Six
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: false
+  description: Standard Revo with quick-swap nozzles, 24V heater
+  url: https://e3d-online.com/products/revo-six
+
+- name: Revo Voron
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: false
+  description: Revo optimized for Voron with shorter melt zone
+  url: https://e3d-online.com/products/revo-voron
+
+- name: Revo Micro
+  manufacturer: E3D
+  maxTemp: 250
+  isHighFlow: false
+  description: Compact lightweight Revo for small printers and bowden setups
+  url: https://e3d-online.com/products/revo-micro
+
+- name: Revo CR
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: false
+  description: Drop-in Revo replacement for Creality printers
+  url: https://e3d-online.com/products/revo-cr
+
+- name: Revo Hemera
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: false
+  description: Integrated direct drive extruder with Revo hotend
+  url: https://e3d-online.com/products/revo-hemera
+
+- name: Revo Hemera XS
+  manufacturer: E3D
+  maxTemp: 300
+  isHighFlow: false
+  description: Compact version of Revo Hemera for tight spaces
+  url: https://e3d-online.com/products/revo-hemera-xs
+
+# E3D Hemera (non-Revo)
+- name: Hemera
+  manufacturer: E3D
+  maxTemp: 500
+  isHighFlow: false
+  description: Direct drive extruder with all-metal V6 hotend
+  url: https://e3d-online.com/products/hemera
+
+- name: Hemera XS
+  manufacturer: E3D
+  maxTemp: 500
+  isHighFlow: false
+  description: Compact direct drive for confined spaces
+  url: https://e3d-online.com/products/hemera-xs
+
+# TriangleLabs Ceramic Heater Core Series
+- name: CHC Pro
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: true
+  description: High quality ceramic heater core hotend
+  url: https://www.aliexpress.com/item/1005004566533274.html
+
+- name: CHC Pro HF
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: true
+  description: High flow ceramic heater core variant
+  url: https://www.aliexpress.com/item/1005004566533274.html
+
+# TriangleLabs TD6 Series
+- name: TD6S
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: false
+  description: Compact all-metal hotend with bi-metal heat break
+  url: https://www.aliexpress.com/item/1005005159949561.html
+
+- name: TD6S HF
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: true
+  description: High flow TD6S variant
+  url: https://www.aliexpress.com/item/1005005159949561.html
+
+# TriangleLabs TZ-V6 Series
+- name: TZ-V6 2.0
+  manufacturer: TriangleLabs
+  maxTemp: 300
+  isHighFlow: false
+  description: V6-compatible hotend with titanium alloy bi-metal heatbreak, 33mm³/s max flow
+  url: https://www.aliexpress.com/item/1005003582802382.html
+
+# TriangleLabs Dragon Clones
+- name: Dragon SF Clone
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: false
+  description: Dragon Standard Flow compatible hotend
+  url: https://www.aliexpress.com/item/1005001892537591.html
+
+- name: Dragon HF Clone
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  isHighFlow: true
+  description: Dragon High Flow compatible hotend
+  url: https://www.aliexpress.com/item/1005001892537591.html
+
+# TriangleLabs Rapido Clones
+- name: Rapido Clone
+  manufacturer: TriangleLabs
+  maxTemp: 450
+  isHighFlow: true
+  description: Rapido-compatible high flow hotend
+  url: https://www.aliexpress.com/item/1005003738382019.html
+
+- name: Rapido UHF Clone
+  manufacturer: TriangleLabs
+  maxTemp: 450
+  isHighFlow: true
+  description: Ultra high flow Rapido-compatible hotend
+  url: https://www.aliexpress.com/item/1005003738382019.html
+
+# Microswiss
+- name: All Metal Hotend
+  manufacturer: Microswiss
+  maxTemp: 285
+  isHighFlow: false
+  description: Direct replacement for Creality/Ender printers
+  url: https://store.micro-swiss.com/collections/all-metal-hotend
+
+- name: FlowTech
+  manufacturer: Microswiss
+  maxTemp: 300
+  isHighFlow: true
+  description: High flow bi-metal design
+  url: https://store.micro-swiss.com/products/flowtech-hotend
+
+# DropEffect
+- name: NextG
+  manufacturer: DropEffect
+  maxTemp: 500
+  isHighFlow: true
+  description: Ultra high flow hotend
+  url: https://www.dropeffect.com/products/nextg-hotend
+
+- name: XG
+  manufacturer: DropEffect
+  maxTemp: 500
+  isHighFlow: true
+  description: Extra large format
+  url: https://www.dropeffect.com/products/xg-hotend
+
+# BIQU
+- name: H2
+  manufacturer: BIQU
+  maxTemp: 300
+  isHighFlow: false
+  description: Integrated extruder and hotend
+  url: https://biqu.equipment/products/biqu-h2-extruder
+
+- name: H2 V2S
+  manufacturer: BIQU
+  maxTemp: 300
+  isHighFlow: false
+  description: Updated H2 design
+  url: https://biqu.equipment/products/biqu-h2-v2s-extruder
+
+- name: Panda Revo Hotend
+  manufacturer: BIQU
+  maxTemp: 300
+  isHighFlow: false
+  description: Revo-compatible hotend with quick-swap nozzles
+  url: https://biqu.equipment/products/panda-revo-hotend
+
+# Bondtech CHT Hotends
+- name: CHT V6
+  manufacturer: Bondtech
+  maxTemp: 500
+  isHighFlow: true
+  description: Core Heating Technology V6 hotend
+  url: https://www.bondtech.se/product/bondtech-cht-nozzle/
+
+- name: CHT Volcano
+  manufacturer: Bondtech
+  maxTemp: 500
+  isHighFlow: true
+  description: CHT technology for volcano-style hotends
+  url: https://www.bondtech.se/product/bondtech-cht-nozzle/

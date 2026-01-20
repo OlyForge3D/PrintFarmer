@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Reflection;
+using System.Text.Json;
+using Farm.Infrastructure.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -27,11 +29,11 @@ public class GcodeHarvestQueueProcessorService(
         {
             try
             {
-                using var scope = serviceProvider.CreateScope();
-                var queue = scope.ServiceProvider.GetRequiredService<IGcodeHarvestQueue>();
+                using IServiceScope scope = serviceProvider.CreateScope();
+                IGcodeHarvestQueue queue = scope.ServiceProvider.GetRequiredService<IGcodeHarvestQueue>();
 
                 // Get the next item to process
-                var queueItem = await queue.DequeueAsync();
+                GcodeHarvestQueueItem? queueItem = await queue.DequeueAsync();
                 if (queueItem == null)
                 {
                     // No items to process, wait before checking again
@@ -50,7 +52,7 @@ public class GcodeHarvestQueueProcessorService(
                     await queue.MarkProcessingAsync(queueItem.Id);
 
                     // Deserialize parameters
-                    var parameters = JsonSerializer.Deserialize<StartGcodeHarvestDto>(queueItem.Parameters)
+                    StartGcodeHarvestDto parameters = JsonSerializer.Deserialize<StartGcodeHarvestDto>(queueItem.Parameters)
                         ?? throw new InvalidOperationException("Failed to deserialize harvest parameters");
 
                     await Console.Error.WriteLineAsync($"[HARVEST_PROCESSOR] CHECKPOINT_1 for queue item {queueItem.Id}");
@@ -59,7 +61,7 @@ public class GcodeHarvestQueueProcessorService(
 
                     // Get the harvest service from DI using GetType lookup
                     // We use reflection to avoid circular dependency between infra and API layers
-                    var harvestServiceType = AppDomain.CurrentDomain.GetAssemblies()
+                    Type? harvestServiceType = AppDomain.CurrentDomain.GetAssemblies()
                         .SelectMany(a =>
                         {
                             try
@@ -92,7 +94,7 @@ public class GcodeHarvestQueueProcessorService(
                     }
 
                     // Call StartHarvestAsync via reflection
-                    var startMethod = harvestServiceType.GetMethod("StartHarvestAsync");
+                    MethodInfo? startMethod = harvestServiceType.GetMethod("StartHarvestAsync");
                     logger.LogInformation("xxx_CHECKPOINT_4: Got start method: {IsNull}", startMethod == null);
                     if (startMethod == null)
                     {

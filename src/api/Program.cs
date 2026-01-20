@@ -17,6 +17,7 @@ using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api;
@@ -37,7 +38,6 @@ using Farm.Web.Api.Services.SlicerServices;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,6 +46,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
+// using Microsoft.Extensions.Caching.Memory; // removed unused
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Register DLL import resolver for Lib3MF to handle cross-platform native library loading
@@ -63,7 +64,7 @@ try
         string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
                          RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
 
-        return NativeLibrary.TryLoad(libName, assembly, searchPath, out nint handle) ? handle : IntPtr.Zero;
+        return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
     });
 }
 catch (InvalidOperationException)
@@ -137,7 +138,7 @@ builder.Services.AddControllers(options =>
     })
     .AddJsonOptions(options =>
     {
-        // Configure JSON options for .NET 10 compatibility
+        // Configure JSON options for .NET 9 compatibility
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.WriteIndented = false;
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
@@ -149,6 +150,8 @@ builder.Services.AddControllers(options =>
     });
 
 builder.Services.AddEndpointsApiExplorer();
+
+// .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
 builder.Services.AddOpenApi();
 
 // CORS configuration for API access
@@ -231,8 +234,7 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
         .AddHttpClientInstrumentation()
         .AddEntityFrameworkCoreInstrumentation(options =>
         {
-            // Note: SetDbStatementForStoredProcedure and SetDbStatementForText removed in OpenTelemetry 1.14.0
-            // DB statements are now captured by default
+            // Note: SetDbStatementForStoredProcedure and SetDbStatementForText removed in .NET 10
             options.EnrichWithIDbCommand = (activity, command) =>
             {
                 _ = activity.SetTag("db.operation", command.CommandText);
@@ -335,7 +337,7 @@ builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 // ApiKey repository
 builder.Services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp =>
 {
-    var db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+    AppDbContext db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
     return new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(db);
 });
 
@@ -544,9 +546,13 @@ catch
 {
     // Best-effort; do not fail startup if env APIs are not available in some hosts
 }
-
 #pragma warning restore S1075 // URIs should not be hardcoded
-
+// Capture a few startup/root services from the service collection before building the
+// final application service provider. This avoids sprinkling `app.Services.GetService`
+// callsites around `Program.cs` while still allowing top-level initialization to
+// use the services safely. We build a temporary provider (disposed immediately)
+// and stash references to services that are safe to keep for the lifetime of the
+// process (loggers, unified logging, temp path provider, startup status).
 IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
 ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
@@ -664,10 +670,7 @@ try
         ITempPathProvider? tempProvider = _capturedTempPathProvider ?? app.Services.GetService<ITempPathProvider>();
         if (tempProvider != null)
         {
-            if (app.Logger.IsEnabled(LogLevel.Information))
-            {
-                app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
-            }
+            app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
         }
         else
         {
@@ -689,10 +692,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    // Enable OpenAPI documentation endpoint at /openapi/v1.json in development
-    // Temporarily disabled due to DateTime JSON serialization issue during schema reflection
-    // _ = app.MapOpenApi();
-    // OpenAPI UI available at /openapi/ui.json (browser-friendly)
+    _ = app.MapOpenApi();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -751,6 +751,9 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
         await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
 });
+
+// Minimal API for network discovery settings
+// Helper: Map between model and DTO
 
 // Network discovery settings now available via UnifiedSettingsController:
 // GET /api/settings/network-discovery
@@ -836,7 +839,8 @@ app.MapGet("/api/debug/db-info", async (
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),
-        [nameof(db.UserActions)] = await db.UserActions.CountAsync(ct),
+
+        // Actions removed - old authorization entity
         [nameof(db.RolePermissions)] = await db.RolePermissions.CountAsync(ct),
         [nameof(db.UserRoles)] = await db.UserRoles.CountAsync(ct)
     };
@@ -947,10 +951,7 @@ try
                 ServeUnknownFileTypes = true,
                 DefaultContentType = "application/octet-stream"
             });
-            if (app.Logger.IsEnabled(LogLevel.Information))
-            {
-                app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
-            }
+            app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
         }
         else
         {
@@ -993,7 +994,7 @@ catch (Exception ex)
 try
 {
     await using AsyncServiceScope storageScope = app.Services.CreateAsyncScope();
-    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
+    IStoragePathService storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
     await storagePathService.EnsureDirectoriesExistAsync();
 }
 catch (Exception ex)
@@ -1043,3 +1044,5 @@ public partial class Program
     {
     }
 }
+
+// Small test-only startup filter used from Program when running under Testing

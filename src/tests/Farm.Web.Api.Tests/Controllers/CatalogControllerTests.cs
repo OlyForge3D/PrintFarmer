@@ -65,7 +65,7 @@ public class CatalogControllerTests
 
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var list = Assert.IsAssignableFrom<IEnumerable<ManufacturerDto>>(okResult.Value);
+        IEnumerable<ManufacturerDto> list = Assert.IsAssignableFrom<IEnumerable<ManufacturerDto>>(okResult.Value);
         Assert.Empty(list);
     }
 

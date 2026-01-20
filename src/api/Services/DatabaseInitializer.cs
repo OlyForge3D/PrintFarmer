@@ -12,10 +12,11 @@ namespace Farm.Web.Api.Services;
 /// <summary>
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
-public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : IDatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger, IDataSeedService dataSeedService) : IDatabaseInitializer
 {
     private readonly AppDbContext _context = context;
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IDataSeedService _dataSeedService = dataSeedService;
 
     /// <summary>
     /// Initialize database with retry logic for container startup scenarios
@@ -158,6 +159,29 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     // === BEGIN: Seeding logic merged from DatabaseSeeder ===
     public virtual async Task SeedAllAsync()
     {
+        // Try loading from YAML files first (new approach)
+        // If YAML files don't exist or fail to load, fall back to hardcoded seed data
+        try
+        {
+            _logger.LogInformation("[DB] Attempting to seed from YAML files");
+            await _dataSeedService.SeedFilamentTypesAsync();
+            await _dataSeedService.SeedManufacturersAsync();
+            await _dataSeedService.SeedPrinterModelsAsync();
+            await _dataSeedService.SeedComponentModelsAsync();
+
+            // Still need to seed these from existing methods (not yet externalized)
+            await SeedAuthenticationDataAsync();
+            await SeedRootFoldersAsync();
+
+            _logger.LogInformation("[DB] Successfully seeded from YAML files");
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DB] Failed to seed from YAML files, falling back to hardcoded seed data: {Message}", ex.Message);
+        }
+
+        // Fallback to original hardcoded seeding
         await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
         await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
         await SeedComponentModelsAsync(); // Seed hotend, extruder, toolhead, nozzle models

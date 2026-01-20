@@ -23,25 +23,25 @@ export interface ToggleApiKeyResponse {
 }
 
 export async function listApiKeys(userId: string): Promise<ApiKeyDto[]> {
-  const response = await apiClient.get(`/users/${userId}/apikeys`);
-  return response.data;
+  const response = await apiClient.listUserApiKeys(userId);
+  return response as ApiKeyDto[];
 }
 
 export async function createApiKey(userId: string, request: CreateApiKeyRequest): Promise<CreateApiKeyResponse> {
-  const response = await apiClient.post(`/users/${userId}/apikeys`, request);
-  return response.data;
+  const response = await apiClient.createUserApiKey(userId, request);
+  return response as CreateApiKeyResponse;
 }
 
 export async function toggleApiKey(userId: string, keyId: string): Promise<ToggleApiKeyResponse> {
-  const response = await apiClient.patch(`/users/${userId}/apikeys/${keyId}/toggle`);
-  return response.data;
+  const response = await apiClient.toggleUserApiKey(userId, keyId);
+  return response as ToggleApiKeyResponse;
 }
 
 export async function deleteApiKey(userId: string, keyId: string): Promise<void> {
-  await apiClient.delete(`/users/${userId}/apikeys/${keyId}`);
+  await apiClient.deleteUserApiKey(userId, keyId);
 }
 
 export async function rotateApiKey(userId: string, keyId: string): Promise<CreateApiKeyResponse> {
-  const response = await apiClient.post(`/users/${userId}/apikeys/${keyId}/rotate`);
-  return response.data;
+  const response = await apiClient.rotateUserApiKey(userId, keyId);
+  return response as CreateApiKeyResponse;
 }
