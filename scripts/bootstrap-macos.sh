@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.102}
+REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.101}
 # Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
 NODE_VERSION=${NODE_VERSION:-20}
 

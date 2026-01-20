@@ -17,10 +17,19 @@ jobs:
       - name: Ensure sudo available
         run: sudo true
 
+      - name: Install .NET 10 SDK via dotnet-install.sh
+        run: |
+          # .NET 10 is not yet available via Microsoft apt repo, use dotnet-install.sh
+          chmod +x ./dotnet-install.sh
+          ./dotnet-install.sh --version 10.0.101
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
+        env:
+          DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+
       - name: Run bootstrap script (verify)
         run: |
           chmod +x scripts/bootstrap-ubuntu.sh
-          sudo bash ./scripts/bootstrap-ubuntu.sh --verify
+          sudo -E bash ./scripts/bootstrap-ubuntu.sh --verify
         env:
-          DOTNET_VERSION: '10.0.x'
-          NODE_VERSION: '18'
+          DOTNET_VERSION: '10.0.101'
+          NODE_VERSION: '24'

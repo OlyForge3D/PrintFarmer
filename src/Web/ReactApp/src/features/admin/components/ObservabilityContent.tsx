@@ -2,9 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTelemetry } from '@/telemetry/useTelemetry';
 import type { Span } from '@opentelemetry/api';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
-import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
-import { PageTemplate } from '@/common/components/PageTemplate';
-import { ActivityIcon } from '@/common/components/icons/MdiIcons';
+import UnifiedLoggingDashboard from '@/common/components/UnifiedLoggingDashboard';
 import { Button } from '@/common/components/ui';
 
 interface TelemetryStats {
@@ -14,7 +12,7 @@ interface TelemetryStats {
   lastUpdated: Date;
 }
 
-export function ObservabilityDashboard() {
+export function ObservabilityContent() {
   const [stats, setStats] = useState<TelemetryStats>({
     operationsCount: 0,
     averageResponseTime: 0,
@@ -29,7 +27,7 @@ export function ObservabilityDashboard() {
   const handleTrackUnmount = useCallback((component: string, span?: Span) => trackComponentUnmount(component, span), [trackComponentUnmount]);
 
   useEffect(() => {
-    const mountSpan = handleTrackMount('ObservabilityDashboard');
+    const mountSpan = handleTrackMount('ObservabilityContent');
     
     // Simulate fetching telemetry stats
     const fetchStats = () => {
@@ -46,9 +44,9 @@ export function ObservabilityDashboard() {
 
     return () => {
       clearInterval(interval);
-      handleTrackUnmount('ObservabilityDashboard', mountSpan);
+      handleTrackUnmount('ObservabilityContent', mountSpan);
     };
-  }, [handleTrackMount, handleTrackUnmount]); // Include stable callback dependencies
+  }, [handleTrackMount, handleTrackUnmount]);
 
   const handleRefresh = useCallback(() => {
     trackUserInteraction('refresh', 'observability-dashboard', { 
@@ -96,11 +94,10 @@ export function ObservabilityDashboard() {
   ];
 
   return (
-    <PageTemplate
-      title="System Observability"
-      subtitle="Real-time system monitoring and telemetry data"
-      icon={ActivityIcon}
-      actions={
+    <div className="space-y-6">
+      {/* Header with Refresh Button */}
+      <div className="flex justify-between items-center">
+        <p className="text-pf-text-secondary">Real-time system monitoring and telemetry data</p>
         <Button
           type="button"
           variant="primary"
@@ -109,8 +106,8 @@ export function ObservabilityDashboard() {
         >
           Refresh Data
         </Button>
-      }
-    >
+      </div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
@@ -184,9 +181,9 @@ export function ObservabilityDashboard() {
       </div>
 
       {/* Unified Logging Dashboard Integration */}
-      <div className="mt-8">
+      <div className="mt-4">
         <UnifiedLoggingDashboard />
       </div>
-    </PageTemplate>
+    </div>
   );
 }

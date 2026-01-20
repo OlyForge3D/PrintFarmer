@@ -41,8 +41,8 @@ print_header "Push Pre-Upgraded Images to Local Registry"
 
 # Pre-upgraded images that were built with --prepare-offline
 UPGRADED_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:10.0-upgraded"
+    "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim-upgraded"
     "ubuntu:24.04-upgraded"
     "node:22-alpine-upgraded"
     "postgres:16-alpine-upgraded"

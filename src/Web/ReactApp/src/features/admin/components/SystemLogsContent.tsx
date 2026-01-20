@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "@/services/api";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
-import { PageTemplate } from '@/common/components/PageTemplate';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
 
 const DEFAULT_COLUMNS: Record<LogColumnKey, { label: string; default: boolean }> = {
@@ -16,7 +15,7 @@ const DEFAULT_COLUMNS: Record<LogColumnKey, { label: string; default: boolean }>
 
 const COLUMNS_STORAGE_KEY = 'logs-page-columns';
 
-export function LogsPage() {
+export function SystemLogsContent() {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [useAdvancedQuery, setUseAdvancedQuery] = useState(false);
@@ -64,9 +63,9 @@ export function LogsPage() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      let logs;
+      let logsData;
       if (useAdvancedQuery) {
-        logs = await apiClient.getSystemLogsQuery(queryString);
+        logsData = await apiClient.getSystemLogsQuery(queryString);
       } else {
         const params: Record<string, string> = {};
         if (filters.correlationId) params.correlationId = filters.correlationId;
@@ -75,9 +74,9 @@ export function LogsPage() {
         if (filters.from) params.from = `${filters.from}T00:00:00Z`;
         if (filters.to) params.to = `${filters.to}T23:59:59Z`;
         if (filters.metadata) params.metadata = filters.metadata;
-        logs = await apiClient.getSystemLogs(params);
+        logsData = await apiClient.getSystemLogs(params);
       }
-      setLogs(logs);
+      setLogs(logsData as unknown as SystemLog[]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch logs';
       alert(message);
@@ -111,9 +110,9 @@ export function LogsPage() {
   const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length;
 
   return (
-    <PageTemplate title="System Logs">
+    <div className="space-y-4">
       {/* Mode Selection */}
-      <div className="mb-4 flex gap-2">
+      <div className="flex gap-2">
         <Button 
           variant={useAdvancedQuery ? "secondary" : "primary"} 
           onClick={() => setUseAdvancedQuery(false)}
@@ -130,7 +129,7 @@ export function LogsPage() {
 
       {/* Filters */}
       {!useAdvancedQuery && (
-        <div className="mb-4 grid grid-cols-1 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
           <FormField label="CorrelationId" inline>
             <Input placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
           </FormField>
@@ -159,7 +158,7 @@ export function LogsPage() {
 
       {/* Advanced Query */}
       {useAdvancedQuery && (
-        <div className="mb-4">
+        <div>
           <FormField label="Lucene Query" inline={false}>
             <Textarea
               value={queryString}
@@ -182,18 +181,18 @@ export function LogsPage() {
       )}
 
       {/* Action Buttons */}
-      <div className="mb-4 flex gap-2">
+      <div className="flex gap-2">
         <Button variant="primary" onClick={fetchLogs} disabled={loading}>Search</Button>
         <Button variant="success" onClick={exportLogs}>Export</Button>
       </div>
 
       {/* Column Visibility Controls */}
-      <div className="mb-4 p-3 bg-pf-bg-1 rounded border border-pf-border">
+      <div className="p-3 bg-pf-bg-1 rounded border border-pf-border">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-pf-text-primary">Visible Columns</h3>
           <Button variant="secondary" size="sm" onClick={resetColumns}>Reset to Defaults</Button>
         </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {Object.entries(DEFAULT_COLUMNS).map(([key, { label }]) => (
             <label key={key} className="flex items-center gap-2 cursor-pointer">
               <Checkbox
@@ -206,7 +205,7 @@ export function LogsPage() {
         </div>
       </div>
 
-      {loading && <div className="text-pf-text-muted mb-4">Loading logs...</div>}
+      {loading && <div className="text-pf-text-muted">Loading logs...</div>}
 
       {/* Logs Table */}
       <div className="overflow-x-auto border border-pf-border rounded">
@@ -226,7 +225,7 @@ export function LogsPage() {
           <tbody>
             {logs.map((log, index) => (
               <React.Fragment key={log.id}>
-                <tr className={index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} style={{borderBottom: '1px solid var(--pf-border)'}}>
+                <tr className={`${index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} border-b border-pf-border`}>
                   <td className="p-2 text-center">
                     <Button
                       variant="subtle"
@@ -287,6 +286,6 @@ export function LogsPage() {
           </tbody>
         </table>
       </div>
-    </PageTemplate>
+    </div>
   );
 }

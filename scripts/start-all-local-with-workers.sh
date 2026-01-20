@@ -22,8 +22,8 @@
 #   5. (Deprecated) PrusaSlicer worker support has been removed
 #
 # Requirements:
-#   - .NET SDK 10.0.102+
-#   - Node.js >=20.19
+#   - .NET SDK 10.0.101+
+#   - Node.js >=24.13
 #   - Docker (for worker containers)
 #   - Docker images: printfarmer/orcaslicer-worker
 
@@ -556,14 +556,14 @@ if command -v docker &> /dev/null; then
 fi
 
 # Verify .NET version
-if ! dotnet --version | grep -q "^9\.0\."; then
-  error ".NET SDK 9.0+ required. Current version: $(dotnet --version)"
+if ! dotnet --version | grep -q "^10\.0\."; then
+  error ".NET SDK 10.0+ required. Current version: $(dotnet --version)"
 fi
 
 # Verify Node.js version
 node_version=$(node --version | sed 's/v//')
-if ! printf '%s\n18.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^18"; then
-  error "Node.js >=20.19 required. Current version: $node_version"
+if ! printf '%s\n24.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^24"; then
+  error "Node.js >=24.13 required. Current version: $node_version"
 fi
 
 success "Prerequisites check passed"

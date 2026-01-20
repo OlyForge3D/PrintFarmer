@@ -287,7 +287,7 @@ function CameraFitter() {
     // Compute bounding box of all visible objects
     const box = new THREE.Box3();
 
-    scene.traverse((object) => {
+    scene.traverse((object: THREE.Object3D) => {
       if (object instanceof THREE.Mesh && object.geometry) {
         const geom = object.geometry as THREE.BufferGeometry;
         geom.computeBoundingBox();

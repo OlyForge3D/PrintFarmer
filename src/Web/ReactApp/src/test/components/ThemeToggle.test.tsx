@@ -238,15 +238,15 @@ describe('ThemeToggle', () => {
       expect(radioGroup).toHaveAttribute('aria-label', 'Theme selection');
       
       const lightButton = screen.getByLabelText(/Switch to light theme/i) as HTMLInputElement;
-      // Native radio inputs shouldn't be required to expose role attribute; assert it's an input radio and ARIA checked
+      // Native radio inputs use the checked property (not aria-checked attribute)
       expect(lightButton.tagName).toBe('INPUT');
       expect(lightButton).toHaveAttribute('type', 'radio');
-      expect(lightButton).toHaveAttribute('aria-checked', 'true');
+      expect(lightButton.checked).toBe(true);
       
       const githubDarkButton = screen.getByLabelText(/Switch to github dark theme/i) as HTMLInputElement;
       expect(githubDarkButton.tagName).toBe('INPUT');
       expect(githubDarkButton).toHaveAttribute('type', 'radio');
-      expect(githubDarkButton).toHaveAttribute('aria-checked', 'false');
+      expect(githubDarkButton.checked).toBe(false);
     });
 
     it('provides proper ARIA label for dropdown', () => {

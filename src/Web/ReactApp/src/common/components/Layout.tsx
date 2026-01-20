@@ -22,7 +22,6 @@ import {
   TagIcon,
   WrenchIcon,
   TrendingUpIcon,
-  DatabaseIcon,
   LocationIcon,
   KeyIcon
 } from '@/common/components/icons/MdiIcons';
@@ -129,21 +128,9 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Logs',
-    href: '/logs',
-    icon: HistoryIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Observability',
-    href: '/admin/observability',
+    name: 'System',
+    href: '/admin/system',
     icon: TrendingUpIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'File Health',
-    href: '/admin/file-health',
-    icon: DatabaseIcon,
     requiredRole: 'farm_admin'
   },
   {

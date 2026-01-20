@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 // ===========================================================================
 // Core Domain Enumerations

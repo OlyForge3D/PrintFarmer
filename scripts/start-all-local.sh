@@ -24,7 +24,7 @@
 #   AUTO_ADMIN_EMAIL=admin@printfarmer.local
 #
 # Requirements:
-#   - .NET SDK 10.0.102+
+#   - .NET SDK 10.0.101+
 #   - Node.js >=20.19
 
 set -euo pipefail
@@ -326,8 +326,8 @@ require_command node
 # Docker checks and Redis startup are intentionally omitted from this simplified local script.
 
 # Verify .NET version
-if ! dotnet --version | grep -q "^9\.0\."; then
-  log_error ".NET SDK 9.0+ required. Current version: $(dotnet --version)"
+if ! dotnet --version | grep -q "^10\.0\."; then
+  log_error ".NET SDK 10.0+ required. Current version: $(dotnet --version)"
 fi
 
 # Verify Node.js version
