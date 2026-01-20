@@ -35,7 +35,7 @@ When you run the deployment script, it checks for .NET SDK:
 ### Scenario 1: .NET SDK Found
 
 ```
-✅ .NET SDK found: 10.0.102
+✅ .NET SDK found: 10.0.101
 ✅ .NET SDK version is compatible
 ```
 
@@ -64,7 +64,7 @@ Would you like to install .NET SDK now? [y/N]:
   echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc
   echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> ~/.zshrc
 
-✅ Verified: .NET SDK 10.0.102 is now available
+✅ Verified: .NET SDK 10.0.101 is now available
 ```
 
 **If you answer no:**
@@ -151,7 +151,7 @@ source ~/.zshrc
 ```bash
 # Check .NET is available
 dotnet --version
-# Should show: 10.0.102 (or similar)
+# Should show: 10.0.101 (or similar)
 
 # Check location
 which dotnet
@@ -178,11 +178,11 @@ PrintFarmer requires **.NET SDK 10.0 or later**
 
 ```bash
 dotnet --version
-# Example output: 10.0.102
+# Example output: 10.0.101
 
 dotnet --list-sdks
 # Example output:
-# 10.0.102 [/home/user/.dotnet/sdk]
+# 10.0.101 [/home/user/.dotnet/sdk]
 ```
 
 ---

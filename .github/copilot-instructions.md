@@ -32,16 +32,16 @@
 ```
 
 ### Prerequisites
-- .NET SDK 10.0 or later (verified working with 10.0.102) - for API backend
+- .NET SDK 10.0 or later (verified working with 10.0.101) - for API backend
 - Node.js 24+ and npm - for React frontend
 - Windows/macOS/Linux supported
 
 **CRITICAL**: If .NET 10 SDK is not installed, install it first:
 ```bash
-# Download .NET 10.0.102 SDK (exact version required by global.json)
+# Download .NET 10.0.101 SDK (exact version required by global.json)
 wget https://dot.net/v1/dotnet-install.sh
 chmod +x dotnet-install.sh
-./dotnet-install.sh --version 10.0.102
+./dotnet-install.sh --version 10.0.101
 export PATH="$HOME/.dotnet:$PATH"
 ```
 
@@ -306,7 +306,7 @@ npm run dev
 /
 ├── CONTRIBUTING.md          # Detailed contributor guidelines
 ├── README.md               # Basic project overview
-├── global.json             # .NET SDK version (10.0.102)
+├── global.json             # .NET SDK version (10.0.101)
 ├── docker-compose.yml      # Multi-container deployment
 ├── docs/                   # Documentation
 ├── scripts/                # Build, deploy, and utility scripts
@@ -395,7 +395,7 @@ npm run dev
 - `src/api/appsettings.json` - Database connections, logging, multi-provider config
 - `src/api/Properties/launchSettings.json` - Development server settings (ports 5245/7281)
 - `src/farm-web.sln` - Solution configuration
-- `global.json` - .NET SDK version requirement (10.0.102)
+- `global.json` - .NET SDK version requirement (10.0.101)
 - Project files: `*.csproj` in each directory
 
 ### Dependencies & External Services
@@ -754,7 +754,7 @@ npm run lint 2>&1 | head -20
 - **All Tests Passing**: Discovery probe validation tests verify confidence scoring, field detection, and error handling
 
 **Trust These Instructions:**
-These instructions have been thoroughly tested and validated with .NET 10.0.102 as of 2026-01-18. Discovery probe migration completed with all tests passing. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
+These instructions have been thoroughly tested and validated with .NET 10.0.101 as of 2026-01-20. Discovery probe migration completed with all tests passing. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
 
 ## Critical Timeout Settings & Build Times
 
@@ -792,8 +792,8 @@ These instructions have been thoroughly tested and validated with .NET 10.0.102 
 **Full development workflow from fresh clone (VALIDATED 2025-09-07):**
 
 ```bash
-# 1. Ensure .NET 10.0.102 is installed
-dotnet --info  # Should show 10.0.102
+# 1. Ensure .NET 10.0.101 is installed
+dotnet --info  # Should show 10.0.101
 
 # 2. Ensure Node.js 24+ is installed
 node --version  # Should be 24+

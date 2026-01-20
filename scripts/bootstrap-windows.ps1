@@ -85,7 +85,7 @@ if (-not (Test-IsElevated)) {
     $global:AllowPerCommandElevation = $false
 }
 
-$REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '10.0.102'
+$REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '10.0.101'
 # Default to Node 24 major LTS for frontend toolchain
 $REQ_NODE_MAJOR = $env:NODE_VERSION -or '24'
 
