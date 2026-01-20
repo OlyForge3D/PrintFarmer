@@ -19,14 +19,9 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts;
 
-public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactory>
+public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
-    private readonly CustomWebApplicationFactory _factory;
-
-    public ArtifactsBulkUploadTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-    }
+    private readonly CustomWebApplicationFactory _factory = factory;
 
     [Fact(DisplayName = "Bulk upload multiple artifacts succeeds")]
     public async Task Bulk_Upload_Multiple_Artifacts_Succeeds()

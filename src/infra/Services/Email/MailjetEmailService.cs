@@ -52,7 +52,7 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
             }
         };
 
-        var json = JsonSerializer.Serialize(payload);
+        string json = JsonSerializer.Serialize(payload);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         try
@@ -80,27 +80,27 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
 
     public async Task<bool> SendPasswordResetAsync(string email, string resetLink, CancellationToken ct = default)
     {
-        var (subject, plain, html) = _renderer.Render("PasswordReset", new Dictionary<string, string>
+        (string? subject, string? plain, string? html) = _renderer.Render("PasswordReset", new Dictionary<string, string>
         {
             ["ResetLink"] = resetLink,
             ["ExpirationMinutes"] = "60"
         });
 
         var message = new EmailMessage(email, subject, plain, html);
-        var result = await SendAsync(message, ct);
+        EmailDispatchResult result = await SendAsync(message, ct);
         return result.Success;
     }
 
     public async Task<bool> SendEmailConfirmationAsync(string email, string confirmationLink, CancellationToken ct = default)
     {
-        var (subject, plain, html) = _renderer.Render("EmailConfirmation", new Dictionary<string, string>
+        (string? subject, string? plain, string? html) = _renderer.Render("EmailConfirmation", new Dictionary<string, string>
         {
             ["ConfirmationLink"] = confirmationLink,
             ["ExpirationHours"] = "24"
         });
 
         var message = new EmailMessage(email, subject, plain, html);
-        var result = await SendAsync(message, ct);
+        EmailDispatchResult result = await SendAsync(message, ct);
         return result.Success;
     }
 

@@ -119,6 +119,7 @@ public class ImportProcessorService : IImportProcessorService
                 if (parts.Length == 2)
                 {
                     string hostPart = parts[1];
+
                     // Remove port and path
                     int colonIndex = hostPart.IndexOf(':');
                     int slashIndex = hostPart.IndexOf('/');
@@ -126,19 +127,24 @@ public class ImportProcessorService : IImportProcessorService
                     if (colonIndex > 0 || slashIndex > 0)
                     {
                         int endIndex = hostPart.Length;
+
                         if (colonIndex > 0)
                         {
                             endIndex = Math.Min(endIndex, colonIndex);
                         }
+
                         if (slashIndex > 0)
                         {
                             endIndex = Math.Min(endIndex, slashIndex);
                         }
+
                         hostPart = hostPart.Substring(0, endIndex);
                     }
+
                     return parts[0] + "://" + hostPart;
                 }
             }
+
             return trimmed;
         }
     }
@@ -155,7 +161,7 @@ public class ImportProcessorService : IImportProcessorService
             {
                 // Add new manufacturer
                 manufacturerId = Guid.NewGuid();
-                await _catalogRepo.AddManufacturerAsync(manufacturerId, name, ct);
+                await _catalogRepo.AddManufacturerAsync(manufacturerId, name, null, null, ct);
             }
             else
             {
@@ -221,6 +227,7 @@ public class ImportProcessorService : IImportProcessorService
             DateAcquired = dto.DateAcquired,
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey,
+
             // Populate hardware specs from DTO (populated from exported data or discovery)
             MaxBuildVolumeX = dto.MaxBuildVolumeX,
             MaxBuildVolumeY = dto.MaxBuildVolumeY,
@@ -237,22 +244,52 @@ public class ImportProcessorService : IImportProcessorService
 
         await _unitOfWork.Printers.AddAsync(p, ct);
 
-        // Create default toolhead for the imported printer
-        var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
+        // Create toolheads from import data or use default
+        if (dto.Toolheads != null && dto.Toolheads.Count > 0)
         {
-            Id = Guid.NewGuid(),
-            PrinterId = p.Id,
-            Name = "Extruder 1",
-            Index = 0,
-            IsPrimary = true,
-            NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
-            SupportedMaterials = dto.SupportedMaterials,
-            MaxHotendTemp = dto.MaxHotendTemp,
-            UpdatedAt = DateTime.UtcNow
-        };
+            // Import toolheads from DTO (exported data)
+            foreach (var toolheadDto in dto.Toolheads.OrderBy(t => t.Index))
+            {
+                var toolhead = new Farm.Infrastructure.Domain.Toolhead
+                {
+                    Id = toolheadDto.Id ?? Guid.NewGuid(),
+                    PrinterId = p.Id,
+                    Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
+                    Index = toolheadDto.Index,
+                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? dto.MaxHotendTemp,
+                    MaxFlowRate = toolheadDto.MaxFlowRate,
+                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
+                    HotendModelId = toolheadDto.HotendModelId,
+                    ExtruderModelId = toolheadDto.ExtruderModelId,
+                    ToolheadModelDefId = toolheadDto.ToolheadModelDefId,
+                    NozzleModelId = toolheadDto.NozzleModelId,  // Nozzle diameter derived from nozzle model
+                    SupportedMaterials = toolheadDto.SupportedMaterials ?? dto.SupportedMaterials,
+                    IsPrimary = toolheadDto.IsPrimary,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                p.Toolheads.Add(toolhead);
+            }
+        }
+        else
+        {
+            // Create default toolhead for the imported printer
+            var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = p.Id,
+                Name = "Extruder 1",
+                Index = 0,
+                IsPrimary = true,
 
-        // TODO: Add toolhead via repository if one exists, or directly via context
-        // For now, we'll need to add it to the database - this may need a toolhead repository
+                // NozzleDiameter is now derived from NozzleModelId - use default nozzle model if needed
+                SupportedMaterials = dto.SupportedMaterials,
+                MaxHotendTemp = dto.MaxHotendTemp,
+                UpdatedAt = DateTime.UtcNow
+            };
+            p.Toolheads.Add(defaultToolhead);
+        }
+
+        await _unitOfWork.SaveChangesAsync(ct);
 
         return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
@@ -274,14 +311,13 @@ public class ImportProcessorService : IImportProcessorService
             BedTemp: null,
             HotendTarget: null,
             BedTarget: null,
-            Backend: (Farm.Infrastructure.PrinterBackend)p.Backend,
+            Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress,
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
-            FrontendUrl: p.FrontendUrl
-        );
+            FrontendUrl: p.FrontendUrl);
     }
 }

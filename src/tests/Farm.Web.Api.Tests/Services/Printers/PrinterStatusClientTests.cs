@@ -54,7 +54,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             services.AddSingleton(sdcpStatusClient);
             services.AddSingleton(octoPrintStatusClient);
 
-            var serviceProvider = services.BuildServiceProvider();
+            ServiceProvider serviceProvider = services.BuildServiceProvider();
 
             // Create mock extended plugins that will return the correct status client types
             var mockMoonrakerPlugin = new Mock<IExtendedBackendPlugin>();
@@ -134,7 +134,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void MoonrakerStatusClient_SupportsCorrectBackend()
         {
             // Arrange
-            var (mockMoonraker, mockBreaker, mockLogger) = CreateMoonrakerMocks();
+            (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateMoonrakerMocks();
             var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -145,7 +145,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task MoonrakerStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockMoonraker, mockBreaker, mockLogger) = CreateMoonrakerMocks();
+            (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateMoonrakerMocks();
             var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -157,7 +157,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task MoonrakerStatusClient_GetCameraStreamUrlAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockMoonraker, mockBreaker, mockLogger) = CreateMoonrakerMocks();
+            (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateMoonrakerMocks();
             var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -169,7 +169,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task MoonrakerStatusClient_IsCameraAvailableAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockMoonraker, mockBreaker, mockLogger) = CreateMoonrakerMocks();
+            (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateMoonrakerMocks();
             var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -181,7 +181,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task MoonrakerStatusClient_GetPrinterDtoAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockMoonraker, mockBreaker, mockLogger) = CreateMoonrakerMocks();
+            (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateMoonrakerMocks();
             var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -197,7 +197,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void PrusaLinkStatusClient_SupportsCorrectBackend()
         {
             // Arrange
-            var (mockPrusa, mockBreaker, mockLogger) = CreatePrusaLinkMocks();
+            (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreatePrusaLinkMocks();
             var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -208,7 +208,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task PrusaLinkStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockPrusa, mockBreaker, mockLogger) = CreatePrusaLinkMocks();
+            (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreatePrusaLinkMocks();
             var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -228,11 +228,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 ServerUrl = "http://prusa.local"
             };
 
-            var (mockPrusa, mockBreaker, mockLogger) = CreatePrusaLinkMocks();
+            (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreatePrusaLinkMocks();
             var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act
-            var result = await client.GetCameraStreamUrlAsync(printer, CancellationToken.None);
+            string? result = await client.GetCameraStreamUrlAsync(printer, CancellationToken.None);
 
             // Assert
             Assert.Null(result);
@@ -250,11 +250,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 ServerUrl = "http://prusa.local"
             };
 
-            var (mockPrusa, mockBreaker, mockLogger) = CreatePrusaLinkMocks();
+            (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreatePrusaLinkMocks();
             var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act
-            var result = await client.GetCameraSnapshotUrlAsync(printer, CancellationToken.None);
+            string? result = await client.GetCameraSnapshotUrlAsync(printer, CancellationToken.None);
 
             // Assert
             Assert.Null(result);
@@ -272,11 +272,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 ServerUrl = "http://prusa.local"
             };
 
-            var (mockPrusa, mockBreaker, mockLogger) = CreatePrusaLinkMocks();
+            (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreatePrusaLinkMocks();
             var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act
-            var result = await client.IsCameraAvailableAsync(printer, CancellationToken.None);
+            bool result = await client.IsCameraAvailableAsync(printer, CancellationToken.None);
 
             // Assert
             Assert.False(result);
@@ -290,7 +290,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void SdcpStatusClient_SupportsCorrectBackend()
         {
             // Arrange
-            var (mockSdcp, mockBreaker, mockLogger) = CreateSdcpMocks();
+            (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateSdcpMocks();
             var client = new SdcpStatusClient(mockSdcp.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -301,7 +301,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task SdcpStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockSdcp, mockBreaker, mockLogger) = CreateSdcpMocks();
+            (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateSdcpMocks();
             var client = new SdcpStatusClient(mockSdcp.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -317,7 +317,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void OctoPrintStatusClient_SupportsCorrectBackend()
         {
             // Arrange
-            var (mockOcto, mockBreaker, mockLogger) = CreateOctoPrintMocks();
+            (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateOctoPrintMocks();
             var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -328,7 +328,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public async Task OctoPrintStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
         {
             // Arrange
-            var (mockOcto, mockBreaker, mockLogger) = CreateOctoPrintMocks();
+            (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateOctoPrintMocks();
             var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act & Assert
@@ -348,11 +348,11 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 ServerUrl = "http://octoprint.local"
             };
 
-            var (mockOcto, mockBreaker, mockLogger) = CreateOctoPrintMocks();
+            (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<IUnifiedLoggingService>? mockLogger) = CreateOctoPrintMocks();
             var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, mockLogger.Object);
 
             // Act
-            var result = await client.GetCameraStreamUrlAsync(printer, CancellationToken.None);
+            string? result = await client.GetCameraStreamUrlAsync(printer, CancellationToken.None);
 
             // Assert
             Assert.Null(result);
@@ -373,7 +373,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -382,7 +382,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 mockLogger.Object);
 
             // Act
-            var client = factory.GetStatusClient(PrinterBackend.Moonraker);
+            IPrinterStatusClient client = factory.GetStatusClient(PrinterBackend.Moonraker);
 
             // Assert
             Assert.NotNull(client);
@@ -401,7 +401,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -410,7 +410,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 mockLogger.Object);
 
             // Act
-            var client = factory.GetStatusClient(PrinterBackend.PrusaLink);
+            IPrinterStatusClient client = factory.GetStatusClient(PrinterBackend.PrusaLink);
 
             // Assert
             Assert.NotNull(client);
@@ -429,7 +429,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -438,7 +438,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 mockLogger.Object);
 
             // Act
-            var client = factory.GetStatusClient(PrinterBackend.SDCP);
+            IPrinterStatusClient client = factory.GetStatusClient(PrinterBackend.SDCP);
 
             // Assert
             Assert.NotNull(client);
@@ -457,7 +457,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -466,7 +466,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 mockLogger.Object);
 
             // Act
-            var client = factory.GetStatusClient(PrinterBackend.OctoPrint);
+            IPrinterStatusClient client = factory.GetStatusClient(PrinterBackend.OctoPrint);
 
             // Assert
             Assert.NotNull(client);
@@ -485,7 +485,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -494,7 +494,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 mockLogger.Object);
 
             // Act
-            var client = factory.GetStatusClient((int)PrinterBackend.Moonraker);
+            IPrinterStatusClient client = factory.GetStatusClient((int)PrinterBackend.Moonraker);
 
             // Assert
             Assert.NotNull(client);
@@ -512,7 +512,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -538,7 +538,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = CreateFactoryWithClients(
+            PrinterStatusClientFactory factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,

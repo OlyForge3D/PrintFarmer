@@ -10,6 +10,7 @@ export interface TreeNode {
   size?: number;
   modifiedAt?: string;
   thumbnailUrl?: string;
+  directoryId?: string; // For folder operations (drag-drop, move)
 }
 
 interface TreeViewProps {
@@ -22,6 +23,14 @@ interface TreeViewProps {
   onCreateFolder?: (name: string) => void;
   onDeleteFiles?: (paths: string[]) => void;
   isLoading?: boolean;
+  // Folder-specific callbacks for drag-drop operations
+  onFolderClick?: (folderPath: string) => void;
+  onFolderToggleExpand?: (folderPath: string) => void;
+  expandedFolders?: Set<string>;
+  dragOverPath?: string | null;
+  onDragOver?: (e: React.DragEvent, folderPath: string) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: React.DragEvent, folderPath: string, directoryId: string) => void;
 }
 
 const TreeItem: React.FC<{
@@ -32,14 +41,45 @@ const TreeItem: React.FC<{
   currentPath: string;
   selectedFiles: string[];
   onSelectFile: (path: string, selected: boolean) => void;
-}> = ({ node, level, onSelect, onNavigate, currentPath, selectedFiles, onSelectFile }) => {
+  onFolderClick?: (folderPath: string) => void;
+  onFolderToggleExpand?: (folderPath: string) => void;
+  expandedFolders?: Set<string>;
+  dragOverPath?: string | null;
+  onDragOver?: (e: React.DragEvent, folderPath: string) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: React.DragEvent, folderPath: string, directoryId: string) => void;
+}> = ({ 
+  node, 
+  level, 
+  onSelect, 
+  onNavigate, 
+  currentPath, 
+  selectedFiles, 
+  onSelectFile,
+  onFolderClick,
+  onFolderToggleExpand,
+  expandedFolders,
+  dragOverPath,
+  onDragOver,
+  onDragLeave,
+  onDrop
+}) => {
   const [expanded, setExpanded] = useState(false);
   const isSelected = selectedFiles.includes(node.path);
+  
+  // Use expandedFolders prop if provided, otherwise use local state
+  const isExpanded = expandedFolders ? expandedFolders.has(node.path) : expanded;
 
   const handleClick = () => {
     if (node.isDirectory) {
-      onNavigate(node.path);
-      setExpanded(true);
+      if (onFolderClick) {
+        onFolderClick(node.path);
+      } else {
+        onNavigate(node.path);
+      }
+      if (!expandedFolders) {
+        setExpanded(true);
+      }
     } else {
       onSelect(node);
     }
@@ -50,27 +90,44 @@ const TreeItem: React.FC<{
     onSelectFile(node.path, e.target.checked);
   };
 
+  const handleToggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (expandedFolders && onFolderToggleExpand) {
+      onFolderToggleExpand(node.path);
+    } else {
+      setExpanded(!expanded);
+    }
+  };
+
+  const isDragOver = dragOverPath === node.path;
+  const isRoot = node.path === '/';
+
   return (
     <div key={node.path}>
       <div
         className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded transition-colors ${
-          currentPath === node.path ? 'bg-pf-accent bg-opacity-40 border-l-2 border-pf-accent text-white font-semibold' : ''
+          currentPath === node.path ? 'bg-pf-accent-bg border-l-2 border-pf-accent text-white font-semibold' : ''
+        } ${
+          isDragOver 
+            ? 'bg-pf-primary bg-opacity-15 border-l-4 border-pf-primary' 
+            : ''
         }`}
-        style={{ paddingLeft: `${level * 16 + 8}px` }}
+        style={{ paddingLeft: `${isRoot ? 8 : level * 16 + 8}px` }}
+        onClick={handleClick}
+        onDragOver={(e) => onDragOver?.(e, node.path)}
+        onDragLeave={onDragLeave}
+        onDrop={(e) => onDrop?.(e, node.path, node.directoryId || node.path)}
       >
         {node.isDirectory && node.children?.length ? (
           <Button
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(!expanded);
-            }}
+            onClick={handleToggleExpand}
             variant="subtle"
             size="sm"
             className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
             aria-hidden="true"
           >
             <ChevronRightIcon
-              className={`w-4 h-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
+              className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
             />
           </Button>
         ) : node.isDirectory ? (
@@ -89,14 +146,21 @@ const TreeItem: React.FC<{
         )}
 
         {node.isDirectory ? (
-          <FolderIcon className="w-4 h-4 text-pf-text-secondary flex-shrink-0" />
+          <FolderIcon 
+            className={`w-4 h-4 flex-shrink-0 ${
+              currentPath === node.path 
+                ? 'text-white' 
+                : isDragOver 
+                  ? 'text-pf-primary'
+                  : 'text-pf-text-secondary'
+            }`}
+          />
         ) : (
           <DocumentIcon className="w-4 h-4 text-pf-text-tertiary flex-shrink-0" />
         )}
 
         <span
-          onClick={handleClick}
-          className="flex-1 text-sm text-pf-text-primary truncate"
+          className="flex-1 text-sm text-pf-text truncate"
           title={node.name}
         >
           {node.name}
@@ -109,7 +173,7 @@ const TreeItem: React.FC<{
         )}
       </div>
 
-      {expanded && node.children?.length ? (
+      {isExpanded && node.children?.length ? (
         <div>
           {node.children.map((child) => (
             <TreeItem
@@ -121,6 +185,13 @@ const TreeItem: React.FC<{
               currentPath={currentPath}
               selectedFiles={selectedFiles}
               onSelectFile={onSelectFile}
+              onFolderClick={onFolderClick}
+              onFolderToggleExpand={onFolderToggleExpand}
+              expandedFolders={expandedFolders}
+              dragOverPath={dragOverPath}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
             />
           ))}
         </div>
@@ -145,6 +216,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
   selectedFiles,
   onSelectFile,
   isLoading = false,
+  onFolderClick,
+  onFolderToggleExpand,
+  expandedFolders,
+  dragOverPath,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }) => {
   return (
     <div className="flex flex-col gap-2 h-full max-h-96 overflow-y-auto">
@@ -167,6 +245,13 @@ export const TreeView: React.FC<TreeViewProps> = ({
             currentPath={currentPath}
             selectedFiles={selectedFiles}
             onSelectFile={onSelectFile}
+            onFolderClick={onFolderClick}
+            onFolderToggleExpand={onFolderToggleExpand}
+            expandedFolders={expandedFolders}
+            dragOverPath={dragOverPath}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
           />
         ))
       )}

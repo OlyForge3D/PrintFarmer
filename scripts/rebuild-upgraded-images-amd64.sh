@@ -40,8 +40,8 @@ fi
 
 # List of images to rebuild with their Dockerfile locations and build context
 declare -a IMAGES_TO_BUILD=(
-    "sdk:9.0.302-alpine-upgraded|Dockerfile.base-sdk|dockerfiles"
-    "aspnet:9.0.1-alpine-upgraded|Dockerfile.base-aspnet|dockerfiles"
+    "sdk:10.0.102-alpine-upgraded|Dockerfile.base-sdk|dockerfiles"
+    "aspnet:10.0.1-alpine-upgraded|Dockerfile.base-aspnet|dockerfiles"
     "ubuntu:24.04-upgraded|Dockerfile.base-ubuntu|dockerfiles"
     "nginx:alpine-upgraded|Dockerfile.base-nginx|dockerfiles"
     "node:22-alpine-upgraded|Dockerfile.base-node|dockerfiles"

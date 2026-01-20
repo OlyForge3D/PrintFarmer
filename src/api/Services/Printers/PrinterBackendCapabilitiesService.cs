@@ -10,36 +10,22 @@ namespace Farm.Web.Api.Services.Printers;
 /// Implementation of IPrinterBackendCapabilitiesService.
 /// Converts backend plugin capability flags into user-friendly DTOs for the UI.
 /// </summary>
-public class PrinterBackendCapabilitiesService : IPrinterBackendCapabilitiesService
+public class PrinterBackendCapabilitiesService(
+    IPrintersRepository repo,
+    IBackendCapabilityFactory capabilityFactory) : IPrinterBackendCapabilitiesService
 {
-    private readonly IPrintersRepository _repo;
-    private readonly IBackendCapabilityFactory _capabilityFactory;
-    private readonly IUnifiedLoggingService _logger;
-
-    public PrinterBackendCapabilitiesService(
-        IPrintersRepository repo,
-        IBackendCapabilityFactory capabilityFactory,
-        IUnifiedLoggingService logger)
-    {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+    private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
-        var printer = await _repo.FindByIdAsync(printerId, ct);
-        if (printer == null)
-        {
-            return null;
-        }
-
-        return CreateCapabilitiesDto(printer);
+        Printer? printer = await _repo.FindByIdAsync(printerId, ct);
+        return printer == null ? null : CreateCapabilitiesDto(printer);
     }
 
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetAllAsync(CancellationToken ct)
     {
-        var printers = await _repo.GetAllAsync(ct);
+        List<Printer> printers = await _repo.GetAllAsync(ct);
         return printers.Select(CreateCapabilitiesDto);
     }
 
@@ -50,7 +36,7 @@ public class PrinterBackendCapabilitiesService : IPrinterBackendCapabilitiesServ
             return Enumerable.Empty<PrinterBackendCapabilitiesDto>();
         }
 
-        var printers = await _repo.GetAllAsync(ct);
+        List<Printer> printers = await _repo.GetAllAsync(ct);
         var result = printers
             .Where(p => printerIds.Contains(p.Id))
             .Select(CreateCapabilitiesDto)
@@ -66,7 +52,7 @@ public class PrinterBackendCapabilitiesService : IPrinterBackendCapabilitiesServ
     private PrinterBackendCapabilitiesDto CreateCapabilitiesDto(Printer printer)
     {
         var backend = (PrinterBackend)printer.Backend;
-        var capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
+        BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
 
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
@@ -82,7 +68,6 @@ public class PrinterBackendCapabilitiesService : IPrinterBackendCapabilitiesServ
             SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
-            SupportsHistory: false // History is handled specially, set to false for now
-        );
+            SupportsHistory: false); // History is handled specially, set to false for now
     }
 }

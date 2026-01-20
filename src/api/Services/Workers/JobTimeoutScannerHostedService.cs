@@ -24,8 +24,8 @@ namespace Farm.Web.Api.Services.Workers
         private readonly JobDispatchRetrySettings _retrySettings;
         private readonly TimeSpan _scanInterval;
         private readonly IWorkerCircuitBreakerService? _circuitBreaker;
-        // Metrics are resolved per-scan from the scope; do not hold a disposable reference here.
 
+        // Metrics are resolved per-scan from the scope; do not hold a disposable reference here.
         public JobTimeoutScannerHostedService(
             ILogger<JobTimeoutScannerHostedService> logger,
             IServiceProvider sp,
@@ -37,6 +37,7 @@ namespace Farm.Web.Api.Services.Workers
             _retrySettings = retryOptions?.Value ?? new JobDispatchRetrySettings { MaxAttempts = 3, BaseDelayMs = 250, Multiplier = 2.0 };
             _scanInterval = TimeSpan.FromSeconds(30);
             _circuitBreaker = circuitBreaker;
+
             // no-op: metrics resolved per-scan from scoped provider when available
         }
 
@@ -49,7 +50,9 @@ namespace Farm.Web.Api.Services.Workers
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
-            catch (OperationCanceledException) { /* shutting down */ }
+            catch (OperationCanceledException)
+            { /* shutting down */
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -112,6 +115,7 @@ namespace Farm.Web.Api.Services.Workers
 
             // Determine stuck jobs: jobs with expired leases OR processing longer than 15 minutes
             int longRunningSeconds = 60 * 15; // 15 minutes
+
             // Retry on transient DB/DNS errors with exponential backoff
             const int maxDbRetries = 4;
             int attempt = 0;
@@ -134,7 +138,11 @@ namespace Farm.Web.Api.Services.Workers
                         {
                             await Task.Delay(delayMs, ct);
                         }
-                        catch (OperationCanceledException) { break; }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
+
                         attempt++;
                         continue;
                     }
@@ -189,13 +197,5 @@ namespace Farm.Web.Api.Services.Workers
         {
             await ScanOnceAsync(ct);
         }
-    }
-
-    // Small settings class mirroring the appsettings section used earlier
-    public class JobDispatchRetrySettings
-    {
-        public int MaxAttempts { get; set; } = 3;
-        public int BaseDelayMs { get; set; } = 250;
-        public double Multiplier { get; set; } = 2.0;
     }
 }

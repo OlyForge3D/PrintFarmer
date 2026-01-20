@@ -30,7 +30,7 @@ if dotnet build Farm.Web.Api.csproj -c Debug --verbosity minimal --no-restore; t
     echo "✅ Protocol buffers compiled successfully"
     
     # Check if generated files exist
-    if [[ -f "obj/Debug/net9.0/SlicerJobs.cs" && -f "obj/Debug/net9.0/SlicerJobsGrpc.cs" ]]; then
+    if [[ -f "obj/Debug/net10.0/SlicerJobs.cs" && -f "obj/Debug/net10.0/SlicerJobsGrpc.cs" ]]; then
         echo "✅ gRPC service files generated: SlicerJobs.cs, SlicerJobsGrpc.cs"
     else
         echo "❌ gRPC service files not found"

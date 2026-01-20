@@ -38,6 +38,7 @@ public class LocationService : ILocationService
     /// <summary>
     /// Gets all active locations.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<List<Location>> GetAllAsync(CancellationToken ct)
     {
         try
@@ -54,6 +55,7 @@ public class LocationService : ILocationService
     /// <summary>
     /// Gets all locations including inactive ones.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<List<Location>> GetAllWithInactiveAsync(CancellationToken ct)
     {
         try
@@ -70,6 +72,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Finds a location by its ID.
     /// </summary>
+    /// <param name="id">The unique identifier of the location.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<Location?> FindByIdAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
@@ -91,6 +95,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Finds a location by name.
     /// </summary>
+    /// <param name="name">The name of the location to find.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -112,6 +118,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Checks if a location with the given name already exists.
     /// </summary>
+    /// <param name="name">The name to check for existence.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<bool> ExistsByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -133,6 +141,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Creates a new location from a DTO.
     /// </summary>
+    /// <param name="dto">The data transfer object containing location creation data.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<LocationDto> CreateLocationAsync(CreateLocationDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
@@ -178,6 +188,9 @@ public class LocationService : ILocationService
     /// <summary>
     /// Updates an existing location.
     /// </summary>
+    /// <param name="id">The unique identifier of the location to update.</param>
+    /// <param name="dto">The data transfer object containing updated location data.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<LocationDto?> UpdateLocationAsync(Guid id, UpdateLocationDto dto, CancellationToken ct)
     {
         if (id == Guid.Empty)
@@ -189,7 +202,7 @@ public class LocationService : ILocationService
 
         try
         {
-            var location = await FindByIdAsync(id, ct);
+            Location? location = await FindByIdAsync(id, ct);
             if (location == null)
             {
                 return null;
@@ -232,6 +245,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Deletes a location (soft delete via IsActive flag).
     /// </summary>
+    /// <param name="id">The unique identifier of the location to delete.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<bool> DeleteLocationAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
@@ -241,7 +256,7 @@ public class LocationService : ILocationService
 
         try
         {
-            var location = await FindByIdAsync(id, ct);
+            Location? location = await FindByIdAsync(id, ct);
             if (location == null)
             {
                 return false;
@@ -267,11 +282,12 @@ public class LocationService : ILocationService
     /// <summary>
     /// Gets all locations as DTOs for API responses.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<LocationDto[]> GetAllLocationDtosAsync(CancellationToken ct)
     {
         try
         {
-            var locations = await GetAllAsync(ct);
+            List<Location> locations = await GetAllAsync(ct);
             return _mapper.Map<LocationDto[]>(locations);
         }
         catch (Exception ex)
@@ -284,6 +300,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Gets a location with all its associated printers.
     /// </summary>
+    /// <param name="id">The unique identifier of the location.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<LocationDetailsDto?> GetLocationDetailsAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
@@ -293,15 +311,15 @@ public class LocationService : ILocationService
 
         try
         {
-            var location = await FindByIdAsync(id, ct);
+            Location? location = await FindByIdAsync(id, ct);
             if (location == null)
             {
                 return null;
             }
 
-            var printers = await GetPrintersInLocationAsync(id, ct);
+            List<Printer> printers = await GetPrintersInLocationAsync(id, ct);
 
-            var detailsDto = _mapper.Map<LocationDetailsDto>(location);
+            LocationDetailsDto detailsDto = _mapper.Map<LocationDetailsDto>(location);
             detailsDto.Printers = _mapper.Map<PrinterInfoDto[]>(printers);
 
             return detailsDto;
@@ -316,6 +334,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Gets all printers assigned to a location.
     /// </summary>
+    /// <param name="locationId">The unique identifier of the location.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<List<Printer>> GetPrintersInLocationAsync(Guid locationId, CancellationToken ct)
     {
         if (locationId == Guid.Empty)
@@ -337,6 +357,9 @@ public class LocationService : ILocationService
     /// <summary>
     /// Assigns a printer to a location.
     /// </summary>
+    /// <param name="printerId">The unique identifier of the printer to assign.</param>
+    /// <param name="locationId">The unique identifier of the target location.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<bool> AssignPrinterToLocationAsync(Guid printerId, Guid locationId, CancellationToken ct)
     {
         if (printerId == Guid.Empty)
@@ -352,11 +375,7 @@ public class LocationService : ILocationService
         try
         {
             // Verify location exists
-            var location = await FindByIdAsync(locationId, ct);
-            if (location == null)
-            {
-                throw new KeyNotFoundException($"Location with ID {locationId} not found");
-            }
+            Location location = await FindByIdAsync(locationId, ct) ?? throw new KeyNotFoundException($"Location with ID {locationId} not found");
 
             // In a real implementation, we would update the printer entity
             // This requires access to the printer repository or context
@@ -375,6 +394,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Removes a printer from its location.
     /// </summary>
+    /// <param name="printerId">The unique identifier of the printer to remove.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<bool> RemovePrinterFromLocationAsync(Guid printerId, CancellationToken ct)
     {
         if (printerId == Guid.Empty)
@@ -401,6 +422,8 @@ public class LocationService : ILocationService
     /// <summary>
     /// Updates the PrinterCount denormalization for a location.
     /// </summary>
+    /// <param name="locationId">The unique identifier of the location to update.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task UpdatePrinterCountAsync(Guid locationId, CancellationToken ct)
     {
         if (locationId == Guid.Empty)
@@ -410,13 +433,13 @@ public class LocationService : ILocationService
 
         try
         {
-            var location = await FindByIdAsync(locationId, ct);
+            Location? location = await FindByIdAsync(locationId, ct);
             if (location == null)
             {
                 return;
             }
 
-            var count = await _unitOfWork.Locations.GetPrinterCountAsync(locationId, ct);
+            int count = await _unitOfWork.Locations.GetPrinterCountAsync(locationId, ct);
             location.PrinterCount = count;
 
             await _unitOfWork.Locations.UpdateAsync(location, ct);
@@ -434,6 +457,7 @@ public class LocationService : ILocationService
     /// <summary>
     /// Persists changes to the database.
     /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         try

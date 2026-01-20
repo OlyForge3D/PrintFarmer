@@ -12,16 +12,10 @@ namespace Farm.OrcaSlicer.Worker.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Tags("Slicer Profiles")]
-public class ProfilesController : ControllerBase
+public class ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly ISlicerProfilesService _profileService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger)
-    {
-        _profileService = profileService;
-        _logger = logger;
-    }
+    private readonly ISlicerProfilesService _profileService = profileService;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
     /// Get all available slicer profiles organized by manufacturer and model hierarchy.
@@ -64,7 +58,7 @@ public class ProfilesController : ControllerBase
                 Dictionary<string, List<MachineProfileDto>> machinesByModelName = new Dictionary<string, List<MachineProfileDto>>();
                 foreach (MachineProfileDto machine in machines)
                 {
-                    string modelName = ExtractModelName(machine.Name ?? "");
+                    string modelName = ExtractModelName(machine.Name ?? string.Empty);
                     if (!machinesByModelName.TryGetValue(modelName, out List<MachineProfileDto>? machineList))
                     {
                         machineList = new List<MachineProfileDto>();
@@ -88,7 +82,7 @@ public class ProfilesController : ControllerBase
                     modelProfiles.MachineProfiles = modelMachines.ToList();
 
                     // Find filament and process profiles compatible with any machine in this model
-                    List<string> machineProfileNames = modelMachines.Select(m => m.Name ?? "").ToList();
+                    List<string> machineProfileNames = modelMachines.Select(m => m.Name ?? string.Empty).ToList();
 
                     // Filter filament profiles: include if:
                     // 1. compatible_printers contains any machine in this model, OR
@@ -96,13 +90,15 @@ public class ProfilesController : ControllerBase
                     // 3. compatible_printers is empty/null (universally available)
                     modelProfiles.FilamentProfiles = filamentProfiles
                         .Where(f =>
+
                             // Explicitly compatible with a machine in this model
                             (f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp))) ||
+
                             // From OrcaFilamentLibrary (universal)
-                            (f.Manufacturer ?? "").Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+                            (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+
                             // No specific compatibility (universally available)
-                            (f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
-                        )
+                            f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
                         .ToList();
 
                     // Filter process profiles: include if:
@@ -110,11 +106,12 @@ public class ProfilesController : ControllerBase
                     // 2. compatible_printers is empty/null (universally available)
                     modelProfiles.ProcessProfiles = processProfiles
                         .Where(p =>
+
                             // Explicitly compatible with a machine in this model
                             (p.CompatiblePrinters != null && p.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp))) ||
+
                             // No specific compatibility (universally available)
-                            (p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
-                        )
+                            p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
                         .ToList();
 
                     models[modelId] = modelProfiles;
@@ -272,11 +269,7 @@ public class ProfilesController : ControllerBase
         // Machine profile names follow pattern: "{Model} {Variant}" where variant is like "0.4 nozzle"
         // We need to remove nozzle size suffixes
         string[] parts = machineName.Split([" 0."], StringSplitOptions.None);
-        if (parts.Length > 1)
-        {
-            return parts[0].Trim();
-        }
-        return machineName;
+        return parts.Length > 1 ? parts[0].Trim() : machineName;
     }
 
     /// <summary>

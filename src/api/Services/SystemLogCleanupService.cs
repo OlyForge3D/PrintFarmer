@@ -34,6 +34,7 @@ public class SystemLogCleanupService(IServiceScopeFactory scopeFactory, IUnified
             {
                 _logger.LogError(ex, "SystemLogCleanupService: Error during log cleanup");
             }
+
             await Task.Delay(_cleanupInterval, stoppingToken);
         }
     }

@@ -10,82 +10,74 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
 
-namespace Farm.Infrastructure.Repositories.UnitOfWork
+namespace Farm.Infrastructure.Repositories.UnitOfWork;
+
+/// <summary>
+/// Unit of Work pattern coordinator for database operations.
+/// Provides access to all repositories while ensuring they share the same DbContext,
+/// enabling atomic transactions across multiple repository operations.
+/// </summary>
+/// <remarks>
+/// The Unit of Work pattern solves multi-context issues by ensuring all repositories
+/// work with the same database context instance. This guarantees:
+/// - Atomic operations across multiple repositories (all-or-nothing transactions)
+/// - Proper entity tracking by a single DbContext
+/// - No FK constraint violations from entities tracked in different contexts
+/// - Clean separation of repository concerns while maintaining transactional integrity
+/// </remarks>
+public interface IUnitOfWork : IDisposable, IAsyncDisposable
 {
     /// <summary>
-    /// Unit of Work pattern coordinator for database operations.
-    /// Provides access to all repositories while ensuring they share the same DbContext,
-    /// enabling atomic transactions across multiple repository operations.
+    /// Repository for G-code file persistence and retrieval operations.
     /// </summary>
-    /// <remarks>
-    /// The Unit of Work pattern solves multi-context issues by ensuring all repositories
-    /// work with the same database context instance. This guarantees:
-    /// - Atomic operations across multiple repositories (all-or-nothing transactions)
-    /// - Proper entity tracking by a single DbContext
-    /// - No FK constraint violations from entities tracked in different contexts
-    /// - Clean separation of repository concerns while maintaining transactional integrity
-    /// </remarks>
-    public interface IUnitOfWork : IDisposable, IAsyncDisposable
-    {
-        /// <summary>
-        /// Repository for G-code file persistence and retrieval operations.
-        /// </summary>
-        IGcodeRepository GcodeFiles { get; }
+    IGcodeRepository GcodeFiles { get; }
 
-        /// <summary>
-        /// Repository for harvest operation and discovered file persistence and retrieval.
-        /// </summary>
-        IHarvestRepository HarvestOperations { get; }
+    /// <summary>
+    /// Repository for harvest operation and discovered file persistence and retrieval.
+    /// </summary>
+    IHarvestRepository HarvestOperations { get; }
 
-        /// <summary>
-        /// Repository for printer configuration and persistence.
-        /// Coordinated with harvest operations via shared DbContext.
-        /// </summary>
-        IPrintersRepository Printers { get; }
+    /// <summary>
+    /// Repository for printer configuration and persistence.
+    /// Coordinated with harvest operations via shared DbContext.
+    /// </summary>
+    IPrintersRepository Printers { get; }
 
-        /// <summary>
-        /// Repository for gcode folder organization and file hierarchy.
-        /// Coordinated with gcode file operations via shared DbContext.
-        /// </summary>
-        IFolderRepository Folders { get; }
+    /// <summary>
+    /// Repository for gcode folder organization and file hierarchy.
+    /// Coordinated with gcode file operations via shared DbContext.
+    /// </summary>
+    IFolderRepository Folders { get; }
 
-        /// <summary>
-        /// Repository for 3D model file persistence and retrieval.
-        /// Coordinated with folder operations via shared DbContext.
-        /// </summary>
-        IModel3DFileRepository Model3dFiles { get; }
+    /// <summary>
+    /// Repository for 3D model file persistence and retrieval.
+    /// Coordinated with folder operations via shared DbContext.
+    /// </summary>
+    IModel3DFileRepository Model3dFiles { get; }
 
-        /// <summary>
-        /// Repository for location (farm site/facility) persistence and retrieval.
-        /// Coordinated with printer and location-based operations via shared DbContext.
-        /// </summary>
-        ILocationRepository Locations { get; }
+    /// <summary>
+    /// Repository for location (farm site/facility) persistence and retrieval.
+    /// Coordinated with printer and location-based operations via shared DbContext.
+    /// </summary>
+    ILocationRepository Locations { get; }
 
-        /// <summary>
-        /// Repository for print job queue and job persistence.
-        /// Coordinated with printer and gcode operations via shared DbContext.
-        /// </summary>
-        IQueueRepository Queue { get; }
+    /// <summary>
+    /// Repository for print job queue and job persistence.
+    /// Coordinated with printer and gcode operations via shared DbContext.
+    /// </summary>
+    IQueueRepository Queue { get; }
 
-        /// <summary>
-        /// Repository for tag persistence and retrieval (generic tags).
-        /// Coordinated with tag mapping operations via shared DbContext.
-        /// </summary>
-        ITagRepository Tags { get; }
+    /// <summary>
+    /// Repository for tag persistence and retrieval (generic tags).
+    /// Tag mappings are now managed via EF Core skip-navigation on StoredFile.Tags.
+    /// </summary>
+    ITagRepository Tags { get; }
 
-        /// <summary>
-        /// Repository for polymorphic tag mappings across all object types.
-        /// Supports tagging gcode files, models, printers, etc.
-        /// Coordinated with tag operations via shared DbContext.
-        /// </summary>
-        ITagMappingRepository TagMappings { get; }
-
-        /// <summary>
-        /// Persists all changes made to entities tracked by any repository in this Unit of Work.
-        /// This is a single atomic transaction affecting all repository changes.
-        /// </summary>
-        /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>The number of state entries written to the database</returns>
-        Task<int> SaveChangesAsync(CancellationToken ct);
-    }
+    /// <summary>
+    /// Persists all changes made to entities tracked by any repository in this Unit of Work.
+    /// This is a single atomic transaction affecting all repository changes.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>The number of state entries written to the database</returns>
+    Task<int> SaveChangesAsync(CancellationToken ct);
 }

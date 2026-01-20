@@ -46,78 +46,65 @@ namespace Farm.Web.Api.Services.Gcode
     /// library services, providing a single source of truth for G-code file management.
     /// </para>
     /// </remarks>
-    public class GcodeFilesService : IGcodeFilesService, IGcodeFileProcessingService
+    /// <remarks>
+    /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
+    /// </remarks>
+    /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
+    /// <param name="unitOfWork">Unit of work for coordinated database operations.</param>
+    /// <param name="logger">Logging service for diagnostic and error logging.</param>
+    /// <param name="storagePathService">Service providing paths to storage directories.</param>
+    /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
+    /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
+    /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
+    /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
+    /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
+    public class GcodeFilesService(
+        IGcodeRepository gcodeRepo,
+        IUnitOfWork unitOfWork,
+        IUnifiedLoggingService logger,
+        IStoragePathService storagePathService,
+        IGcodeMetadataExtractorService metadataExtractor,
+        IGcodeThumbnailExtractorService thumbnailExtractor,
+        IFolderManagementService folderService,
+        IStoredFileOperationsService fileOperations) : IGcodeFilesService, IGcodeFileProcessingService
     {
-        private readonly IGcodeRepository _gcodeRepo;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IUnifiedLoggingService _logger;
-        private readonly IStoragePathService _storagePathService;
-        private readonly IGcodeMetadataExtractorService _metadataExtractor;
-        private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
-        private readonly IFolderManagementService _folderService;
-        private readonly IStoredFileOperationsService _fileOperations;
+        private readonly IGcodeRepository _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+        private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
+        private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
+        private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
+        private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
+        /// New efficient query method that pushes all filtering, sorting, and pagination to the database.
+        /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
+        /// This method is designed to replace ListAsync once frontend migration is complete.
         /// </summary>
-        /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
-        /// <param name="unitOfWork">Unit of work for coordinated database operations.</param>
-        /// <param name="logger">Logging service for diagnostic and error logging.</param>
-        /// <param name="storagePathService">Service providing paths to storage directories.</param>
-        /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
-        /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
-        /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
-        /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
-        /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
-        public GcodeFilesService(
-            IGcodeRepository gcodeRepo,
-            IUnitOfWork unitOfWork,
-            IUnifiedLoggingService logger,
-            IStoragePathService storagePathService,
-            IGcodeMetadataExtractorService metadataExtractor,
-            IGcodeThumbnailExtractorService thumbnailExtractor,
-            IFolderManagementService folderService,
-            IStoredFileOperationsService fileOperations)
+        /// <param name="path">Optional virtual path to filter files by directory.</param>
+        /// <param name="sortBy">Field name to sort by (e.g., 'name', 'size', 'date').</param>
+        /// <param name="sortOrder">Sort order: 'asc' for ascending, 'desc' for descending.</param>
+        /// <param name="search">Optional search term for filtering by filename.</param>
+        /// <param name="page">Page number for pagination (1-based).</param>
+        /// <param name="pageSize">Number of items per page.</param>
+        /// <param name="tagIds">Optional array of tag IDs to filter by.</param>
+        /// <param name="printerModelId">Optional printer model ID to filter files by.</param>
+        /// <param name="printerId">Optional printer ID to filter files by.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        public async Task<GcodeFileListResponse> QueryAsync(
+            string? path,
+            string? sortBy,
+            string? sortOrder,
+            string? search,
+            int page,
+            int pageSize,
+            Guid[]? tagIds,
+            Guid? printerModelId,
+            Guid? printerId,
+            CancellationToken ct)
         {
-            _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
-            _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-            _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
-            _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
-            _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-        }
-
-        /// <summary>
-        /// Lists G-code files and subdirectories within a specific virtual path with pagination and filtering.
-        /// </summary>
-        /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder'). Null or whitespace defaults to root.</param>
-        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'. Case-insensitive.</param>
-        /// <param name="sortOrder">Sort order: 'asc' (ascending) or 'desc' (descending).</param>
-        /// <param name="search">Optional search term to filter by filename. Case-insensitive partial matching.</param>
-        /// <param name="page">Page number (1-based). Values &lt; 1 default to 1.</param>
-        /// <param name="pageSize">Items per page. Automatically clamped to range [1, 500]. Default if invalid: 100.</param>
-        /// <param name="harvestId">Optional harvest operation ID to filter files by harvest source.</param>
-        /// <param name="printerId">Optional printer ID for filtering (reserved for future use).</param>
-        /// <param name="ct">Cancellation token for canceling async operation.</param>
-        /// <returns>
-        /// A paginated response containing files and directories with metadata. Directories are always sorted
-        /// before files regardless of sort order.
-        /// </returns>
-        /// <remarks>
-        /// <para>
-        /// This method queries the database for files and subdirectories at the specified virtual path,
-        /// applies sorting and filtering, and returns a paginated result set. All paths are normalized
-        /// to start with '/' automatically.
-        /// </para>
-        /// <para>
-        /// Search is performed on filename only (not the full path). Page and pageSize parameters are
-        /// validated and clamped to reasonable ranges automatically.
-        /// </para>
-        /// </remarks>
-        public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
-        {
+            // Validate and clamp pagination parameters
             if (page < 1)
             {
                 page = 1;
@@ -133,129 +120,68 @@ namespace Farm.Web.Api.Services.Gcode
                 pageSize = 500;
             }
 
-            // Parse virtual path to directory
-            string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
-            if (!vPath.StartsWith('/'))
+            // Call the efficient repository method that does everything at the database level
+            (List<GcodeFile>? files, int totalCount) = await _gcodeRepo.QueryFilesAsync(
+                path,
+                search,
+                tagIds,
+                printerModelId,
+                printerId,
+                sortBy,
+                sortOrder,
+                page,
+                pageSize,
+                ct);
+
+            // Build file entries
+            List<GcodeFileEntryDto> entries = [];
+            long totalSize = 0;
+
+            // Get storage directory once (same for all files)
+            string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
+            string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
+
+            foreach (GcodeFile file in files)
             {
-                vPath = "/" + vPath;
-            }
-
-            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Where(s => s != "." && s != "..")
-                .ToArray();
-            string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
-            string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
-
-            // Get all files and subdirectories from database for this directory (pure DB approach)
-            List<GcodeFile> dbFiles = await _gcodeRepo.ListValidByDirectoryAsync(requestedDir, ct);
-            List<string> subdirectories = await _gcodeRepo.ListSubdirectoriesAsync(requestedDir, ct);
-
-            // Build directory entries
-            List<GcodeFileEntryDto> entries = new();
-
-            foreach (string subdir in subdirectories)
-            {
-                if (subdir.StartsWith('.'))
-                {
-                    continue;
-                }
-
-                if (!IsMatch(subdir, search))
-                {
-                    continue;
-                }
-
-                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
-                    FileName: subdir,
-                    Size: 0,
-                    ModifiedAt: DateTime.UtcNow, // Directories don't have modification time in DB
-                    IsDirectory: true
-                ));
-            }
-
-            // Get harvest operations for all printers (once, not per file)
-            var printerIds = dbFiles
-                .Where(f => f.SourcePrinterId.HasValue)
-                .Select(f => f.SourcePrinterId!.Value)
-                .Distinct()
-                .ToList();
-
-            Dictionary<Guid, Guid?> harvestOpsByPrinter = new();
-            if (printerIds.Count > 0)
-            {
-                try
-                {
-                    harvestOpsByPrinter = await _gcodeRepo.GetLatestHarvestOperationIdsByPrintersAsync(printerIds, ct);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug($"Non-fatal DB query failure fetching harvest operations: {ex.Message}");
-                }
-            }
-
-            // Add files from database
-            foreach (var file in dbFiles)
-            {
-                if (!IsMatch(file.FileName, search))
-                {
-                    continue;
-                }
-
-                Guid? harvestOpId = file.SourcePrinterId.HasValue
-                    ? harvestOpsByPrinter.GetValueOrDefault(file.SourcePrinterId.Value)
-                    : null;
-
-                // Apply harvest filter if specified
-                if (harvestId.HasValue && harvestOpId != harvestId)
-                {
-                    continue;
-                }
-
-                string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
-
                 // Convert thumbnail path to API URL if available
                 string? thumbnailUrl = null;
                 if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
-                    // Construct full path from directory + filename
-                    string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-                    // Convert full filesystem path to virtual path for API download endpoint
-                    // Remove the storage root prefix to get virtual path
-                    string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
-                    string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
-                    string normalizedThumbnailPath = Path.GetFullPath(fullThumbnailPath);
+                    string thumbnailFullPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                    string normalizedThumbnailPath = Path.GetFullPath(thumbnailFullPath);
 
                     if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
                     {
-                        // Extract relative path from storage directory
                         string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
                             .TrimStart(Path.DirectorySeparatorChar, '/');
-                        // Convert to forward slashes for URL
                         relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
                         thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
                     }
                     else
                     {
-                        // Fallback: just use the filename
                         thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
                     }
                 }
 
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
+                // Map tags from the eagerly-loaded Tags collection
+                List<TagDto> tags = file.Tags
+                    ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                    .ToList() ?? new List<TagDto>();
+
+                var entry = new GcodeFileEntryDto(
+                    Path: file.FilePath,
                     FileName: file.FileName,
-                    Size: file.FileSizeBytes,
-                    ModifiedAt: file.UploadedAt,
+                    FileSize: file.FileSizeBytes,
+                    UploadedAt: file.UploadedAt,
                     IsDirectory: false,
-                    Name: file.Name,  // Original filename for display
-                    HarvestOperationId: harvestOpId,
-                    ThumbnailPath: thumbnailUrl,
-                    GcodeFileId: null,
+                    Name: file.Name,
+                    ThumbnailUrl: thumbnailUrl,
+                    Id: file.Id.ToString(),
+                    FileType: file.FileType,
                     DirectoryId: null,
                     TargetModelName: file.PrinterModel?.Name,
                     RequiredMaterial: file.RequiredMaterial,
+                    Tags: tags,
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
                     ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
@@ -263,53 +189,58 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
                     ExtractedPrinterModel: file.PrinterModel?.Name,
-                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,  // Raw extracted name for fallback
+                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,
                     ExtractedLayerHeight: file.LayerHeight,
                     ExtractedInfill: file.InfillPercentage,
                     ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
-                    ExtractedBedTemp: file.BedTemperature
-                ));
+                    ExtractedBedTemp: file.BedTemperature);
+                entries.Add(entry);
+
+                totalSize += file.FileSizeBytes;
             }
 
-            // Sorting
-            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
-            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
-            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
+            // Extract distinct printer models from the files
+            var availablePrinterModels = files
+                .Where(f => f.PrinterModel != null || !string.IsNullOrEmpty(f.ExtractedPrinterModelName))
+                .Select(f => new
+                {
+                    Id = f.PrinterModel?.Id,
+                    Name = f.PrinterModel?.Name ?? f.ExtractedPrinterModelName ?? string.Empty
+                })
+                .Where(pm => !string.IsNullOrEmpty(pm.Name))
+                .GroupBy(pm => pm.Name)
+                .Select(g => new PrinterModelSummary(
+                    Id: g.First().Id,
+                    Name: g.Key))
+                .OrderBy(pm => pm.Name)
+                .ToList();
 
-            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
-            else
-            {
-                entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
-            }
+            // Calculate total pages
+            int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
-            int totalFiles = entries.Count(e => !e.IsDirectory);
-            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
-            int skip = (page - 1) * pageSize;
-            IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<GcodeFileEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
-            int totalItems = entries.Count;
-            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
-
-            return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
+            return new GcodeFileListResponse(
+                Files: entries,
+                TotalFiles: totalCount,
+                TotalSize: totalSize,
+                Page: page,
+                PageSize: pageSize,
+                TotalPages: totalPages,
+                TotalItems: totalCount,
+                AvailablePrinterModels: availablePrinterModels);
         }
 
         /// <summary>
         /// List G-code files with hierarchy support, including directoryId and gcodeFileId for efficient lookups.
         /// This is the hierarchical variant used by ExplorerFileBrowser and other tree-based navigation UIs.
         /// </summary>
+        /// <param name="path">Virtual directory path to list files from.</param>
+        /// <param name="sortBy">Field name to sort by (e.g., 'name', 'size', 'date').</param>
+        /// <param name="sortOrder">Sort order: 'asc' for ascending, 'desc' for descending.</param>
+        /// <param name="search">Optional search term for filtering by filename.</param>
+        /// <param name="page">Page number for pagination (1-based).</param>
+        /// <param name="pageSize">Number of items per page.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         public async Task<GcodeFileListResponse> ListFilesWithHierarchyAsync(
             string? path,
             string? sortBy,
@@ -347,44 +278,14 @@ namespace Farm.Web.Api.Services.Gcode
             string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
-            // Get all files and subdirectories from database for this directory
+            // Get files from database for this directory
             List<GcodeFile> dbFiles = await _gcodeRepo.ListValidByDirectoryAsync(requestedDir, ct);
-            List<string> subdirectories = await _gcodeRepo.ListSubdirectoriesAsync(requestedDir, ct);
 
-            // Build directory entries with IDs
+            // Build file entries with IDs
             List<GcodeFileEntryDto> entries = new();
 
-            // Add directories with directoryId (virtual path)
-            foreach (string subdir in subdirectories)
-            {
-                if (subdir.StartsWith('.'))
-                {
-                    continue;
-                }
-
-                if (!IsMatch(subdir, search))
-                {
-                    continue;
-                }
-
-                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
-                    FileName: subdir,
-                    Size: 0,
-                    ModifiedAt: DateTime.UtcNow,
-                    IsDirectory: true,
-                    HarvestOperationId: null,
-                    ThumbnailPath: null,
-                    GcodeFileId: null,
-                    DirectoryId: childVirtual,  // Virtual path is the directory ID
-                    TargetModelName: null,  // Directories don't have printer model
-                    RequiredMaterial: null  // Directories don't have material
-                ));
-            }
-
             // Add files with gcodeFileId (GUID) and thumbnail URL
-            foreach (var file in dbFiles)
+            foreach (GcodeFile file in dbFiles)
             {
                 if (!IsMatch(file.FileName, search))
                 {
@@ -415,19 +316,25 @@ namespace Farm.Web.Api.Services.Gcode
                     }
                 }
 
-                entries.Add(new GcodeFileEntryDto(
-                    Path: childVirtual,
+                // Map tags from the eagerly-loaded Tags skip-navigation collection
+                List<TagDto> tags = file.Tags
+                    ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                    .ToList() ?? new List<TagDto>();
+
+                var entry = new GcodeFileEntryDto(
+                    Path: file.FilePath,
                     FileName: file.FileName,
-                    Size: file.FileSizeBytes,
-                    ModifiedAt: file.UploadedAt,
+                    FileSize: file.FileSizeBytes,
+                    UploadedAt: file.UploadedAt,
                     IsDirectory: false,
-                    Name: file.Name,  // Original filename for display
-                    HarvestOperationId: null,
-                    ThumbnailPath: thumbnailUrl,
-                    GcodeFileId: file.Id.ToString(),  // GUID as string for file ID
+                    Name: file.Name,
+                    ThumbnailUrl: thumbnailUrl,
+                    Id: file.Id.ToString(),
+                    FileType: file.FileType,
                     DirectoryId: null,
-                    TargetModelName: file.PrinterModel?.Name,  // Include printer model name
-                    RequiredMaterial: file.RequiredMaterial,  // Include required filament type
+                    TargetModelName: file.PrinterModel?.Name,
+                    RequiredMaterial: file.RequiredMaterial,
+                    Tags: tags,
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
                     ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
@@ -435,13 +342,13 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
                     ExtractedPrinterModel: file.PrinterModel?.Name,
-                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,  // Raw extracted name for fallback
+                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,
                     ExtractedLayerHeight: file.LayerHeight,
                     ExtractedInfill: file.InfillPercentage,
                     ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
-                    ExtractedBedTemp: file.BedTemperature
-                ));
+                    ExtractedBedTemp: file.BedTemperature);
+                entries.Add(entry);
             }
 
             // Apply sorting
@@ -452,14 +359,14 @@ namespace Farm.Web.Api.Services.Gcode
             if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileSize).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileSize).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.UploadedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.UploadedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else
             {
@@ -470,7 +377,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Apply pagination
             int totalFiles = entries.Count(e => !e.IsDirectory);
-            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
+            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.FileSize);
             int skip = (page - 1) * pageSize;
             IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count
                 ? Array.Empty<GcodeFileEntryDto>()
@@ -479,6 +386,49 @@ namespace Farm.Web.Api.Services.Gcode
             int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
 
             return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
+        }
+
+        /// <summary>
+        /// Lists all G-code folders recursively for building a folder tree structure.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        public async Task<List<GcodeFileEntryDto>> ListAllFoldersAsync(CancellationToken ct)
+        {
+            // Get all folders from the folder management service
+            List<string> allFolderPaths = await _folderService.GetAllFolderPathsRecursiveAsync("gcode", "/", ct);
+            List<GcodeFileEntryDto> folderEntries = [];
+
+            // Always include root folder
+            folderEntries.Add(new GcodeFileEntryDto(
+                Path: "/",
+                FileName: "/",
+                FileSize: 0,
+                UploadedAt: DateTime.UtcNow,
+                IsDirectory: true,
+                ThumbnailUrl: null,
+                Id: null,
+                DirectoryId: "/",
+                TargetModelName: null,
+                RequiredMaterial: null));
+
+            // Add all subfolders
+            foreach (string? folderPath in allFolderPaths.OrderBy(p => p))
+            {
+                string folderName = folderPath.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? folderPath;
+                folderEntries.Add(new GcodeFileEntryDto(
+                    Path: folderPath,
+                    FileName: folderName,
+                    FileSize: 0,
+                    UploadedAt: DateTime.UtcNow,
+                    IsDirectory: true,
+                    ThumbnailUrl: null,
+                    Id: null,
+                    DirectoryId: folderPath,
+                    TargetModelName: null,
+                    RequiredMaterial: null));
+            }
+
+            return folderEntries;
         }
 
         /// <summary>
@@ -503,7 +453,7 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
-            if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            if (!uploadSettings.GetAllowedExtensions().Contains(ext, StringComparer.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Invalid file type '{ext}'");
             }
@@ -550,6 +500,38 @@ namespace Farm.Web.Api.Services.Gcode
                 await _gcodeRepo.SaveChangesAsync(ct);
                 _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", originalName, gcodeFile.Id);
             }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx) when (dbEx.InnerException?.Message?.Contains("IX_GcodeFiles_FileHash", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // File with same hash already exists (deduplication)
+                // Delete the newly created physical file and return the existing record
+                try
+                {
+                    System.IO.File.Delete(fullTarget);
+                }
+                catch
+                { /* Ignore deletion errors */
+                }
+
+                // Find the existing file by hash
+                string fileHash = await ComputeFileHashAsync(fullTarget, ct);
+                GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
+
+                if (existingFile != null)
+                {
+                    _logger.LogInformation("File {FileName} already exists (hash {FileHash}), returning existing record", originalName, fileHash);
+                    string virtualFilePath = CombineVirtual(virtualDir, existingFile.FileName);
+                    return new GcodeFileEntryDto(
+                        Path: virtualFilePath,
+                        FileName: existingFile.FileName,
+                        Name: existingFile.Name,
+                        FileSize: existingFile.FileSizeBytes,
+                        UploadedAt: existingFile.UpdatedAt,
+                        IsDirectory: false,
+                        Id: existingFile.Id.ToString());  // Include the existing file's ID
+                }
+
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create GcodeFile database record for {FileName}, but file was uploaded successfully", originalName);
@@ -557,21 +539,39 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             // Return the virtual path using the display name (original filename), not the GUID
-            string virtualFilePath = CombineVirtual(virtualDir, gcodeFile.FileName);
+            string virtualFilePath2 = CombineVirtual(virtualDir, gcodeFile.FileName);
             return new GcodeFileEntryDto(
-                Path: virtualFilePath,
+                Path: virtualFilePath2,
                 FileName: gcodeFile.FileName,
                 Name: gcodeFile.Name,  // Original filename for display
-                Size: gcodeFile.FileSizeBytes,
-                ModifiedAt: info.LastWriteTimeUtc,
-                IsDirectory: false
-            );
+                FileSize: gcodeFile.FileSizeBytes,
+                UploadedAt: info.LastWriteTimeUtc,
+                IsDirectory: false);
+        }
+
+        /// <summary>
+        /// Computes the SHA256 hash of a file for deduplication.
+        /// </summary>
+        /// <param name="filePath">Full path to the file to hash.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        private async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)
+        {
+            await using FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create();
+            byte[] hashBytes = await sha256.ComputeHashAsync(fs, ct);
+            return Convert.ToHexString(hashBytes);
         }
 
         /// <summary>
         /// Finalize a chunked upload by creating a GcodeFile database record with extracted metadata.
         /// This is called after a chunked upload completes to index the file in the database.
         /// </summary>
+        /// <param name="filePath">Full path to the uploaded file on disk.</param>
+        /// <param name="originalFileName">Original filename as provided by the uploader.</param>
+        /// <param name="thumbnailPath">Optional path to extracted thumbnail image.</param>
+        /// <param name="virtualDirectory">Virtual directory path for file organization.</param>
+        /// <param name="chunkedUploadService">Service for handling chunked uploads and metadata extraction.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         public async Task<GcodeFile?> FinalizeChunkedUploadAsync(
             string filePath,
             string? originalFileName,
@@ -615,7 +615,7 @@ namespace Farm.Web.Api.Services.Gcode
                 string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
 
                 // Get or create target folder
-                var targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+                FolderNode targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
                 // Create database record
                 GcodeFile gcodeFile = new()
@@ -681,70 +681,6 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Uploads multiple G-code files in a single operation with individual error handling per file.
-        /// </summary>
-        /// <param name="path">Virtual directory path where files should be uploaded</param>
-        /// <param name="files">Collection of files to upload</param>
-        /// <param name="uploadSettings">Upload settings including allowed extensions</param>
-        /// <param name="quotaService">Quota service for tracking upload limits</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Response containing lists of successfully uploaded and failed files</returns>
-        /// <remarks>
-        /// This method processes each file independently, so partial success is possible.
-        /// Failed uploads are captured with error messages without stopping the entire operation.
-        /// </remarks>
-        public async Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
-        {
-            List<GcodeFileEntryDto> created = new();
-            List<MultiUploadFailure> failed = new();
-
-            // Resolve path using IStoragePathService
-            (_, string targetDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
-
-            if (!Directory.Exists(targetDirFullPath))
-            {
-                _ = Directory.CreateDirectory(targetDirFullPath);
-            }
-
-            foreach (IFormFile? f in files)
-            {
-                try
-                {
-                    if (f == null || f.Length == 0)
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), "Empty file"));
-                        continue;
-                    }
-                    string ext = Path.GetExtension(f.FileName) ?? string.Empty;
-                    if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-                    {
-                        failed.Add(new MultiUploadFailure(SafeOriginalName(f.FileName), $"Invalid file type '{ext}'"));
-                        continue;
-                    }
-
-                    (string? fullTarget, string? safeName) = await SaveUploadedFileAsync(f, targetDirFullPath, ct);
-                    System.IO.FileInfo info = new(fullTarget);
-                    string virtualFilePath = CombineVirtual(virtualDir, safeName);
-                    created.Add(new GcodeFileEntryDto(
-                        Path: virtualFilePath,
-                        FileName: safeName,
-                        Name: null,  // No name yet for temporary files not in database
-                        Size: info.Length,
-                        ModifiedAt: info.LastWriteTimeUtc,
-                        IsDirectory: false
-                    ));
-                }
-                catch (Exception exFile)
-                {
-                    _logger.LogWarning($"Failed to save uploaded file {f?.FileName}: {exFile.Message}");
-                    failed.Add(new MultiUploadFailure(SafeOriginalName(f?.FileName), exFile.Message));
-                }
-            }
-
-            return new MultiUploadResponse(created, failed, created.Count, failed.Count);
-        }
-
-        /// <summary>
         /// Creates a new virtual folder in the G-code library for organizational purposes.
         /// </summary>
         /// <param name="path">Parent virtual directory path</param>
@@ -763,6 +699,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 throw new ArgumentException("name is required");
             }
+
             if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\n') || name.Contains('\r'))
             {
                 throw new ArgumentException("Invalid directory name");
@@ -785,10 +722,9 @@ namespace Farm.Web.Api.Services.Gcode
             GcodeFileEntryDto dto = new(
                 Path: folderPath,
                 FileName: name,
-                Size: 0,
-                ModifiedAt: folder.CreatedAt,
-                IsDirectory: true
-            );
+                FileSize: 0,
+                UploadedAt: folder.CreatedAt,
+                IsDirectory: true);
             return dto;
         }
 
@@ -809,7 +745,7 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 // Get the file from database (with includes)
-                var gcodeFile = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
+                GcodeFile? gcodeFile = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
                 if (gcodeFile == null)
                 {
                     _logger.LogWarning($"[MoveToFolder] File not found: {fileId}");
@@ -817,7 +753,7 @@ namespace Farm.Web.Api.Services.Gcode
                 }
 
                 // Get or create the target folder
-                var targetFolder = await _folderService.GetOrCreateFolderAsync(targetFolderPath, "gcode", ct);
+                FolderNode targetFolder = await _folderService.GetOrCreateFolderAsync(targetFolderPath, "gcode", ct);
 
                 // Update the folder reference (virtual move - physical file stays in place)
                 gcodeFile.FolderId = targetFolder.Id;
@@ -854,11 +790,11 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Step 1: Get all file records from database by ID
             List<GcodeFile> filesToDelete = new();
-            foreach (var fileId in fileIdsList)
+            foreach (Guid fileId in fileIdsList)
             {
                 try
                 {
-                    var file = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
+                    GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
                     if (file != null)
                     {
                         filesToDelete.Add(file);
@@ -884,7 +820,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Step 2: Delete database records first (before deleting physical files)
             _logger.LogInformation($"[DeleteFilesAsync] Deleting {filesToDelete.Count} record(s) from database");
 
-            foreach (var file in filesToDelete)
+            foreach (GcodeFile file in filesToDelete)
             {
                 _logger.LogInformation($"[DeleteFilesAsync]   - Removing from DB: {file.FileName} (ID: {file.Id})");
                 await _gcodeRepo.RemoveAsync(file, ct);
@@ -896,7 +832,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Step 3: Delete physical files (gcode + thumbnails)
             // If a physical file is missing, we still count it as deleted since the DB record was removed
             int deleted = 0;
-            foreach (var file in filesToDelete)
+            foreach (GcodeFile file in filesToDelete)
             {
                 try
                 {
@@ -944,7 +880,7 @@ namespace Farm.Web.Api.Services.Gcode
                 }
             }
 
-            _logger.LogInformation($"[DeleteFilesAsync] Deletion complete: {deleted}/{filesToDelete.Count} file(s) successfully processed, returning {(deleted > 0)}");
+            _logger.LogInformation($"[DeleteFilesAsync] Deletion complete: {deleted}/{filesToDelete.Count} file(s) successfully processed, returning {deleted > 0}");
             return deleted > 0;
         }
 
@@ -958,7 +894,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// This method resolves the virtual path to the physical file location and reads the entire file into memory.
         /// For large files, consider streaming instead of reading all bytes at once.
         /// </remarks>
-        public async Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct)
+        public async Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct)
         {
             // Resolve path using IStoragePathService
             (string storageRoot, string fullFilePath, _) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
@@ -971,6 +907,46 @@ namespace Farm.Web.Api.Services.Gcode
             byte[] bytes = await File.ReadAllBytesAsync(fullFilePath, ct);
             string fileName = Path.GetFileName(fullFilePath);
             return (bytes, fileName);
+        }
+
+        public async Task<string?> GetFilePathAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                return null;
+            }
+
+            // Return path by combining FilePath (directory) with FileName (GUID filename)
+            // FilePath is the storage directory, FileName is the GUID-based filename
+            return Path.Combine(file.FilePath, file.FileName);
+        }
+
+        public async Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                return null;
+            }
+
+            // Return path AND original filename for download scenarios
+            string filePath = Path.Combine(file.FilePath, file.FileName);
+            return (filePath, file.Name);
+        }
+
+        public async Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+
+            if (file == null || string.IsNullOrEmpty(file.ThumbnailFileName))
+            {
+                return null;
+            }
+
+            // Combine the file directory with the thumbnail filename
+            string fileDirectory = Path.GetDirectoryName(file.FilePath) ?? string.Empty;
+            return Path.Combine(fileDirectory, file.ThumbnailFileName);
         }
 
         /// <summary>
@@ -986,7 +962,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// This performs a physical file/directory move operation on disk.
         /// For virtual folder moves (database-only), use MoveToFolderAsync instead.
         /// </remarks>
-        public Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct)
+        public Task<(bool Ok, string VirtualPath, bool IsDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct)
         {
             string storageRoot = _storagePathService.GetGcodeStorageDirectory();
 
@@ -1026,6 +1002,7 @@ namespace Farm.Web.Api.Services.Gcode
                 {
                     throw new InvalidOperationException("Destination directory exists (cannot overwrite)");
                 }
+
                 Directory.Move(sourceFull, destFull);
             }
             else
@@ -1054,7 +1031,7 @@ namespace Farm.Web.Api.Services.Gcode
             long used = 0;
             long limit = 0;
             _ = quotaService.TryAddUsage(userId, 0, out used, out limit);
-            return Task.FromResult(new GcodeUploadSettingsResponse(uploadSettings.AllowedExtensions, limit, used));
+            return Task.FromResult(new GcodeUploadSettingsResponse(uploadSettings.GetAllowedExtensions(), limit, used));
         }
 
         #region Helper Methods
@@ -1076,12 +1053,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// <returns>Combined virtual path with proper separator handling</returns>
         private static string CombineVirtual(string? baseVirtual, string childName)
         {
-            if (baseVirtual == "/")
-            {
-                return "/" + childName;
-            }
-
-            return UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
+            return baseVirtual == "/" ? "/" + childName : UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
         }
 
         /// <summary>
@@ -1102,6 +1074,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 normalizedPath = normalizedPath[1..];
             }
+
             if (normalizedPath.EndsWith('/'))
             {
                 normalizedPath = normalizedPath[..^1];
@@ -1111,85 +1084,13 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Safely extracts the original filename from a path, returning a default if invalid.
-        /// </summary>
-        /// <param name="name">Filename or path</param>
-        /// <returns>Safe filename or "(unnamed)" if null/empty</returns>
-        private static string SafeOriginalName(string? name)
-            => string.IsNullOrWhiteSpace(name) ? "(unnamed)" : Path.GetFileName(name);
-
-        /// <summary>
-        /// Sanitizes a filename by replacing invalid characters with underscores and ensuring proper extension.
-        /// </summary>
-        /// <param name="originalName">Original filename to sanitize</param>
-        /// <param name="ext">File extension to ensure (e.g., ".gcode")</param>
-        /// <returns>Sanitized filename safe for filesystem use</returns>
-        private static string SanitizeFileName(string originalName, string ext)
-        {
-            string safeName = originalName;
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                safeName = safeName.Replace(c, '_');
-            }
-            if (!safeName.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-            {
-                safeName += ext;
-            }
-            return safeName;
-        }
-
-        /// <summary>
-        /// Saves an uploaded file to disk with automatic name collision resolution.
-        /// </summary>
-        /// <param name="file">File to save</param>
-        /// <param name="targetDirFullPath">Physical target directory path</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Tuple of full file path and safe filename</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the resolved path is unsafe (directory traversal attempt)</exception>
-        /// <remarks>
-        /// If a file with the same name exists, appends " (N)" before the extension.
-        /// Performs security checks to prevent directory traversal attacks.
-        /// </remarks>
-        private static async Task<(string fullTargetPath, string safeName)> SaveUploadedFileAsync(IFormFile file, string targetDirFullPath, CancellationToken ct)
-        {
-            string ext = Path.GetExtension(file.FileName) ?? string.Empty;
-            string originalName = Path.GetFileName(file.FileName);
-            if (string.IsNullOrWhiteSpace(originalName))
-            {
-                originalName = "upload" + ext;
-            }
-
-            string safeName = SanitizeFileName(originalName, ext);
-            string destinationPath = Path.Combine(targetDirFullPath, safeName);
-            string fullTarget = Path.GetFullPath(destinationPath);
-
-            if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Unsafe target path");
-            }
-
-            if (File.Exists(fullTarget))
-            {
-                string baseName = Path.GetFileNameWithoutExtension(safeName);
-                int counter = 1;
-                do
-                {
-                    string candidate = baseName + " (" + counter++ + ")" + ext;
-                    fullTarget = Path.GetFullPath(Path.Combine(targetDirFullPath, candidate));
-                } while (File.Exists(fullTarget));
-                safeName = Path.GetFileName(fullTarget);
-            }
-
-            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await file.CopyToAsync(fs, ct);
-            return (fullTarget, safeName);
-        }
-
-        /// <summary>
         /// Helper method to resolve and validate virtual paths consistently throughout the service.
         /// Centralizes path security logic to prevent directory traversal attacks.
         /// </summary>
-        private static (string storageRoot, string resolvedFullPath, string virtualNormalized) ResolveVirtualPath(
+        /// <param name="virtualPath">Virtual path to resolve</param>
+        /// <param name="storageRoot">Physical storage root directory</param>
+        /// <returns>Tuple of storage root, full resolved path, and normalized virtual path</returns>
+        private static (string StorageRoot, string ResolvedFullPath, string VirtualNormalized) ResolveVirtualPath(
             string? virtualPath,
             string storageRoot)
         {
@@ -1223,6 +1124,8 @@ namespace Farm.Web.Api.Services.Gcode
         /// Extract metadata from a G-code file by reading its content.
         /// Handles errors gracefully and returns null if extraction fails.
         /// </summary>
+        /// <param name="filePath">Full path to the G-code file to extract metadata from.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         private async Task<GcodeMetadataExtracted?> ExtractMetadataAsync(string filePath, CancellationToken ct)
         {
             try
@@ -1235,12 +1138,7 @@ namespace Farm.Web.Api.Services.Gcode
                 using StreamReader reader = new(filePath, Encoding.UTF8);
                 string gcodeContent = await reader.ReadToEndAsync(ct);
 
-                if (string.IsNullOrWhiteSpace(gcodeContent))
-                {
-                    return null;
-                }
-
-                return await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+                return string.IsNullOrWhiteSpace(gcodeContent) ? null : await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
             }
             catch (Exception ex)
             {
@@ -1253,6 +1151,8 @@ namespace Farm.Web.Api.Services.Gcode
         /// Extract and save a thumbnail from a G-code file.
         /// Handles errors gracefully and returns null if extraction fails.
         /// </summary>
+        /// <param name="filePath">Full path to the G-code file to extract thumbnail from.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         private async Task<string?> ExtractThumbnailAsync(string filePath, CancellationToken ct)
         {
             try
@@ -1275,6 +1175,13 @@ namespace Farm.Web.Api.Services.Gcode
         /// <summary>
         /// Create a GcodeFile database record from an uploaded file with metadata and thumbnail extraction.
         /// </summary>
+        /// <param name="filePath">Full path to the uploaded G-code file.</param>
+        /// <param name="originalFileName">Original filename as provided by the uploader.</param>
+        /// <param name="fileSizeBytes">Size of the file in bytes.</param>
+        /// <param name="fileExtension">File extension including the dot (e.g., '.gcode').</param>
+        /// <param name="virtualDirectory">Virtual directory path for file organization.</param>
+        /// <param name="fileId">GUID to use for the file record.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         private async Task<GcodeFile> CreateGcodeFileRecordAsync(
             string filePath,
             string originalFileName,
@@ -1326,7 +1233,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Get or create target folder
             string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
-            var targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+            FolderNode targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
             // Resolve printer model from extracted metadata
             Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
@@ -1341,8 +1248,7 @@ namespace Farm.Web.Api.Services.Gcode
                 thumbnailPath,
                 GcodeSource.Upload,
                 fileExtension,
-                resolvedPrinterModelId: printerModelId
-            );
+                resolvedPrinterModelId: printerModelId);
         }
 
         /// <summary>
@@ -1350,6 +1256,18 @@ namespace Farm.Web.Api.Services.Gcode
         /// This is the unified method used by all code paths (upload, single harvest, bulk harvest).
         /// Storage directory is obtained from IStoragePathService internally.
         /// </summary>
+        /// <param name="fileId">Unique identifier for the file.</param>
+        /// <param name="originalFileName">Original filename for display purposes.</param>
+        /// <param name="fileHash">SHA256 hash of the file content.</param>
+        /// <param name="fileSizeBytes">Size of the file in bytes.</param>
+        /// <param name="folderId">ID of the virtual folder containing the file.</param>
+        /// <param name="metadata">Extracted metadata from the G-code file, or null if extraction failed.</param>
+        /// <param name="thumbnailPath">Path to the extracted thumbnail, or null if none available.</param>
+        /// <param name="source">Source of the G-code file (Upload, Harvested, etc.).</param>
+        /// <param name="fileExtension">File extension including the dot (default: '.gcode').</param>
+        /// <param name="sourcePrinterId">Optional ID of the printer the file was harvested from.</param>
+        /// <param name="originalPrinterPath">Optional original path on the printer if harvested.</param>
+        /// <param name="resolvedPrinterModelId">Optional resolved printer model ID from metadata.</param>
         internal GcodeFile BuildGcodeFileEntityFromMetadata(
             Guid fileId,
             string originalFileName,
@@ -1449,12 +1367,7 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<GcodeFileDto?> GetFileAsync(Guid id, CancellationToken ct)
         {
             GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
-            if (file is null)
-            {
-                return null;
-            }
-
-            return MapToDto(file);
+            return file is null ? null : MapToDto(file);
         }
 
         /// <summary>
@@ -1517,10 +1430,8 @@ namespace Farm.Web.Api.Services.Gcode
                 {
                     gcodeFile.Description = metadata.Description;
                 }
-                if (metadata.Tags != null && metadata.Tags.Any())
-                {
-                    gcodeFile.Tags = string.Join(',', metadata.Tags);
-                }
+
+                // Note: Tags are managed separately through the tagging service, not during upload
                 // User-provided printer model overrides extracted one
                 if (metadata.PrinterModelId.HasValue)
                 {
@@ -1585,11 +1496,7 @@ namespace Farm.Web.Api.Services.Gcode
                 file.Description = request.Description;
             }
 
-            if (request.Tags != null)
-            {
-                file.Tags = string.Join(',', request.Tags);
-            }
-
+            // Note: Tags are managed separately through the tagging service, not through updates
             if (request.RequiredNozzleDiameter.HasValue)
             {
                 file.RequiredNozzleDiameter = request.RequiredNozzleDiameter;
@@ -1705,12 +1612,7 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             string fullPath = Path.Combine(file.FilePath, file.FileName);
-            if (!System.IO.File.Exists(fullPath))
-            {
-                return null;
-            }
-
-            return await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+            return !System.IO.File.Exists(fullPath) ? null : await System.IO.File.ReadAllBytesAsync(fullPath, ct);
         }
 
         /// <summary>
@@ -1739,12 +1641,13 @@ namespace Farm.Web.Api.Services.Gcode
         /// </remarks>
         private GcodeFileDto MapToDto(GcodeFile file)
         {
-            // Use centralized service method for efficient download-based thumbnail URL
-            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
-                file,
-                "/api/gcode-files/download",
-                _storagePathService.GetGcodeStorageDirectory()
-            );
+            // Use centralized service method for thumbnail URL
+            string? thumbnailUrl = _fileOperations.BuildGcodeThumbnailUrl(file.Id);
+
+            // Map tags from Tags collection
+            TagDto[] tags = file.Tags?
+                .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
+                .ToArray() ?? Array.Empty<TagDto>();
 
             return new GcodeFileDto(
                 Id: file.Id,
@@ -1759,7 +1662,7 @@ namespace Farm.Web.Api.Services.Gcode
                 OriginalPrinterPath: file.OriginalPrinterPath,
                 LastSeenOnPrinter: file.LastSeenOnPrinter,
                 Description: file.Description,
-                Tags: file.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+                Tags: tags,
                 RequiredNozzleDiameter: file.RequiredNozzleDiameter,
                 RequiredMaterial: file.RequiredMaterial,
                 EstimatedPrintTimeMinutes: file.EstimatedPrintTimeMinutes,
@@ -1769,14 +1672,13 @@ namespace Farm.Web.Api.Services.Gcode
                 PrinterModelName: file.PrinterModel?.Name,
                 SlicerName: file.SlicerName,
                 SlicerVersion: file.SlicerVersion,
-                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName)
-            );
+                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName));
         }
 
         /// <summary>
         /// Unified method for processing and storing G-code files from any source
         /// (upload, single harvest, bulk harvest, or future sources).
-        /// 
+        ///
         /// Handles all file processing: storage, hash calculation, duplicate detection,
         /// metadata extraction, thumbnail processing, entity creation, and database persistence.
         /// </summary>
@@ -1798,7 +1700,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// 4. Processes and extracts thumbnail image
         /// 5. Creates GcodeFile entity with complete metadata
         /// 6. Saves to database
-        /// 
+        ///
         /// If a duplicate file is detected (same hash), an exception is thrown allowing
         /// the caller to decide whether to skip, replace, or re-import.
         /// </remarks>
@@ -1855,17 +1757,24 @@ namespace Farm.Web.Api.Services.Gcode
                 byte[] hashBytes = await sha256.ComputeHashAsync(hashStream, ct);
                 fileHash = Convert.ToHexString(hashBytes);
             }
+
             _logger.LogInformation($"Calculated file hash: {fileHash.Substring(0, 8)}...");
 
             // Check for duplicates (allow if from same source/printer path, but otherwise reject)
-            var existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
+            GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
             if (existingFile != null && existingFile.Id != fileId)
             {
                 _logger.LogWarning($"[GcodeProcessing] Duplicate file detected: {originalFileName} matches existing file {existingFile.Id}");
+
                 // Clean up the file we just wrote
                 try
-                { System.IO.File.Delete(finalFilePath); }
-                catch (Exception ex) { _logger.LogWarning(ex, $"[GcodeProcessing] Failed to clean up duplicate file: {finalFilePath}"); }
+                {
+                    System.IO.File.Delete(finalFilePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[GcodeProcessing] Failed to clean up duplicate file: {finalFilePath}");
+                }
 
                 throw new DuplicateFileException(originalFileName, existingFile.Id.ToString(), fileHash);
             }
@@ -1882,6 +1791,7 @@ namespace Farm.Web.Api.Services.Gcode
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"[GcodeProcessing] Failed to extract metadata from {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+
                 // Continue without metadata - it's not fatal
             }
 
@@ -1892,6 +1802,7 @@ namespace Farm.Web.Api.Services.Gcode
                 if (!string.IsNullOrWhiteSpace(thumbnailUrl))
                 {
                     _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail download from URL: {thumbnailUrl}");
+
                     // Try to download from printer API URL
                     thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
                 }
@@ -1915,6 +1826,7 @@ namespace Farm.Web.Api.Services.Gcode
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"[GcodeProcessing] Error processing thumbnail for {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+
                 // Continue without thumbnail - it's not fatal
             }
 
@@ -1922,7 +1834,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Resolve printer model from extracted metadata
             Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
 
-            var gcodeFile = BuildGcodeFileEntityFromMetadata(
+            GcodeFile gcodeFile = BuildGcodeFileEntityFromMetadata(
                 fileId.Value,
                 originalFileName,
                 fileHash,
@@ -1947,10 +1859,17 @@ namespace Farm.Web.Api.Services.Gcode
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"[GcodeProcessing] Failed to persist GcodeFile to database: {originalFileName}");
+
                 // Clean up the stored file since database save failed
                 try
-                { System.IO.File.Delete(finalFilePath); }
-                catch (Exception deleteEx) { _logger.LogWarning(deleteEx, $"[GcodeProcessing] Failed to clean up file after database error: {finalFilePath}"); }
+                {
+                    System.IO.File.Delete(finalFilePath);
+                }
+                catch (Exception deleteEx)
+                {
+                    _logger.LogWarning(deleteEx, $"[GcodeProcessing] Failed to clean up file after database error: {finalFilePath}");
+                }
+
                 throw new FilePersistenceException(originalFileName, $"Failed to save file to database: {ex.Message}", ex);
             }
 
@@ -1958,8 +1877,12 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Helper method to process thumbnail from printer API URL
+        /// Helper method to process thumbnail from printer API URL.
         /// </summary>
+        /// <param name="thumbnailUrl">URL to download the thumbnail from.</param>
+        /// <param name="fileId">File ID to use for naming the thumbnail.</param>
+        /// <param name="storageDir">Directory to save the thumbnail to.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
         private async Task<string?> ProcessThumbnailFromUrlAsync(
             string thumbnailUrl,
             Guid fileId,
@@ -1975,7 +1898,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Download thumbnail from URL
                 using var httpClient = new System.Net.Http.HttpClient();
-                var response = await httpClient.GetAsync(thumbnailUrl, ct);
+                HttpResponseMessage response = await httpClient.GetAsync(thumbnailUrl, ct);
 
                 if (!response.IsSuccessStatusCode)
                 {

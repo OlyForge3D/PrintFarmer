@@ -65,6 +65,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
             RuntimeEnvironment.WindowsNative => RewriteForWindowsNative(uri),
             RuntimeEnvironment.MacOSNative => RewriteForMacOSNative(uri),
             RuntimeEnvironment.LinuxNative => RewriteForLinuxNative(uri),
+            RuntimeEnvironment.Unknown => throw new System.NotImplementedException(),
             _ => uri.ToString()
         };
     }
@@ -122,22 +123,11 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
         }
 
         // Detect OS
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return RuntimeEnvironment.WindowsNative;
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return RuntimeEnvironment.MacOSNative;
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            return RuntimeEnvironment.LinuxNative;
-        }
-
-        return RuntimeEnvironment.Unknown;
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? RuntimeEnvironment.WindowsNative
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? RuntimeEnvironment.MacOSNative
+            : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? RuntimeEnvironment.LinuxNative : RuntimeEnvironment.Unknown;
     }
 
     private static bool IsDockerDesktop()
@@ -147,8 +137,10 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
         bool[] dockerDesktopIndicators = new[]
         {
             Environment.GetEnvironmentVariable("DOCKER_DESKTOP") == "true",
+
             // Docker Desktop typically uses these internal networks
             Environment.GetEnvironmentVariable("DOCKER_HOST")?.Contains("docker.io", StringComparison.OrdinalIgnoreCase) == true,
+
             // Check if we're on Windows/macOS (where Docker Desktop is common)
             !RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
         };
@@ -165,15 +157,18 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
 
             // Check for private IP ranges (RFC 1918)
             return bytes.Length == 4 && (
+
                 // 10.0.0.0/8
                 bytes[0] == 10 ||
+
                 // 172.16.0.0/12
                 (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+
                 // 192.168.0.0/16
                 (bytes[0] == 192 && bytes[1] == 168) ||
+
                 // 127.0.0.0/8 (localhost)
-                bytes[0] == 127
-            );
+                bytes[0] == 127);
         }
 
         // Check for common local hostnames

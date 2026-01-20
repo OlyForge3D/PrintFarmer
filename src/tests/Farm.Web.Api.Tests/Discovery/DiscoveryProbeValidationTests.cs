@@ -7,6 +7,7 @@ using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Discovery;
@@ -164,7 +165,7 @@ public class DiscoveryProbeValidationTests
             new MoonrakerDiscoveryProbe(),
         };
 
-        foreach (var probe in probes)
+        foreach (INetworkDiscoveryProbe probe in probes)
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -272,16 +273,10 @@ public class DiscoveryProbeValidationTests
         public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
     }
 
-    private sealed class TestableBaseProbe : BaseDiscoveryProbe
+    private sealed class TestableBaseProbe(int port, bool shouldValidate) : BaseDiscoveryProbe
     {
-        private readonly int _port;
-        private readonly bool _shouldValidate;
-
-        public TestableBaseProbe(int port, bool shouldValidate)
-        {
-            _port = port;
-            _shouldValidate = shouldValidate;
-        }
+        private readonly int _port = port;
+        private readonly bool _shouldValidate = shouldValidate;
 
         public override string DisplayName => "TestBase";
         protected override int[] Ports => new[] { _port };

@@ -6,6 +6,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public interface IOrcaBinaryDetector
 {
     bool IsRealBinaryPresent();
+
     /// <summary>
     /// Get the installed OrcaSlicer version (e.g., "1.7.0" or "2.0.0").
     /// Returns null if version cannot be determined.
@@ -55,11 +56,16 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 {
                     // ignored
                 }
+
                 return false;
             }
+
             return proc.ExitCode == 0 || proc.ExitCode == 1;
         }
-        catch { return false; }
+        catch
+        {
+            return false;
+        }
     }
 
     public async Task<string?> GetVersionAsync()
@@ -90,6 +96,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             {
                 _ = tcs.TrySetResult(true);
             }
+
             proc.EnableRaisingEvents = true;
             proc.Exited += OnExited;
 
@@ -100,7 +107,10 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 {
                     proc.Kill();
                 }
-                catch { }
+                catch
+                {
+                }
+
                 return null;
             }
 

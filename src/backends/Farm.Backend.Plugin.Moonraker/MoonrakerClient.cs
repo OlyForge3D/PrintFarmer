@@ -176,6 +176,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             {
                 state = stNode.GetString();
             }
+
             // Only report job details when printing
             if (!string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase))
             {
@@ -199,8 +200,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     catch
                     {
                     }
+
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
+
                 if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
                     ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
                 {
@@ -249,7 +252,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         }
                     }
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             return new PrinterJob(state, progress, jobName, thumb);
@@ -337,20 +342,21 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
-            if (!resp.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsByteArrayAsync(cts.Token);
         }
-        catch { return null; }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
     /// Queries the Moonraker API for actual configured camera URLs.
     /// Returns the first enabled camera's stream and snapshot URLs from the /server/webcams/list API.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="frontendPort">The optional frontend port to use for camera URLs.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<(string? StreamUrl, string? SnapshotUrl)> GetConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
     {
         try
@@ -375,6 +381,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);
         _logger.LogDebug($"[Moonraker] GetCompositeStatusAsync: status.IsOnline={status.IsOnline}, status.State={status.State}");
         PrinterJob? job = await GetJobAsync(baseUrl, ct);
+
         // Try to read current position
         double? x = null, y = null, z = null;
         try
@@ -395,20 +402,35 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     th.TryGetProperty("position", out JsonElement pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
                 {
                     try
-                    { x = pos[0].GetDouble(); }
-                    catch { }
+                    {
+                        x = pos[0].GetDouble();
+                    }
+                    catch
+                    {
+                    }
+
                     try
-                    { y = pos[1].GetDouble(); }
-                    catch { }
+                    {
+                        y = pos[1].GetDouble();
+                    }
+                    catch
+                    {
+                    }
+
                     try
-                    { z = pos[2].GetDouble(); }
-                    catch { }
+                    {
+                        z = pos[2].GetDouble();
+                    }
+                    catch
+                    {
+                    }
                 }
             }
         }
         catch
         {
         }
+
         // Prefer print job state (printing, paused, complete) over system state, but not for error states
         // If system is shutdown/error, that takes precedence over print_stats state
         string? state = null;
@@ -424,6 +446,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             // Otherwise prefer job state if available
             state = job?.PrintState ?? status.State;
         }
+
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try
@@ -443,21 +466,58 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     if (status2.TryGetProperty("extruder", out JsonElement ex))
                     {
                         if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-                        { try { hotend = t.GetDouble(); } catch { } }
+                        {
+                            try
+                            {
+                                hotend = t.GetDouble();
+                            }
+                            catch
+                            {
+                            }
+                        }
+
                         if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-                        { try { hotendT = tt.GetDouble(); } catch { } }
+                        {
+                            try
+                            {
+                                hotendT = tt.GetDouble();
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
+
                     if (status2.TryGetProperty("heater_bed", out JsonElement hb))
                     {
                         if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-                        { try { bed = t.GetDouble(); } catch { } }
+                        {
+                            try
+                            {
+                                bed = t.GetDouble();
+                            }
+                            catch
+                            {
+                            }
+                        }
+
                         if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-                        { try { bedT = tt.GetDouble(); } catch { } }
+                        {
+                            try
+                            {
+                                bedT = tt.GetDouble();
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         // Query camera info when online; webcam listing may still be available via Moonraker
         string? cam = null;
@@ -468,6 +528,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             cam = streamUrl;
             snap = snapshotUrl;
         }
+
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
     }
 
@@ -512,8 +573,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             SpoolInfo: spoolInfo,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
-        ));
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
@@ -651,7 +711,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
-    private async Task<(string? stream, string? snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)
+    private async Task<(string? Stream, string? Snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)
     {
         string? stream = null;
         string? snapshot = null;
@@ -690,6 +750,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         enabled = true;
                     }
                 }
+
                 if (!enabled)
                 {
                     continue;
@@ -765,6 +826,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                         stream = NormalizeCameraUrl(s, baseUrl);
                     }
                 }
+
                 if (snapshot is null && cam.TryGetProperty("snapshot_url", out JsonElement sn) && sn.ValueKind == JsonValueKind.String)
                 {
                     string? s = sn.GetString();
@@ -801,6 +863,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         {
             _logger.LogDebug(ex, $"Failed to get camera URLs from {baseUrl}");
         }
+
         return (stream, snapshot);
     }
 
@@ -852,13 +915,15 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
     {
         // Call the new method that returns full file info, then extract just the paths for backward compatibility
-        var fileInfoList = await GetFileListWithMetadataAsync(baseUrl, ct);
+        List<PrinterFileInfo> fileInfoList = await GetFileListWithMetadataAsync(baseUrl, ct);
         return fileInfoList.Select(f => f.Path).ToArray();
     }
 
     /// <summary>
     /// Get list of G-code files with metadata (size, modified date) from Moonraker.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -871,7 +936,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -881,7 +946,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             if (!root.TryGetProperty("result", out JsonElement result) ||
                 result.ValueKind != JsonValueKind.Array)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             List<PrinterFileInfo> files = new();
@@ -924,11 +989,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     }
                 }
             }
+
             return files;
         }
         catch
         {
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
@@ -936,15 +1002,18 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// Gets the thumbnail URL for a gcode file if available.
     /// Returns null if no thumbnail is found.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the gcode file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     private async Task<string?> GetThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
         {
-            var thumbnails = await GetFileThumbnailsAsync(baseUrl, filename, ct);
+            List<(int Width, int Height, string RelativePath)> thumbnails = await GetFileThumbnailsAsync(baseUrl, filename, ct);
             if (thumbnails != null && thumbnails.Count > 0)
             {
                 // Use the largest thumbnail available
-                var largestThumbnail = thumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault();
+                (int Width, int Height, string RelativePath) largestThumbnail = thumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault();
                 if (!string.IsNullOrEmpty(largestThumbnail.RelativePath))
                 {
                     // Build absolute thumbnail URL
@@ -956,6 +1025,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         {
             // Silently fail if thumbnail retrieval fails
         }
+
         return null;
     }
 
@@ -964,6 +1034,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get list of available file roots
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<FileRoot[]> GetFileRootsAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -991,6 +1063,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get directory information with optional filtering
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="path">The directory path to query.</param>
+    /// <param name="extended">Whether to include extended file information.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default)
     {
         try
@@ -1017,6 +1093,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                 catch (JsonException ex)
                 {
                     _logger.LogDebug($"Error parsing directory info from REST API: {ex.Message}");
+
                     // Continue to fallback method
                 }
             }
@@ -1131,6 +1208,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Create a new directory
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="path">The path of the directory to create.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<DirectoryCreateResponse?> CreateDirectoryAsync(string baseUrl, string path, CancellationToken ct = default)
     {
         try
@@ -1159,6 +1239,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a file or directory
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="path">The path of the file or directory to delete.</param>
+    /// <param name="force">Whether to force deletion of non-empty directories.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteFileOrDirectoryAsync(string baseUrl, string path, bool force = false, CancellationToken ct = default)
     {
         try
@@ -1181,6 +1265,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Move or rename a file/directory
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="source">The source path of the file or directory.</param>
+    /// <param name="dest">The destination path for the file or directory.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> MoveFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
     {
         try
@@ -1203,6 +1291,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Copy a file
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="source">The source path of the file to copy.</param>
+    /// <param name="dest">The destination path for the copied file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> CopyFileAsync(string baseUrl, string source, string dest, CancellationToken ct = default)
     {
         try
@@ -1225,6 +1317,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get file metadata for G-Code files
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the G-Code file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<GCodeMetadata?> GetFileMetadataAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1254,6 +1349,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// Gets thumbnail information for a G-code file using Moonraker's dedicated thumbnails API endpoint.
     /// This is more efficient than GetFileMetadataAsync when only thumbnails are needed.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the G-code file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1267,28 +1365,28 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return new List<(int, int, string)>();
+                return [];
             }
 
             MoonrakerResponse<List<ThumbnailInfo>>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<List<ThumbnailInfo>>>(cancellationToken: cts.Token);
-            if (response?.Result == null || response.Result.Count == 0)
-            {
-                return new List<(int, int, string)>();
-            }
-
-            return response.Result
+            return response?.Result == null || response.Result.Count == 0
+                ? []
+                : response.Result
                 .Select(t => (t.Width, t.Height, t.RelativePath))
                 .ToList();
         }
         catch
         {
-            return new List<(int, int, string)>();
+            return [];
         }
     }
 
     /// <summary>
     /// Start a metadata scan for a file
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the file to scan.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1327,6 +1425,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get a file thumbnail
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1338,12 +1439,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/thumbs/{encodedFilename}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsByteArrayAsync(cts.Token);
         }
         catch
         {
@@ -1356,6 +1452,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// This endpoint is more efficient than GetFileMetadataAsync when only thumbnail information is needed.
     /// The response returns thumbnail metadata including relative paths, allowing efficient direct construction of URLs.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the G-code file.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetFileThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1380,7 +1479,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             }
 
             // Find the largest thumbnail by pixel count
-            var largestThumbnail = response.Result
+            ThumbnailInfo? largestThumbnail = response.Result
                 .OrderByDescending(t => t.Width * t.Height)
                 .FirstOrDefault();
 
@@ -1395,6 +1494,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Download a file from Moonraker
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the file to download.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     /// <remarks>
     /// Moonraker filenames come with "gcodes/" prefix (e.g., "gcodes/file.gcode").
     /// The URL constructed is: /server/files/gcodes/...
@@ -1457,6 +1559,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Upload a file to a specific root directory
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="root">The root directory to upload to.</param>
+    /// <param name="filename">The name of the file to upload.</param>
+    /// <param name="content">The file content stream.</param>
+    /// <param name="print">Whether to start printing after upload.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<FileUploadResponse?> UploadFileAsync(string baseUrl, string root, string filename, Stream content,
         bool print = false, CancellationToken ct = default)
     {
@@ -1496,6 +1604,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Upload a file with path (can create subdirectories)
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="path">The full path including filename for the upload.</param>
+    /// <param name="content">The file content stream.</param>
+    /// <param name="print">Whether to start printing after upload.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<FileUploadResponse?> UploadFileWithPathAsync(string baseUrl, string path, Stream content,
         bool print = false, CancellationToken ct = default)
     {
@@ -1537,6 +1650,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get detailed file list with extended information
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="root">The root directory to list files from.</param>
+    /// <param name="path">Optional subdirectory path to list.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<MoonrakerFileInfo[]> GetDetailedFileListAsync(string baseUrl, string root = "gcodes", string? path = null, CancellationToken ct = default)
     {
         try
@@ -1569,6 +1686,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a specific file
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="path">The path of the file to delete.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteFileAsync(string baseUrl, string path, CancellationToken ct = default)
     {
         try
@@ -1591,6 +1711,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get file contents as stream
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filename">The name of the file to stream.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<Stream?> GetFileStreamAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
@@ -1622,6 +1745,13 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// List print history jobs with optional filtering parameters
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="start">Index to start from for pagination.</param>
+    /// <param name="since">Filter jobs since this date.</param>
+    /// <param name="before">Filter jobs before this date.</param>
+    /// <param name="order">Sort order for the results.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, DateTime? before = null, string? order = null, CancellationToken ct = default)
     {
         try
@@ -1679,6 +1809,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                 _logger.LogWarning($"[Moonraker] History response deserialization returned null");
                 return null;
             }
+
             _logger.LogInformation($"[Moonraker] Successfully fetched {response.Result.Count} history items");
             return response.Result;
         }
@@ -1702,6 +1833,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get a specific history job by job ID
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="jobId">The unique identifier of the history job.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
     {
         try
@@ -1730,6 +1864,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a specific history job by job ID
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="jobId">The unique identifier of the history job to delete.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, CancellationToken ct = default)
     {
         try
@@ -1752,6 +1889,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get history totals and statistics
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -1780,6 +1919,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Reset history totals (clears all statistics)
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> ResetHistoryTotalsAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -1804,6 +1945,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get Spoolman status and connection information
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<SpoolmanStatus?> GetSpoolmanStatusAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -1831,6 +1974,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get the currently active spool ID
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default)
     {
         try
@@ -1858,6 +2003,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Set the active spool ID in Spoolman
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolId">The spool ID to set as active, or null to clear.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> SetSpoolmanActiveSpoolAsync(string baseUrl, int? spoolId, CancellationToken ct = default)
     {
         try
@@ -1880,6 +2028,13 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Proxy a request to the Spoolman server
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="method">The HTTP method for the proxied request.</param>
+    /// <param name="path">The Spoolman API path to request.</param>
+    /// <param name="query">Optional query string parameters.</param>
+    /// <param name="body">Optional request body object.</param>
+    /// <param name="useV2Response">Whether to use V2 response format.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> SpoolmanProxyRequestAsync(string baseUrl, string method, string path,
         string? query = null, object? body = null, bool useV2Response = false, CancellationToken ct = default)
     {
@@ -1899,12 +2054,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             };
 
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(uri, request, cts.Token);
-            if (!resp.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            return await resp.Content.ReadAsStringAsync(cts.Token);
+            return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsStringAsync(cts.Token);
         }
         catch
         {
@@ -1915,6 +2065,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get all spools from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanSpoolsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/spool", ct: ct);
@@ -1923,6 +2075,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get a specific spool by ID from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolId">The unique identifier of the spool.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/spool/{spoolId}", ct: ct);
@@ -1931,6 +2086,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Create a new spool in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolData">The spool data to create.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> CreateSpoolmanSpoolAsync(string baseUrl, object spoolData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/spool", body: spoolData, ct: ct);
@@ -1939,6 +2097,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Update a spool in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolId">The unique identifier of the spool to update.</param>
+    /// <param name="spoolData">The updated spool data.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> UpdateSpoolmanSpoolAsync(string baseUrl, int spoolId, object spoolData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/spool/{spoolId}", body: spoolData, ct: ct);
@@ -1947,6 +2109,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a spool from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolId">The unique identifier of the spool to delete.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteSpoolmanSpoolAsync(string baseUrl, int spoolId, CancellationToken ct = default)
     {
         string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/spool/{spoolId}", ct: ct);
@@ -1956,6 +2121,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get all filaments from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanFilamentsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/filament", ct: ct);
@@ -1964,6 +2131,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get a specific filament by ID from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filamentId">The unique identifier of the filament.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanFilamentByIdAsync(string baseUrl, int filamentId, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/filament/{filamentId}", ct: ct);
@@ -1972,6 +2142,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Create a new filament in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filamentData">The filament data to create.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> CreateSpoolmanFilamentAsync(string baseUrl, object filamentData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/filament", body: filamentData, ct: ct);
@@ -1980,6 +2153,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Update a filament in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filamentId">The unique identifier of the filament to update.</param>
+    /// <param name="filamentData">The updated filament data.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> UpdateSpoolmanFilamentAsync(string baseUrl, int filamentId, object filamentData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/filament/{filamentId}", body: filamentData, ct: ct);
@@ -1988,6 +2165,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a filament from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filamentId">The unique identifier of the filament to delete.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteSpoolmanFilamentAsync(string baseUrl, int filamentId, CancellationToken ct = default)
     {
         string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/filament/{filamentId}", ct: ct);
@@ -1997,6 +2177,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get all vendors from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanVendorsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/vendor", ct: ct);
@@ -2005,6 +2187,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get a specific vendor by ID from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="vendorId">The unique identifier of the vendor.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanVendorByIdAsync(string baseUrl, int vendorId, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", $"/api/v1/vendor/{vendorId}", ct: ct);
@@ -2013,6 +2198,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Create a new vendor in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="vendorData">The vendor data to create.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> CreateSpoolmanVendorAsync(string baseUrl, object vendorData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/vendor", body: vendorData, ct: ct);
@@ -2021,6 +2209,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Update a vendor in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="vendorId">The unique identifier of the vendor to update.</param>
+    /// <param name="vendorData">The updated vendor data.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> UpdateSpoolmanVendorAsync(string baseUrl, int vendorId, object vendorData, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "PATCH", $"/api/v1/vendor/{vendorId}", body: vendorData, ct: ct);
@@ -2029,6 +2221,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Delete a vendor from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="vendorId">The unique identifier of the vendor to delete.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> DeleteSpoolmanVendorAsync(string baseUrl, int vendorId, CancellationToken ct = default)
     {
         string? result = await SpoolmanProxyRequestAsync(baseUrl, "DELETE", $"/api/v1/vendor/{vendorId}", ct: ct);
@@ -2038,6 +2233,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Use a specific amount of filament from the active spool
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="length">The length of filament used in millimeters.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> UseSpoolmanFilamentAsync(string baseUrl, double length, CancellationToken ct = default)
     {
         var body = new { used_length = length };
@@ -2048,6 +2246,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get Spoolman server information via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanInfoAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/info", ct: ct);
@@ -2056,6 +2256,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get Spoolman health status via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanHealthAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/health", ct: ct);
@@ -2064,6 +2266,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Search spools in Spoolman with optional filters via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="query">Optional search query string.</param>
+    /// <param name="allowArchived">Whether to include archived spools in results.</param>
+    /// <param name="limit">Maximum number of results to return.</param>
+    /// <param name="offset">Number of results to skip for pagination.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> SearchSpoolmanSpoolsAsync(string baseUrl, string? query = null,
         bool? allowArchived = null, int? limit = null, int? offset = null, CancellationToken ct = default)
     {
@@ -2095,6 +2303,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Search filaments in Spoolman with optional filters via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="query">Optional search query string.</param>
+    /// <param name="limit">Maximum number of results to return.</param>
+    /// <param name="offset">Number of results to skip for pagination.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> SearchSpoolmanFilamentsAsync(string baseUrl, string? query = null,
         int? limit = null, int? offset = null, CancellationToken ct = default)
     {
@@ -2121,6 +2334,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Archive/unarchive a spool in Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="spoolId">The unique identifier of the spool to archive.</param>
+    /// <param name="archived">Whether to archive or unarchive the spool.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<bool> ArchiveSpoolmanSpoolAsync(string baseUrl, int spoolId, bool archived = true, CancellationToken ct = default)
     {
         var body = new { archived };
@@ -2131,6 +2348,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Get statistics from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanStatsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/statistics", ct: ct);
@@ -2139,14 +2358,18 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Backup Spoolman database via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> BackupSpoolmanAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "POST", "/api/v1/backup", ct: ct);
     }
 
     /// <summary>
-    /// Get external database integrations status from Spoolman via proxy  
+    /// Get external database integrations status from Spoolman via proxy
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     public async Task<string?> GetSpoolmanIntegrationsAsync(string baseUrl, CancellationToken ct = default)
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/external", ct: ct);
@@ -2157,12 +2380,18 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsFileDownload implementation - downloads a file from the printer.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filePath">The path of the file to download.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct)
         => await DownloadFileAsync(baseUrl, filePath, ct);
 
     /// <summary>
     /// ISupportsFileList implementation - gets the list of files on the printer.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         // Use the new method that extracts file metadata including size
@@ -2175,18 +2404,30 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsFileUpload implementation - uploads a G-code file to the printer.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="fileName">The name of the file to upload.</param>
+    /// <param name="fileContent">The file content stream.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
         => await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
 
     /// <summary>
     /// ISupportsStartPrint implementation - starts a print job for the specified file.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="fileName">The name of the file to print.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
         => await StartPrintAsync(baseUrl, fileName, ct);
 
     /// <summary>
     /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
         => await PauseAsync(baseUrl, ct);
 
@@ -2199,6 +2440,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsCamera implementations - get camera stream and snapshot URLs.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="frontendPort">Optional frontend port for camera URL.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
         => await GetCameraStreamUrlAsync(baseUrl, frontendPort, ct: ct);
 
@@ -2210,7 +2455,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// This queries the Moonraker API to find cameras that are actually present on the printer.
     /// Returns (null, null) if no cameras are found, preventing false positives.
     /// </summary>
-    async Task<(string? streamUrl, string? snapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="frontendPort">Optional frontend port for camera URL.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    async Task<(string? StreamUrl, string? SnapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
     {
         // Query the actual API to get configured camera URLs
         (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
@@ -2220,9 +2469,13 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="filePath">The path of the file to get metadata for.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default)
     {
-        var metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
+        GCodeMetadata? metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
         if (metadata == null)
         {
             return null;
@@ -2251,10 +2504,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         return result;
     }
 
-
     /// <summary>
     /// ISupportsMovement implementations - home and move operations.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
         => await SendHomeAsync(baseUrl, ct);
 
@@ -2276,12 +2531,22 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsTemperatureControl implementation - set temperatures.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="hotendTemp">Optional target hotend temperature in Celsius.</param>
+    /// <param name="bedTemp">Optional target bed temperature in Celsius.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
         => await SetTempsAsync(baseUrl, hotendTemp, bedTemp, ct);
 
     /// <summary>
     /// ISupportsHistory implementations - get and manage print history.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="start">Index to start from for pagination.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
         => await GetHistoryListAsync(baseUrl, limit, start, ct: ct);
 
@@ -2297,9 +2562,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// ISupportsPrinterInformation implementation - get detailed printer information.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var info = await GetPrinterInfoAsync(baseUrl, ct);
+        MoonrakerPrinterInfo? info = await GetPrinterInfoAsync(baseUrl, ct);
         return new StandardPrinterInfo
         {
             Name = info?.Hostname ?? "Unknown",
@@ -2770,6 +3038,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <summary>
     /// Response model for thumbnail information from Moonraker API
     /// </summary>
+    /// <param name="Width">The width of the thumbnail in pixels.</param>
+    /// <param name="Height">The height of the thumbnail in pixels.</param>
+    /// <param name="Size">The size of the thumbnail in bytes.</param>
+    /// <param name="RelativePath">The relative path to the thumbnail file.</param>
     private record ThumbnailInfo(
         int Width,
         int Height,

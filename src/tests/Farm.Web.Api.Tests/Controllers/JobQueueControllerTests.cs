@@ -52,11 +52,11 @@ public class JobQueueControllerTests
             .ReturnsAsync(queueOverview);
 
         // Act
-        var result = await _controller.GetQueueAsync();
+        ActionResult<IEnumerable<JobQueuePrintJobDto>> result = await _controller.GetQueueAsync();
 
         // Assert
-        var okResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
-        var okValue = Assert.IsType<OkObjectResult>(okResult.Result);
+        ActionResult<IEnumerable<JobQueuePrintJobDto>> okResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
+        OkObjectResult okValue = Assert.IsType<OkObjectResult>(okResult.Result);
         Assert.Equal(queueOverview, okValue.Value);
     }
 
@@ -69,11 +69,11 @@ public class JobQueueControllerTests
             .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act
-        var result = await _controller.GetQueueAsync();
+        ActionResult<IEnumerable<JobQueuePrintJobDto>> result = await _controller.GetQueueAsync();
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
-        var problemResult = Assert.IsType<ObjectResult>(actionResult.Result);
+        ActionResult<IEnumerable<JobQueuePrintJobDto>> actionResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
+        ObjectResult problemResult = Assert.IsType<ObjectResult>(actionResult.Result);
         Assert.Equal(500, problemResult.StatusCode);
     }
 
@@ -81,11 +81,11 @@ public class JobQueueControllerTests
     public async Task QueueJobAsync_WithNullRequest_ReturnsBadRequest()
     {
         // Act
-        var result = await _controller.QueueJobAsync(null!);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(null!);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
         Assert.Equal("Request body is required", badRequest.Value);
     }
 
@@ -118,11 +118,11 @@ public class JobQueueControllerTests
             .ReturnsAsync(jobDto);
 
         // Act
-        var result = await _controller.QueueJobAsync(request);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        var createdResult = Assert.IsType<CreatedAtActionResult>(actionResult.Result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(actionResult.Result);
         Assert.Equal(jobDto, createdResult.Value);
         Assert.Equal(nameof(_controller.GetJobAsync), createdResult.ActionName);
     }
@@ -142,10 +142,10 @@ public class JobQueueControllerTests
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act
-        var result = await _controller.QueueJobAsync(request);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
     }
 
@@ -171,11 +171,11 @@ public class JobQueueControllerTests
             .ReturnsAsync(jobDto);
 
         // Act
-        var result = await _controller.GetJobAsync(jobId);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.GetJobAsync(jobId);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
         Assert.Equal(jobDto, okResult.Value);
     }
 
@@ -190,10 +190,10 @@ public class JobQueueControllerTests
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act
-        var result = await _controller.GetJobAsync(jobId);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.GetJobAsync(jobId);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
     }
 
@@ -204,11 +204,11 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         // Act
-        var result = await _controller.UpdateJobAsync(jobId, null!);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, null!);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
         Assert.Equal("Request body is required", badRequest.Value);
     }
 
@@ -240,11 +240,11 @@ public class JobQueueControllerTests
             .ReturnsAsync(updatedDto);
 
         // Act
-        var result = await _controller.UpdateJobAsync(jobId, request);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
         Assert.Equal(updatedDto, okResult.Value);
     }
 
@@ -263,10 +263,10 @@ public class JobQueueControllerTests
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
         // Act
-        var result = await _controller.UpdateJobAsync(jobId, request);
+        ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
 
         // Assert
-        var actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
+        ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
     }
 
@@ -281,7 +281,7 @@ public class JobQueueControllerTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _controller.DeleteJobAsync(jobId);
+        IActionResult result = await _controller.DeleteJobAsync(jobId);
 
         // Assert
         Assert.IsType<NoContentResult>(result);
@@ -298,10 +298,10 @@ public class JobQueueControllerTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _controller.DeleteJobAsync(jobId);
+        IActionResult result = await _controller.DeleteJobAsync(jobId);
 
         // Assert
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("Cannot delete the job", badRequest.Value?.ToString());
     }
 
@@ -316,10 +316,10 @@ public class JobQueueControllerTests
             .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act
-        var result = await _controller.DeleteJobAsync(jobId);
+        IActionResult result = await _controller.DeleteJobAsync(jobId);
 
         // Assert
-        var problemResult = Assert.IsType<ObjectResult>(result);
+        ObjectResult problemResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, problemResult.StatusCode);
     }
 }

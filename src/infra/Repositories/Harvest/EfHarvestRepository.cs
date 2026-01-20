@@ -10,14 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Harvest;
 
-public class EfHarvestRepository : IHarvestRepository
+public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfHarvestRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     // GcodeHarvestOperation operations
     public async Task<GcodeHarvestOperation?> GetOperationByIdAsync(Guid operationId, CancellationToken ct = default)
@@ -162,7 +157,7 @@ public class EfHarvestRepository : IHarvestRepository
             .ToListAsync(ct);
 
         // Apply client-side filtering for case-insensitive search
-        var query = allFiles.AsEnumerable();
+        IEnumerable<HarvestDiscoveredFile> query = allFiles.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(search))
         {
             string term = search.Trim().ToLowerInvariant();
@@ -231,6 +226,7 @@ public class EfHarvestRepository : IHarvestRepository
         };
 
         _ = await _db.HarvestFileGcodeFileMappings.AddAsync(mapping, ct);
+
         // Do NOT save here - let the caller save when all changes are ready
         // This prevents transaction issues with concurrent imports
     }

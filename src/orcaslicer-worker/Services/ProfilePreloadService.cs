@@ -28,22 +28,15 @@ public interface IProfilePreloadService
 /// <summary>
 /// Implementation of profile preload service.
 /// </summary>
-public class ProfilePreloadService : IProfilePreloadService
+public class ProfilePreloadService(
+    ISlicerProfilesService profileService,
+    IUnifiedLoggingService logger,
+    IHttpClientFactory httpClientFactory) : IProfilePreloadService
 {
-    private readonly ISlicerProfilesService _profileService;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ISlicerProfilesService _profileService = profileService;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private static readonly JsonSerializerOptions s_jsonOptions = new() { PropertyNameCaseInsensitive = true };
-
-    public ProfilePreloadService(
-        ISlicerProfilesService profileService,
-        IUnifiedLoggingService logger,
-        IHttpClientFactory httpClientFactory)
-    {
-        _profileService = profileService;
-        _logger = logger;
-        _httpClientFactory = httpClientFactory;
-    }
 
     public async Task PreloadProfilesAsync(CancellationToken ct = default)
     {
@@ -78,8 +71,7 @@ public class ProfilePreloadService : IProfilePreloadService
                     string content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                     List<ManufacturerDto>? manufacturerDtos = JsonSerializer.Deserialize<List<ManufacturerDto>>(
                         content,
-                        s_jsonOptions
-                    );
+                        s_jsonOptions);
 
                     HashSet<string> catalogManufacturers = manufacturerDtos?
                         .Select(m => m.Name)

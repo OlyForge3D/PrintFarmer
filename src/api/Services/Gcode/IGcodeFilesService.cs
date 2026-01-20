@@ -43,24 +43,31 @@ namespace Farm.Web.Api.Services.Gcode
         #region File Browser and Directory Operations
 
         /// <summary>
-        /// Lists G-code files and subdirectories within a specific virtual path with pagination and filtering.
+        /// Efficient query endpoint that pushes all filtering, sorting, and pagination to the database.
+        /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
         /// </summary>
-        /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder'). Null or empty defaults to root.</param>
-        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'. Defaults to 'name' if not specified.</param>
-        /// <param name="sortOrder">Sort order: 'asc' (ascending) or 'desc' (descending). Defaults to 'asc'.</param>
-        /// <param name="search">Optional search term to filter by filename. Case-insensitive partial matching.</param>
-        /// <param name="page">Page number for pagination (1-based, default: 1). Must be >= 1.</param>
-        /// <param name="pageSize">Items per page (min: 1, max: 500, default: 100). Automatically clamped to valid range.</param>
-        /// <param name="harvestId">Optional harvest operation ID to filter files by their harvest source.</param>
-        /// <param name="printerId">Optional printer ID for filtering (currently reserved for future use).</param>
-        /// <param name="ct">Cancellation token for async operation.</param>
-        /// <returns>Paginated response containing files and directories with metadata. Directories always sorted before files.</returns>
-        /// <remarks>
-        /// This method queries the database for files and subdirectories, applies sorting and filtering,
-        /// and returns a paginated response. All paths are normalized to start with '/'. Search is performed
-        /// on filename only (not including path).
-        /// </remarks>
-        Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct);
+        /// <param name="path">Virtual directory path. Null/empty returns all files. Non-null returns files in that directory only.</param>
+        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'.</param>
+        /// <param name="sortOrder">Sort order: 'asc' or 'desc'.</param>
+        /// <param name="search">Optional search term for file names.</param>
+        /// <param name="page">Page number (1-based).</param>
+        /// <param name="pageSize">Page size (1-500).</param>
+        /// <param name="tagIds">Optional array of tag IDs for filtering (AND logic - file must have all tags)</param>
+        /// <param name="printerModelId">Optional filter by printer model ID</param>
+        /// <param name="printerId">Optional filter by source printer ID</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Paginated response with file entries, totals, and metadata</returns>
+        Task<GcodeFileListResponse> QueryAsync(
+            string? path,
+            string? sortBy,
+            string? sortOrder,
+            string? search,
+            int page,
+            int pageSize,
+            Guid[]? tagIds,
+            Guid? printerModelId,
+            Guid? printerId,
+            CancellationToken ct);
 
         /// <summary>
         /// Lists G-code files and subdirectories within a virtual path, organized in a hierarchical structure.
@@ -72,12 +79,22 @@ namespace Farm.Web.Api.Services.Gcode
         /// <param name="page">Page number for pagination (1-based).</param>
         /// <param name="pageSize">Items per page (1-500 range, default 100).</param>
         /// <param name="ct">Cancellation token.</param>
-        /// <returns>Paginated response with hierarchical folder structure preserved.</returns>
+        /// <returns>Paginated response with files for the specified path.</returns>
         /// <remarks>
-        /// Similar to ListAsync but returns results organized by folder hierarchy rather than a flat list.
-        /// Useful for tree-view UI components and preserving folder structure information.
+        /// Returns only files in the specified directory. For folder tree structure, use ListAllFoldersAsync endpoint.
         /// </remarks>
         Task<GcodeFileListResponse> ListFilesWithHierarchyAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, CancellationToken ct);
+
+        /// <summary>
+        /// Lists all G-code folders recursively for building a folder tree structure.
+        /// </summary>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>Flat list of all folders in the gcode directory hierarchy.</returns>
+        /// <remarks>
+        /// Returns all folders without pagination or file information. Intended for tree-view UI components
+        /// that need the complete folder hierarchy for navigation. Folders are returned in path order.
+        /// </remarks>
+        Task<List<GcodeFileEntryDto>> ListAllFoldersAsync(CancellationToken ct);
 
         /// <summary>
         /// Uploads a single G-code file to the specified virtual directory with quota validation.
@@ -111,22 +128,6 @@ namespace Farm.Web.Api.Services.Gcode
         /// handles thumbnail organization, creates database record, and cleans up temporary upload state.
         /// </remarks>
         Task<GcodeFile?> FinalizeChunkedUploadAsync(string filePath, string? originalFileName, string? thumbnailPath, string? virtualDirectory, IChunkedUploadService chunkedUploadService, CancellationToken ct);
-
-        /// <summary>
-        /// Uploads multiple G-code files to a virtual directory in a single operation.
-        /// </summary>
-        /// <param name="path">Target virtual directory for all files. Null defaults to root.</param>
-        /// <param name="files">Collection of files to upload.</param>
-        /// <param name="uploadSettings">Upload configuration and validation rules.</param>
-        /// <param name="quotaService">Service for quota management across multiple files.</param>
-        /// <param name="ct">Cancellation token.</param>
-        /// <returns>Response containing results for each file (success/failure with details).</returns>
-        /// <remarks>
-        /// Processes multiple files efficiently, validating each against quotas and settings. Returns detailed
-        /// results for each file including error messages for any that fail. Quota is checked cumulatively
-        /// across all files in the batch.
-        /// </remarks>
-        Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, IGcodeUploadQuotaService quotaService, CancellationToken ct);
 
         /// <summary>
         /// Creates a new virtual directory at the specified path.
@@ -165,7 +166,32 @@ namespace Farm.Web.Api.Services.Gcode
         /// Returns the complete file contents suitable for HTTP response transmission. Filename is suitable
         /// for Content-Disposition header.
         /// </remarks>
-        Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct);
+        Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct);
+
+        /// <summary>
+        /// Gets the file path for a G-code file by its ID.
+        /// </summary>
+        /// <param name="id">Unique identifier of the file.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>File path if found, otherwise null.</returns>
+        Task<string?> GetFilePathAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Gets both the file path and original filename for a G-code file by its ID.
+        /// Useful for downloads where we need the original filename in Content-Disposition header.
+        /// </summary>
+        /// <param name="id">G-code file ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>Tuple of (filePath, originalFileName) if found, otherwise null.</returns>
+        Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Gets the thumbnail path for a G-code file by its ID.
+        /// </summary>
+        /// <param name="id">Unique identifier of the file.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>Thumbnail path if found and exists, otherwise null.</returns>
+        Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct);
 
         /// <summary>
         /// Moves a G-code file or directory from one virtual path to another.
@@ -179,7 +205,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// Updates database references without moving physical files (virtual filesystem). Source and destination
         /// must be on the same virtual filesystem.
         /// </remarks>
-        Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct);
+        Task<(bool Ok, string VirtualPath, bool IsDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct);
 
         /// <summary>
         /// Moves a G-code file to a target folder by file ID and target folder path.

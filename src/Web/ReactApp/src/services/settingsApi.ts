@@ -1,41 +1,27 @@
-import axios from 'axios';
+import { apiClient } from '@/services/api';
 import type { SettingMetadata } from '@/components/SettingsPagelet';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
-const api = axios.create({
-  baseURL: getApiBaseUrl(),
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-// Add auth token interceptor
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth-token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+/**
+ * Settings API - delegated to apiClient singleton
+ * apiClient handles authentication, correlation IDs, and error handling automatically
+ */
 
 export async function fetchSettingsMetadata(): Promise<SettingMetadata[]> {
-  const resp = await api.get('/settings/metadata');
-  return resp.data;
+  return apiClient.getSettingsMetadata();
 }
 
 export async function fetchSettingsUnified(): Promise<Record<string, unknown>> {
-  const resp = await api.get('/settings');
-  return resp.data;
+  return apiClient.getAllSettings();
 }
 
 export async function saveAllSettings(values: Record<string, unknown>): Promise<void> {
-  await api.post('/settings', values);
+  return apiClient.saveAllSettings(values);
 }
 
 export async function fetchSettingsValues(keyName: string): Promise<Record<string, unknown>> {
-  const resp = await api.get(`/settings/${encodeURIComponent(keyName)}`);
-  return resp.data;
+  return apiClient.getSettings(keyName);
 }
 
 export async function saveSettingsValues(keyName: string, values: Record<string, unknown>): Promise<void> {
-  await api.post(`/settings/${encodeURIComponent(keyName)}`, values);
+  return apiClient.saveSettings(keyName, values);
 }

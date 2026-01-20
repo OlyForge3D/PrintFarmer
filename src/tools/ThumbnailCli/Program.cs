@@ -30,7 +30,7 @@ internal static class Program
                 return 0;
             }
 
-            var opts = Parse(args);
+            CliOptions opts = Parse(args);
 
             if (!File.Exists(opts.Input))
             {
@@ -55,6 +55,7 @@ internal static class Program
                 Console.WriteLine($"Applying zoom: {opts.ZoomPercent.Value}%");
                 options.SetZoomPercent(defaultZoomPercent, opts.ZoomPercent.Value);
             }
+
             options.EnableGroundShadow = opts.EnableGroundShadow;
             options.TwoSided = opts.TwoSided;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
@@ -77,7 +78,7 @@ internal static class Program
             // Apply camera view
             if (!string.IsNullOrWhiteSpace(opts.View))
             {
-                var viewName = opts.View;
+                string viewName = opts.View;
                 Console.WriteLine($"Applying camera view: {viewName}");
                 if (!options.SetCameraView(viewName))
                 {
@@ -106,10 +107,10 @@ internal static class Program
         string output = GetValue(args, "--output", "-o") ?? Path.ChangeExtension(input, ".png");
         string preset = GetValue(args, "--preset", "-p")?.ToLowerInvariant() ?? "orca";
 
-        int width = int.TryParse(GetValue(args, "--width", "-w"), out var w) ? w : 1024;
-        int height = int.TryParse(GetValue(args, "--height", "-h"), out var h) ? h : 1024;
+        int width = int.TryParse(GetValue(args, "--width", "-w"), out int w) ? w : 1024;
+        int height = int.TryParse(GetValue(args, "--height", "-h"), out int h) ? h : 1024;
 
-        int? zoomPercent = int.TryParse(GetValue(args, "--zoom", "-z"), out var zv) ? zv : null;
+        int? zoomPercent = int.TryParse(GetValue(args, "--zoom", "-z"), out int zv) ? zv : null;
 
         string? view = GetValue(args, "--view", "-v")?.ToLowerInvariant();
         string? viewMode = GetValue(args, "--view-mode", "-vm")?.ToLowerInvariant();
@@ -123,9 +124,9 @@ internal static class Program
 
     private static bool HasFlag(IReadOnlyList<string> args, params string[] keys)
     {
-        foreach (var a in args)
+        foreach (string a in args)
         {
-            foreach (var k in keys)
+            foreach (string k in keys)
             {
                 if (string.Equals(a, k, StringComparison.OrdinalIgnoreCase))
                 {
@@ -133,36 +134,31 @@ internal static class Program
                 }
             }
         }
+
         return false;
     }
 
     private static string Require(IReadOnlyList<string> args, params string[] keys)
     {
-        var value = GetValue(args, keys);
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new ArgumentException($"Missing required option: {string.Join(" | ", keys)}");
-        }
-        return value;
+        string? value = GetValue(args, keys);
+        return string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException($"Missing required option: {string.Join(" | ", keys)}")
+            : value;
     }
 
     private static string? GetValue(IReadOnlyList<string> args, params string[] keys)
     {
         for (int i = 0; i < args.Count; i++)
         {
-            foreach (var key in keys)
+            foreach (string key in keys)
             {
                 if (string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (i + 1 < args.Count)
-                    {
-                        return args[i + 1];
-                    }
-
-                    return null;
+                    return i + 1 < args.Count ? args[i + 1] : null;
                 }
             }
         }
+
         return null;
     }
 

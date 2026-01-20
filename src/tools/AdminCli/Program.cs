@@ -12,6 +12,9 @@ using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Telemetry;
+using Farm.OrcaSlicer.Worker.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Tools.AdminCli;
 
@@ -39,18 +42,22 @@ internal static class Program
                 {
                     argsDic["range"] = savedConfig.Range;
                 }
+
                 if (!string.IsNullOrEmpty(savedConfig.Interface))
                 {
                     argsDic["interface"] = savedConfig.Interface;
                 }
+
                 if (!argsDic.ContainsKey("timeout"))
                 {
                     argsDic["timeout"] = savedConfig.Timeout.ToString();
                 }
+
                 if (!argsDic.ContainsKey("concurrent"))
                 {
                     argsDic["concurrent"] = savedConfig.Concurrent.ToString();
                 }
+
                 Console.WriteLine("[AdminCli] Loaded saved discovery config from last run");
             }
         }
@@ -76,12 +83,18 @@ internal static class Program
             return await HandleDiscoveryAsync(argsDic);
         }
 
+        // Handle seed-profiles command
+        if (argsDic.ContainsKey("seed-profiles"))
+        {
+            return await HandleSeedProfilesAsync(argsDic);
+        }
+
         bool hasUsername = argsDic.TryGetValue("username", out string? username);
         bool hasEmail = argsDic.TryGetValue("email", out string? email);
         bool hasPassword = argsDic.TryGetValue("password", out string? password);
         if (!hasUsername || !hasEmail || !hasPassword)
         {
-            await Console.Error.WriteLineAsync("ERROR: --username, --email and --password are required unless using --status, --discover, or --sample-csv.");
+            await Console.Error.WriteLineAsync("ERROR: --username, --email and --password are required unless using --status, --discover, --sample-csv, or --seed-profiles.");
             PrintHelp();
             return 1;
         }
@@ -153,7 +166,7 @@ internal static class Program
 #pragma warning disable CA1303
         try
         {
-            string outputFile = argsDic.GetValueOrDefault("output", "");
+            string outputFile = argsDic.GetValueOrDefault("output", string.Empty);
             string csv = GenerateSampleCsv();
 
             if (!string.IsNullOrWhiteSpace(outputFile))
@@ -193,16 +206,287 @@ internal static class Program
         return csv.ToString();
     }
 
+    private static async Task<int> HandleSeedProfilesAsync(Dictionary<string, string> argsDic)
+    {
+#pragma warning disable CA1303
+        try
+        {
+            string profilesPath = argsDic.GetValueOrDefault("path", string.Empty);
+            string slicerType = argsDic.GetValueOrDefault("slicer", string.Empty).ToLowerInvariant();
+            string outputFormat = argsDic.GetValueOrDefault("format", "summary").ToLowerInvariant();
+            string outputFile = argsDic.GetValueOrDefault("output", string.Empty);
+
+            if (string.IsNullOrWhiteSpace(profilesPath))
+            {
+                await Console.Error.WriteLineAsync("ERROR: --path is required for --seed-profiles");
+                await Console.Error.WriteLineAsync("Usage: --seed-profiles --path /path/to/profiles [--slicer orcaslicer|prusaslicer] [--format summary|json|csv]");
+                return 1;
+            }
+
+            if (!Directory.Exists(profilesPath))
+            {
+                await Console.Error.WriteLineAsync($"ERROR: Profiles directory not found: {profilesPath}");
+                return 1;
+            }
+
+            // Auto-detect slicer type if not specified
+            if (string.IsNullOrWhiteSpace(slicerType))
+            {
+                slicerType = DetectSlicerType(profilesPath);
+                if (string.IsNullOrWhiteSpace(slicerType))
+                {
+                    await Console.Error.WriteLineAsync("ERROR: Could not auto-detect slicer type. Please specify with --slicer orcaslicer|prusaslicer");
+                    return 1;
+                }
+
+                Console.WriteLine($"[AdminCli] Auto-detected slicer type: {slicerType}");
+            }
+
+            Console.WriteLine($"[AdminCli] Loading profiles from: {profilesPath}");
+            Console.WriteLine($"[AdminCli] Slicer type: {slicerType}");
+
+            // Parse profiles using the appropriate service
+            int machineCount = 0;
+            int filamentCount = 0;
+            int processCount = 0;
+            List<MachineProfileDto> machines = [];
+            List<FilamentProfileDto> filaments = [];
+            List<ProcessProfileDto> processes = [];
+
+            if (slicerType == "orcaslicer")
+            {
+                // Use a simple console logger for CLI usage
+                var logger = new ConsoleLoggingService();
+                var service = new OrcaProfilesService(logger, profilesPath);
+
+                Console.WriteLine("[AdminCli] Parsing machine profiles...");
+                machines = (await service.ListAvailableMachineProfilesAsync()).ToList();
+                machineCount = machines.Count;
+
+                Console.WriteLine("[AdminCli] Parsing filament profiles...");
+                filaments = (await service.ListAvailableFilamentProfilesAsync()).ToList();
+                filamentCount = filaments.Count;
+
+                Console.WriteLine("[AdminCli] Parsing process profiles...");
+                processes = (await service.ListAvailableProcessProfilesAsync()).ToList();
+                processCount = processes.Count;
+            }
+            else if (slicerType == "prusaslicer")
+            {
+                await Console.Error.WriteLineAsync("ERROR: PrusaSlicer profile parsing is not yet implemented");
+                return 1;
+            }
+            else
+            {
+                await Console.Error.WriteLineAsync($"ERROR: Unknown slicer type: {slicerType}. Supported: orcaslicer, prusaslicer");
+                return 1;
+            }
+
+            // Output results
+            Console.WriteLine();
+            Console.WriteLine("═══════════════════════════════════════════════════════════════");
+            Console.WriteLine("                    PROFILE PARSING RESULTS                    ");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════");
+            Console.WriteLine($"  Machine Profiles:  {machineCount,6:N0}");
+            Console.WriteLine($"  Filament Profiles: {filamentCount,6:N0}");
+            Console.WriteLine($"  Process Profiles:  {processCount,6:N0}");
+            Console.WriteLine($"  ─────────────────────────────");
+            Console.WriteLine($"  Total Profiles:    {machineCount + filamentCount + processCount,6:N0}");
+            Console.WriteLine("═══════════════════════════════════════════════════════════════");
+
+            // Group machines by manufacturer for summary
+            if (outputFormat == "summary" || outputFormat == "json")
+            {
+                var manufacturerGroups = machines
+                    .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
+                    .GroupBy(m => m.Manufacturer)
+                    .OrderByDescending(g => g.Count())
+                    .Take(15)
+                    .ToList();
+
+                Console.WriteLine("\nTop Manufacturers by Machine Profiles:");
+                foreach (var group in manufacturerGroups)
+                {
+                    Console.WriteLine($"  {group.Key,-30} {group.Count(),5:N0} machines");
+                }
+
+                if (machines.Count(m => !string.IsNullOrEmpty(m.Manufacturer)) > manufacturerGroups.Sum(g => g.Count()))
+                {
+                    Console.WriteLine($"  ... and {machines.GroupBy(m => m.Manufacturer).Count() - manufacturerGroups.Count} more manufacturers");
+                }
+            }
+
+            // Output detailed data if requested
+            if (outputFormat == "json")
+            {
+                var output = new
+                {
+                    Summary = new
+                    {
+                        MachineCount = machineCount,
+                        FilamentCount = filamentCount,
+                        ProcessCount = processCount,
+                        TotalCount = machineCount + filamentCount + processCount
+                    },
+                    Machines = machines.Select(m => new { m.Name, m.Manufacturer, m.NozzleDiameter }),
+                    Filaments = filaments.Select(f => new { f.Name, f.Manufacturer, f.CompatiblePrinters }),
+                    Processes = processes.Select(p => new { p.Name, p.Quality, p.CompatiblePrinters })
+                };
+
+                string json = JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true });
+
+                if (!string.IsNullOrWhiteSpace(outputFile))
+                {
+                    await File.WriteAllTextAsync(outputFile, json);
+                    Console.WriteLine($"\n✓ JSON output saved to: {outputFile}");
+                }
+                else
+                {
+                    Console.WriteLine("\n" + json);
+                }
+            }
+            else if (outputFormat == "csv")
+            {
+                var csv = new StringBuilder();
+                _ = csv.AppendLine("ProfileType,Name,Manufacturer,NozzleDiameter,Quality,CompatiblePrinters");
+
+                foreach (var m in machines)
+                {
+                    _ = csv.AppendLine($"machine,\"{m.Name}\",\"{m.Manufacturer}\",{m.NozzleDiameter?.ToString(CultureInfo.InvariantCulture) ?? string.Empty},\"{string.Empty}\",\"{string.Empty}\"");
+                }
+
+                foreach (var f in filaments)
+                {
+                    string compatible = f.CompatiblePrinters != null ? string.Join(";", f.CompatiblePrinters) : string.Empty;
+                    _ = csv.AppendLine($"filament,\"{f.Name}\",\"{f.Manufacturer}\",{string.Empty},{string.Empty},\"{compatible}\"");
+                }
+
+                foreach (var p in processes)
+                {
+                    string compatible = p.CompatiblePrinters != null ? string.Join(";", p.CompatiblePrinters) : string.Empty;
+                    _ = csv.AppendLine($"process,\"{p.Name}\",{string.Empty},{string.Empty},\"{p.Quality}\",\"{compatible}\"");
+                }
+
+                if (!string.IsNullOrWhiteSpace(outputFile))
+                {
+                    await File.WriteAllTextAsync(outputFile, csv.ToString());
+                    Console.WriteLine($"\n✓ CSV output saved to: {outputFile}");
+                }
+                else
+                {
+                    Console.WriteLine("\n" + csv);
+                }
+            }
+
+            Console.WriteLine("\n✓ Profile parsing complete!");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync($"Error parsing profiles: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                await Console.Error.WriteLineAsync($"  Inner: {ex.InnerException.Message}");
+            }
+
+            return 1;
+        }
+#pragma warning restore CA1303
+    }
+
+    private static string DetectSlicerType(string profilesPath)
+    {
+        // OrcaSlicer: Look for manufacturer bundle JSON files (e.g., Prusa.json, Voron.json)
+        // These bundles contain machine_list, filament_list, process_list arrays
+        string[] jsonFiles = Directory.GetFiles(profilesPath, "*.json", SearchOption.TopDirectoryOnly);
+        foreach (string jsonFile in jsonFiles)
+        {
+            try
+            {
+                string content = File.ReadAllText(jsonFile);
+
+                // OrcaSlicer bundles have machine_list, filament_list, process_list
+                if (content.Contains("\"machine_list\"", StringComparison.OrdinalIgnoreCase) ||
+                    content.Contains("\"filament_list\"", StringComparison.OrdinalIgnoreCase) ||
+                    content.Contains("\"machine_model_list\"", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "orcaslicer";
+                }
+
+                // PrusaSlicer uses different structure with printer_model
+                if (content.Contains("\"printer_model\"", StringComparison.OrdinalIgnoreCase) &&
+                    content.Contains("\"printer_notes\"", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "prusaslicer";
+                }
+            }
+            catch
+            {
+                // Skip files that can't be read
+            }
+        }
+
+        // Check for OrcaSlicer directory structure (manufacturer folders with machine/filament/process subdirs)
+        string[] subdirs = Directory.GetDirectories(profilesPath);
+        foreach (string subdir in subdirs)
+        {
+            if (Directory.Exists(Path.Combine(subdir, "machine")) ||
+                Directory.Exists(Path.Combine(subdir, "filament")) ||
+                Directory.Exists(Path.Combine(subdir, "process")))
+            {
+                return "orcaslicer";
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Simple console logger for CLI usage without DI container.
+    /// </summary>
+    private sealed class ConsoleLoggingService : IUnifiedLoggingService
+    {
+        public void LogDebug(string message, string? correlationId = null, object? metadata = null) =>
+            Console.WriteLine($"[DEBUG] {message}");
+
+        public void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
+            Console.WriteLine($"[DEBUG] {message}: {exception.Message}");
+
+        public void LogInformation(string message, string? correlationId = null, object? metadata = null) =>
+            Console.WriteLine($"[INFO] {message}");
+
+        public void LogWarning(string message, string? correlationId = null, object? metadata = null) =>
+            Console.WriteLine($"[WARN] {message}");
+
+        public void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
+            Console.WriteLine($"[WARN] {message}: {exception.Message}");
+
+        public void LogError(string message, string? correlationId = null, object? metadata = null) =>
+            Console.Error.WriteLine($"[ERROR] {message}");
+
+        public void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
+            Console.Error.WriteLine($"[ERROR] {message}: {exception.Message}");
+
+        public void LogCritical(string message, string? correlationId = null, object? metadata = null) =>
+            Console.Error.WriteLine($"[CRITICAL] {message}");
+
+        public void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null) =>
+            Console.Error.WriteLine($"[CRITICAL] {message}: {exception.Message}");
+
+        public void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null) =>
+            Console.WriteLine($"[{level}] [{category}] {message}");
+    }
+
     private static async Task<int> HandleDiscoveryAsync(Dictionary<string, string> argsDic)
     {
 #pragma warning disable CA1303
         try
         {
             string outputFormat = argsDic.GetValueOrDefault("format", "json").ToLowerInvariant();
-            string outputFile = argsDic.GetValueOrDefault("output", "");
+            string outputFile = argsDic.GetValueOrDefault("output", string.Empty);
             bool noApproval = argsDic.ContainsKey("no-approval");
-            List<string> rangeConstraints = argsDic.GetValueOrDefault("range", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
-            List<string> interfaceConstraints = argsDic.GetValueOrDefault("interface", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
+            List<string> rangeConstraints = argsDic.GetValueOrDefault("range", string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
+            List<string> interfaceConstraints = argsDic.GetValueOrDefault("interface", string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
             int probeTimeoutMs = int.TryParse(argsDic.GetValueOrDefault("timeout", "200"), out int t) ? t : 200;
             int maxConcurrentScans = int.TryParse(argsDic.GetValueOrDefault("concurrent", "10"), out int c) ? c : 10;
 
@@ -215,6 +499,7 @@ internal static class Program
             {
                 Console.WriteLine($"  IP Range Filter: {string.Join(", ", rangeConstraints)}");
             }
+
             if (interfaceConstraints.Count > 0)
             {
                 Console.WriteLine($"  Interface Filter: {string.Join(", ", interfaceConstraints)}");
@@ -419,7 +704,7 @@ internal static class Program
                             // Show progress every 10 IPs scanned
                             if (scanCountLocal % 10 == 0 || scanCountLocal == 1)
                             {
-                                int progress = (int)((scanCountLocal / (double)total) * 100);
+                                int progress = (int)(scanCountLocal / (double)total * 100);
                                 Console.Write($"\r  Scanning... [{progress}%] ({scanCountLocal}/{total} IPs checked, {discovered.Count} found)");
                             }
 
@@ -526,10 +811,12 @@ internal static class Program
         {
             return 0;
         }
+
         if (ip1 == null)
         {
             return -1;
         }
+
         if (ip2 == null)
         {
             return 1;
@@ -579,6 +866,7 @@ internal static class Program
                 }
             }
         }
+
         return 32;
     }
 
@@ -613,9 +901,13 @@ internal static class Program
     private class DiscoveredPrinterInfo
     {
         public string IpAddress { get; set; } = string.Empty;
+
         public string Backend { get; set; } = string.Empty;
+
         public int? BackendPort { get; set; }
+
         public int? FrontendPort { get; set; }
+
         public string? FriendlyName { get; set; }
     }
 
@@ -646,8 +938,8 @@ internal static class Program
         {
             string name = printer.FriendlyName ?? $"{printer.Backend}-{printer.IpAddress}";
             string enabled = setDisabledByDefault ? "false" : "true";
-            string backendPort = printer.BackendPort?.ToString() ?? "";
-            string frontendPort = printer.FrontendPort?.ToString() ?? "";
+            string backendPort = printer.BackendPort?.ToString() ?? string.Empty;
+            string frontendPort = printer.FrontendPort?.ToString() ?? string.Empty;
             _ = csv.AppendLine($"\"{EscapeCsv(name)}\",\"{printer.IpAddress}\",\"{printer.Backend}\",{backendPort},{frontendPort},\"Unknown\",\"Unknown\",\"Auto-discovered\",{enabled}");
         }
 
@@ -671,6 +963,7 @@ internal static class Program
 #pragma warning restore CA1303
                 return;
             }
+
             Console.WriteLine("needsSetup=" + status.NeedsSetup.ToString().ToLowerInvariant());
         }
         catch (Exception ex)
@@ -704,6 +997,13 @@ internal static class Program
         Console.WriteLine("  --format <json|csv>       Output format (default: json)");
         Console.WriteLine("  --no-approval             Set discovered printers to enabled=true (skip approval)");
         Console.WriteLine();
+        Console.WriteLine("Slicer Profile Commands:");
+        Console.WriteLine("  --seed-profiles           Parse and display slicer profiles from a directory");
+        Console.WriteLine("  --path <directory>        Path to profiles directory (required for --seed-profiles)");
+        Console.WriteLine("  --slicer <type>           Slicer type: orcaslicer, prusaslicer (auto-detected if omitted)");
+        Console.WriteLine("  --format <type>           Output format: summary (default), json, csv");
+        Console.WriteLine("  --output <file>           Save output to file (for json/csv formats)");
+        Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --status");
         Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --username admin --email admin@example.com --password 'LongPassword123!'");
@@ -712,6 +1012,11 @@ internal static class Program
         Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --discover --range '192.168.1.0/24' --format csv --output discovered.csv");
         Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --discover --range '10.0.0.0/24' --timeout 200 --concurrent 20");
         Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --discover  (uses saved config from previous run)");
+        Console.WriteLine();
+        Console.WriteLine("Slicer Profile Examples:");
+        Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --seed-profiles --path ~/.config/OrcaSlicer/profiles");
+        Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --seed-profiles --path /opt/orcaslicer/resources/profiles --format json --output profiles.json");
+        Console.WriteLine("  dotnet run --project src/tools/AdminCli -- --seed-profiles --path ./my-profiles --slicer orcaslicer");
 #pragma warning restore CA1303
     }
 
@@ -727,12 +1032,14 @@ internal static class Program
                 i++;
                 continue;
             }
+
             string key = token[2..];
             if (key.Length == 0)
             {
                 i++;
                 continue;
             }
+
             if (i + 1 < raw.Length && !raw[i + 1].StartsWith("--", StringComparison.Ordinal))
             {
                 dic[key] = raw[i + 1];
@@ -744,11 +1051,14 @@ internal static class Program
                 i++;
             }
         }
+
         return dic;
     }
 
     private sealed record SetupStatus(bool NeedsSetup);
+
     private sealed record AuthResult(bool Success, string? Token, DateTime? ExpiresAt, object? User, string? Error);
+
     private sealed record DiscoveryConfig(string Range = "", string Interface = "", int Timeout = 200, int Concurrent = 10, string Format = "json", bool NoApproval = false);
 
     private static string GetConfigPath() => Path.Combine(
@@ -766,6 +1076,7 @@ internal static class Program
             {
                 _ = Directory.CreateDirectory(directory);
             }
+
             string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(configPath, json);
         }
@@ -784,6 +1095,7 @@ internal static class Program
             {
                 return null;
             }
+
             string json = await File.ReadAllTextAsync(configPath);
             return JsonSerializer.Deserialize<DiscoveryConfig>(json);
         }

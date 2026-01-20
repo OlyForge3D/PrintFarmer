@@ -6,10 +6,15 @@ namespace Farm.Infrastructure.Telemetry;
 public interface IPrintFarmerTelemetryService
 {
     Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal);
+
     void RecordApiCall(string endpoint, string method, int statusCode, TimeSpan duration);
+
     void RecordPrinterOperation(string operation, string printerId, bool success);
+
     void RecordSlicerOperation(string operation, string engine, bool success, TimeSpan? duration = null);
+
     void RecordFileOperation(string operation, string fileType, long? fileSize = null);
+
     void RecordDatabaseOperation(string table, string operation, int recordCount);
 }
 

@@ -7,14 +7,9 @@ namespace Farm.Web.Api.Tests.Utilities;
 /// Simple console-based logging service for tests that actually outputs to console
 /// instead of being suppressed like a Mock logger
 /// </summary>
-public class ConsoleLoggingService : IUnifiedLoggingService
+public class ConsoleLoggingService(string categoryName = "Test") : IUnifiedLoggingService
 {
-    private readonly string _categoryName;
-
-    public ConsoleLoggingService(string categoryName = "Test")
-    {
-        _categoryName = categoryName;
-    }
+    private readonly string _categoryName = categoryName;
 
     public void LogDebug(string message, string? correlationId = null, object? metadata = null)
     {
@@ -103,7 +98,7 @@ public class ConsoleLoggingService : IUnifiedLoggingService
 
     public void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null)
     {
-        var levelStr = level switch
+        string levelStr = level switch
         {
             LogLevel.Debug => "DEBUG",
             LogLevel.Information => "INFO",

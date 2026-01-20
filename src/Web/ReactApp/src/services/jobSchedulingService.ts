@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { apiClient } from '@/services/api';
 
 export interface ScheduleJobRequest {
   scheduledStartTime: Date;
@@ -39,94 +39,49 @@ export interface TimeZoneDto {
   offset: string;
 }
 
-const API_BASE = '/api/jobscheduling';
-
 export const jobSchedulingService = {
   async scheduleJob(
     jobId: string,
     request: ScheduleJobRequest
   ): Promise<ScheduledJobDto> {
-    const response = await axios.post<ScheduledJobDto>(
-      `${API_BASE}/${jobId}/schedule`,
-      {
-        scheduledStartTime: request.scheduledStartTime.toISOString(),
-        timeZone: request.timeZone || 'UTC',
-        recurrencePattern: request.recurrencePattern || null,
-        recurrenceEndDate: request.recurrenceEndDate?.toISOString() || null,
-      }
-    );
-    return response.data;
+    return apiClient.scheduleJob(jobId, request);
   },
 
   async rescheduleJob(
     jobId: string,
     request: RescheduleJobRequest
   ): Promise<ScheduledJobDto> {
-    const response = await axios.put<ScheduledJobDto>(
-      `${API_BASE}/${jobId}/reschedule`,
-      {
-        newScheduledTime: request.newScheduledTime.toISOString(),
-        timeZone: request.timeZone || 'UTC',
-      }
-    );
-    return response.data;
+    return apiClient.rescheduleJob(jobId, request);
   },
 
   async cancelScheduling(jobId: string): Promise<void> {
-    await axios.delete(`${API_BASE}/${jobId}/schedule`);
+    return apiClient.cancelScheduling(jobId);
   },
 
   async pauseScheduling(jobId: string): Promise<void> {
-    await axios.post(`${API_BASE}/${jobId}/pause`);
+    return apiClient.pauseScheduling(jobId);
   },
 
   async resumeScheduling(jobId: string): Promise<void> {
-    await axios.post(`${API_BASE}/${jobId}/resume`);
+    return apiClient.resumeScheduling(jobId);
   },
 
   async getScheduledJob(jobId: string): Promise<ScheduledJobDto | null> {
-    try {
-      const response = await axios.get<ScheduledJobDto>(
-        `${API_BASE}/${jobId}`
-      );
-      return response.data;
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        return null;
-      }
-      throw error;
-    }
+    return apiClient.getScheduledJob(jobId);
   },
 
   async getScheduledJobs(
     dateFrom?: Date,
     dateTo?: Date
   ): Promise<ScheduledJobDto[]> {
-    const params = new URLSearchParams();
-    if (dateFrom) {
-      params.append('dateFrom', dateFrom.toISOString());
-    }
-    if (dateTo) {
-      params.append('dateTo', dateTo.toISOString());
-    }
-
-    const response = await axios.get<ScheduledJobDto[]>(
-      `${API_BASE}/scheduled?${params.toString()}`
-    );
-    return response.data;
+    return apiClient.getScheduledJobs(dateFrom, dateTo);
   },
 
   async getExecutionHistory(jobId: string): Promise<JobExecutionDto[]> {
-    const response = await axios.get<JobExecutionDto[]>(
-      `${API_BASE}/${jobId}/executions`
-    );
-    return response.data;
+    return apiClient.getExecutionHistory(jobId);
   },
 
   async getAvailableTimeZones(): Promise<TimeZoneDto[]> {
-    const response = await axios.get<TimeZoneDto[]>(
-      `${API_BASE}/timezones`
-    );
-    return response.data;
+    return apiClient.getAvailableTimeZones();
   },
 };

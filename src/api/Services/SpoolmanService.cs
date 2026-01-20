@@ -22,11 +22,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     public SpoolmanConfigDto? GetConfig()
     {
         SpoolmanSettings? settings = settingsService.Get<SpoolmanSettings>();
-        if (settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl))
-        {
-            return null;
-        }
-        return new SpoolmanConfigDto(settings.BaseUrl);
+        return settings is null || string.IsNullOrWhiteSpace(settings.BaseUrl) ? null : new SpoolmanConfigDto(settings.BaseUrl);
     }
 
     public async Task<SpoolmanProbeResult> ProbeAsync(string candidateBaseUrl, CancellationToken ct)
@@ -74,7 +70,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                             version = svProp.GetString();
                         }
                     }
-                    catch { }
+                    catch
+                    {
+                    }
 
                     return new SpoolmanProbeResult(true, NormalizedUrl: normalized, EndpointTried: path, StatusCode: (int)resp.StatusCode, Version: version);
                 }
@@ -83,9 +81,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             {
                 if (path == probePaths[^1])
                 {
-                    (string? category, string? message) = CategorizeException(ex);
+                    (string? Category, string? Message) = CategorizeException(ex);
                     logger.LogError(ex, "Probe failed for {Url}", candidateBaseUrl);
-                    return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: message, ErrorCategory: category);
+                    return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: Message, ErrorCategory: Category);
                 }
             }
         }
@@ -127,12 +125,13 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return new SpoolmanProbeResult(false, NormalizedUrl: baseUrl, Message: "Probe endpoints failed");
     }
 
-    private static (string? category, string? message) CategorizeException(Exception ex)
+    private static (string? Category, string? Message) CategorizeException(Exception ex)
     {
         if (ex is TaskCanceledException or OperationCanceledException)
         {
             return ("timeout", "Connection timed out");
         }
+
         if (ex is HttpRequestException hre)
         {
             if (hre.InnerException is System.Net.Sockets.SocketException se)
@@ -145,12 +144,15 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     _ => ("network_error", hre.Message)
                 };
             }
+
             return ("http_error", hre.Message);
         }
+
         if (ex is System.Security.Authentication.AuthenticationException)
         {
             return ("tls_error", "TLS/SSL negotiation failed");
         }
+
         return ("unknown", ex.Message);
     }
 
@@ -207,6 +209,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     {
                         logger.LogDebug($"Retrieved {result.Items.Count} spools via endpoint {ep}", null, null);
                     }
+
                     return result.Items;
                 }
 
@@ -234,6 +237,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
     /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
     /// </summary>
+    /// <param name="ct">The cancellation token.</param>
     public async Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();
@@ -270,6 +274,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     {
                         logger.LogDebug($"Retrieved {result.Items.Count} materials via endpoint {ep}", null, null);
                     }
+
                     return result.Items;
                 }
                 else if (result.Success)
@@ -313,6 +318,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Stop paging on first failure after at least one success; otherwise treat as total failure
                 break;
             }
+
             anySuccess = true;
 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
@@ -398,6 +404,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Stop paging on first failure after at least one success; otherwise treat as total failure
                 break;
             }
+
             anySuccess = true;
 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
@@ -443,8 +450,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                                 Id: 0, // No ID available in string format
                                 Name: materialName,
                                 Density: null,
-                                ColorHex: null
-                            );
+                                ColorHex: null);
                         }
                     }
                     else if (el.ValueKind == JsonValueKind.Object && TryParseMaterialFromJson(el, out SpoolmanMaterialDto objectMaterial))
@@ -462,7 +468,9 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 // Check for pagination - Spoolman uses standard HTTP header-based pagination
                 // For materials, we expect a single page usually, but handle pagination if present
                 nextUrl = null;
-                if (currentBatch.Length < 100) // Typical page size - if less than full page, probably last page
+
+                // Typical page size - if less than full page, probably last page
+                if (currentBatch.Length < 100)
                 {
                     break;
                 }
@@ -501,12 +509,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             using JsonDocument? doc = await TryParseJsonAsync(resp.Content, ct);
-            if (doc is null)
-            {
-                return null;
-            }
-
-            return ParseSpool(doc.RootElement);
+            return doc is null ? null : ParseSpool(doc.RootElement);
         }
         catch
         {
@@ -532,7 +535,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     return null; // HTML, not JSON
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return null;
         }
     }
@@ -577,6 +583,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         // case-insensitive scan
         foreach (JsonProperty prop in obj.EnumerateObject())
         {
@@ -589,6 +596,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return false;
     }
 
@@ -615,10 +623,13 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         string? filamentName = TryGetString(el, "filament_name")
                    ?? TryGetStringFromObject(el, ["filament", "profile"], ["name", "filament_name", "display_name"]);
         string? vendor =
+
             // Preferred path per Spoolman: filament.vendor.name
             TryGetStringAtPath(el, "filament", "vendor", "name")
+
             // Common alternative: profile.vendor.name
             ?? TryGetStringAtPath(el, "profile", "vendor", "name")
+
             // Fallbacks
             ?? TryGetStringFromObject(el, ["filament", "profile"], ["vendor", "manufacturer", "brand", "name"])
             ?? TryGetString(el, "vendor", "manufacturer");
@@ -683,6 +694,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return i;
             }
         }
+
         // case-insensitive
         if (el.ValueKind == JsonValueKind.Object)
         {
@@ -697,6 +709,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return 0;
     }
 
@@ -709,6 +722,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return d;
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -722,6 +736,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -744,23 +759,21 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         s = s.ToUpperInvariant();
+
         // Expand shorthand RGB like F0A -> FF00AA
         if (s.Length == 3 && s.All(IsHex))
         {
             s = string.Concat(s[0], s[0], s[1], s[1], s[2], s[2]);
         }
+
         // Drop alpha if present (ARGB/RGBA -> take first 6 of last 8)
         if (s.Length == 8 && s.All(IsHex))
         {
             // Heuristic: keep first 6 (assume RRGGBB and ignore alpha at the end)
             s = s[..6];
         }
-        if (s.Length == 6 && s.All(IsHex))
-        {
-            return "#" + s;
-        }
 
-        return null;
+        return s.Length == 6 && s.All(IsHex) ? "#" + s : null;
     }
 
     private static bool IsHex(char c) =>
@@ -775,6 +788,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return v.GetString();
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -788,6 +802,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -805,6 +820,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -832,8 +848,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             {
                 return next.ValueKind == JsonValueKind.String ? next.GetString() : null;
             }
+
             current = next;
         }
+
         return null;
     }
 
@@ -853,6 +871,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         return false;
     }
 
@@ -867,6 +886,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return true;
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -881,6 +901,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return false;
     }
 
@@ -893,6 +914,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return v.GetBoolean();
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -906,6 +928,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -923,6 +946,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         if (el.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty p in el.EnumerateObject())
@@ -940,6 +964,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
+
         return null;
     }
 
@@ -986,7 +1011,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
+
         return null;
     }
 
@@ -1015,8 +1043,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 Id: id,
                 Name: name,
                 Density: density,
-                ColorHex: colorHex
-            );
+                ColorHex: colorHex);
             return true;
         }
         catch
@@ -1032,12 +1059,14 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// Scans the configured network ranges for available Spoolman instances.
     /// Uses the discovery settings to determine which network ranges to scan.
     /// </summary>
+    /// <param name="networkRanges">The network ranges to scan (CIDR notation or IP ranges).</param>
+    /// <param name="ct">The cancellation token.</param>
     public async Task<IEnumerable<SpoolmanDiscoveryResult>> ScanNetworkForSpoolmanAsync(IEnumerable<string> networkRanges, CancellationToken ct = default)
     {
         List<SpoolmanDiscoveryResult> results = new();
         if (networkRanges == null)
         {
-            results.Add(new SpoolmanDiscoveryResult("", false, "No network subnets configured in discovery settings"));
+            results.Add(new SpoolmanDiscoveryResult(string.Empty, false, "No network subnets configured in discovery settings"));
             return results;
         }
 
@@ -1050,7 +1079,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         results.AddRange(scanResults.Where(r => r.IsAvailable || !string.IsNullOrEmpty(r.Error)));
         return results;
     }
-
 
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
@@ -1099,5 +1127,4 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
-
 }

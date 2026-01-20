@@ -322,9 +322,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
                 MaxX = 256,
                 MaxY = 256,
                 MaxZ = 256,
-                DefaultNozzleDiameter = 0.4,
                 MaxBedTemp = 120,
-                MaxHotendTemp = 300,
                 IsActive = true
             };
             _ = db.PrinterModels.Add(printerModel);

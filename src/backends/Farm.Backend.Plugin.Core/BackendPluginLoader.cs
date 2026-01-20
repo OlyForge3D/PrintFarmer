@@ -1,6 +1,6 @@
-﻿namespace Farm.Backend.Plugin.Core;
+﻿using Microsoft.Extensions.DependencyInjection;
 
-using Microsoft.Extensions.DependencyInjection;
+namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Default implementation of the backend plugin loader.
@@ -21,9 +21,9 @@ public class BackendPluginLoader : IBackendPluginLoader
             return Task.CompletedTask;
         }
 
-        var dllFiles = Directory.GetFiles(pluginDirectory, "Farm.Backend.Plugin.*.dll");
+        string[] dllFiles = Directory.GetFiles(pluginDirectory, "Farm.Backend.Plugin.*.dll");
 
-        foreach (var dll in dllFiles)
+        foreach (string dll in dllFiles)
         {
             try
             {
@@ -31,10 +31,10 @@ public class BackendPluginLoader : IBackendPluginLoader
 #pragma warning disable S3885
                 var assembly = System.Reflection.Assembly.LoadFrom(dll);
 #pragma warning restore S3885
-                var pluginTypes = assembly.GetTypes()
+                IEnumerable<Type> pluginTypes = assembly.GetTypes()
                     .Where(t => typeof(IBackendClientPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
 
-                foreach (var pluginType in pluginTypes)
+                foreach (Type? pluginType in pluginTypes)
                 {
                     var instance = (IBackendClientPlugin?)Activator.CreateInstance(pluginType);
                     if (instance != null)
@@ -60,7 +60,8 @@ public class BackendPluginLoader : IBackendPluginLoader
     /// <typeparam name="T">The plugin type to load.</typeparam>
     /// <param name="registry">The plugin registry to register the plugin with.</param>
     /// <param name="services">The service collection for dependency injection setup.</param>
-    public void LoadPlugin<T>(IBackendPluginRegistry registry, IServiceCollection services) where T : IBackendClientPlugin, new()
+    public void LoadPlugin<T>(IBackendPluginRegistry registry, IServiceCollection services)
+        where T : IBackendClientPlugin, new()
     {
         var plugin = new T();
         registry.Register(plugin);

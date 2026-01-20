@@ -4,6 +4,7 @@ using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
@@ -69,10 +70,6 @@ public static class ServiceCollectionExtensions
             {
                 _ = options.UseNpgsql(connectionString);
             }
-            else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
-            {
-                _ = options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-            }
             else
             {
                 _ = options.UseSqlite(connectionString);
@@ -90,10 +87,6 @@ public static class ServiceCollectionExtensions
         else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
         {
             _ = optionsBuilder.UseNpgsql(connectionString);
-        }
-        else if (provider.Equals("mysql", StringComparison.OrdinalIgnoreCase))
-        {
-            _ = optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
         }
         else
         {
@@ -119,7 +112,9 @@ public static class ServiceCollectionExtensions
             // Use the SectionName constant if present
             _ = services.Configure<DatabaseSettings>(s => { });
         }
-        catch { }
+        catch
+        {
+        }
 
         // Register a lightweight provider for system settings that reads from IConfiguration
         _ = services.AddSingleton<ISystemSettingsProvider, ConfigurationSystemSettingsProvider>();
@@ -141,6 +136,9 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers all PrintFarmer services. This is the main entry point for service registration.
     /// </summary>
+    /// <param name="services">The service collection to add services to.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="environment">The host environment.</param>
     public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
         // AutoMapper
@@ -247,7 +245,6 @@ public static class ServiceCollectionExtensions
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.IModelTagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfModelTagMappingRepository>();
 
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
@@ -325,6 +322,7 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddMemoryCache();
         _ = services.AddOptions<CatalogCacheOptions>();
+
         // CatalogCache resolves scoped AppDbContext per-call, so it can be a Singleton
         _ = services.AddSingleton<ICatalogCache, CatalogCache>();
     }

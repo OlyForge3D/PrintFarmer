@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DetailedHealthStatus } from '@/types/api';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 interface HealthState {
   loading: boolean;
@@ -68,11 +68,12 @@ export function useDiagnosticsSummary(pollMs: number = 60000) {
     let timer: number | null = null;
     const run = async () => {
       try {
-        const resp = await fetch(`${getApiBaseUrl()}/diagnostics/summary`, { headers: getAuthHeaders() });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const json = await resp.json();
+        const resp = await apiClient.getDiagnosticsSummary();
+        const httpResp = (resp as unknown as Response);
+        if (!httpResp.ok) throw new Error(`HTTP ${httpResp.status}`);
+        const json = (await httpResp.json()) as unknown as Record<string, unknown>;
         if (!aborted) {
-          setData(json);
+          setData((json as unknown as DiagnosticsSummary));
           setError(null);
         }
       } catch (e) {

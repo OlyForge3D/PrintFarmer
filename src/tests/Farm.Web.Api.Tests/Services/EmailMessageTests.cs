@@ -104,7 +104,7 @@ public class EmailMessageTests
     {
         var message = new EmailMessage("user@example.com", "Subject", "Body");
 
-        var (to, subject, plainBody, htmlBody, templateKey, metadata) = message;
+        (string? to, string? subject, string? plainBody, string? htmlBody, string? templateKey, Dictionary<string, string>? metadata) = message;
 
         to.Should().Be("user@example.com");
         subject.Should().Be("Subject");
@@ -162,7 +162,7 @@ public class EmailMessageTests
     {
         var result = new EmailDispatchResult(true, "Message", null);
 
-        var (success, providerMessage, error) = result;
+        (bool success, string? providerMessage, string? error) = result;
 
         success.Should().BeTrue();
         providerMessage.Should().Be("Message");

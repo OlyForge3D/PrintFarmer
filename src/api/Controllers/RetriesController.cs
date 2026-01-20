@@ -1,6 +1,7 @@
 ﻿using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
+using Farm.Web.Api.DTOs.PrintQueue;
 using Farm.Web.Api.DTOs.Retries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,6 +27,7 @@ public class RetriesController(
     /// <summary>
     /// Get the current retry policy configuration
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Returns the retry policy</response>
     /// <response code="500">Server error</response>
     [HttpGet("policy")]
@@ -35,7 +37,7 @@ public class RetriesController(
     {
         try
         {
-            var policy = await _retryService.GetRetryPolicyAsync(cancellationToken);
+            RetryPolicy policy = await _retryService.GetRetryPolicyAsync(cancellationToken);
             return Ok(new RetryPolicyDto
             {
                 Id = policy.Id,
@@ -57,6 +59,8 @@ public class RetriesController(
     /// <summary>
     /// Update the retry policy configuration
     /// </summary>
+    /// <param name="request">The updated retry policy configuration.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Policy updated successfully</response>
     /// <response code="400">Invalid policy configuration</response>
     /// <response code="401">Unauthorized</response>
@@ -93,7 +97,7 @@ public class RetriesController(
                 return BadRequest("MaxDelaySeconds must be >= InitialDelaySeconds");
             }
 
-            var currentPolicy = await _retryService.GetRetryPolicyAsync(cancellationToken);
+            RetryPolicy currentPolicy = await _retryService.GetRetryPolicyAsync(cancellationToken);
 
             currentPolicy.IsEnabled = request.IsEnabled;
             currentPolicy.MaxRetries = request.MaxRetries;
@@ -102,7 +106,7 @@ public class RetriesController(
             currentPolicy.MaxDelaySeconds = request.MaxDelaySeconds;
             currentPolicy.RetryOnErrorCategories = request.RetryOnErrorCategories;
 
-            var updated = await _retryService.UpdateRetryPolicyAsync(currentPolicy, cancellationToken);
+            RetryPolicy updated = await _retryService.UpdateRetryPolicyAsync(currentPolicy, cancellationToken);
 
             return Ok(new RetryPolicyDto
             {
@@ -125,6 +129,8 @@ public class RetriesController(
     /// <summary>
     /// Get retry history for a specific job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Returns retry history</response>
     /// <response code="404">Job not found</response>
     /// <response code="500">Server error</response>
@@ -139,13 +145,13 @@ public class RetriesController(
         try
         {
             // Verify job exists
-            var job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
+            QueuedPrintJobDto? job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
             {
                 return NotFound($"Job {jobId} not found");
             }
 
-            var retries = await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
+            IEnumerable<JobRetry> retries = await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
             var dtos = retries.Select(r => MapToDto(r)).ToList();
 
             return Ok(dtos);
@@ -160,6 +166,8 @@ public class RetriesController(
     /// <summary>
     /// Get details of a specific retry attempt
     /// </summary>
+    /// <param name="retryId">The unique identifier of the retry attempt.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Returns retry details</response>
     /// <response code="404">Retry not found</response>
     /// <response code="500">Server error</response>
@@ -173,13 +181,8 @@ public class RetriesController(
     {
         try
         {
-            var retry = await _retryService.GetRetryAsync(retryId, cancellationToken);
-            if (retry is null)
-            {
-                return NotFound($"Retry {retryId} not found");
-            }
-
-            return Ok(MapToDto(retry));
+            JobRetry? retry = await _retryService.GetRetryAsync(retryId, cancellationToken);
+            return retry is null ? NotFound($"Retry {retryId} not found") : Ok(MapToDto(retry));
         }
         catch (Exception ex)
         {
@@ -191,6 +194,7 @@ public class RetriesController(
     /// <summary>
     /// Get all pending retries that are due to execute
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Returns list of due retries</response>
     /// <response code="500">Server error</response>
     [HttpGet("due/list")]
@@ -201,7 +205,7 @@ public class RetriesController(
     {
         try
         {
-            var retries = await _retryService.GetDueRetriesAsync(cancellationToken);
+            IEnumerable<JobRetry> retries = await _retryService.GetDueRetriesAsync(cancellationToken);
             var dtos = retries.Select(r => MapToDto(r)).ToList();
 
             return Ok(dtos);
@@ -216,6 +220,9 @@ public class RetriesController(
     /// <summary>
     /// Check if a job should be automatically retried
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to check.</param>
+    /// <param name="request">The retry check request containing error category.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     /// <response code="200">Returns whether job should be retried</response>
     /// <response code="400">Invalid error category</response>
     /// <response code="404">Job not found</response>
@@ -234,19 +241,19 @@ public class RetriesController(
         try
         {
             // Verify job exists
-            var job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
+            QueuedPrintJobDto? job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
             {
                 return NotFound($"Job {jobId} not found");
             }
 
             // Validate error category
-            if (!Enum.TryParse<ErrorCategory>(request.ErrorCategory, out var category))
+            if (!Enum.TryParse<ErrorCategory>(request.ErrorCategory, out ErrorCategory category))
             {
                 return BadRequest($"Invalid error category: {request.ErrorCategory}");
             }
 
-            var shouldRetry = await _retryService.ShouldRetryAsync(jobId, category, cancellationToken);
+            bool shouldRetry = await _retryService.ShouldRetryAsync(jobId, category, cancellationToken);
 
             return Ok(new CheckRetryResponse { ShouldRetry = shouldRetry });
         }

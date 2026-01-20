@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Discovery;
 
@@ -14,9 +15,13 @@ namespace Farm.Infrastructure.Discovery;
 public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 {
     public abstract string DisplayName { get; }
+
     protected abstract int[] Ports { get; }
+
     protected abstract string EndpointPath { get; }
+
     protected abstract PrinterBackend Backend { get; }
+
     protected abstract string PrinterName { get; }
 
     // Expose backend via interface
@@ -26,6 +31,8 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     /// Override to provide backend-specific validation with confidence scoring.
     /// Returns (isValid, confidenceScore, reason).
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected virtual Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -77,8 +84,11 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 
                 return new ProbeResult(dto, confidence, reason);
             }
-            catch { }
+            catch
+            {
+            }
         }
+
         return null;
     }
 }

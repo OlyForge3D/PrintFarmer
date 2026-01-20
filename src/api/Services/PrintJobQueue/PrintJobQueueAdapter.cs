@@ -10,20 +10,13 @@ using Farm.Web.Api.Services.Queue;
 
 namespace Farm.Web.Api.Services.PrintJobQueue;
 
-public class PrintJobQueueAdapter : IPrintJobQueueService
+public class PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService) : IPrintJobQueueService
 {
-    private readonly Services.Queue.IJobQueueService _jobQueueService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public PrintJobQueueAdapter(Services.Queue.IJobQueueService jobQueueService, IUnifiedLoggingService logger)
-    {
-        _jobQueueService = jobQueueService;
-        _logger = logger;
-    }
+    private readonly Services.Queue.IJobQueueService _jobQueueService = jobQueueService;
 
     public async Task<IEnumerable<PrintJobDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var list = await _jobQueueService.GetQueueOverviewAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<QueueOverviewDto> list = await _jobQueueService.GetQueueOverviewAsync(cancellationToken).ConfigureAwait(false);
         return list.Select(q => new PrintJobDto(
             Id: Guid.NewGuid(),
             GcodeFileId: Guid.Empty,
@@ -34,13 +27,12 @@ public class PrintJobQueueAdapter : IPrintJobQueueService
             QueuePosition: q.QueuedJobsCount,
             RequiredNozzleDiameter: null,
             RequiredMaterialType: null,
-            CreatedAt: DateTime.UtcNow
-        ));
+            CreatedAt: DateTime.UtcNow));
     }
 
     public async Task<PrintJobDto?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var dto = await _jobQueueService.GetJobAsync(id, cancellationToken).ConfigureAwait(false);
+        JobQueuePrintJobDto? dto = await _jobQueueService.GetJobAsync(id, cancellationToken).ConfigureAwait(false);
         if (dto == null)
         {
             return null;
@@ -61,7 +53,7 @@ public class PrintJobQueueAdapter : IPrintJobQueueService
             RequiredMaterialType = req.requiredMaterialType
         };
 
-        var added = await _jobQueueService.AddJobToQueueAsync(qreq, cancellationToken).ConfigureAwait(false);
+        JobQueuePrintJobDto? added = await _jobQueueService.AddJobToQueueAsync(qreq, cancellationToken).ConfigureAwait(false);
         if (added == null)
         {
             return null;

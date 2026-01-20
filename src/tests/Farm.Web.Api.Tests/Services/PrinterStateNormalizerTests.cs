@@ -20,7 +20,7 @@ public class PrinterStateNormalizerTests
     [InlineData("CONNECTING", "Connecting")]
     public void NormalizeState_WithValidState_ReturnsPascalCase(string input, string expected)
     {
-        var result = PrinterStateNormalizer.NormalizeState(input);
+        string? result = PrinterStateNormalizer.NormalizeState(input);
 
         result.Should().Be(expected);
     }
@@ -33,7 +33,7 @@ public class PrinterStateNormalizerTests
     [InlineData("1", "1")]
     public void NormalizeState_WithSingleCharacter_NormalizesCorrectly(string input, string expected)
     {
-        var result = PrinterStateNormalizer.NormalizeState(input);
+        string? result = PrinterStateNormalizer.NormalizeState(input);
 
         result.Should().Be(expected);
     }
@@ -43,7 +43,7 @@ public class PrinterStateNormalizerTests
     [InlineData("")]
     public void NormalizeState_WithNullOrEmpty_ReturnsNullOrEmpty(string? input)
     {
-        var result = PrinterStateNormalizer.NormalizeState(input);
+        string? result = PrinterStateNormalizer.NormalizeState(input);
 
         result.Should().Be(input);
     }
@@ -54,7 +54,7 @@ public class PrinterStateNormalizerTests
     [InlineData("\n")]
     public void NormalizeState_WithWhitespace_NormalizesAsString(string input)
     {
-        var result = PrinterStateNormalizer.NormalizeState(input);
+        string? result = PrinterStateNormalizer.NormalizeState(input);
 
         // Whitespace is treated like any other character
         result.Should().NotBeNullOrEmpty();
@@ -63,7 +63,7 @@ public class PrinterStateNormalizerTests
     [Fact]
     public void NormalizeState_WithMixedCase_ConvertsToProperCase()
     {
-        var result = PrinterStateNormalizer.NormalizeState("IdLe");
+        string? result = PrinterStateNormalizer.NormalizeState("IdLe");
 
         result.Should().Be("Idle");
     }
@@ -71,7 +71,7 @@ public class PrinterStateNormalizerTests
     [Fact]
     public void NormalizeState_WithNumbers_PreservesNumbers()
     {
-        var result = PrinterStateNormalizer.NormalizeState("error123");
+        string? result = PrinterStateNormalizer.NormalizeState("error123");
 
         result.Should().Be("Error123");
     }
@@ -79,7 +79,7 @@ public class PrinterStateNormalizerTests
     [Fact]
     public void NormalizeState_WithSpecialCharacters_PreservesCharacters()
     {
-        var result = PrinterStateNormalizer.NormalizeState("error-code");
+        string? result = PrinterStateNormalizer.NormalizeState("error-code");
 
         result.Should().Be("Error-code");
     }
@@ -90,7 +90,7 @@ public class PrinterStateNormalizerTests
     [InlineData("AUTO_LEVELING", "Auto_leveling")]
     public void NormalizeState_WithUnderscores_PreservesUnderscores(string input, string expected)
     {
-        var result = PrinterStateNormalizer.NormalizeState(input);
+        string? result = PrinterStateNormalizer.NormalizeState(input);
 
         result.Should().Be(expected);
     }
@@ -99,8 +99,8 @@ public class PrinterStateNormalizerTests
     public void NormalizeState_IsStateless()
     {
         // Multiple calls with same input should return same result
-        var result1 = PrinterStateNormalizer.NormalizeState("PRINTING");
-        var result2 = PrinterStateNormalizer.NormalizeState("PRINTING");
+        string? result1 = PrinterStateNormalizer.NormalizeState("PRINTING");
+        string? result2 = PrinterStateNormalizer.NormalizeState("PRINTING");
 
         result1.Should().Be(result2);
     }
@@ -108,9 +108,9 @@ public class PrinterStateNormalizerTests
     [Fact]
     public void NormalizeState_WithVeryLongState_StillWorks()
     {
-        var longState = "VERY_LONG_PRINTER_STATE_STRING_WITH_MANY_WORDS";
+        string longState = "VERY_LONG_PRINTER_STATE_STRING_WITH_MANY_WORDS";
 
-        var result = PrinterStateNormalizer.NormalizeState(longState);
+        string? result = PrinterStateNormalizer.NormalizeState(longState);
 
         result!.Should().StartWith("V");
         result.Should().NotContain("VERY_LONG");

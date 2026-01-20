@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -69,7 +70,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task JoinDiscoveryGroupAsync_AddsClientToGroup()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
 
             // Act
             await _hub.JoinDiscoveryGroupAsync(sessionId);
@@ -85,7 +86,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task JoinDiscoveryGroupAsync_WithoutCachedProgress_DoesNotSendProgress()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
 
             _progressCacheMock
                 .Setup(c => c.TryGet(sessionId, out It.Ref<DiscoveryProgressDto?>.IsAny))
@@ -109,7 +110,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task JoinDiscoveryGroupAsync_WithConnectionAborted_StopsRetrying()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
             var cts = new CancellationTokenSource();
             cts.Cancel(); // Pre-cancel to simulate aborted connection
 
@@ -134,7 +135,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task LeaveDiscoveryGroupAsync_RemovesClientFromGroup()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
 
             // Act
             await _hub.LeaveDiscoveryGroupAsync(sessionId);
@@ -263,7 +264,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task JoinDiscoveryGroupAsync_LogsConnectionInfo()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
 
             // Act
             await _hub.JoinDiscoveryGroupAsync(sessionId);
@@ -283,7 +284,7 @@ namespace Farm.Web.Api.Tests.Hubs
         public async Task LeaveDiscoveryGroupAsync_LogsConnectionInfo()
         {
             // Arrange
-            var sessionId = "test-session-id";
+            string sessionId = "test-session-id";
 
             // Act
             await _hub.LeaveDiscoveryGroupAsync(sessionId);

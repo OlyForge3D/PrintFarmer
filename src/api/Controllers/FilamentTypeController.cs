@@ -1,5 +1,4 @@
-﻿
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -46,6 +45,7 @@ public class FilamentTypeController(
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
+
             IReadOnlyList<FilamentTypeDto> list = await _filamentService.GetFilamentTypesAsync(ct);
             return Ok(list);
         }
@@ -78,6 +78,7 @@ public class FilamentTypeController(
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
+
             FilamentPresetsDto presets = await _filamentService.GetFilamentPresetsAsync(ct);
             return Ok(presets);
         }

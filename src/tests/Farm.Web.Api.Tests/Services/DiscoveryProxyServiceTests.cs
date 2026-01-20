@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -61,7 +62,8 @@ public class DiscoveryProxyServiceTests
         Assert.True(doc.RootElement.GetProperty("autoRegister").GetBoolean());
         Assert.Equal(500, doc.RootElement.GetProperty("probeTimeoutMs").GetInt32());
         Assert.Equal(5, doc.RootElement.GetProperty("maxConcurrentProbes").GetInt32());
-        Assert.Equal((int)PrinterBackend.Moonraker, doc.RootElement.GetProperty("backends")[0].GetInt32());
+        // Enum is serialized as string due to JsonStringEnumConverter in Program.cs
+        Assert.Equal(nameof(PrinterBackend.Moonraker), doc.RootElement.GetProperty("backends")[0].GetString());
         Assert.Equal("192.168.1.0/24", doc.RootElement.GetProperty("subnets")[0].GetString());
     }
 
@@ -154,15 +156,10 @@ public class DiscoveryProxyServiceTests
         return hubContext;
     }
 
-    private sealed class RecordingHandler : HttpMessageHandler
+    private sealed class RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
         public HttpRequestMessage? LastRequest { get; private set; }
-
-        public RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        {
-            _handler = handler;
-        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -171,14 +168,9 @@ public class DiscoveryProxyServiceTests
         }
     }
 
-    private sealed class ThrowingHandler : HttpMessageHandler
+    private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
     {
-        private readonly Exception _exception;
-
-        public ThrowingHandler(Exception exception)
-        {
-            _exception = exception;
-        }
+        private readonly Exception _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

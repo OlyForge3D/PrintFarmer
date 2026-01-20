@@ -12,16 +12,22 @@ public interface IDiscoveryProgressBroadcaster
     /// <summary>
     /// Broadcast discovery progress to the API's SignalR hub.
     /// </summary>
+    /// <param name="progress">The discovery progress data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     Task BroadcastProgressAsync(DiscoveryProgressDto progress, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Broadcast when a printer is found during discovery.
     /// </summary>
+    /// <param name="found">The discovered printer data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     Task BroadcastPrinterFoundAsync(DiscoveryPrinterFoundDto found, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Broadcast discovery completion to the API's SignalR hub.
     /// </summary>
+    /// <param name="completed">The discovery completion data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     Task BroadcastCompletedAsync(DiscoveryCompletedDto completed, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -107,7 +113,8 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             {
                 // Invoke the hub method to broadcast to the discovery group
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryProgressAsync", progress, cancellationToken);
-                _logger.LogDebug("[DISCOVERY-BROADCASTER] Broadcasted progress for session {SessionId}: {Percentage}%",
+                _logger.LogDebug(
+                    "[DISCOVERY-BROADCASTER] Broadcasted progress for session {SessionId}: {Percentage}%",
                     progress.SessionId, progress.ProgressPercentage);
             }
             else
@@ -130,7 +137,8 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             if (_hubConnection?.State == HubConnectionState.Connected)
             {
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryPrinterFoundAsync", found, cancellationToken);
-                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted printer found for session {SessionId}: {Name} at {Ip}",
+                _logger.LogInformation(
+                    "[DISCOVERY-BROADCASTER] Broadcasted printer found for session {SessionId}: {Name} at {Ip}",
                     found.SessionId, found.Printer.Name, found.Printer.ServerUrl);
             }
             else
@@ -153,7 +161,8 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             if (_hubConnection?.State == HubConnectionState.Connected)
             {
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryCompletedAsync", completed, cancellationToken);
-                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted completion for session {SessionId}: {Found} printers found",
+                _logger.LogInformation(
+                    "[DISCOVERY-BROADCASTER] Broadcasted completion for session {SessionId}: {Found} printers found",
                     completed.SessionId, completed.TotalPrintersFound);
             }
             else
@@ -173,6 +182,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
         {
             await _hubConnection.DisposeAsync();
         }
+
         _connectionLock.Dispose();
     }
 }

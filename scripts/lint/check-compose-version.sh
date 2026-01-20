@@ -2,52 +2,45 @@
 set -euo pipefail
 
 # Fail if any Docker Compose file contains a top-level 'version:' key
-# The 'version' key is deprecated in Docker Compose v2 and should be removed
-# This script only checks actual Docker Compose files, not other YAML configs
+# Docker Compose v2+ doesn't require the version key and it's deprecated
+#
+# Usage: check-compose-version.sh [path1] [path2] ...
+#   Checks specified paths (files or directories) for deprecated version keys
 
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <path1> [path2] ..." >&2
+  echo "Example: $0 scripts/docker/compose-templates/ .dive-ci.yml" >&2
+  exit 1
+fi
+
 found=0
-
-# Files that legitimately use 'version:' key and should be excluded
-exclude_patterns=(
-  ".github/dependabot.yml"
-  ".github/workflows/"
-  "openapi/"
-  "grafana/"
-  ".dive-ci.yml"
-)
-
-should_exclude() {
-  local file="$1"
-  local rel="${file#${repo_root}/}"
-  
-  for pattern in "${exclude_patterns[@]}"; do
-    if [[ "$rel" == *"$pattern"* ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
 
 echo "Scanning Docker Compose files for deprecated top-level 'version:' keys..."
 
-while IFS= read -r -d '' file; do
-  rel="${file#${repo_root}/}"
-  
-  # Skip excluded files
-  if should_exclude "$file"; then
+for path in "$@"; do
+  if [ ! -e "$path" ]; then
+    echo "Warning: Path does not exist: $path" >&2
     continue
   fi
   
-  # Check if file has top-level 'version:' key (on first line without leading whitespace)
-  # For Docker Compose files, version must be on the very first line to be the compose version
-  first_line=$(head -1 "$file")
-  if [[ "$first_line" =~ ^[[:space:]]*version[[:space:]]*: ]]; then
-    echo "Found deprecated version key in: $rel"
-    echo "$rel:1:$first_line"
-    found=1
+  # If it's a directory, find all .yml and .yaml files
+  if [ -d "$path" ]; then
+    while IFS= read -r -d '' file; do
+      if awk '/^[[:space:]]*version[[:space:]]*:/ {exit 0} END {exit 1}' "$file" 2>/dev/null; then
+        echo "Found deprecated version key in: $file"
+        awk '/^[[:space:]]*version[[:space:]]*:/ {print "  Line "NR": "$0; exit 0}' "$file"
+        found=1
+      fi
+    done < <(find "$path" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
+  # If it's a file, check it directly
+  elif [ -f "$path" ]; then
+    if awk '/^[[:space:]]*version[[:space:]]*:/ {exit 0} END {exit 1}' "$path" 2>/dev/null; then
+      echo "Found deprecated version key in: $path"
+      awk '/^[[:space:]]*version[[:space:]]*:/ {print "  Line "NR": "$0; exit 0}' "$path"
+      found=1
+    fi
   fi
-done < <(find "$repo_root" -type f \( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name '*.compose.yml' -o -name '*.compose.yaml' -o -path '*/docker/*.yml' -o -path '*/docker/*.yaml' \) -not -path '*/.git/*' -print0)
+done
 
 if [ "$found" -ne 0 ]; then
   echo "ERROR: Docker Compose files contain deprecated 'version:' keys. Please remove them." >&2

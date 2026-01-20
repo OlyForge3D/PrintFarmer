@@ -100,7 +100,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             // Use OrcaPreviewRenderer for high-quality rendering
             var renderer = new OrcaPreviewRenderer();
 
-            var options = OrcaPreset.Create();
+            RenderOptions options = OrcaPreset.Create();
             const int defaultZoomPercent = 40; // matches existing Orca default appearance
 
             if (zoomPercent.HasValue)
@@ -136,13 +136,14 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             if (!string.IsNullOrWhiteSpace(view))
             {
                 _logger.LogInformation($"    Applying camera view: {view}");
-                var oldPos = options.CameraPosition;
-                var oldTgt = options.CameraTarget;
+                Vector3 oldPos = options.CameraPosition;
+                Vector3 oldTgt = options.CameraTarget;
                 if (!options.SetCameraView(view))
                 {
                     _logger.LogWarning($"    Unknown view '{view}', using default 'front'");
                     options.SetCameraView("front");
                 }
+
                 _logger.LogInformation($"    Camera: Pos({oldPos.X:F2},{oldPos.Y:F2},{oldPos.Z:F2}) -> ({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
                 _logger.LogInformation($"    Target: ({oldTgt.X:F2},{oldTgt.Y:F2},{oldTgt.Z:F2}) -> ({options.CameraTarget.X:F2},{options.CameraTarget.Y:F2},{options.CameraTarget.Z:F2})");
             }

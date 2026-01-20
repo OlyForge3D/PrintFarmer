@@ -44,7 +44,7 @@ public class SetupServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _service.NeedsSetupAsync(CancellationToken.None);
+        bool result = await _service.NeedsSetupAsync(CancellationToken.None);
 
         // Assert
         Assert.True(result);
@@ -59,7 +59,7 @@ public class SetupServiceTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _service.NeedsSetupAsync(CancellationToken.None);
+        bool result = await _service.NeedsSetupAsync(CancellationToken.None);
 
         // Assert
         Assert.False(result);
@@ -73,7 +73,7 @@ public class SetupServiceTests
     public async Task CreateInitialAdminAsync_WithNullRequest_ReturnsFalseWithError()
     {
         // Act
-        var result = await _service.CreateInitialAdminAsync(null!, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(null!, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -97,7 +97,7 @@ public class SetupServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -121,7 +121,7 @@ public class SetupServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -144,7 +144,7 @@ public class SetupServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -175,7 +175,7 @@ public class SetupServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -201,7 +201,7 @@ public class SetupServiceTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -253,7 +253,7 @@ public class SetupServiceTests
             .ReturnsAsync(userDto);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -286,7 +286,7 @@ public class SetupServiceTests
             .ReturnsAsync(policy);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -312,7 +312,7 @@ public class SetupServiceTests
             .ReturnsAsync((PasswordPolicyEntity?)null);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -347,7 +347,7 @@ public class SetupServiceTests
             .ReturnsAsync(policy);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -382,7 +382,7 @@ public class SetupServiceTests
             .ReturnsAsync(policy);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -417,7 +417,7 @@ public class SetupServiceTests
             .ReturnsAsync(policy);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -452,7 +452,7 @@ public class SetupServiceTests
             .ReturnsAsync(policy);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -484,7 +484,7 @@ public class SetupServiceTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -512,7 +512,7 @@ public class SetupServiceTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -565,7 +565,7 @@ public class SetupServiceTests
             .ReturnsAsync(userDto);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -606,7 +606,7 @@ public class SetupServiceTests
             .ReturnsAsync((Role?)null);
 
         // Act
-        var result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.False(result.Success);
@@ -621,8 +621,7 @@ public class SetupServiceTests
     public void GetConfigurationOptions_ReturnsValidConfiguration()
     {
         // Act
-        var options = _service.GetConfigurationOptions();
-
+        SetupConfigurationOptions options = _service.GetConfigurationOptions();
         // Assert
         Assert.NotNull(options);
         Assert.NotNull(options.DatabaseProviders);
@@ -630,14 +629,13 @@ public class SetupServiceTests
         Assert.Contains("SQLite", options.DatabaseProviders);
         Assert.Contains("SQL Server", options.DatabaseProviders);
         Assert.Contains("PostgreSQL", options.DatabaseProviders);
-        Assert.Contains("MySQL", options.DatabaseProviders);
     }
 
     [Fact]
     public void GetConfigurationOptions_IncludesDefaultNetworkRanges()
     {
         // Act
-        var options = _service.GetConfigurationOptions();
+        SetupConfigurationOptions options = _service.GetConfigurationOptions();
 
         // Assert
         Assert.NotNull(options.DefaultNetworkRanges);
@@ -649,7 +647,7 @@ public class SetupServiceTests
     public void GetConfigurationOptions_IncludesRecommendedPorts()
     {
         // Act
-        var options = _service.GetConfigurationOptions();
+        SetupConfigurationOptions options = _service.GetConfigurationOptions();
 
         // Assert
         Assert.NotNull(options.RecommendedPorts);

@@ -54,9 +54,11 @@ public class GracefulShutdownService : BackgroundService
                     _logger.LogInformation($"All jobs complete after {(DateTime.UtcNow - start).TotalMilliseconds}ms");
                     break;
                 }
+
                 _logger.LogInformation($"Waiting on {snapshot.ActiveJobs} active jobs... {(_grace - (DateTime.UtcNow - start)).TotalSeconds}s left");
                 await Task.Delay(TimeSpan.FromSeconds(1));
             }
+
             await _cts.CancelAsync();
         });
     }

@@ -28,6 +28,7 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 public class PrinterLocationImportTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
+    private AsyncServiceScope _scope;
     private IPrintersService _printersService;
     private ILocationService _locationService;
     private AppDbContext _dbContext;
@@ -42,10 +43,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var scope = _factory.Services.CreateAsyncScope();
-        _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
-        _locationService = scope.ServiceProvider.GetRequiredService<ILocationService>();
+        _scope = _factory.Services.CreateAsyncScope();
+        _dbContext = _scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _printersService = _scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        _locationService = _scope.ServiceProvider.GetRequiredService<ILocationService>();
 
         // Create test locations - use unique IDs to avoid conflicts
         _testLocation1 = new Location
@@ -65,8 +66,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         };
 
         // Check if locations already exist (for test isolation)
-        var existing1 = await _dbContext.Locations.FirstOrDefaultAsync(l => l.Name == "Warehouse");
-        var existing2 = await _dbContext.Locations.FirstOrDefaultAsync(l => l.Name == "Lab");
+        Location? existing1 = await _dbContext.Locations.FirstOrDefaultAsync(l => l.Name == "Warehouse");
+        Location? existing2 = await _dbContext.Locations.FirstOrDefaultAsync(l => l.Name == "Lab");
 
         if (existing1 == null)
         {
@@ -91,7 +92,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        _dbContext?.Dispose();
+        await _scope.DisposeAsync();
         _factory?.Dispose();
     }
 
@@ -101,7 +102,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ImportPrintersCsvAsync_WithLocationColumn_AssignsLocationsToPrinters()
     {
         // Arrange
-        var csv = GetCsvWithLocations(new[]
+        string csv = GetCsvWithLocations(new[]
         {
             new { Name = "Printer1", Location = "Warehouse" },
             new { Name = "Printer2", Location = "Lab" }
@@ -110,21 +111,21 @@ public class PrinterLocationImportTests : IAsyncLifetime
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":2");
         resultJson.Should().Contain("\"failureCount\":0");
 
         // Verify locations were assigned
-        var printer1 = await _dbContext.Printers
+        Printer? printer1 = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "Printer1");
         printer1.Should().NotBeNull();
         printer1!.LocationId.Should().Be(_testLocation1.Id);
 
-        var printer2 = await _dbContext.Printers
+        Printer? printer2 = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "Printer2");
         printer2.Should().NotBeNull();
         printer2!.LocationId.Should().Be(_testLocation2.Id);
@@ -134,22 +135,22 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ImportPrintersCsvAsync_WithoutLocationColumn_CreatesPreintersWithoutLocation()
     {
         // Arrange - CSV without LocationName column (backward compatibility)
-        var ip = GetNextIpAddress();
-        var mfg = GetNextUniqueMfgName();
-        var csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired
+        string ip = GetNextIpAddress();
+        string mfg = GetNextUniqueMfgName();
+        string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired
 ""Printer3"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""" ";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":1");
 
-        var printer = await _dbContext.Printers
+        Printer? printer = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "Printer3");
         printer.Should().NotBeNull();
         printer!.LocationId.Should().BeNull(); // No location assigned
@@ -159,7 +160,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ImportPrintersCsvAsync_WithNonExistentLocation_CreatesPartnerWithoutLocation()
     {
         // Arrange
-        var csv = GetCsvWithLocations(new[]
+        string csv = GetCsvWithLocations(new[]
         {
             new { Name = "PrinterNoLocation", Location = "NonExistentLocation" }
         });
@@ -167,14 +168,14 @@ public class PrinterLocationImportTests : IAsyncLifetime
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":1"); // Still imports, just without location
 
-        var printer = await _dbContext.Printers
+        Printer? printer = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "PrinterNoLocation");
         printer.Should().NotBeNull();
         printer!.LocationId.Should().BeNull(); // Location not assigned due to not existing
@@ -184,22 +185,22 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ImportPrintersCsvAsync_WithEmptyLocationField_CreatesForintersWithoutLocation()
     {
         // Arrange - Location column present but empty
-        var ip = GetNextIpAddress();
-        var mfg = GetNextUniqueMfgName();
-        var csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
+        string ip = GetNextIpAddress();
+        string mfg = GetNextUniqueMfgName();
+        string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
 ""PrinterEmptyLocation"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""","""" ";
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":1");
 
-        var printer = await _dbContext.Printers
+        Printer? printer = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "PrinterEmptyLocation");
         printer.Should().NotBeNull();
         printer!.LocationId.Should().BeNull();
@@ -209,10 +210,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ImportPrintersCsvAsync_PreservesLocationOnOverwrite()
     {
         // Arrange - Create initial printer with no location
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var initialPrinter = new Printer
         {
             Id = Guid.NewGuid(),
@@ -230,8 +231,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Import with overwrite and location assignment - use same IP for overwrite
-        var mfg = GetNextUniqueMfgName();
-        var csv = GetCsvWithLocations(new[]
+        string mfg = GetNextUniqueMfgName();
+        string csv = GetCsvWithLocations(new[]
         {
             new { Name = "OverwritePrinter", Location = "Warehouse" }
         }, mfg, ip);  // Use same IP for overwrite
@@ -239,15 +240,15 @@ public class PrinterLocationImportTests : IAsyncLifetime
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "overwrite", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "overwrite", CancellationToken.None);
 
         // Assert - verify the printer was successfully overwritten (not skipped or failed)
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":1", "printer should be imported successfully with overwrite mode");
 
         // Reload from database to get fresh data after overwrite
-        var printer = await _dbContext.Printers
+        Printer? printer = await _dbContext.Printers
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Name == "OverwritePrinter");
         printer.Should().NotBeNull("printer should exist after import");
@@ -256,27 +257,26 @@ public class PrinterLocationImportTests : IAsyncLifetime
         printer!.Id.Should().NotBe(initialPrinter.Id, "printer should have new ID after overwrite");
     }
 
-
     [Fact]
     public async Task ImportPrintersCsvAsync_WithWhitespace_TrimsLocationName()
     {
         // Arrange - Location name with leading/trailing whitespace
-        var ip = GetNextIpAddress();
-        var mfg = GetNextUniqueMfgName();
-        var csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
+        string ip = GetNextIpAddress();
+        string mfg = GetNextUniqueMfgName();
+        string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
 ""PrinterWhitespace"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""",""  Warehouse  """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
 
         // Act
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        var resultJson = JsonSerializer.Serialize(result);
+        string resultJson = JsonSerializer.Serialize(result);
         resultJson.Should().Contain("\"importedCount\":1");
 
-        var printer = await _dbContext.Printers
+        Printer? printer = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "PrinterWhitespace");
         printer.Should().NotBeNull();
         printer!.LocationId.Should().Be(_testLocation1.Id); // Should find "Warehouse" after trimming
@@ -290,10 +290,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ExportAndReplaceAsync_IncludesLocation_CanBeImportedBack()
     {
         // Arrange - Create a printer with location
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
@@ -312,8 +312,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act - Export the printer
-        var csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
-        var csv = Encoding.UTF8.GetString(csvBytes);
+        byte[] csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
+        string csv = Encoding.UTF8.GetString(csvBytes);
 
         // Assert - CSV should contain LocationName column with value
         csv.Should().Contain("LocationName");
@@ -324,10 +324,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         using var stream = new MemoryStream(csvBytes);
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert - Reimported printer should have location assigned
-        var reimportedPrinter = await _dbContext.Printers
+        Printer? reimportedPrinter = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "RoundTripPrinter");
         reimportedPrinter.Should().NotBeNull();
         reimportedPrinter!.LocationId.Should().Be(_testLocation1.Id);
@@ -337,10 +337,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ExportJsonAndImportAsync_IncludesLocation_CanBeImportedBack()
     {
         // Arrange - Create a printer with location
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
@@ -359,8 +359,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act - Export the printer as JSON
-        var jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
-        var json = Encoding.UTF8.GetString(jsonBytes);
+        byte[] jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
+        string json = Encoding.UTF8.GetString(jsonBytes);
 
         // Assert - JSON should contain locationName field with value
         json.Should().Contain("\"locationName\"");
@@ -371,10 +371,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         using var stream = new MemoryStream(jsonBytes);
-        var result = await _printersService.ImportFromStreamAsync(stream, "test.json", "skip", CancellationToken.None);
+        object result = await _printersService.ImportFromStreamAsync(stream, "test.json", "skip", CancellationToken.None);
 
         // Assert - Reimported printer should have location assigned
-        var reimportedPrinter = await _dbContext.Printers
+        Printer? reimportedPrinter = await _dbContext.Printers
             .FirstOrDefaultAsync(p => p.Name == "JsonRoundTripPrinter");
         reimportedPrinter.Should().NotBeNull();
         reimportedPrinter!.LocationId.Should().Be(_testLocation1.Id);
@@ -388,10 +388,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ExportPrintersCsvAsync_IncludesLocationNameColumn()
     {
         // Arrange - Create printer with location
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
@@ -410,15 +410,15 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
-        var csv = Encoding.UTF8.GetString(csvBytes);
+        byte[] csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
+        string csv = Encoding.UTF8.GetString(csvBytes);
 
         // Assert
-        var lines = csv.Split('\n');
-        var headerLine = lines[0];
+        string[] lines = csv.Split('\n');
+        string headerLine = lines[0];
         headerLine.Should().Contain("LocationName");
 
-        var printerLine = lines.FirstOrDefault(l => l.Contains("ExportPrinter"));
+        string? printerLine = lines.FirstOrDefault(l => l.Contains("ExportPrinter"));
         printerLine.Should().NotBeNullOrEmpty();
         printerLine.Should().Contain("Warehouse");  // Should find Warehouse since LocationId = _testLocation1
     }
@@ -427,10 +427,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ExportPrintersCsvAsync_PrinterWithoutLocation_ShowsEmptyLocationField()
     {
         // Arrange - Create printer without location
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
@@ -449,12 +449,12 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
-        var csv = Encoding.UTF8.GetString(csvBytes);
+        byte[] csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
+        string csv = Encoding.UTF8.GetString(csvBytes);
 
         // Assert
-        var lines = csv.Split('\n');
-        var printerLine = lines.FirstOrDefault(l => l.Contains("NoLocationPrinter"));
+        string[] lines = csv.Split('\n');
+        string? printerLine = lines.FirstOrDefault(l => l.Contains("NoLocationPrinter"));
         printerLine.Should().NotBeNullOrEmpty();
         // Should have trailing empty field for location
         printerLine.Should().EndWith(",");
@@ -468,10 +468,10 @@ public class PrinterLocationImportTests : IAsyncLifetime
     public async Task ExportPrintersJsonAsync_IncludesLocationNameField()
     {
         // Arrange
-        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        Guid modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
-        var ip = GetNextIpAddress();
+        string ip = GetNextIpAddress();
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
@@ -490,8 +490,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
-        var json = Encoding.UTF8.GetString(jsonBytes);
+        byte[] jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
+        string json = Encoding.UTF8.GetString(jsonBytes);
 
         // Assert
         json.Should().Contain("\"locationName\"");
@@ -505,9 +505,9 @@ public class PrinterLocationImportTests : IAsyncLifetime
     private string GetNextIpAddress()
     {
         // Generate a truly random IP address using Guid bytes
-        var guidBytes = Guid.NewGuid().ToByteArray();
-        var byte3 = (guidBytes[0] % 200) + 20; // Range 20-219
-        var byte4 = (guidBytes[1] % 200) + 20; // Range 20-219
+        byte[] guidBytes = Guid.NewGuid().ToByteArray();
+        int byte3 = (guidBytes[0] % 200) + 20; // Range 20-219
+        int byte4 = (guidBytes[1] % 200) + 20; // Range 20-219
         return $"192.168.{byte3}.{byte4}";
     }
 
@@ -524,13 +524,13 @@ public class PrinterLocationImportTests : IAsyncLifetime
         lines.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName");
 
         // Generate unique IP addresses for test data (or use provided IP)
-        var ipIdx = 0;
-        foreach (var printer in printerData)
+        int ipIdx = 0;
+        foreach (dynamic printer in printerData)
         {
-            var name = printer.Name;
-            var location = printer.Location;
-            var ip = ipAddress ?? GetNextIpAddress();
-            var csvLine = $"\"{name}\",\"{ip}\",\"Moonraker\",\"7125\",\"80\",\"{manufacturerName}\",\"Ender3\",\"Test\",\"\",\"true\",\"\",\"\",\"\",\"{location}\"";
+            dynamic name = printer.Name;
+            dynamic location = printer.Location;
+            string ip = ipAddress ?? GetNextIpAddress();
+            string csvLine = $"\"{name}\",\"{ip}\",\"Moonraker\",\"7125\",\"80\",\"{manufacturerName}\",\"Ender3\",\"Test\",\"\",\"true\",\"\",\"\",\"\",\"{location}\"";
             lines.AppendLine(csvLine);
 
             // Only use provided IP for first printer, generate new ones for subsequent

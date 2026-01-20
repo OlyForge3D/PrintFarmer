@@ -9,10 +9,10 @@ namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
 /// Parser for OrcaSlicer printer condition expressions (compatible_printers_condition).
-/// 
+///
 /// Evaluates arbitrary boolean expressions with proper operator precedence:
 /// - Regex matching: property=~/pattern/
-/// - Equality: property==value or property[index]==value  
+/// - Equality: property==value or property[index]==value
 /// - Logical operators: and, or (AND has higher precedence than OR)
 /// - Properties: printer_notes (from Settings), nozzle_diameter
 ///
@@ -26,6 +26,8 @@ public static class PrinterExpressionParser
     /// Evaluates a compatible_printers_condition expression against available machines.
     /// Returns list of matching machine names, or null if expression cannot be evaluated.
     /// </summary>
+    /// <param name="condition">The compatible_printers_condition expression to evaluate.</param>
+    /// <param name="availableMachines">The list of available machine profiles to match against.</param>
     public static List<string>? EvaluateCondition(string condition, List<MachineProfileDto> availableMachines)
     {
         if (string.IsNullOrWhiteSpace(condition))
@@ -35,13 +37,13 @@ public static class PrinterExpressionParser
 
         try
         {
-            List<string> matchingMachines = new List<string>();
+            List<string> matchingMachines = [];
 
             foreach (MachineProfileDto machine in availableMachines)
             {
                 if (EvaluateExpression(condition, machine))
                 {
-                    matchingMachines.Add(machine.Name ?? "");
+                    matchingMachines.Add(machine.Name ?? string.Empty);
                 }
             }
 
@@ -70,29 +72,18 @@ public static class PrinterExpressionParser
     /// Recursive descent parser for boolean expressions with proper operator precedence.
     /// Precedence: comparison (highest) > AND > OR (lowest)
     /// </summary>
-    private class ExpressionParser
+    private class ExpressionParser(string expression, MachineProfileDto machine)
     {
-        private readonly string _expression;
-        private readonly MachineProfileDto _machine;
+        private readonly string _expression = expression;
+        private readonly MachineProfileDto _machine = machine;
         private int _position = 0;
-
-        public ExpressionParser(string expression, MachineProfileDto machine)
-        {
-            _expression = expression;
-            _machine = machine;
-        }
 
         public bool Parse()
         {
             SkipWhitespace();
             bool result = ParseOr();
             SkipWhitespace();
-            if (_position < _expression.Length)
-            {
-                throw new FormatException($"Unexpected characters at position {_position}");
-            }
-
-            return result;
+            return _position < _expression.Length ? throw new FormatException($"Unexpected characters at position {_position}") : result;
         }
 
         private bool ParseOr()
@@ -157,7 +148,7 @@ public static class PrinterExpressionParser
             throw new FormatException($"Invalid comparison at position {_position}");
         }
 
-        private (string property, int? index) ParseProperty()
+        private (string Property, int? Index) ParseProperty()
         {
             string property = ReadIdentifier();
             int? index = null;
@@ -184,6 +175,7 @@ public static class PrinterExpressionParser
             {
                 _ = pattern.Append(_expression[_position++]);
             }
+
             Consume('/');
             return pattern.ToString();
         }
@@ -201,18 +193,16 @@ public static class PrinterExpressionParser
                 {
                     _ = value.Append(_expression[_position++]);
                 }
+
                 Consume('"');
                 return value.ToString();
             }
 
             // Handle unquoted numbers or identifiers
             char? ch = Peek();
-            if (ch.HasValue && (char.IsDigit(ch.Value) || (ch == '-' && _position + 1 < _expression.Length && char.IsDigit(_expression[_position + 1]))))
-            {
-                return ReadNumber();
-            }
-
-            return ReadIdentifier();
+            return ch.HasValue && (char.IsDigit(ch.Value) || (ch == '-' && _position + 1 < _expression.Length && char.IsDigit(_expression[_position + 1])))
+                ? ReadNumber()
+                : ReadIdentifier();
         }
 
         private string ReadIdentifier()
@@ -222,6 +212,7 @@ public static class PrinterExpressionParser
             {
                 _ = id.Append(_expression[_position++]);
             }
+
             return id.ToString();
         }
 
@@ -237,6 +228,7 @@ public static class PrinterExpressionParser
             {
                 _ = num.Append(_expression[_position++]);
             }
+
             return num.ToString();
         }
 
@@ -384,12 +376,7 @@ public static class PrinterExpressionParser
 
         private static string? ExtractPrinterNotes(MachineProfileDto machine)
         {
-            if (machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes))
-            {
-                return notes?.ToString();
-            }
-
-            return null;
+            return machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes) ? notes?.ToString() : null;
         }
 
         private static string? ExtractNozzleDiameterFromName(string? machineName)
@@ -402,12 +389,7 @@ public static class PrinterExpressionParser
             // Look for pattern: space + number + optional decimal + space/end/nozzle
             // e.g., "Prusa MK4S 0.25 nozzle" → "0.25"
             Match match = Regex.Match(machineName, @"\s(\d+\.?\d*)\s*(nozzle|mm)?(\s|$)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                return match.Groups[1].Value;
-            }
-
-            return null;
+            return match.Success ? match.Groups[1].Value : null;
         }
     }
 }

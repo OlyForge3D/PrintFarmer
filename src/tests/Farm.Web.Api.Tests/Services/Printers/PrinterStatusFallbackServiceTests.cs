@@ -34,8 +34,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var expectedResult = new object();
+            Printer printer = CreateTestPrinter();
+            object expectedResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -44,7 +44,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithFallbackAsync(
+            object result = await service.ExecuteWithFallbackAsync(
                 printer, operation, TimeSpan.FromSeconds(5), () => new object());
 
             // Assert
@@ -58,8 +58,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var fallbackResult = new object();
+            Printer printer = CreateTestPrinter();
+            object fallbackResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -68,7 +68,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithFallbackAsync(
+            object result = await service.ExecuteWithFallbackAsync(
                 printer, operation, TimeSpan.FromMilliseconds(100), () => fallbackResult);
 
             // Assert
@@ -82,8 +82,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var fallbackResult = new object();
+            Printer printer = CreateTestPrinter();
+            object fallbackResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -92,7 +92,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithFallbackAsync(
+            object result = await service.ExecuteWithFallbackAsync(
                 printer, operation, TimeSpan.FromSeconds(5), () => fallbackResult);
 
             // Assert
@@ -121,7 +121,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
+            Printer printer = CreateTestPrinter();
 
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentNullException>(() =>
@@ -135,7 +135,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
+            Printer printer = CreateTestPrinter();
 
             Func<CancellationToken, Task<object>> operation = async ct => new object();
 
@@ -155,8 +155,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var circuitBreakerService = new CircuitBreakerService(loggerMock.Object);
             var service = new PrinterStatusFallbackService(circuitBreakerService, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var expectedResult = new object();
+            Printer printer = CreateTestPrinter();
+            object expectedResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -165,7 +165,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithCircuitBreakerAsync(
+            object result = await service.ExecuteWithCircuitBreakerAsync(
                 printer, "test-key", operation, TimeSpan.FromSeconds(5), () => expectedResult);
 
             // Assert
@@ -179,8 +179,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var circuitBreakerService = new CircuitBreakerService(loggerMock.Object);
             var service = new PrinterStatusFallbackService(circuitBreakerService, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var fallbackResult = new object();
+            Printer printer = CreateTestPrinter();
+            object fallbackResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -189,7 +189,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithCircuitBreakerAsync(
+            object result = await service.ExecuteWithCircuitBreakerAsync(
                 printer, "test-key", operation, TimeSpan.FromMilliseconds(100), () => fallbackResult);
 
             // Assert
@@ -203,8 +203,8 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var circuitBreakerService = new CircuitBreakerService(loggerMock.Object);
             var service = new PrinterStatusFallbackService(circuitBreakerService, loggerMock.Object);
-            var printer = CreateTestPrinter();
-            var fallbackResult = new object();
+            Printer printer = CreateTestPrinter();
+            object fallbackResult = new object();
 
             Func<CancellationToken, Task<object>> operation = async ct =>
             {
@@ -213,7 +213,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             };
 
             // Act
-            var result = await service.ExecuteWithCircuitBreakerAsync(
+            object result = await service.ExecuteWithCircuitBreakerAsync(
                 printer, "test-key", operation, TimeSpan.FromSeconds(5), () => fallbackResult);
 
             // Assert
@@ -242,7 +242,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
+            Printer printer = CreateTestPrinter();
 
             Func<CancellationToken, Task<object>> operation = async ct => new object();
 
@@ -258,7 +258,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
+            Printer printer = CreateTestPrinter();
 
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentNullException>(() =>
@@ -272,7 +272,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var cbMock = new Mock<ICircuitBreakerService>();
             var loggerMock = new Mock<IUnifiedLoggingService>();
             var service = new PrinterStatusFallbackService(cbMock.Object, loggerMock.Object);
-            var printer = CreateTestPrinter();
+            Printer printer = CreateTestPrinter();
 
             Func<CancellationToken, Task<object>> operation = async ct => new object();
 
@@ -294,7 +294,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var service = new PrinterStatusFallbackService(circuitBreakerService, loggerMock.Object);
 
             // Act
-            var isOpen = service.IsCircuitBreakerOpen("test-key");
+            bool isOpen = service.IsCircuitBreakerOpen("test-key");
 
             // Assert
             isOpen.Should().BeFalse();

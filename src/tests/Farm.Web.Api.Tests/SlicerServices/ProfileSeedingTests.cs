@@ -39,14 +39,14 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var result = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, options)!;
+        AllProfilesResponseDto result = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, options)!;
 
         // Assert
         result.Should().NotBeNull();
         result.ByHierarchy.Should().HaveCount(1);
         result.ByHierarchy.Should().ContainKey("Prusa");
 
-        var prusa = result.ByHierarchy["Prusa"];
+        ManufacturerProfilesDto prusa = result.ByHierarchy["Prusa"];
         prusa.Name.Should().Be("Prusa");
         prusa.Models.Should().HaveCount(1);
         prusa.Models.Should().ContainKey("Prusa_CORE_One");
@@ -56,7 +56,7 @@ public class ProfileSeedingTests
     public void ManufacturerMatching_IsCaseInsensitive()
     {
         // Arrange
-        var manufacturers = new[] { "Prusa", "Voron", "FlashForge" };
+        string[] manufacturers = new[] { "Prusa", "Voron", "FlashForge" };
         var hashSet = new HashSet<string>(manufacturers, StringComparer.OrdinalIgnoreCase);
 
         // Act & Assert
@@ -72,7 +72,7 @@ public class ProfileSeedingTests
     public void ModelMatching_IsCaseInsensitive()
     {
         // Arrange
-        var models = new[] { "Prusa MK4S", "Flashforge Speeder 400", "Voron 2.4" };
+        string[] models = new[] { "Prusa MK4S", "Flashforge Speeder 400", "Voron 2.4" };
         var hashSet = new HashSet<string>(models, StringComparer.OrdinalIgnoreCase);
 
         // Act & Assert
@@ -87,11 +87,11 @@ public class ProfileSeedingTests
     {
         // Arrange - Hierarchy from worker may have different casing than catalog
         var workerData = new Dictionary<string, string> { { "Flashforge", "Worker" }, { "flashforge", "Worker2" } };
-        var catalogManufacturers = new[] { "FlashForge", "Flashforge" };
+        string[] catalogManufacturers = new[] { "FlashForge", "Flashforge" };
         var catalogSet = new HashSet<string>(catalogManufacturers, StringComparer.OrdinalIgnoreCase);
 
         // Act & Assert
-        foreach (var key in workerData.Keys)
+        foreach (string key in workerData.Keys)
         {
             catalogSet.Contains(key).Should().BeTrue($"Manufacturer {key} should match catalog");
         }
@@ -114,7 +114,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
+        FilamentProfileDto profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -143,7 +143,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options)!;
+        ProcessProfileDto profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -167,7 +167,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options)!;
+        MachineProfileDto profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -179,11 +179,11 @@ public class ProfileSeedingTests
     public void HierarchyWithManyManufacturers_OnlyImportsMatchingCatalog()
     {
         // Arrange - Create a response with many manufacturers
-        var fullHierarchy = GenerateHierarchyJson();
+        string fullHierarchy = GenerateHierarchyJson();
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var response = JsonSerializer.Deserialize<AllProfilesResponseDto>(fullHierarchy, options)!;
+        AllProfilesResponseDto response = JsonSerializer.Deserialize<AllProfilesResponseDto>(fullHierarchy, options)!;
 
-        var catalogManufacturers = new[] { "Prusa", "Voron", "RatRig", "FlashForge", "Sovol" };
+        string[] catalogManufacturers = new[] { "Prusa", "Voron", "RatRig", "FlashForge", "Sovol" };
         var catalogSet = new HashSet<string>(catalogManufacturers, StringComparer.OrdinalIgnoreCase);
 
         // Act - Filter to catalog only
@@ -229,7 +229,7 @@ public class ProfileSeedingTests
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         var doc = JsonDocument.Parse(json);
-        var filaments = JsonSerializer.Deserialize<List<FilamentProfileDto>>(
+        List<FilamentProfileDto> filaments = JsonSerializer.Deserialize<List<FilamentProfileDto>>(
             JsonSerializer.Serialize(doc.RootElement.GetProperty("filamentProfiles")),
             options
         )!;
@@ -270,7 +270,7 @@ public class ProfileSeedingTests
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         var doc = JsonDocument.Parse(json);
-        var processes = JsonSerializer.Deserialize<List<ProcessProfileDto>>(
+        List<ProcessProfileDto> processes = JsonSerializer.Deserialize<List<ProcessProfileDto>>(
             JsonSerializer.Serialize(doc.RootElement.GetProperty("processProfiles")),
             options
         )!;
@@ -300,7 +300,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
+        FilamentProfileDto profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
 
         // Assert - Inherits property should be captured for inheritance resolution during seeding
         profile.Should().NotBeNull();
@@ -311,7 +311,7 @@ public class ProfileSeedingTests
     // Helper method to generate test data
     private string GenerateHierarchyJson()
     {
-        var manufacturerList = new[]
+        string[] manufacturerList = new[]
         {
             "Anycubic", "Artillery", "Anet", // Not in catalog
             "Bambu Lab", "Creality", // Not in catalog for this test
@@ -326,7 +326,7 @@ public class ProfileSeedingTests
             "Voxelab", "Wanhao"
         };
 
-        var manufacturers = string.Join(",\n", manufacturerList.Select(m =>
+        string manufacturers = string.Join(",\n", manufacturerList.Select(m =>
             $@"
         ""{m}"": {{
             ""name"": ""{m}"",

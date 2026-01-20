@@ -12,14 +12,9 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 /// <summary>
 /// EF Core implementation of ISliceJobRepository
 /// </summary>
-public class EfSliceJobRepository : ISliceJobRepository
+public class EfSliceJobRepository(AppDbContext db) : ISliceJobRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfSliceJobRepository(AppDbContext db)
-    {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
-    }
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {
@@ -158,6 +153,7 @@ public class EfSliceJobRepository : ISliceJobRepository
         job.EstimatedPrintTimeSeconds = estimatedPrintTimeSeconds;
         job.FilamentUsedGrams = filamentUsedGrams;
         job.ArtifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
+
         // Aggregate bytes from artifacts table
         if (ids.Length > 0)
         {
@@ -170,6 +166,7 @@ public class EfSliceJobRepository : ISliceJobRepository
             job.ArtifactsTotalBytes = 0;
             job.ArtifactsCount = 0;
         }
+
         job.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -243,6 +240,7 @@ public class EfSliceJobRepository : ISliceJobRepository
         {
             job.StartedAt = now;
         }
+
         job.UpdatedAt = now;
 
         await SaveChangesAsync(ct);
@@ -301,6 +299,7 @@ public class EfSliceJobRepository : ISliceJobRepository
         else
         {
             job.Status = SliceJobStatus.Queued;
+
             // bump queuedAt to now so it can be retried fairly
             job.QueuedAt = DateTime.UtcNow;
         }

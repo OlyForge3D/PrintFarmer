@@ -40,7 +40,9 @@ public class PrintersController(
     Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
     IValidator<CreatePrinterDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
-    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService)
+    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
+    Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
+    IHttpClientFactory httpClientFactory)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -50,13 +52,21 @@ public class PrintersController(
     private readonly IValidator<CreatePrinterDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+#pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
+#pragma warning disable S1144 // Unused private types or members should be removed
+#pragma warning disable CA1823 // Avoid unused private fields
+    private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
+#pragma warning restore CA1823 // Avoid unused private fields
+#pragma warning restore S1144 // Unused private types or members should be removed
+#pragma warning restore IDE0052
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
     /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>A lightweight list of all printers with their configured camera URLs</returns>
-    /// <response code="200">Returns the list of printers with camera URL information</response>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>A lightweight list of all printers with their configured camera URLs.</returns>
+    /// <response code="200">Returns the list of printers with camera URL information.</response>
     [HttpGet("camera-urls")]
     [ProducesResponseType(typeof(IEnumerable<PrinterCameraUrlsDto>), 200)]
     [ProducesResponseType(500)]
@@ -91,9 +101,9 @@ public class PrintersController(
     /// Retrieves backend capabilities for all printers.
     /// Indicates which features each backend (Moonraker, PrusaLink, etc.) supports.
     /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Backend capabilities for all printers</returns>
-    /// <response code="200">Returns backend capabilities for all printers</response>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Backend capabilities for all printers.</returns>
+    /// <response code="200">Returns backend capabilities for all printers.</response>
     [HttpGet("backend-capabilities")]
     [ProducesResponseType(typeof(IEnumerable<PrinterBackendCapabilitiesDto>), 200)]
     [ProducesResponseType(500)]
@@ -101,7 +111,7 @@ public class PrintersController(
     {
         try
         {
-            var capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
+            IEnumerable<PrinterBackendCapabilitiesDto> capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
             return Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -120,11 +130,11 @@ public class PrintersController(
     /// Retrieves backend capabilities for a specific printer.
     /// Indicates which features the printer's backend (Moonraker, PrusaLink, etc.) supports.
     /// </summary>
-    /// <param name="printerId">The ID of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Backend capabilities for the specified printer</returns>
-    /// <response code="200">Returns backend capabilities for the printer</response>
-    /// <response code="404">Printer not found</response>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Backend capabilities for the specified printer.</returns>
+    /// <response code="200">Returns backend capabilities for the printer.</response>
+    /// <response code="404">Printer not found.</response>
     [HttpGet("{printerId}/backend-capabilities")]
     [ProducesResponseType(typeof(PrinterBackendCapabilitiesDto), 200)]
     [ProducesResponseType(404)]
@@ -133,13 +143,8 @@ public class PrintersController(
     {
         try
         {
-            var capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
-            if (capabilities == null)
-            {
-                return NotFound($"Printer with ID {printerId} not found");
-            }
-
-            return Ok(capabilities);
+            PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
+            return capabilities == null ? NotFound($"Printer with ID {printerId} not found") : Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -154,13 +159,243 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Tests connectivity to a printer backend before adding the printer.
+    /// Validates that the provided URL and credentials can successfully connect to the printer.
+    /// </summary>
+    /// <param name="request">Connection test parameters including URL, backend type, and optional API key.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Connection test result with success status and optional message.</returns>
+    /// <response code="200">Connection test completed (check success field for result).</response>
+    /// <response code="400">Invalid request parameters.</response>
+    [HttpPost("test-connection")]
+    [ProducesResponseType(typeof(TestConnectionResponse), 200)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<TestConnectionResponse>> TestConnectionAsync(
+        [FromBody] TestConnectionRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.ServerUrl))
+        {
+            return BadRequest(new TestConnectionResponse { Success = false, Message = "Server URL is required" });
+        }
+
+        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
+        }
+
+        _logger.LogInformation($"Testing connection to {request.ServerUrl} with backend {request.Backend}");
+
+        try
+        {
+            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Connection test failed: {ex.Message}");
+            return Ok(new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"Connection failed: {ex.Message}"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Tests connection to a printer backend based on the backend type.
+    /// </summary>
+    private async Task<TestConnectionResponse> TestBackendConnectionAsync(
+        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+    {
+        using HttpClient httpClient = _httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+        return backend switch
+        {
+            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.SDCP => new TestConnectionResponse
+            {
+                Success = true,
+                Message = "SDCP uses UDP broadcast discovery. Manual connection test not available."
+            },
+            _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
+        };
+    }
+
+    /// <summary>
+    /// Tests Moonraker connection by hitting /printer/info endpoint.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, int backendPort, CancellationToken ct)
+    {
+        // Build URL with backend port (default 7125 for Moonraker API)
+        var builder = new UriBuilder(serverUrl)
+        {
+            Port = backendPort,
+            Path = "/printer/info"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+
+        try
+        {
+            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                string content = await response.Content.ReadAsStringAsync(ct);
+
+                // Moonraker responses are wrapped in "result"
+                if (content.Contains("\"result\"") || content.Contains("hostname"))
+                {
+                    return new TestConnectionResponse
+                    {
+                        Success = true,
+                        Message = "Successfully connected to Moonraker printer"
+                    };
+                }
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"Moonraker returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with API key.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers" };
+        }
+
+        var builder = new UriBuilder(serverUrl)
+        {
+            Path = "/api/v1/status"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        request.Headers.Add("X-Api-Key", apiKey);
+
+        try
+        {
+            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = true,
+                    Message = "Successfully connected to PrusaLink printer"
+                };
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "Invalid API key - authentication failed"
+                };
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"PrusaLink returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Tests OctoPrint connection by hitting /api/version endpoint with API key.
+    /// </summary>
+    private static async Task<TestConnectionResponse> TestOctoPrintConnectionAsync(
+        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new TestConnectionResponse { Success = false, Message = "API Key is required for OctoPrint printers" };
+        }
+
+        var builder = new UriBuilder(serverUrl)
+        {
+            Path = "/api/version"
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        request.Headers.Add("X-Api-Key", apiKey);
+
+        try
+        {
+            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = true,
+                    Message = "Successfully connected to OctoPrint server"
+                };
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "Invalid API key - authentication failed"
+                };
+            }
+
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"OctoPrint returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (HttpRequestException ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
     /// Retrieves a lightweight list of all printers with minimal data for quick loading.
     /// This is the default GET endpoint for the printers resource.
     /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <param name="includeDisabled">Return disabled printers as well (admin-only)</param>
-    /// <returns>A complete list of all printers with configuration and live status merged</returns>
-    /// <response code="200">Returns the list of complete printer data with live status</response>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
+    /// <returns>A complete list of all printers with configuration and live status merged.</returns>
+    /// <response code="200">Returns the list of complete printer data with live status.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
     [ProducesResponseType(500)]
@@ -199,13 +434,13 @@ public class PrintersController(
     /// <summary>
     /// Creates multiple printers in a bulk operation.
     /// </summary>
-    /// <param name="printers">Array of printer configurations to create</param>
-    /// <param name="duplicateHandling">How to handle duplicate printers: 'skip' (default), 'overwrite', or 'error'</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result of bulk import operation including created printers and errors</returns>
-    /// <response code="200">Returns bulk import results with created printers and any errors</response>
-    /// <response code="400">If the printer data is invalid</response>
-    /// <response code="500">If there was an error creating printers</response>
+    /// <param name="printers">Array of printer configurations to create.</param>
+    /// <param name="duplicateHandling">How to handle duplicate printers: 'skip' (default), 'overwrite', or 'error'.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result of bulk import operation including created printers and errors.</returns>
+    /// <response code="200">Returns bulk import results with created printers and any errors.</response>
+    /// <response code="400">If the printer data is invalid.</response>
+    /// <response code="500">If there was an error creating printers.</response>
     [HttpPost("bulk")]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
@@ -262,13 +497,13 @@ public class PrintersController(
     /// <summary>
     /// Imports printers from an uploaded CSV or JSON file with optional duplicate handling.
     /// </summary>
-    /// <param name="file">The CSV or JSON file containing printer configurations</param>
-    /// <param name="duplicateHandling">How to handle duplicates: 'skip' (default), 'overwrite', or 'error'</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result of import operation including created printers and any errors</returns>
-    /// <response code="200">Returns import results with created printers and errors</response>
-    /// <response code="400">If the file is invalid or missing</response>
-    /// <response code="500">If there was an error importing printers</response>
+    /// <param name="file">The CSV or JSON file containing printer configurations.</param>
+    /// <param name="duplicateHandling">How to handle duplicates: 'skip' (default), 'overwrite', or 'error'.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result of import operation including created printers and any errors.</returns>
+    /// <response code="200">Returns import results with created printers and errors.</response>
+    /// <response code="400">If the file is invalid or missing.</response>
+    /// <response code="500">If there was an error importing printers.</response>
     [HttpPost("import")]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
@@ -290,7 +525,8 @@ public class PrintersController(
             return BadRequest(new { message = "File must be CSV or JSON format" });
         }
 
-        if (file.Length > 10 * 1024 * 1024) // 10MB limit
+        // 10MB limit
+        if (file.Length > 10 * 1024 * 1024)
         {
             return BadRequest(new { message = "File is too large (max 10MB)" });
         }
@@ -298,7 +534,7 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
-            using (var stream = file.OpenReadStream())
+            using (Stream stream = file.OpenReadStream())
             {
                 object result = await _printersService.ImportFromStreamAsync(stream, file.FileName, duplicateHandling ?? "skip", ct);
                 _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
@@ -329,12 +565,12 @@ public class PrintersController(
     /// <summary>
     /// Gets the current print job status for a specific printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The current print job status if a job is running, otherwise null</returns>
-    /// <response code="200">Returns the print job status or null if no job running</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error retrieving job status</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The current print job status if a job is running, otherwise null.</returns>
+    /// <response code="200">Returns the print job status or null if no job running.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error retrieving job status.</response>
     [HttpGet("{id:guid}/printjob")]
     [ProducesResponseType(typeof(PrintJobStatusDto), 200)]
     [ProducesResponseType(404)]
@@ -383,12 +619,12 @@ public class PrintersController(
     /// <summary>
     /// Gets the current status of a specific printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The current status of the specified printer including print progress, temperatures, and position</returns>
-    /// <response code="200">Returns the printer's current status</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error communicating with the printer</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The current status of the specified printer including print progress, temperatures, and position.</returns>
+    /// <response code="200">Returns the printer's current status.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error communicating with the printer.</response>
     [HttpGet("{id:guid}/status")]
     [ProducesResponseType(typeof(PrinterStatusDto), 200)]
     [ProducesResponseType(404)]
@@ -414,11 +650,11 @@ public class PrintersController(
     /// <summary>
     /// Gets basic information about a specific printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Basic printer information including name, backend, connection status, and current state</returns>
-    /// <response code="200">Returns basic printer information</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Basic printer information including name, backend, connection status, and current state.</returns>
+    /// <response code="200">Returns basic printer information.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}", Name = "GetPrinterById")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -444,11 +680,11 @@ public class PrintersController(
     /// <summary>
     /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings</returns>
-    /// <response code="200">Returns detailed printer information</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings.</returns>
+    /// <response code="200">Returns detailed printer information.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(PrinterDetailsDto), 200)]
     [ProducesResponseType(404)]
@@ -461,13 +697,17 @@ public class PrintersController(
             return NotFound();
         }
 
+        // Get primary toolhead for capabilities DTO (backward compatibility)
+        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
+
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
+        // This provides backward compatibility while we transition to using Toolheads directly
         PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
             Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
             p.Id,
             p.Name,
-            null, // NozzleDiameter - now per-Toolhead, not printer-wide
-            null, // SupportedMaterials - now per-Toolhead, not printer-wide
+            primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
+            primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
             p.MaxBuildVolumeY,
             p.MaxBuildVolumeZ,
@@ -476,13 +716,36 @@ public class PrintersController(
             p.MultiMaterial,
             p.SupportsAutoLeveling,
             p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
-            null, // MaxHotendTemp - now per-Toolhead
+            primaryToolhead?.MaxHotendTemp,
             p.MaxBedTemp,
+            p.MaxPrintSpeed,
             p.CurrentMaterial,
             p.CurrentSpoolId,
             p.IsAvailable,
-            p.LastCapabilityUpdate
-        );
+            p.LastCapabilityUpdate);
+
+        // Map toolheads to DTOs with hardware tracking fields
+        ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(
+            t.Id,
+            t.Name,
+            t.Index,
+            t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
+            t.MaxHotendTemp,
+            t.MaxFlowRate,
+            t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+
+            // Component model references - nozzle diameter comes from NozzleModel.Diameter
+            t.HotendModelId,
+            t.HotendModel?.Name,
+            t.ExtruderModelId,
+            t.ExtruderModel?.Name,
+            t.ToolheadModelDefId,
+            t.ToolheadModelDef?.Name,
+            t.NozzleModelId,
+            t.NozzleModel?.Name,
+            t.SupportedMaterials,
+            t.IsPrimary,
+            t.UpdatedAt)).ToArray();
 
         return new PrinterDetailsDto(
             p.Id,
@@ -500,26 +763,26 @@ public class PrintersController(
             p.DateAcquired,
             (PrinterBackend)p.Backend,
             p.ApiKey,
-            null, // CameraStreamUrl (not available here)
-            null, // CameraSnapshotUrl (not available here)
+            p.CameraStreamUrl,
+            p.CameraSnapshotUrl,
             p.OriginalServerUrl,
             p.IpAddress,
             p.BackendPort,
             p.FrontendPort,
-            capabilitiesDto
-        );
+            capabilitiesDto,
+            toolheadDtos);
     }
 
     /// <summary>
     /// Creates a new printer configuration.
     /// </summary>
-    /// <param name="dto">The printer data transfer object containing printer details</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The created printer with its assigned unique identifier</returns>
-    /// <response code="201">Returns the newly created printer</response>
-    /// <response code="400">If the printer data is invalid or validation fails</response>
-    /// <response code="409">If a printer with the same name and URL already exists</response>
-    /// <response code="500">If there was an error creating the printer</response>
+    /// <param name="dto">The printer data transfer object containing printer details.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The created printer with its assigned unique identifier.</returns>
+    /// <response code="201">Returns the newly created printer.</response>
+    /// <response code="400">If the printer data is invalid or validation fails.</response>
+    /// <response code="409">If a printer with the same name and URL already exists.</response>
+    /// <response code="500">If there was an error creating the printer.</response>
     [HttpPost]
     [ProducesResponseType(typeof(PrinterDto), 201)]
     [ProducesResponseType(400)]
@@ -528,6 +791,7 @@ public class PrintersController(
     public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
+
         // Validate input using FluentValidation
         ValidationResult validationResult = await _validator.ValidateAsync(dto, ct);
         if (!validationResult.IsValid)
@@ -553,12 +817,12 @@ public class PrintersController(
     /// Register printers discovered by the network discovery service.
     /// Accepts both single printers and arrays for backward compatibility.
     /// </summary>
-    /// <param name="discoveredPrinters">Discovered printer(s) to register</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>List of registered printers</returns>
-    /// <response code="200">Successfully registered discovered printer(s)</response>
-    /// <response code="400">Invalid printer data</response>
-    /// <response code="500">Server error</response>
+    /// <param name="discoveredPrinters">Discovered printer(s) to register.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of registered printers.</returns>
+    /// <response code="200">Successfully registered discovered printer(s).</response>
+    /// <response code="400">Invalid printer data.</response>
+    /// <response code="500">Server error.</response>
     [HttpPost("discovered")]
     [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
     [ProducesResponseType(400)]
@@ -618,7 +882,7 @@ public class PrintersController(
             return BadRequest("No valid printers provided");
         }
 
-        List<PrinterDto> registered = new List<PrinterDto>();
+        List<PrinterDto> registered = [];
 
         foreach (DiscoveredPrinterDto discovered in printers)
         {
@@ -639,6 +903,7 @@ public class PrintersController(
                     {
                         registered.Add(existingDto);
                     }
+
                     continue;
                 }
 
@@ -662,6 +927,7 @@ public class PrintersController(
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Name}");
+
                 // Continue with next printer on error
             }
         }
@@ -672,13 +938,13 @@ public class PrintersController(
     /// <summary>
     /// Sets the maintenance mode for a printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="inMaintenance">True to enable maintenance mode, false to disable</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The updated printer DTO</returns>
-    /// <response code="200">Returns the updated printer</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error updating the printer</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="inMaintenance">True to enable maintenance mode, false to disable.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The updated printer DTO.</returns>
+    /// <response code="200">Returns the updated printer.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error updating the printer.</response>
     [HttpPut("{id:guid}/maintenance")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -690,6 +956,7 @@ public class PrintersController(
         {
             return NotFound();
         }
+
         printer.InMaintenance = inMaintenance;
         await _printersService.SaveChangesAsync(ct);
 
@@ -701,11 +968,13 @@ public class PrintersController(
             ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(printer.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
+
         if (printer.ModelId != Guid.Empty)
         {
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
             modelName = mod?.Name;
         }
+
         PrinterDto dto = new(
             Id: printer.Id,
             Name: printer.Name,
@@ -733,8 +1002,7 @@ public class PrintersController(
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
-            FrontendUrl: printer.FrontendUrl
-        );
+            FrontendUrl: printer.FrontendUrl);
         return Ok(dto);
     }
 
@@ -742,12 +1010,12 @@ public class PrintersController(
     /// Refreshes camera URLs for a printer by querying the backend API.
     /// Use this to update camera configuration after adding or modifying cameras on a printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The updated printer DTO with refreshed camera URLs</returns>
-    /// <response code="200">Returns the updated printer with camera URLs</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error refreshing camera URLs</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The updated printer DTO with refreshed camera URLs.</returns>
+    /// <response code="200">Returns the updated printer with camera URLs.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error refreshing camera URLs.</response>
     [HttpPost("{id:guid}/refresh-cameras")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -757,11 +1025,7 @@ public class PrintersController(
         try
         {
             PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
-            if (result == null)
-            {
-                return NotFound();
-            }
-            return Ok(result);
+            return result == null ? NotFound() : Ok(result);
         }
         catch (Exception ex)
         {
@@ -771,16 +1035,103 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Applies template defaults from the printer's associated model.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the PrinterModel template to the printer, overwriting existing values.
+    /// Useful for backfilling data on existing printers that were created before template support.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The updated printer with applied template values.</returns>
+    /// <response code="200">Template applied successfully.</response>
+    /// <response code="404">If the printer was not found.</response>
+    /// <response code="500">If there was an error applying the template.</response>
+    [HttpPost("{id:guid}/apply-template")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> ApplyModelTemplateAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            // Use FindByIdForTemplateUpdateAsync to get printer with Toolheads and tracking enabled
+            Printer? printer = await _printersService.FindByIdForTemplateUpdateAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound();
+            }
+
+            bool updated = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, ct);
+
+            if (updated)
+            {
+                await _printersService.SaveChangesAsync(ct);
+            }
+
+            PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct) ?? throw new InvalidOperationException("Printer not found after update");
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to apply model template for printer {id}");
+            return StatusCode(500, "Failed to apply model template");
+        }
+    }
+
+    /// <summary>
+    /// Applies template defaults from printer models to all printers.
+    /// Overwrites existing values with template defaults.
+    /// Useful for backfilling data on existing printers that were created before template support.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Summary of how many printers were updated.</returns>
+    /// <response code="200">Templates applied successfully.</response>
+    /// <response code="500">If there was an error applying templates.</response>
+    [HttpPost("apply-templates")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> ApplyModelTemplatesToAllAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Use GetAllForTemplateUpdateAsync to get printers with Toolheads and tracking enabled
+            List<Printer> allPrinters = await _printersService.GetAllForTemplateUpdateAsync(ct);
+            int updatedCount = 0;
+            int totalCount = 0;
+
+            foreach (Printer printer in allPrinters)
+            {
+                totalCount++;
+                bool updated = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, ct);
+                if (updated)
+                {
+                    updatedCount++;
+                }
+            }
+
+            await _printersService.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"Applied model templates to {updatedCount}/{totalCount} printers");
+            return Ok(new { updated = updatedCount, total = totalCount, message = $"Applied templates to {updatedCount} printers" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply model templates to all printers");
+            return StatusCode(500, "Failed to apply model templates");
+        }
+    }
+
+    /// <summary>
     /// Updates an existing printer configuration.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer to update</param>
-    /// <param name="dto">The updated printer data</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The updated printer</returns>
-    /// <response code="200">Returns the updated printer</response>
-    /// <response code="400">If the update data is invalid</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error updating the printer</response>
+    /// <param name="id">The unique identifier of the printer to update.</param>
+    /// <param name="dto">The updated printer data.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The updated printer.</returns>
+    /// <response code="200">Returns the updated printer.</response>
+    /// <response code="400">If the update data is invalid.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error updating the printer.</response>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -789,29 +1140,33 @@ public class PrintersController(
     public async Task<ActionResult<PrinterDto>> UpdateAsync(Guid id, [FromBody] UpdatePrinterDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        Printer? p = await _printersService.FindByIdAsync(id, ct);
+
+        // Use FindByIdForTemplateUpdateAsync to load printer with Toolheads for updating
+        Printer? p = await _printersService.FindByIdForTemplateUpdateAsync(id, ct);
         if (p is null)
         {
             return NotFound();
         }
+
         // resolve or create manufacturer/model
         Guid manufacturerId = dto.ManufacturerId ?? p.ManufacturerId;
         if (dto.ManufacturerId is null && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             string name = dto.NewManufacturerName!.Trim();
+
             // ICatalogRepository does not expose GetManufacturerByName; create via CatalogService
-            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
+            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, null, null, ct);
             manufacturerId = created.Id;
         }
 
         Guid modelId = dto.ModelId ?? p.ModelId;
-        if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId != Guid.Empty)
+        if (dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
             CreateModelRequest createReq = new CreateModelRequest(
                 ManufacturerId: manufacturerId,
                 Name: mname,
-                Type: null,
+                MotionType: null,
                 MaxX: null,
                 MaxY: null,
                 MaxZ: null,
@@ -831,8 +1186,10 @@ public class PrintersController(
                 {
                     throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
                 }
+
                 manufacturerId = unknownMfgId.Value;
             }
+
             if (modelId == Guid.Empty)
             {
                 Guid? unknownModelId = await _catalogRepository.GetUnknownModelIdAsync(ct);
@@ -840,6 +1197,7 @@ public class PrintersController(
                 {
                     throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
                 }
+
                 modelId = unknownModelId.Value;
             }
         }
@@ -861,6 +1219,9 @@ public class PrintersController(
             p.IpAddress = resolveResp.ResolvedIp;
         }
 
+        // Track if model changed for template application
+        bool modelChanged = modelId != p.ModelId;
+
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -870,6 +1231,12 @@ public class PrintersController(
         if (dto.Backend.HasValue)
         {
             p.Backend = (int)dto.Backend.Value;
+        }
+
+        // If model changed, apply template defaults from the new model (don't overwrite user-customized values)
+        if (modelChanged)
+        {
+            await _printersService.ApplyModelTemplateAsync(p, forceOverwrite: false, ct);
         }
 
         if (dto.ApiKey != null)
@@ -882,6 +1249,7 @@ public class PrintersController(
         {
             p.BackendPort = dto.BackendPort.Value;
         }
+
         if (dto.FrontendPort.HasValue)
         {
             p.FrontendPort = dto.FrontendPort.Value;
@@ -903,17 +1271,54 @@ public class PrintersController(
         p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
 
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
+        p.MaxPrintSpeed = dto.MaxPrintSpeed ?? p.MaxPrintSpeed;
         p.LastCapabilityUpdate = DateTime.UtcNow;
 
-        // Update primary toolhead specs if provided
-        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
-        if (primaryToolhead != null)
+        // Update toolheads if provided
+        if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
         {
-            primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
-            primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+            foreach (UpdateToolheadDto toolheadDto in dto.Toolheads)
+            {
+                Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Id == toolheadDto.Id);
+                if (toolhead != null)
+                {
+                    toolhead.Name = toolheadDto.Name ?? toolhead.Name;
+                    if (toolheadDto.Index.HasValue)
+                    {
+                        toolhead.Index = toolheadDto.Index.Value;
+                    }
 
-            primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
-            primaryToolhead.UpdatedAt = DateTime.UtcNow;
+                    // Nozzle diameter is derived from NozzleModel, update NozzleModelId instead
+                    toolhead.MaxHotendTemp = toolheadDto.MaxHotendTemp ?? toolhead.MaxHotendTemp;
+                    toolhead.MaxFlowRate = toolheadDto.MaxFlowRate ?? toolhead.MaxFlowRate;
+                    toolhead.ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : toolhead.ToolheadType;
+
+                    // Component model references
+                    toolhead.HotendModelId = toolheadDto.HotendModelId ?? toolhead.HotendModelId;
+                    toolhead.ExtruderModelId = toolheadDto.ExtruderModelId ?? toolhead.ExtruderModelId;
+                    toolhead.ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? toolhead.ToolheadModelDefId;
+                    toolhead.NozzleModelId = toolheadDto.NozzleModelId ?? toolhead.NozzleModelId;
+                    toolhead.SupportedMaterials = toolheadDto.SupportedMaterials ?? toolhead.SupportedMaterials;
+                    if (toolheadDto.IsPrimary.HasValue)
+                    {
+                        toolhead.IsPrimary = toolheadDto.IsPrimary.Value;
+                    }
+
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
+        else
+        {
+            // Legacy: Update primary toolhead specs if no explicit toolheads array provided
+            Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
+            if (primaryToolhead != null)
+            {
+                // Nozzle diameter is derived from NozzleModel, can't update directly
+                primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+                primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
+                primaryToolhead.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         // Build updated manufacturer/model names
@@ -924,6 +1329,7 @@ public class PrintersController(
             ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(p.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
+
         if (p.ModelId != Guid.Empty)
         {
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
@@ -960,8 +1366,7 @@ public class PrintersController(
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
-            FrontendUrl: p.FrontendUrl
-        );
+            FrontendUrl: p.FrontendUrl);
 
         return Ok(dtoResponse);
     }
@@ -969,12 +1374,12 @@ public class PrintersController(
     /// <summary>
     /// Resolves a hostname to an IP address for printer configuration.
     /// </summary>
-    /// <param name="body">The hostname resolution request containing the server URL and backend type</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The resolved IP address and normalized URL</returns>
-    /// <response code="200">Returns the resolved hostname information</response>
-    /// <response code="400">If the hostname resolution fails or URL is invalid</response>
-    /// <response code="500">If there was an error during hostname resolution</response>
+    /// <param name="body">The hostname resolution request containing the server URL and backend type.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The resolved IP address and normalized URL.</returns>
+    /// <response code="200">Returns the resolved hostname information.</response>
+    /// <response code="400">If the hostname resolution fails or URL is invalid.</response>
+    /// <response code="500">If there was an error during hostname resolution.</response>
     [HttpPost("resolve")]
     [ProducesResponseType(typeof(ResolveHostnameResponse), 200)]
     [ProducesResponseType(400)]
@@ -985,6 +1390,7 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         // Delegate hostname normalization and resolution to the service
         try
         {
@@ -1000,13 +1406,13 @@ public class PrintersController(
     /// <summary>
     /// Gets the default capabilities for a printer model.
     /// </summary>
-    /// <param name="modelId">The unique identifier of the printer model</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Default printer capabilities based on the model</returns>
-    /// <response code="200">Returns the default capabilities for the model</response>
-    /// <response code="404">If the model with the specified ID was not found</response>
-    /// <response code="204">If no default capabilities are available for the model</response>
-    /// <response code="500">If there was an error retrieving the capabilities</response>
+    /// <param name="modelId">The unique identifier of the printer model.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Default printer capabilities based on the model.</returns>
+    /// <response code="200">Returns the default capabilities for the model.</response>
+    /// <response code="404">If the model with the specified ID was not found.</response>
+    /// <response code="204">If no default capabilities are available for the model.</response>
+    /// <response code="500">If there was an error retrieving the capabilities.</response>
     [HttpGet("model/{modelId:guid}/default-capabilities")]
     [ProducesResponseType(typeof(PrinterCapabilitiesDto), 200)]
     [ProducesResponseType(404)]
@@ -1023,11 +1429,16 @@ public class PrintersController(
 
         // Map modelDto to a lightweight shape consistent with previous behavior
         // Note: modelDto contains ManufacturerName, SupportedFilamentTypes and capability fields
-
+        // Nozzle diameter and max hotend temp are now on toolheads
         try
         {
+            // Get nozzle diameter and max hotend temp from the primary toolhead (or first toolhead)
+            PrinterModelToolheadDto? primaryToolhead = modelDto.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelDto.Toolheads?.FirstOrDefault();
+            double? nozzleDiameter = primaryToolhead?.NozzleDiameter;
+            int? maxHotendTemp = primaryToolhead?.MaxHotendTemp;
+
             bool hasCapabilityData = modelDto.MaxX.HasValue || modelDto.MaxY.HasValue || modelDto.MaxZ.HasValue ||
-                                     modelDto.DefaultNozzleDiameter.HasValue || modelDto.MaxHotendTemp.HasValue ||
+                                     nozzleDiameter.HasValue || maxHotendTemp.HasValue ||
                                      modelDto.MaxBedTemp.HasValue || (modelDto.SupportedFilamentTypes != null && modelDto.SupportedFilamentTypes.Length > 0);
 
             if (!hasCapabilityData)
@@ -1039,8 +1450,8 @@ public class PrintersController(
                 Id: Guid.Empty,
                 PrinterId: Guid.Empty,
                 PrinterName: modelDto.Name,
-                NozzleDiameter: modelDto.DefaultNozzleDiameter,
-                    SupportedMaterials: modelDto.SupportedFilamentTypes ?? Array.Empty<string>(),
+                NozzleDiameter: nozzleDiameter,
+                SupportedMaterials: modelDto.SupportedFilamentTypes ?? Array.Empty<string>(),
                 MaxBuildVolumeX: modelDto.MaxX,
                 MaxBuildVolumeY: modelDto.MaxY,
                 MaxBuildVolumeZ: modelDto.MaxZ,
@@ -1048,13 +1459,12 @@ public class PrintersController(
                 HasEnclosure: modelDto.HasEnclosure,
                 MultiMaterial: modelDto.MultiMaterial,
                 NumberOfExtruders: modelDto.NumberOfExtruders,
-                MaxHotendTemp: modelDto.MaxHotendTemp,
+                MaxHotendTemp: maxHotendTemp,
                 MaxBedTemp: modelDto.MaxBedTemp,
                 CurrentMaterial: null,
                 CurrentSpoolId: null,
                 IsAvailable: true,
-                LastUpdated: DateTime.UtcNow
-            );
+                LastUpdated: DateTime.UtcNow);
 
             return Ok(dto);
         }
@@ -1068,12 +1478,12 @@ public class PrintersController(
     /// <summary>
     /// Deletes a printer configuration.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer to delete</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>No content if successful</returns>
-    /// <response code="204">If the printer was successfully deleted</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error deleting the printer</response>
+    /// <param name="id">The unique identifier of the printer to delete.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>No content if successful.</returns>
+    /// <response code="204">If the printer was successfully deleted.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error deleting the printer.</response>
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -1085,6 +1495,7 @@ public class PrintersController(
         {
             return NotFound();
         }
+
         await _printersService.RemoveAsync(p, ct);
         return NoContent();
     }
@@ -1092,12 +1503,12 @@ public class PrintersController(
     /// <summary>
     /// Gets a camera snapshot image from the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>The camera snapshot as an image file</returns>
-    /// <response code="200">Returns the snapshot image</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="503">If the camera is not available or configured</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The camera snapshot as an image file.</returns>
+    /// <response code="200">Returns the snapshot image.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="503">If the camera is not available or configured.</response>
     [HttpGet("{id:guid}/snapshot")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(404)]
@@ -1112,12 +1523,12 @@ public class PrintersController(
     /// <summary>
     /// Homes all axes (X, Y, Z) of the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the homing operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the homing command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the homing operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1125,22 +1536,18 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.SendHomeAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Homes the X and Y axes of the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the homing operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the homing command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the homing operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1148,22 +1555,18 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeXYAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Homes the Z axis of the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the Z-axis homing operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the homing command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the Z-axis homing operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1171,11 +1574,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.HomeZAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/temps")]
@@ -1189,12 +1588,9 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/move")]
@@ -1208,12 +1604,9 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/moveto")]
@@ -1227,12 +1620,9 @@ public class PrintersController(
         {
             return BadRequest("Request body is required.");
         }
+
         bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/pause")]
@@ -1242,11 +1632,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.PauseAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/resume")]
@@ -1256,11 +1642,7 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.ResumeAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     [HttpPost("{id:guid}/emergency-stop")]
@@ -1270,22 +1652,18 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.EmergencyStopAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Stops the print on the specified printer (alias for emergency-stop for frontend compatibility).
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the stop operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the stop command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the stop operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the stop command.</response>
     /// <remarks>
     /// This endpoint is an alias for /emergency-stop provided for frontend compatibility.
     /// Both endpoints execute the same emergency-stop operation.
@@ -1303,12 +1681,12 @@ public class PrintersController(
     /// <summary>
     /// Restarts the firmware/MCU of the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the firmware restart operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the restart command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the firmware restart operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the restart command.</response>
     /// <remarks>
     /// Restarts the printer's firmware/MCU without a full power cycle.
     /// This operation is typically used to recover from firmware issues.
@@ -1320,22 +1698,18 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.FirmwareRestartAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Disables the stepper motors of the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the disable motors operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error executing the disable motors command</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the disable motors operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error executing the disable motors command.</response>
     /// <remarks>
     /// Disables all stepper motors, allowing manual movement of printer axes.
     /// Motors will remain disabled until explicitly re-enabled via homing or other operations.
@@ -1347,23 +1721,20 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableMotorsAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     // Camera control endpoints
+
     /// <summary>
     /// Enables camera functionality on the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the enable camera operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error enabling the camera</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the enable camera operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error enabling the camera.</response>
     /// <remarks>
     /// Enables camera streaming and snapshot functionality on the printer.
     /// Camera must be physically connected and configured in the printer backend for this to work.
@@ -1375,22 +1746,18 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.EnableCameraAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Disables camera functionality on the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Result indicating success or failure of the disable camera operation</returns>
-    /// <response code="200">Returns the command execution result</response>
-    /// <response code="404">If the printer with the specified ID was not found</response>
-    /// <response code="500">If there was an error disabling the camera</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the disable camera operation.</returns>
+    /// <response code="200">Returns the command execution result.</response>
+    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="500">If there was an error disabling the camera.</response>
     /// <remarks>
     /// Disables camera streaming and snapshot functionality on the printer.
     /// Can be used to reduce network load or disable camera access temporarily.
@@ -1402,21 +1769,17 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableCameraAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
+        return !ok ? NotFound() : new CommandResult(true, null);
     }
 
     /// <summary>
     /// Retrieves the camera stream and snapshot URLs for the specified printer.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported)</returns>
-    /// <response code="200">Returns the camera URLs</response>
-    /// <response code="404">If the printer with the specified ID was not found or camera is not available</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported).</returns>
+    /// <response code="200">Returns the camera URLs.</response>
+    /// <response code="404">If the printer with the specified ID was not found or camera is not available.</response>
     /// <remarks>
     /// Returns the URLs for live camera streaming and snapshot capture.
     /// Either or both URLs may be null depending on printer capabilities and configuration.
@@ -1428,11 +1791,7 @@ public class PrintersController(
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
-        if (streamUrl == null && snapshotUrl == null)
-        {
-            return NotFound();
-        }
-        return new CameraUrlResult(streamUrl, snapshotUrl);
+        return streamUrl == null && snapshotUrl == null ? NotFound() : new CameraUrlResult(streamUrl, snapshotUrl);
     }
 
     [HttpPost("{id:guid}/files/upload")]
@@ -1457,12 +1816,7 @@ public class PrintersController(
             await using Stream fileStream = file.OpenReadStream();
             bool success = await _printersService.UploadGcodeAsync(id, file.FileName, fileStream, ct);
 
-            if (!success)
-            {
-                return NotFound();
-            }
-
-            return Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
+            return !success ? NotFound() : Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
         }
         catch (Exception ex)
         {
@@ -1492,16 +1846,16 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Downloads a file from a printer's storage
+    /// Downloads a file from a printer's storage.
     /// </summary>
-    /// <param name="id">Printer ID</param>
-    /// <param name="filename">The filename to download (filename query parameter)</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>File content</returns>
-    /// <response code="200">File content</response>
-    /// <response code="400">Invalid filename</response>
-    /// <response code="404">Printer or file not found</response>
-    /// <response code="500">Download failed</response>
+    /// <param name="id">Printer ID.</param>
+    /// <param name="filename">The filename to download (filename query parameter).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The requested file as a binary stream with appropriate content type.</returns>
+    /// <response code="200">Returns the file content as a downloadable attachment.</response>
+    /// <response code="400">The filename query parameter is missing or empty.</response>
+    /// <response code="404">The printer with the specified ID was not found, or the file does not exist on the printer.</response>
+    /// <response code="500">An error occurred while downloading the file from the printer.</response>
     [HttpGet("{id:guid}/files/download")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1558,11 +1912,9 @@ public class PrintersController(
         try
         {
             bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
-            if (!success)
-            {
-                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
-            }
-            return Ok(new CommandResult(true, "Print started successfully"));
+            return !success
+                ? Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"))
+                : Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
@@ -1583,11 +1935,9 @@ public class PrintersController(
         try
         {
             bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
-            if (!success)
-            {
-                return Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"));
-            }
-            return Ok(new CommandResult(true, "File deleted successfully"));
+            return !success
+                ? Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"))
+                : Ok(new CommandResult(true, "File deleted successfully"));
         }
         catch (Exception ex)
         {
@@ -1596,7 +1946,6 @@ public class PrintersController(
     }
 
     // ===== HISTORY ENDPOINTS =====
-
     [HttpGet("{id}/history")]
     [ProducesResponseType(typeof(HistoryListResponse), 200)]
     [ProducesResponseType(404)]
@@ -1725,6 +2074,8 @@ public class PrintersController(
     /// Accepts an array of printer IDs in the request body. If no IDs are provided,
     /// all printers will be exported. Returns JSON array of printers with capability objects.
     /// </summary>
+    /// <param name="ids">Optional array of printer IDs to export; if null, exports all printers.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("export")]
     [ProducesResponseType(typeof(PrinterWithCapabilitiesDto[]), 200)]
     [ProducesResponseType(500)]
@@ -1747,6 +2098,9 @@ public class PrintersController(
     /// Streams an export file (CSV or JSON) for the selected printer IDs. This avoids building
     /// the entire payload in memory for large fleets. Query param 'format' may be 'csv' or 'json'.
     /// </summary>
+    /// <param name="ids">Optional array of printer IDs to export; if null, exports all printers.</param>
+    /// <param name="format">Export format: 'csv' (default) or 'json'.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("export/file")]
     [ProducesResponseType(200)]
     [ProducesResponseType(500)]
@@ -1787,7 +2141,6 @@ public class PrintersController(
     // Export helpers moved to PrintersService
 
     // Thumbnail extraction delegated to PrintersService
-
     [HttpGet("test")]
     [ProducesResponseType(typeof(object), 200)]
     public IActionResult SimpleTest()
@@ -1802,12 +2155,12 @@ public class PrintersController(
     /// Gets the current configuration for a specific printer.
     /// Returns all editable printer properties including API key, camera URLs, maintenance mode, etc.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Printer configuration details</returns>
-    /// <response code="200">Returns the printer configuration</response>
-    /// <response code="404">If the printer does not exist</response>
-    /// <response code="500">If there was an error retrieving the configuration</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Printer configuration details.</returns>
+    /// <response code="200">Returns the printer configuration.</response>
+    /// <response code="404">If the printer does not exist.</response>
+    /// <response code="500">If there was an error retrieving the configuration.</response>
     [HttpGet("{id:guid}/config")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
@@ -1863,14 +2216,14 @@ public class PrintersController(
     /// Updates the configuration for a specific printer.
     /// Allows updating API key, camera URLs, maintenance mode, and other editable properties.
     /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="config">The updated configuration properties</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Updated printer configuration</returns>
-    /// <response code="200">Returns the updated configuration</response>
-    /// <response code="400">If the configuration data is invalid</response>
-    /// <response code="404">If the printer does not exist</response>
-    /// <response code="500">If there was an error updating the configuration</response>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="config">The updated configuration properties.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Updated printer configuration.</returns>
+    /// <response code="200">Returns the updated configuration.</response>
+    /// <response code="400">If the configuration data is invalid.</response>
+    /// <response code="404">If the printer does not exist.</response>
+    /// <response code="500">If there was an error updating the configuration.</response>
     [HttpPut("{id:guid}/config")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
@@ -1996,11 +2349,11 @@ public class PrintersController(
     /// Start a network discovery stream to find printers on the local network.
     /// Returns a session ID that can be used to receive discovery progress via SignalR.
     /// </summary>
-    /// <param name="request">Optional request with backend filters</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Session ID for tracking discovery progress</returns>
-    /// <response code="200">Discovery started successfully</response>
-    /// <response code="500">Failed to start discovery</response>
+    /// <param name="request">Optional request with backend filters.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Session ID for tracking discovery progress.</returns>
+    /// <response code="200">Discovery started successfully.</response>
+    /// <response code="500">Failed to start discovery.</response>
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -2035,11 +2388,11 @@ public class PrintersController(
     /// <summary>
     /// Cancel an active discovery stream.
     /// </summary>
-    /// <param name="sessionId">The session ID to cancel</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Cancellation confirmation</returns>
-    /// <response code="200">Discovery cancelled successfully</response>
-    /// <response code="500">Failed to cancel discovery</response>
+    /// <param name="sessionId">The session ID to cancel.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Cancellation confirmation.</returns>
+    /// <response code="200">Discovery cancelled successfully.</response>
+    /// <response code="500">Failed to cancel discovery.</response>
     [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -2073,13 +2426,13 @@ public class PrintersController(
     /// <summary>
     /// Assign a printer to a location.
     /// </summary>
-    /// <param name="id">The printer ID</param>
-    /// <param name="request">The location assignment request</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>The updated printer</returns>
-    /// <response code="200">Printer assigned to location successfully</response>
-    /// <response code="404">Printer or location not found</response>
-    /// <response code="500">Failed to assign printer to location</response>
+    /// <param name="id">The printer ID.</param>
+    /// <param name="request">The location assignment request.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The updated printer.</returns>
+    /// <response code="200">Printer assigned to location successfully.</response>
+    /// <response code="404">Printer or location not found.</response>
+    /// <response code="500">Failed to assign printer to location.</response>
     [HttpPost("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -2097,7 +2450,7 @@ public class PrintersController(
                 return BadRequest(new { message = "LocationId is required" });
             }
 
-            var printer = await _printersService.FindByIdAsync(id, ct);
+            Printer? printer = await _printersService.FindByIdAsync(id, ct);
             if (printer == null)
             {
                 return NotFound(new { message = "Printer not found" });
@@ -2121,12 +2474,12 @@ public class PrintersController(
     /// <summary>
     /// Remove a printer from its location (unassign).
     /// </summary>
-    /// <param name="id">The printer ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content</returns>
-    /// <response code="204">Printer unassigned from location successfully</response>
-    /// <response code="404">Printer not found</response>
-    /// <response code="500">Failed to unassign printer from location</response>
+    /// <param name="id">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>No content.</returns>
+    /// <response code="204">Printer unassigned from location successfully.</response>
+    /// <response code="404">Printer not found.</response>
+    /// <response code="500">Failed to unassign printer from location.</response>
     [HttpDelete("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -2137,7 +2490,7 @@ public class PrintersController(
     {
         try
         {
-            var printer = await _printersService.FindByIdAsync(id, ct);
+            Printer? printer = await _printersService.FindByIdAsync(id, ct);
             if (printer == null)
             {
                 return NotFound(new { message = "Printer not found" });

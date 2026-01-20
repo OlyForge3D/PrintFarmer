@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { ListIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, FormField, Alert, Card } from '@/common/components/ui';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 interface JobStatus {
   id: string;
@@ -32,14 +32,10 @@ export const SlicerJobStatusPage: React.FC = () => {
         setLoading(true);
         setStatus(null);
         try {
-            const res = await fetch(`${getApiBaseUrl()}/slicer/jobs/${encodeURIComponent(jobId)}/status`, { headers: getAuthHeaders() });
-            if (!res.ok) {
-                if (res.status === 404) throw new Error('Job not found');
-                throw new Error('Failed to fetch job status');
-            }
-            setStatus(await res.json());
+            const response = await apiClient.getSlicerJobStatus(jobId);
+            setStatus((response as unknown as JobStatus));
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : String(err));
+            setError(err instanceof Error ? (err.message === 'Not Found' ? 'Job not found' : err.message) : 'Failed to fetch job status');
         } finally { setLoading(false); }
     };
 

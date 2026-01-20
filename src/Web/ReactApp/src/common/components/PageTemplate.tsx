@@ -19,6 +19,8 @@ interface PageTemplateProps {
   includeTopPadding?: boolean;
   /** Optional background color (defaults to bg-pf-bg-2) */
   backgroundColor?: string;
+  /** Hide the header region while retaining layout chrome */
+  showHeader?: boolean;
 }
 
 /**
@@ -45,26 +47,33 @@ export function PageTemplate({
   maxWidth = 'max-w-full',
   padding = 'px-4',
   includeTopPadding = true,
-  backgroundColor = 'bg-pf-bg-2'
+  backgroundColor = 'bg-pf-bg-2',
+  showHeader = true
 }: PageTemplateProps) {
   return (
-    <div className={`min-h-screen ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}>
+    <div
+      className={`min-h-screen ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
+      data-header-visible={showHeader ? 'true' : 'false'}
+      aria-label={showHeader ? undefined : title}
+    >
       <div className={`${maxWidth} ${padding}`}>
         {/* Page Header */}
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h2 className="text-2xl font-bold text-pf-text-primary flex items-center">
-              {Icon && <Icon className="h-6 w-6 mr-2" />}
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-pf-text-secondary mt-1">
-                {subtitle}
-              </p>
-            )}
+        {showHeader && (
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-2xl font-bold text-pf-text-primary flex items-center">
+                {Icon && <Icon className="h-6 w-6 mr-2" />}
+                {title}
+              </h2>
+              {subtitle && (
+                <p className="text-pf-text-secondary mt-1">
+                  {subtitle}
+                </p>
+              )}
+            </div>
+            {actions && <div className="flex-shrink-0">{actions}</div>}
           </div>
-          {actions && <div className="flex-shrink-0">{actions}</div>}
-        </div>
+        )}
 
         {/* Page Content */}
         {children}

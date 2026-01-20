@@ -28,11 +28,13 @@ import {
   mdiInformation,
   mdiMagnify,
   mdiRefresh,
+  mdiRestore,
   mdiContentSave,
   mdiEmail,
   mdiEye,
   mdiEyeOff,
   mdiLock,
+  mdiKey,
   mdiServer,
   mdiHistory,
   mdiTag,
@@ -855,6 +857,32 @@ export function RefreshIcon({ className = 'w-4 h-4', ariaLabel = 'Refresh' }: Om
 }
 
 /**
+ * Clear/Reset filters icon
+ * 
+ * Material Design icon component that renders an SVG element.
+ * Represents resetting or clearing filters back to default state.
+ * 
+ * @component
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties including className and ariaLabel
+ * @returns {JSX.Element} SVG element with appropriate styling
+ * @example
+ * <ClearFiltersIcon className="w-5 h-5" ariaLabel="Clear filters" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ClearFiltersIcon({ className = 'w-4 h-4', ariaLabel = 'Clear filters' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiRestore} />
+    </svg>
+  );
+}
+
+/**
  * Timer sand icon (hourglass)
  * 
  * Material Design icon component that displays a sand timer/hourglass icon.
@@ -1007,6 +1035,32 @@ export function LockIcon({ className = 'w-4 h-4', ariaLabel = 'Lock' }: Omit<Ico
       role="img"
     >
       <path fill="currentColor" d={mdiLock} />
+    </svg>
+  );
+}
+
+/**
+ * Key icon
+ * 
+ * Material Design icon component for API keys or security keys.
+ * 
+ * @component
+ * @preview ![key](https://unpkg.com/@mdi/svg@7.4.47/svg/key.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/key.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <KeyIcon className="w-5 h-5" ariaLabel="API Key" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function KeyIcon({ className = 'w-4 h-4', ariaLabel = 'Key' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiKey} />
     </svg>
   );
 }
@@ -1390,6 +1444,31 @@ export function ChevronDownIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron do
       role="img"
     >
       <path fill="currentColor" d={mdiChevronDown} />
+    </svg>
+  );
+}
+
+/**
+ * Chevron up icon
+ * 
+ * Material Design icon component for collapse/minimize actions.
+ * 
+ * @component
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ChevronUpIcon className="w-5 h-5" ariaLabel="Collapse" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ChevronUpIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron up' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronUp} />
     </svg>
   );
 }

@@ -455,12 +455,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                           {config?.modelId && (() => {
                             const selectedModel = allModels.find(m => m.id === config.modelId);
                             if (selectedModel) {
+                              // Get nozzle diameter and max hotend from primary toolhead
+                              const primaryToolhead = selectedModel.toolheads?.find(t => t.isPrimary) ?? selectedModel.toolheads?.[0];
+                              const nozzleDiameter = primaryToolhead?.nozzleDiameter;
+                              const maxHotendTemp = primaryToolhead?.maxHotendTemp;
                               return (
                                 <div className="text-xs text-pf-text-tertiary bg-pf-bg-2 rounded p-2">
                                   <p className="font-medium mb-1">Model Capabilities:</p>
                                   <div className="grid grid-cols-2 gap-1">
-                                    {selectedModel.defaultNozzleDiameter && (
-                                      <span>Nozzle: {selectedModel.defaultNozzleDiameter}mm</span>
+                                    {nozzleDiameter && (
+                                      <span>Nozzle: {nozzleDiameter}mm</span>
                                     )}
                                     {selectedModel.maxX && selectedModel.maxY && selectedModel.maxZ && (
                                       <span>Build: {selectedModel.maxX}×{selectedModel.maxY}×{selectedModel.maxZ}</span>
@@ -469,8 +473,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                     {selectedModel.hasEnclosure && <span>Enclosure</span>}
                                     {selectedModel.multiMaterial && <span>Multi-Material</span>}
                                     {selectedModel.supportsAutoLeveling && <span>Auto-Leveling</span>}
-                                    {selectedModel.maxHotendTemp && (
-                                      <span>Max Hotend: {selectedModel.maxHotendTemp}°C</span>
+                                    {maxHotendTemp && (
+                                      <span>Max Hotend: {maxHotendTemp}°C</span>
                                     )}
                                     {selectedModel.maxBedTemp && (
                                       <span>Max Bed: {selectedModel.maxBedTemp}°C</span>

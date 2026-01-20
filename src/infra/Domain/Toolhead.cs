@@ -3,7 +3,7 @@
 /// <summary>
 /// Represents a single hotend/nozzle configuration.
 /// Supports multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.).
-/// 
+///
 /// For single-toolhead printers, there will be one Toolhead per Printer.
 /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), there will be multiple Toolheads, one for each hotend.
 /// </summary>
@@ -32,14 +32,49 @@ public class Toolhead
     public int Index { get; set; }
 
     /// <summary>
-    /// Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8, 1.0).
-    /// </summary>
-    public double? NozzleDiameter { get; set; }
-
-    /// <summary>
     /// Maximum hotend temperature in °C for this toolhead.
     /// </summary>
     public int? MaxHotendTemp { get; set; }
+
+    /// <summary>
+    /// Maximum volumetric flow rate in mm³/s for this toolhead.
+    /// Depends on hotend, nozzle size, and material.
+    /// </summary>
+    public double? MaxFlowRate { get; set; }
+
+    /// <summary>
+    /// Whether this is a stock or custom/aftermarket toolhead.
+    /// Stored as int; cast to ToolheadType enum.
+    /// </summary>
+    public int? ToolheadType { get; set; }
+
+    #region Component Model References (database-backed, extensible)
+
+    /// <summary>
+    /// Reference to a hotend model definition (e.g., Phaetus Dragon, Slice Engineering Mosquito).
+    /// Nullable for stock hotends or when not specified.
+    /// </summary>
+    public Guid? HotendModelId { get; set; }
+
+    /// <summary>
+    /// Reference to an extruder model definition (e.g., Bondtech BMG, LGX).
+    /// Nullable for stock extruders or when not specified.
+    /// </summary>
+    public Guid? ExtruderModelId { get; set; }
+
+    /// <summary>
+    /// Reference to a toolhead model definition (e.g., StealthBurner, DragonBurner).
+    /// Nullable for stock toolheads or when not specified.
+    /// </summary>
+    public Guid? ToolheadModelDefId { get; set; }
+
+    /// <summary>
+    /// Reference to a nozzle model definition (e.g., West3D Undertaker, Slice Vanadium).
+    /// Nullable for generic/stock nozzles or when not specified.
+    /// </summary>
+    public Guid? NozzleModelId { get; set; }
+
+    #endregion
 
     /// <summary>
     /// Materials this toolhead is rated for (e.g., ["PLA", "PETG", "ABS"]).
@@ -59,6 +94,17 @@ public class Toolhead
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    // Navigation property
+    #region Navigation Properties
+
     public Printer? Printer { get; set; }
+
+    public HotendModelDefinition? HotendModel { get; set; }
+
+    public ExtruderModelDefinition? ExtruderModel { get; set; }
+
+    public ToolheadModelDefinition? ToolheadModelDef { get; set; }
+
+    public NozzleModelDefinition? NozzleModel { get; set; }
+
+    #endregion
 }

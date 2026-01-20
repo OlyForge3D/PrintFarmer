@@ -10,14 +10,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Users;
 
-public class EfUsersRepository : IUsersRepository
+public class EfUsersRepository(AppDbContext db) : IUsersRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfUsersRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<IReadOnlyList<UserDto>> GetUsersAsync(CancellationToken ct = default)
     {
@@ -25,6 +20,7 @@ public class EfUsersRepository : IUsersRepository
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .AsNoTracking()
+            .AsSplitQuery()
             .ToListAsync(ct);
 
         return users.Select(u => new UserDto
@@ -78,8 +74,8 @@ public class EfUsersRepository : IUsersRepository
 
     public async Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
     {
-        List<UserRole> existingRoles = await _db.UserRoles.Where(ur => ur.UserId == userId).ToListAsync(ct);
-        _db.UserRoles.RemoveRange(existingRoles);
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
+        await _db.UserRoles.Where(ur => ur.UserId == userId).ExecuteDeleteAsync(ct);
         foreach (Guid roleId in roleIds)
         {
             Role? role = await _db.Roles.FindAsync(new object?[] { roleId }, cancellationToken: ct);
@@ -104,8 +100,9 @@ public class EfUsersRepository : IUsersRepository
         {
             return;
         }
-        List<UserRole> userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
-        _db.UserRoles.RemoveRange(userRoles);
+
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
+        await _db.UserRoles.Where(ur => ur.UserId == id).ExecuteDeleteAsync(ct);
         _ = _db.Users.Remove(user);
     }
 
@@ -117,6 +114,7 @@ public class EfUsersRepository : IUsersRepository
             .Include(r => r.RolePermissions)
             .ThenInclude(rp => rp.Action)
             .AsNoTracking()
+            .AsSplitQuery()
             .ToListAsync(ct);
 
         return roles.Select(r => new RoleDto
@@ -161,7 +159,8 @@ public class EfUsersRepository : IUsersRepository
     {
         return _db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u =>
+            .FirstOrDefaultAsync(
+                u =>
                 u.Username == username && u.Email == email &&
                 u.UserRoles.Any(ur => ur.Role.Name == "farm_admin" && ur.IsActive), ct);
     }
@@ -230,6 +229,7 @@ public class EfUsersRepository : IUsersRepository
         {
             return false;
         }
+
         // Current password check is done in service; repository only updates if hash differs
         string existingPreview = user.PasswordHash is not null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : (user.PasswordHash ?? "(null)");
         string newPreview = newPasswordHash is not null && newPasswordHash.Length > 10 ? newPasswordHash.Substring(0, 10) : (newPasswordHash ?? "(null)");
@@ -238,6 +238,7 @@ public class EfUsersRepository : IUsersRepository
         {
             return true; // no change needed
         }
+
         user.PasswordHash = newPasswordHash ?? string.Empty;
         user.UpdatedAt = DateTime.UtcNow;
         _ = await _db.SaveChangesAsync(ct);

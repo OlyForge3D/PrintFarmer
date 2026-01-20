@@ -1,5 +1,4 @@
-﻿
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
@@ -29,6 +28,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             await _next(context);
         }
+
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
         // This is the global exception handler that provides consistent error responses
         catch (Exception ex)
@@ -93,33 +93,9 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
             // Default for all other exceptions - include full error chain for debugging
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred",
-                $"{ex.GetType().Name}: {ex.Message}" + (ex.InnerException != null ? $" -> {ex.InnerException.GetType().Name}: {ex.InnerException.Message}" : ""))
+                $"{ex.GetType().Name}: {ex.Message}" + (ex.InnerException != null ? $" -> {ex.InnerException.GetType().Name}: {ex.InnerException.Message}" : string.Empty))
         };
 
         return result;
-    }
-}
-
-/// <summary>
-/// Custom exception for printer not found scenarios
-/// </summary>
-public class PrinterNotFoundException : Exception
-{
-    public PrinterNotFoundException(string message) : base(message) { }
-    public PrinterNotFoundException(string message, Exception innerException) : base(message, innerException) { }
-    public PrinterNotFoundException()
-    {
-    }
-}
-
-/// <summary>
-/// Custom exception for Spoolman service errors
-/// </summary>
-public class SpoolmanServiceException : Exception
-{
-    public SpoolmanServiceException(string message) : base(message) { }
-    public SpoolmanServiceException(string message, Exception innerException) : base(message, innerException) { }
-    public SpoolmanServiceException()
-    {
     }
 }

@@ -20,7 +20,6 @@ public class UsersServiceTests
     private readonly Mock<IUsersRepository> _usersRepositoryMock;
     private readonly Mock<IAuthenticationService> _authenticationServiceMock;
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
-    private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly IUsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
 
@@ -29,8 +28,7 @@ public class UsersServiceTests
         _usersRepositoryMock = new Mock<IUsersRepository>(MockBehavior.Strict);
         _authenticationServiceMock = new Mock<IAuthenticationService>(MockBehavior.Strict);
         _passwordHashingServiceMock = new Mock<IPasswordHashingService>(MockBehavior.Strict);
-        _loggerMock = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
-        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object, _loggerMock.Object);
+        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object);
     }
 
     #region GetUsersAsync Tests
@@ -44,7 +42,7 @@ public class UsersServiceTests
             .ReturnsAsync(emptyList);
 
         // Act
-        var result = await _usersService.GetUsersAsync(_cancellationToken);
+        IReadOnlyList<UserDto> result = await _usersService.GetUsersAsync(_cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -67,7 +65,7 @@ public class UsersServiceTests
             .ReturnsAsync(users);
 
         // Act
-        var result = await _usersService.GetUsersAsync(_cancellationToken);
+        IReadOnlyList<UserDto> result = await _usersService.GetUsersAsync(_cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -104,7 +102,7 @@ public class UsersServiceTests
             FirstName = "New",
             LastName = "User"
         };
-        var passwordHash = "hashed_password_123";
+        string passwordHash = "hashed_password_123";
         var userId = Guid.NewGuid();
 
         _passwordHashingServiceMock.Setup(x => x.HashPassword(request.Password))
@@ -119,7 +117,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUserDto);
 
         // Act
-        var result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -155,7 +153,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUser);
 
         // Act
-        var result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -190,7 +188,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUser);
 
         // Act
-        var result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -220,7 +218,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUser);
 
         // Act
-        var result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -270,7 +268,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUser);
 
         // Act
-        var result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         // Verify the user is created with correct defaults (checked via AddUserAsync call)
@@ -308,7 +306,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUserDto);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -327,7 +325,7 @@ public class UsersServiceTests
             .ReturnsAsync((User?)null);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.Null(result);
@@ -352,7 +350,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -378,7 +376,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -406,7 +404,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -431,7 +429,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        var result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -457,7 +455,7 @@ public class UsersServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _usersService.DeleteUserAsync(userId, _cancellationToken);
+        bool result = await _usersService.DeleteUserAsync(userId, _cancellationToken);
 
         // Assert
         Assert.True(result);
@@ -475,7 +473,7 @@ public class UsersServiceTests
             .ReturnsAsync((User?)null);
 
         // Act
-        var result = await _usersService.DeleteUserAsync(userId, _cancellationToken);
+        bool result = await _usersService.DeleteUserAsync(userId, _cancellationToken);
 
         // Assert
         Assert.False(result);
@@ -517,7 +515,7 @@ public class UsersServiceTests
             .ReturnsAsync(roles);
 
         // Act
-        var result = await _usersService.GetRolesAsync(_cancellationToken);
+        IReadOnlyList<RoleDto> result = await _usersService.GetRolesAsync(_cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -533,7 +531,7 @@ public class UsersServiceTests
             .ReturnsAsync(new List<RoleDto>());
 
         // Act
-        var result = await _usersService.GetRolesAsync(_cancellationToken);
+        IReadOnlyList<RoleDto> result = await _usersService.GetRolesAsync(_cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -548,12 +546,12 @@ public class UsersServiceTests
     public async Task CheckAvailabilityAsync_WithUsernameOnly_ChecksUsernameAvailability()
     {
         // Arrange
-        var username = "testuser";
+        string username = "testuser";
         _usersRepositoryMock.Setup(x => x.UsernameExistsAsync(username, _cancellationToken))
             .ReturnsAsync(false);
 
         // Act
-        var result = await _usersService.CheckAvailabilityAsync(username, null, _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync(username, null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -566,12 +564,12 @@ public class UsersServiceTests
     public async Task CheckAvailabilityAsync_WithEmailOnly_ChecksEmailAvailability()
     {
         // Arrange
-        var email = "test@example.com";
+        string email = "test@example.com";
         _usersRepositoryMock.Setup(x => x.EmailExistsAsync(email, _cancellationToken))
             .ReturnsAsync(true);
 
         // Act
-        var result = await _usersService.CheckAvailabilityAsync(null, email, _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync(null, email, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -583,15 +581,15 @@ public class UsersServiceTests
     public async Task CheckAvailabilityAsync_WithBothUsernameAndEmail_ChecksBoth()
     {
         // Arrange
-        var username = "testuser";
-        var email = "test@example.com";
+        string username = "testuser";
+        string email = "test@example.com";
         _usersRepositoryMock.Setup(x => x.UsernameExistsAsync(username, _cancellationToken))
             .ReturnsAsync(false);
         _usersRepositoryMock.Setup(x => x.EmailExistsAsync(email, _cancellationToken))
             .ReturnsAsync(true);
 
         // Act
-        var result = await _usersService.CheckAvailabilityAsync(username, email, _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync(username, email, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -607,7 +605,7 @@ public class UsersServiceTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _usersService.CheckAvailabilityAsync("   ", "test@example.com", _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync("   ", "test@example.com", _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -620,7 +618,7 @@ public class UsersServiceTests
     public async Task CheckAvailabilityAsync_WithNullParameters_ReturnsNulls()
     {
         // Act
-        var result = await _usersService.CheckAvailabilityAsync(null, null, _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync(null, null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -632,13 +630,13 @@ public class UsersServiceTests
     public async Task CheckAvailabilityAsync_TrimsWhitespace_BeforeChecking()
     {
         // Arrange
-        var usernameWithSpaces = "  testuser  ";
-        var trimmedUsername = "testuser";
+        string usernameWithSpaces = "  testuser  ";
+        string trimmedUsername = "testuser";
         _usersRepositoryMock.Setup(x => x.UsernameExistsAsync(trimmedUsername, _cancellationToken))
             .ReturnsAsync(false);
 
         // Act
-        var result = await _usersService.CheckAvailabilityAsync(usernameWithSpaces, null, _cancellationToken);
+        UserAvailabilityDto result = await _usersService.CheckAvailabilityAsync(usernameWithSpaces, null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);

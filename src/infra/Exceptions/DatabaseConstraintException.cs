@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Exceptions;
+﻿using System.Text.RegularExpressions;
+
+namespace Farm.Infrastructure.Exceptions;
 
 /// <summary>
 /// Thrown when a database constraint violation occurs during entity creation or update.
@@ -8,17 +10,27 @@
 public sealed class DatabaseConstraintException : Exception
 {
     public string? ConstraintName { get; }
+
     public string EntityType { get; } = "Entity";
+
     public string PropertyName { get; } = "Property";
 
     /// <summary>
     /// Creates an exception with just a message.
     /// </summary>
-    public DatabaseConstraintException(string message) : base(message) { }
+    /// <param name="message">The error message describing the constraint violation.</param>
+    public DatabaseConstraintException(string message) : base(message)
+    {
+    }
 
     /// <summary>
     /// Creates an exception with detailed constraint information.
     /// </summary>
+    /// <param name="message">The error message describing the constraint violation.</param>
+    /// <param name="constraintName">The name of the constraint that was violated.</param>
+    /// <param name="entityType">The type of entity that caused the violation.</param>
+    /// <param name="propertyName">The name of the property involved in the violation.</param>
+    /// <param name="inner">The inner exception that caused this exception.</param>
 #pragma warning disable S3427 // Multiple constructors with default parameters are intentional for flexible initialization
     public DatabaseConstraintException(
         string message,
@@ -38,6 +50,8 @@ public sealed class DatabaseConstraintException : Exception
     /// Creates a user-friendly error message from an EF DbUpdateException.
     /// Extracts constraint violation details and provides context.
     /// </summary>
+    /// <param name="ex">The Entity Framework exception to parse.</param>
+    /// <param name="entityType">The type of entity being saved when the exception occurred.</param>
     public static DatabaseConstraintException FromEfException(Exception ex, string entityType = "Printer")
     {
         ArgumentNullException.ThrowIfNull(ex);
@@ -49,13 +63,13 @@ public sealed class DatabaseConstraintException : Exception
         string message = "Failed to save changes to the database";
 
         // Check for specific EF exception types
-        var exceptionType = ex.GetType().Name;
+        string exceptionType = ex.GetType().Name;
 
         // Look for constraint violation in exception message or inner exceptions
         if (ex.Message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase))
         {
             // SQLite UNIQUE constraint format: "UNIQUE constraint failed: Printers.Name"
-            var match = System.Text.RegularExpressions.Regex.Match(ex.Message, @"UNIQUE constraint failed: \w+\.(\w+)");
+            Match match = System.Text.RegularExpressions.Regex.Match(ex.Message, @"UNIQUE constraint failed: \w+\.(\w+)");
             if (match.Success)
             {
                 propertyName = match.Groups[1].Value;
@@ -71,12 +85,13 @@ public sealed class DatabaseConstraintException : Exception
         else if (ex.Message.Contains("NOT NULL constraint failed", StringComparison.OrdinalIgnoreCase))
         {
             // "NOT NULL constraint failed: Printers.BackendPort"
-            var match = System.Text.RegularExpressions.Regex.Match(ex.Message, @"NOT NULL constraint failed: \w+\.(\w+)");
+            Match match = System.Text.RegularExpressions.Regex.Match(ex.Message, @"NOT NULL constraint failed: \w+\.(\w+)");
             if (match.Success)
             {
                 propertyName = match.Groups[1].Value;
                 message = $"{entityType}.{propertyName} is required but was not provided";
             }
+
             constraintName = "NOT NULL";
         }
         else if (ex.Message.Contains("CHECK constraint failed", StringComparison.OrdinalIgnoreCase))

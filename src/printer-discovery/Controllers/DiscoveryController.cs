@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 
@@ -12,21 +13,14 @@ namespace PrinterDiscovery.Controllers;
 [Route("api/discovery")]
 [Tags("Discovery")]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "S6960:This controller has multiple responsibilities", Justification = "Discovery endpoints are logically grouped")]
-public class DiscoveryController : ControllerBase
+public class DiscoveryController(
+    INetworkDiscoveryService discoveryService,
+    IStreamingDiscoveryService streamingDiscoveryService,
+    ILogger<DiscoveryController> logger) : ControllerBase
 {
-    private readonly INetworkDiscoveryService _discoveryService;
-    private readonly IStreamingDiscoveryService _streamingDiscoveryService;
-    private readonly ILogger<DiscoveryController> _logger;
-
-    public DiscoveryController(
-        INetworkDiscoveryService discoveryService,
-        IStreamingDiscoveryService streamingDiscoveryService,
-        ILogger<DiscoveryController> logger)
-    {
-        _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
-        _streamingDiscoveryService = streamingDiscoveryService ?? throw new ArgumentNullException(nameof(streamingDiscoveryService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly INetworkDiscoveryService _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
+    private readonly IStreamingDiscoveryService _streamingDiscoveryService = streamingDiscoveryService ?? throw new ArgumentNullException(nameof(streamingDiscoveryService));
+    private readonly ILogger<DiscoveryController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Start a streaming discovery scan with progress updates via SignalR.
@@ -41,7 +35,8 @@ public class DiscoveryController : ControllerBase
         try
         {
             string sessionId = Guid.NewGuid().ToString("N");
-            _logger.LogInformation("Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
+            _logger.LogInformation(
+                "Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
                 sessionId,
                 request?.Subnets != null ? string.Join(", ", request.Subnets) : "default",
                 request?.Backends != null ? string.Join(", ", request.Backends) : "all",
@@ -207,10 +202,15 @@ public class DiscoveryController : ControllerBase
 public class DiscoveryResult
 {
     public string Hostname { get; set; } = string.Empty;
+
     public string IpAddress { get; set; } = string.Empty;
+
     public int Port { get; set; }
+
     public string PrinterBackend { get; set; } = string.Empty;
+
     public DateTime DiscoveredAt { get; set; }
+
     public bool Registered { get; set; }
 }
 
@@ -220,10 +220,15 @@ public class DiscoveryResult
 public class ServiceInfo
 {
     public string ServiceName { get; set; } = string.Empty;
+
     public string Version { get; set; } = string.Empty;
+
     public int ScanIntervalSeconds { get; set; }
+
     public bool PeriodicDiscoveryEnabled { get; set; }
+
     public string ApiBaseUrl { get; set; } = string.Empty;
+
     public DateTime Timestamp { get; set; }
 }
 
@@ -264,5 +269,6 @@ public class StreamingDiscoveryRequest
 public class StreamingDiscoveryResponse
 {
     public string SessionId { get; set; } = string.Empty;
+
     public string Message { get; set; } = string.Empty;
 }

@@ -3,6 +3,8 @@
 # NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
 # from docker-compose.common.yml during deployment
 
+name: printfarmer
+
 services:
   # .NET API Backend - Multi-stage build for efficiency
   api:

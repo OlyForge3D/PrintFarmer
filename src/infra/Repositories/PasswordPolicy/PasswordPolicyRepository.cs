@@ -7,14 +7,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.PasswordPolicy;
 
-public class PasswordPolicyRepository : IPasswordPolicyRepository
+public class PasswordPolicyRepository(AppDbContext db) : IPasswordPolicyRepository
 {
-    private readonly AppDbContext _db;
-
-    public PasswordPolicyRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<PasswordPolicyEntity?> GetAsync(CancellationToken ct = default)
     {
@@ -27,6 +22,7 @@ public class PasswordPolicyRepository : IPasswordPolicyRepository
         {
             _ = _db.PasswordPolicies.Add(policy);
         }
+
         _ = await _db.SaveChangesAsync(ct);
     }
 }

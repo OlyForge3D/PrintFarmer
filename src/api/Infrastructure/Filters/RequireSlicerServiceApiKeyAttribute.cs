@@ -25,6 +25,7 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
             context.Result = new UnauthorizedObjectResult(new { error = "Missing SlicerService id in route" });
             return;
         }
+
         if (!Guid.TryParse(idObj.ToString(), out Guid id))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Invalid SlicerService id" });
@@ -44,12 +45,14 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
             context.Result = new UnauthorizedObjectResult(new { error = "SlicersRepository unavailable" });
             return;
         }
+
         SlicerService? svc = await repo.GetByIdAsync(id, context.HttpContext.RequestAborted);
         if (svc == null)
         {
             context.Result = new UnauthorizedObjectResult(new { error = "SlicerService not found" });
             return;
         }
+
         if (!string.Equals(provided.ToString(), svc.ApiKey, StringComparison.Ordinal))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Invalid X-Slicer-ApiKey" });

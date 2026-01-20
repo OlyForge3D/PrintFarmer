@@ -37,16 +37,14 @@ using Farm.Web.Api.Services.SlicerServices;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-
-// using Microsoft.Extensions.Caching.Memory; // removed unused
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -65,7 +63,7 @@ try
         string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
                          RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
 
-        return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
+        return NativeLibrary.TryLoad(libName, assembly, searchPath, out nint handle) ? handle : IntPtr.Zero;
     });
 }
 catch (InvalidOperationException)
@@ -128,7 +126,9 @@ try
         builder.Environment.WebRootPath = potentialShared;
     }
 }
-catch { /* non-fatal */ }
+catch
+{ /* non-fatal */
+}
 
 // Add API services
 builder.Services.AddControllers(options =>
@@ -137,54 +137,19 @@ builder.Services.AddControllers(options =>
     })
     .AddJsonOptions(options =>
     {
-        // Configure JSON options for .NET 9 compatibility
+        // Configure JSON options for .NET 10 compatibility
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.WriteIndented = false;
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         options.JsonSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
         options.JsonSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+
         // Default string enum converter for all other enums
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddOpenApi(options =>
-{
-    // Configure OpenAPI document with JWT Bearer security
-    OpenApiSecurityScheme securityScheme = new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
-    };
-
-    _ = options.AddOperationTransformer((operation, api, ct) =>
-    {
-        operation.Security ??= [];
-        operation.Security.Add(new()
-        {
-            [new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            }] = []
-        });
-        return Task.CompletedTask;
-    });
-
-    _ = options.AddDocumentTransformer((document, context, ct) =>
-    {
-        document.Components ??= new();
-        document.Components.SecuritySchemes["Bearer"] = securityScheme;
-        return Task.CompletedTask;
-    });
-});
+builder.Services.AddOpenApi();
 
 // CORS configuration for API access
 builder.Services.AddCors(options =>
@@ -202,6 +167,7 @@ builder.Services.AddCors(options =>
             {
                 return true;
             }
+
             string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(o => o.Trim()).ToArray();
             return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
@@ -211,6 +177,10 @@ builder.Services.AddCors(options =>
         _ = policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
     });
 });
+
+// TODO: Simple rate limiting scaffold for OctoPrint endpoints - implementation pending
+// NOTE: This is a lightweight scaffold; replace with production-ready rate limiter if needed
+// builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
 
 // Configure OpenTelemetry (skippable for tests)
 bool disableTelemetry = false;
@@ -222,7 +192,9 @@ try
         disableTelemetry = true;
     }
 }
-catch { /* best-effort */ }
+catch
+{ /* best-effort */
+}
 
 // Also skip telemetry when running under the 'Testing' environment to avoid external exporters
 if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
@@ -259,8 +231,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
         .AddHttpClientInstrumentation()
         .AddEntityFrameworkCoreInstrumentation(options =>
         {
-            options.SetDbStatementForStoredProcedure = true;
-            options.SetDbStatementForText = true;
+            // Note: SetDbStatementForStoredProcedure and SetDbStatementForText removed in OpenTelemetry 1.14.0
+            // DB statements are now captured by default
             options.EnrichWithIDbCommand = (activity, command) =>
             {
                 _ = activity.SetTag("db.operation", command.CommandText);
@@ -322,7 +294,6 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
             });
         }
     });
-
 } // end skip-telemetry guard
 
 // SignalR for real-time updates
@@ -355,6 +326,21 @@ builder.Services.AddHealthChecks()
 
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+// OctoPrint compatibility settings and services
+builder.Services.Configure<Farm.Web.Api.Services.OctoPrint.OctoPrintSettings>(builder.Configuration.GetSection("OctoPrint"));
+builder.Services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
+builder.Services.AddSingleton<Farm.Web.Api.Middleware.SimpleRateLimitService>();
+
+// ApiKey repository
+builder.Services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp =>
+{
+    var db = sp.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+    return new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(db);
+});
+
+// Print job approval service
+builder.Services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
 
 // File Management Services
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
@@ -400,6 +386,7 @@ if (isMonolithicDeployment)
                     return; // leaves configuration.RootPath unset -> no static file serving attempt
                 }
             }
+
             string relative = Path.GetRelativePath(builder.Environment.ContentRootPath, shared);
             configuration.RootPath = relative; // e.g. ../../wwwroot or wwwroot
         }
@@ -419,8 +406,10 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
     {
         devUrl = string.Concat("http://localhost:", "3000"); // constructed to avoid hardcoded analyzer warning
     }
+
     _ = builder.Services.AddSingleton(_ => new SpaProxyActivationState(devUrl));
     _ = builder.Services.AddHttpClient("SpaProxy");
+
     // SpaDevServerWatcher is implemented as a BackgroundService; register it as a hosted service
     _ = builder.Services.AddHostedService<SpaDevServerWatcher>();
 }
@@ -428,12 +417,15 @@ if (isMonolithicDeployment && builder.Environment.IsDevelopment())
 // Register background services for distributed slicing
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.WorkerHealthMonitorService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobDispatchingService>();
+
 // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
 builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>(builder.Configuration.GetSection("JobDispatchRetry"));
+
 // Circuit breaker for worker failure tracking
 builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
 builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
+
 // Stale worker cleanup service
 builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
@@ -469,6 +461,7 @@ builder.Services.AddAuthentication("Bearer")
             // The concrete startup logging references will be populated after the application is built.
             options.Events = ProgramHelpers.CreateJwtEvents(null, null);
         }
+
         // Allow HTTP in test runs and relax validation for test environment
         if (builder.Environment.EnvironmentName == "Testing")
         {
@@ -480,6 +473,7 @@ builder.Services.AddAuthentication("Bearer")
         {
             throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
         }
+
         string issuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer";
         string audience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer";
 
@@ -501,7 +495,6 @@ builder.Services.AddAuthentication("Bearer")
         // Enforcing validation in tests prevents accidental acceptance of malformed tokens.
         // (If a future test truly needs to bypass these checks, generate a properly formed token
         // instead of weakening validation here.)
-
         options.TokenValidationParameters = tvp;
     });
 
@@ -514,6 +507,7 @@ builder.Services.AddAuthorization(options =>
         _ = policy.RequireAuthenticatedUser();
         _ = policy.RequireRole("farm_admin");
     });
+
     // Historical policy name used across controllers. Keep an alias so existing
     // controllers using [Authorize(Policy = "farm_admin")] continue to work.
     options.AddPolicy("farm_admin", policy =>
@@ -549,13 +543,9 @@ catch
 {
     // Best-effort; do not fail startup if env APIs are not available in some hosts
 }
+
 #pragma warning restore S1075 // URIs should not be hardcoded
-// Capture a few startup/root services from the service collection before building the
-// final application service provider. This avoids sprinkling `app.Services.GetService`
-// callsites around `Program.cs` while still allowing top-level initialization to
-// use the services safely. We build a temporary provider (disposed immediately)
-// and stash references to services that are safe to keep for the lifetime of the
-// process (loggers, unified logging, temp path provider, startup status).
+
 IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
 ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
@@ -579,7 +569,10 @@ catch (Exception ex)
 #pragma warning restore CA1303
         }
     }
-    catch { }
+    catch
+    {
+    }
+
     throw;
 }
 
@@ -645,6 +638,7 @@ app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
 if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
 {
     IHostApplicationLifetime lifetime = app.Lifetime; // IHostApplicationLifetime
+
     // Capture root-level logging services once to avoid per-call scope creation inside the callback
     // Prefer startup-captured unified logging / logger when available to avoid creating
     // a scope inside the ApplicationStarted callback.
@@ -669,7 +663,10 @@ try
         ITempPathProvider? tempProvider = _capturedTempPathProvider ?? app.Services.GetService<ITempPathProvider>();
         if (tempProvider != null)
         {
-            app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+            if (app.Logger.IsEnabled(LogLevel.Information))
+            {
+                app.Logger.LogInformation("[Startup] Temp root: {TempRoot}", tempProvider.GetTempRoot());
+            }
         }
         else
         {
@@ -677,7 +674,9 @@ try
         }
     }
 }
-catch { /* ignore diagnostics failure */ }
+catch
+{ /* ignore diagnostics failure */
+}
 
 // === MIDDLEWARE PIPELINE ===
 
@@ -689,11 +688,13 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi();
+    // Enable OpenAPI documentation endpoint at /openapi/v1.json in development
+    // Temporarily disabled due to DateTime JSON serialization issue during schema reflection
+    // _ = app.MapOpenApi();
+    // OpenAPI UI available at /openapi/ui.json (browser-friendly)
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
-
 app.UseCors("Default");
 
 // Rate limiting for authentication endpoints
@@ -707,6 +708,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
+
 // Slicer registry events hub (worker registration, heartbeat, deregistration)
 // app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
 // Slicer progress hub for job processing progress events
@@ -729,6 +731,7 @@ catch
 // Capture host environment and resolve startup status from the root service provider (app.Services)
 // Use app.Environment directly instead of resolving IHostEnvironment from the service provider
 IHostEnvironment _programHostEnvironment = app.Environment;
+
 // Resolve IStartupStatus once from the root provider (it's a singleton-like service used for diagnostics)
 IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<IStartupStatus>();
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
@@ -748,14 +751,8 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     }
 });
 
-
-// Minimal API for network discovery settings
-// Helper: Map between model and DTO
-
-
-
 // Network discovery settings now available via UnifiedSettingsController:
-// GET /api/settings/network-discovery  
+// GET /api/settings/network-discovery
 // POST /api/settings/network-discovery
 app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
@@ -779,6 +776,7 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
     string? rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
     string? portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
     NetworkDiscoverySettings current = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
+
     // TODO: Update logic for new NetworkDiscoverySettings properties if needed
     settingsService.Save(current);
     return Results.Ok(current);
@@ -786,13 +784,15 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
 
 // Database info endpoint (dev or DEBUG_DB_INFO=true) with migration status integration.
-app.MapGet("/api/debug/db-info", async (AppDbContext db,
+app.MapGet("/api/debug/db-info", async (
+    AppDbContext db,
     IWebHostEnvironment env,
     IConfiguration config,
     [FromServices] IMigrationStatusProvider migrationStatusProvider,
@@ -836,7 +836,7 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),
-        [nameof(db.Actions)] = await db.Actions.CountAsync(ct),
+        [nameof(db.UserActions)] = await db.UserActions.CountAsync(ct),
         [nameof(db.RolePermissions)] = await db.RolePermissions.CountAsync(ct),
         [nameof(db.UserRoles)] = await db.UserRoles.CountAsync(ct)
     };
@@ -851,12 +851,14 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
             {
                 SqliteConnectionStringBuilder builder = new(cs);
                 string dataSource = builder.DataSource;
+
                 // CA3003: dataSource is from connection string, not user input
 #pragma warning disable CA3003
                 if (!Path.IsPathRooted(dataSource))
                 {
                     dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
                 }
+
                 if (File.Exists(dataSource))
                 {
                     fileSizeBytes = new System.IO.FileInfo(dataSource).Length;
@@ -864,7 +866,9 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
 #pragma warning restore CA3003
             }
         }
-        catch { }
+        catch
+        {
+        }
     }
 
     MigrationStatus migration = migrationStatusProvider.GetStatus();
@@ -943,7 +947,10 @@ try
                 ServeUnknownFileTypes = true,
                 DefaultContentType = "application/octet-stream"
             });
-            app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+            if (app.Logger.IsEnabled(LogLevel.Information))
+            {
+                app.Logger.LogInformation("[Startup] Artifact static serving enabled at /artifacts (path: {Path})", artifactPath);
+            }
         }
         else
         {
@@ -975,7 +982,10 @@ catch (Exception ex)
 #pragma warning restore CA1303
         }
     }
-    catch { }
+    catch
+    {
+    }
+
     throw;
 }
 
@@ -1028,38 +1038,8 @@ public partial class Program
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
-    protected Program() { }
-}
 
-// Small test-only startup filter used from Program when running under Testing
-namespace Farm.Web.Api.Testing
-{
-    using System.IO;
-    using System.Text;
-
-    internal sealed class TestStartupFilter : IStartupFilter
+    protected Program()
     {
-        private readonly System.Action _onConfigure;
-
-        public TestStartupFilter(System.Action onConfigure)
-        {
-            _onConfigure = onConfigure ?? throw new ArgumentNullException(nameof(onConfigure));
-        }
-
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
-        {
-            return app =>
-            {
-                try
-                { _onConfigure(); }
-                catch { }
-                next(app);
-            };
-        }
     }
 }
-
-
-
-
-

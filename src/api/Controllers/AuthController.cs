@@ -35,12 +35,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
         AuthenticationResult result = await _authService.AuthenticateAsync(request.UsernameOrEmail, request.Password);
 
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-
-        return Unauthorized(result);
+        return result.Success ? Ok(result) : Unauthorized(result);
     }
 
     [HttpPost("register")]
@@ -82,16 +77,10 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 Token: null,
                 ExpiresAt: null,
                 User: result.User,
-                Error: "Registration successful. Your account requires admin approval before you can log in."
-            ));
+                Error: "Registration successful. Your account requires admin approval before you can log in."));
         }
 
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-
-        return BadRequest(result);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("logout")]
@@ -209,6 +198,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing forgot password request");
+
             // Return generic success message even on error to prevent email enumeration
             return Ok(new ForgotPasswordResponse
             {
@@ -252,23 +242,19 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 request.Token,
                 request.Email,
                 request.NewPassword,
-                HttpContext.Connection.RemoteIpAddress?.ToString()
-            );
+                HttpContext.Connection.RemoteIpAddress?.ToString());
 
-            if (success)
-            {
-                return Ok(new ResetPasswordResponse
+            return success
+                ? Ok(new ResetPasswordResponse
                 {
                     Success = true,
                     Message = "Password has been reset successfully"
+                })
+                : BadRequest(new ResetPasswordResponse
+                {
+                    Success = false,
+                    Message = "Invalid or expired password reset token"
                 });
-            }
-
-            return BadRequest(new ResetPasswordResponse
-            {
-                Success = false,
-                Message = "Invalid or expired password reset token"
-            });
         }
         catch (Exception ex)
         {
@@ -298,12 +284,9 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         {
             bool success = await _authService.ConfirmEmailAsync(request.Token);
 
-            if (success)
-            {
-                return Ok(new ConfirmEmailResponse(true, "Email address confirmed successfully. You can now log in."));
-            }
-
-            return BadRequest(new ConfirmEmailResponse(false, "Invalid or expired email confirmation token"));
+            return success
+                ? Ok(new ConfirmEmailResponse(true, "Email address confirmed successfully. You can now log in."))
+                : BadRequest(new ConfirmEmailResponse(false, "Invalid or expired email confirmation token"));
         }
         catch (Exception ex)
         {
@@ -348,12 +331,9 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
             bool success = await _authService.SendEmailConfirmationAsync(user);
 
-            if (success)
-            {
-                return Ok(new ResendConfirmationResponse(true, "Confirmation email has been sent"));
-            }
-
-            return BadRequest(new ResendConfirmationResponse(false, "Failed to send confirmation email. Please try again later."));
+            return success
+                ? Ok(new ResendConfirmationResponse(true, "Confirmation email has been sent"))
+                : BadRequest(new ResendConfirmationResponse(false, "Failed to send confirmation email. Please try again later."));
         }
         catch (Exception ex)
         {
@@ -364,4 +344,5 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 }
 
 public record ConfirmEmailResponse(bool Success, string Message);
+
 public record ResendConfirmationResponse(bool Success, string Message);

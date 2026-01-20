@@ -25,19 +25,39 @@ namespace Farm.Web.Api.Services.Model
         Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct);
 
         /// <summary>
-        /// Retrieves models and subdirectories from a specific folder path with hierarchical support.
-        /// Enables folder-based browsing of 3D models with pagination and searching.
-        /// Results include both files and directories, sorted with directories first.
+        /// Lists all 3D model folders recursively for building a folder tree structure.
         /// </summary>
-        /// <param name="path">Virtual folder path (e.g., "/mechanical/gears"); null or "/" for root</param>
-        /// <param name="sortBy">Sort field: "name", "size", or "date" (default: "name")</param>
-        /// <param name="sortOrder">"asc" for ascending or "desc" for descending (default: "asc")</param>
-        /// <param name="search">Optional search term to filter files and directories by name</param>
-        /// <param name="page">Page number for pagination (1-based; default: 1)</param>
-        /// <param name="pageSize">Results per page (max 500; default: 20)</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Model3DListResponse with paginated results, totals, and directory structure</returns>
-        Task<Model3DListResponse> ListModelsWithHierarchyAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, CancellationToken ct);
+        /// <returns>Flat list of all folders in the models directory hierarchy</returns>
+        /// <remarks>
+        /// Returns all folders without pagination or file information. Intended for tree-view UI components
+        /// that need the complete folder hierarchy for navigation. Folders are returned in path order.
+        /// </remarks>
+        Task<List<Model3DEntryDto>> ListAllFoldersAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Queries models with comprehensive filtering, sorting, and pagination.
+        /// This is the efficient query method that performs all operations at database level.
+        /// Provides parity with GcodeFilesService.QueryAsync for consistent API patterns.
+        /// </summary>
+        /// <param name="path">Optional directory path filter; null for all directories</param>
+        /// <param name="sortBy">Sort field: "name", "size", or "date"</param>
+        /// <param name="sortOrder">Sort order: "asc" or "desc"</param>
+        /// <param name="search">Optional search query for file name (case-insensitive)</param>
+        /// <param name="page">Page number (1-based)</param>
+        /// <param name="pageSize">Number of items per page</param>
+        /// <param name="tagIds">Optional array of tag IDs for filtering (AND logic)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Response containing paginated models, totals, and metadata</returns>
+        Task<Model3DListResponse> QueryAsync(
+            string? path,
+            string? sortBy,
+            string? sortOrder,
+            string? search,
+            int page,
+            int pageSize,
+            Guid[]? tagIds,
+            CancellationToken ct);
 
         /// <summary>
         /// Retrieves a single model by its unique identifier.
@@ -85,7 +105,7 @@ namespace Farm.Web.Api.Services.Model
 
         /// <summary>
         /// Uploads and processes a 3D model file.
-        /// Performs file validation, hash computation, deduplication checking, metadata extraction, 
+        /// Performs file validation, hash computation, deduplication checking, metadata extraction,
         /// and thumbnail generation. Returns immediately; processing continues in background.
         /// </summary>
         /// <param name="modelFile">The model file to upload (IFormFile from HTTP request)</param>
@@ -108,7 +128,7 @@ namespace Farm.Web.Api.Services.Model
         /// </summary>
         /// <param name="modelId">GUID of the model to move</param>
         /// <param name="targetFolderPath">Virtual path of the destination folder</param>
-        /// <param name="ct">Cancellation token</param>
+        /// <param name="ct">Cancellation token.</param>
         /// <returns>True if the model was successfully moved; false if model was not found</returns>
         /// <remarks>
         /// This is a virtual move operation that only updates the model's FolderId reference in the database.
@@ -128,6 +148,6 @@ namespace Farm.Web.Api.Services.Model
         /// This method serves both model files and thumbnails using path-based lookups.
         /// Path validation is performed internally to prevent directory traversal attacks.
         /// </remarks>
-        Task<(byte[] bytes, string fileName)?> DownloadFileAsync(string path, CancellationToken ct);
+        Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct);
     }
 }

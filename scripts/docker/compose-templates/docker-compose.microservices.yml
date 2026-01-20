@@ -3,6 +3,8 @@
 # NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
 # from docker-compose.common.yml during deployment
 
+name: printfarmer
+
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
@@ -44,11 +46,11 @@ services:
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: api-runtime
       args:
-        SDK_TAG: ${SDK_TAG:-9.0}
-        ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
-        NODE_TAG: ${NODE_TAG:-22-alpine}
-        NGINX_TAG: ${NGINX_TAG:-alpine}
-        UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
     image: printfarmer-api
     container_name: printfarmer-api
     ports:
@@ -94,11 +96,11 @@ services:
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: frontend-runtime
       args:
-        SDK_TAG: ${SDK_TAG:-9.0}
-        ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
-        NODE_TAG: ${NODE_TAG:-22-alpine}
-        NGINX_TAG: ${NGINX_TAG:-alpine}
-        UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
         VITE_API_BASE_URL: /api
         VITE_SIGNALR_PRINTERS_URL: /hubs/printers
         VITE_SIGNALR_HARVEST_URL: /hubs/harvest

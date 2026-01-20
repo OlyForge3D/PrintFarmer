@@ -27,7 +27,9 @@ describe('PrinterBedVisualization Component', () => {
       maxX: 200,
       maxY: 200,
       maxZ: 250,
-      defaultNozzleDiameter: 0.4,
+      toolheads: [
+        { id: 'th-1', name: 'Extruder 1', index: 0, nozzleDiameter: 0.4, isPrimary: true }
+      ],
     };
 
     testStatus = {
@@ -294,7 +296,7 @@ describe('PrinterBedVisualization Component', () => {
     it('handles missing nozzle diameter', () => {
       const noDiameterPrinter: PrinterModelDto = {
         ...testPrinterModel,
-        defaultNozzleDiameter: undefined,
+        toolheads: undefined,
       };
 
       const { container } = render(

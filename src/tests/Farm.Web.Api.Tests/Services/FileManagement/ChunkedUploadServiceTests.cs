@@ -97,7 +97,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             var allowedExtensions = new List<string> { ".gcode", ".stl" };
 
             // Act & Assert
-            var exception = Assert.Throws<InvalidOperationException>(() =>
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
                 _service.InitializeUpload(userId, fileName, fileSize, _testDirectory, allowedExtensions));
             Assert.Contains("Invalid file type", exception.Message);
         }
@@ -112,7 +112,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             var allowedExtensions = new List<string> { ".gcode" };
 
             // Act & Assert
-            var exception = Assert.Throws<ArgumentException>(() =>
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
                 _service.InitializeUpload(userId, fileName, fileSize, _testDirectory, allowedExtensions));
             Assert.Contains("userId", exception.Message);
         }
@@ -127,7 +127,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             var allowedExtensions = new List<string> { ".gcode" };
 
             // Act & Assert
-            var exception = Assert.Throws<ArgumentException>(() =>
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
                 _service.InitializeUpload(userId, fileName, fileSize, _testDirectory, allowedExtensions));
             Assert.Contains("fileSize", exception.Message);
         }
@@ -141,7 +141,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const long fileSize = 1024;
 
             // Act & Assert
-            var exception = Assert.Throws<ArgumentException>(() =>
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
                 _service.InitializeUpload(userId, fileName, fileSize, _testDirectory, null!));
             Assert.Contains("allowedExtensions", exception.Message);
         }
@@ -177,7 +177,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string hashAlgorithm = "md5"; // Unsupported
 
             // Act & Assert
-            var exception = Assert.Throws<ArgumentException>(() =>
+            ArgumentException exception = Assert.Throws<ArgumentException>(() =>
                 _service.InitializeUpload(userId, fileName, fileSize, _testDirectory, allowedExtensions, hashAlgorithm));
             Assert.Contains("Unsupported hashAlgorithm", exception.Message);
         }
@@ -193,7 +193,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string userId = "user123";
             const long fileSize = 2048;
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", fileSize, _testDirectory, allowedExtensions);
@@ -218,7 +218,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string userId = "user123";
             const long fileSize = 1024;
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", fileSize, _testDirectory, allowedExtensions);
@@ -240,10 +240,10 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             // Arrange
             const string invalidUploadId = "nonexistent";
             byte[] chunk = new byte[1024];
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             // Act & Assert
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(invalidUploadId, 0, chunk, "user123", quotaService.Object));
             Assert.Contains("not found", exception.Message);
         }
@@ -254,7 +254,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             // Arrange
             const string userId = "user123";
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", 2048, _testDirectory, allowedExtensions);
@@ -262,7 +262,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             byte[] chunk = new byte[1024];
 
             // Act & Assert - wrong offset (should be 0, passing 1024)
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(initResult.UploadId, 1024, chunk, userId, quotaService.Object));
             Assert.Contains("Offset mismatch", exception.Message);
         }
@@ -274,7 +274,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string userId = "user123";
             const long fileSize = 1024;
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", fileSize, _testDirectory, allowedExtensions);
@@ -282,7 +282,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             byte[] chunk = new byte[2048]; // Larger than fileSize
 
             // Act & Assert
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(initResult.UploadId, 0, chunk, userId, quotaService.Object));
             Assert.Contains("exceeds remaining file size", exception.Message);
         }
@@ -293,7 +293,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             // Arrange
             const string userId = "user123";
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: false); // Quota exceeded
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: false); // Quota exceeded
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", 2048, _testDirectory, allowedExtensions);
@@ -301,7 +301,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             byte[] chunk = new byte[1024];
 
             // Act & Assert
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(initResult.UploadId, 0, chunk, userId, quotaService.Object));
             Assert.Contains("quota exceeded", exception.Message);
         }
@@ -312,7 +312,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             // Arrange
             const string userId = "user123";
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId, "test.gcode", 2048, _testDirectory, allowedExtensions);
@@ -323,7 +323,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             byte[] chunk = new byte[1024];
 
             // Act & Assert
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(initResult.UploadId, 0, chunk, userId, quotaService.Object));
             Assert.Contains("paused", exception.Message);
         }
@@ -335,7 +335,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string userId = "user123";
             const long fileSize = 512;
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             byte[] chunk = new byte[512];
             Array.Fill(chunk, (byte)0xAB);
@@ -377,7 +377,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string userId = "user123";
             const long fileSize = 256;
             var allowedExtensions = new List<string> { ".gcode" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             byte[] chunk = new byte[fileSize];
             Array.Fill(chunk, (byte)0x01);
@@ -396,7 +396,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             string finalPath = Path.Combine(_testDirectory, "hashcheck.gcode");
 
             // Act
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await _service.AppendChunkAsync(initResult.UploadId, 0, chunk, userId, quotaService.Object));
 
             // Assert
@@ -412,7 +412,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             // Arrange
             const string userId = "user123";
             var allowedExtensions = new List<string> { ".txt" };
-            var quotaService = CreateMockQuotaService(allow: true);
+            Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
                 userId,

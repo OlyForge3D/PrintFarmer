@@ -16,7 +16,7 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// <remarks>
 /// This repository implements the full contract of IQueueRepository using Entity Framework Core
 /// to interact with the PrintJob, Printer, GcodeFile, and related database tables.
-/// 
+///
 /// Key implementation details:
 /// - Basic CRUD operations (GetAllAsync, FindByIdAsync, AddAsync, RemoveAsync) for individual job management
 /// - Specialized query methods for queue operations with optimized includes and filtering
@@ -25,21 +25,19 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// - AsNoTracking() for read-only queries to improve performance and reduce change tracking overhead
 /// - Supports atomic transactions through shared DbContext from Unit of Work pattern
 /// - Efficient aggregation queries for position tracking and job counting
-/// 
+///
 /// All methods are optimized for the specific query patterns needed by JobQueueService,
 /// QueueDataService, and other queue-related operations. Methods include proper error handling
 /// and support for cancellation tokens throughout for responsive async operations.
 /// </remarks>
-public class EfQueueRepository : IQueueRepository
+/// <remarks>
+/// Initializes a new instance of the EfQueueRepository with the provided DbContext.
+/// </remarks>
+/// <param name="db">Entity Framework DbContext for database access</param>
+/// <exception cref="ArgumentNullException">Thrown when DbContext is null</exception>
+public class EfQueueRepository(AppDbContext db) : IQueueRepository
 {
-    private readonly AppDbContext _db;
-
-    /// <summary>
-    /// Initializes a new instance of the EfQueueRepository with the provided DbContext.
-    /// </summary>
-    /// <param name="db">Entity Framework DbContext for database access</param>
-    /// <exception cref="ArgumentNullException">Thrown when DbContext is null</exception>
-    public EfQueueRepository(AppDbContext db) => _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <summary>
     /// Retrieves all print jobs from the database.

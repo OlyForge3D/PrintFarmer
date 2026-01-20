@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- Central Package Version Management for .NET 10 Migration -->
+  <!-- Ensures all Microsoft.Extensions packages use 10.0.0 across the solution -->
+  <!-- Prevents transitive dependency version conflicts -->
+
+  <PropertyGroup>
+    <!-- Central Package Management disabled for now - reverting to per-project versions -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- 
+  PackageVersion items below are NOT used when ManagePackageVersionsCentrally=false.
+  They are retained for future reference if we re-enable Central Package Management.
+  Until then, versions are managed per-project in .csproj files.
+  
+  <ItemGroup>
+    Microsoft.Extensions packages - unified to 10.0.0
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Diagnostics.HealthChecks" Version="2.2.0" />
+    ...
+  </ItemGroup>
+  -->
+
+</Project>

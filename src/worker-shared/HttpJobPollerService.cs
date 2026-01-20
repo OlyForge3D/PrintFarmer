@@ -15,6 +15,11 @@ namespace Farm.Slicer.Worker.Core;
 /// processes them through the slicing pipeline, uploads artifacts, and completes the job.
 /// This replaces the Redis-based BaseQueueConsumerService to integrate with the SQL database queue.
 /// </summary>
+/// <param name="httpClientFactory">Factory for creating HTTP clients to communicate with the API.</param>
+/// <param name="serviceProvider">Service provider for creating scoped services during job processing.</param>
+/// <param name="logger">Unified logging service for telemetry and diagnostics.</param>
+/// <param name="workerState">Service for tracking worker state and active job counts.</param>
+/// <param name="configuration">Configuration for worker settings such as API URL and poll interval.</param>
 public abstract class HttpJobPollerService(
     IHttpClientFactory httpClientFactory,
     IServiceProvider serviceProvider,
@@ -30,13 +35,18 @@ public abstract class HttpJobPollerService(
     private readonly Guid _workerId = Guid.NewGuid();
 
     /// <summary>
-    /// Derived classes implement this to execute the slicing pipeline
+    /// Derived classes implement this to execute the slicing pipeline.
     /// </summary>
+    /// <param name="job">The distributed slicing job containing model file and configuration.</param>
+    /// <param name="scopeServices">Scoped service provider for resolving dependencies during pipeline execution.</param>
+    /// <param name="ct">Cancellation token to observe for cancellation requests.</param>
+    /// <returns>A task containing the slicing result with output file path and metadata.</returns>
     protected abstract Task<SlicingResult> ExecutePipelineAsync(DistributedSlicingJob job, IServiceProvider scopeServices, CancellationToken ct);
 
     /// <summary>
-    /// Derived classes specify which capabilities this worker provides (e.g., ["orcaslicer", "stl-processing"])
+    /// Derived classes specify which capabilities this worker provides (e.g., ["orcaslicer", "stl-processing"]).
     /// </summary>
+    /// <returns>An array of capability strings that this worker supports.</returns>
     protected abstract string[] GetWorkerCapabilities();
 
     private const string DefaultApiBaseUrl = "http://localhost:5245"; // fallback dev URL
@@ -146,7 +156,8 @@ public abstract class HttpJobPollerService(
                 int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300");
                 int renewIntervalSeconds = Math.Max(10, leaseDurationSeconds / 3);
 
-                _ = Task.Run(async () =>
+                _ = Task.Run(
+                    async () =>
                 {
                     while (!localLinkedCts.Token.IsCancellationRequested)
                     {
@@ -159,7 +170,10 @@ public abstract class HttpJobPollerService(
                                 _logger.LogDebug($"Lease renew for job {job.Id} returned {resp.StatusCode}");
                             }
                         }
-                        catch (OperationCanceledException) { break; }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
                         catch (Exception ex)
                         {
                             _logger.LogDebug(ex, $"Failed to renew lease for job {job.Id}");
@@ -215,16 +229,17 @@ public abstract class HttpJobPollerService(
         catch (OperationCanceledException)
         {
             _logger.LogWarning($"Job {job.Id} cancelled");
+
             // Job will timeout and be reassigned by the API's error recovery system
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Job {job.Id} failed: {ex.Message}");
+
             // Job will timeout and be reassigned by the API's error recovery system
         }
         finally
         {
-
             // Stop lease renew task if running by cancelling and disposing localLinkedCts
             try
             {
@@ -234,7 +249,9 @@ public abstract class HttpJobPollerService(
                     localLinkedCts.Dispose();
                 }
             }
-            catch { }
+            catch
+            {
+            }
 
             _workerState.DecrementActiveJobs();
         }
@@ -319,20 +336,6 @@ public abstract class HttpJobPollerService(
         _logger.LogInformation($"Uploaded G-code artifact: {artifactResponse.Id} ({gcodeBytes.Length} bytes)");
 
         // TODO: Upload additional artifacts (thumbnails, metadata, etc.) if present in result.Metadata
-
         return artifactIds;
     }
-}
-
-/// <summary>
-/// Response from artifact upload endpoint
-/// </summary>
-public class ArtifactResponse
-{
-    public Guid Id { get; set; }
-    public string Kind { get; set; } = string.Empty;
-    public long FileSizeBytes { get; set; }
-    public string Sha256Hash { get; set; } = string.Empty;
-    public string FileUrl { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
 }

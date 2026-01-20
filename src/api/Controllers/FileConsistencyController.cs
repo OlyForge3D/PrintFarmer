@@ -23,10 +23,12 @@ public class FileConsistencyController(
     IFileConsistencyRepository fileConsistencyRepo) : ControllerBase
 {
     private readonly IFileConsistencyRepository _repo = fileConsistencyRepo;
+
     /// <summary>
     /// Get current file health status summary for dashboard.
     /// Returns statistics on file health across Model3D and GcodeFile libraries.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     [HttpGet("health/summary")]
     public async Task<ActionResult<FileHealthSummaryDto>> GetHealthSummaryAsync(CancellationToken ct)
     {
@@ -54,7 +56,8 @@ public class FileConsistencyController(
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError,
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
                 new { error = "Failed to retrieve file health summary", details = ex.Message });
         }
     }
@@ -62,6 +65,8 @@ public class FileConsistencyController(
     /// <summary>
     /// Get detailed audit history with recent findings.
     /// </summary>
+    /// <param name="pageSize">The maximum number of audit records to return.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     [HttpGet("audits/history")]
     public async Task<ActionResult<List<FileHealthAuditDto>>> GetAuditHistoryAsync(
         [FromQuery] int pageSize = 20,
@@ -88,7 +93,8 @@ public class FileConsistencyController(
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError,
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
                 new { error = "Failed to retrieve audit history", details = ex.Message });
         }
     }
@@ -96,6 +102,7 @@ public class FileConsistencyController(
     /// <summary>
     /// Get all files with health issues for review and potential remediation.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     [HttpGet("issues")]
     public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssuesAsync(CancellationToken ct = default)
     {
@@ -108,7 +115,7 @@ public class FileConsistencyController(
             IReadOnlyList<GcodeFile> missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
             IReadOnlyList<GcodeFile> corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-            List<FileIssueDto> allIssues = new List<FileIssueDto>();
+            List<FileIssueDto> allIssues = [];
 
             // Add Model3D missing files
             allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
@@ -167,7 +174,8 @@ public class FileConsistencyController(
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError,
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
                 new { error = "Failed to retrieve files with issues", details = ex.Message });
         }
     }
@@ -175,6 +183,8 @@ public class FileConsistencyController(
     /// <summary>
     /// Get details for a specific Model3D file's health status.
     /// </summary>
+    /// <param name="modelId">The unique identifier of the Model3D file.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     [HttpGet("model3d/{modelId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetModel3DHealthAsync(Guid modelId, CancellationToken ct)
     {
@@ -205,6 +215,8 @@ public class FileConsistencyController(
     /// <summary>
     /// Get details for a specific GcodeFile's health status.
     /// </summary>
+    /// <param name="gcodeId">The unique identifier of the GcodeFile.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     [HttpGet("gcode/{gcodeId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetGcodeFileHealthAsync(Guid gcodeId, CancellationToken ct)
     {
@@ -233,7 +245,6 @@ public class FileConsistencyController(
     }
 
     // Private helper methods
-
     private async Task<(int Total, int Healthy, int Missing, int Corrupted)> GetModel3DHealthStatsAsync(CancellationToken ct)
     {
         int total = await _repo.CountModel3DFilesAsync(ct);
@@ -265,6 +276,6 @@ public class FileConsistencyController(
         }
 
         int totalHealthy = model3DStats.Healthy + gcodeStats.Healthy;
-        return (totalHealthy / (double)totalFiles) * 100.0;
+        return totalHealthy / (double)totalFiles * 100.0;
     }
 }

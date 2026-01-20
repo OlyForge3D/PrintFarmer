@@ -32,7 +32,7 @@ public class GcodeMetadataExtractorServiceTests
     [Fact]
     public async Task ExtractMetadataAsync_EmptyContent_ReturnsEmptyMetadata()
     {
-        var result = await _service.ExtractMetadataAsync("");
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync("");
 
         result.Should().NotBeNull();
         result.SlicerName.Should().BeNull();
@@ -42,7 +42,7 @@ public class GcodeMetadataExtractorServiceTests
     [Fact]
     public async Task ExtractMetadataAsync_NullContent_ReturnsEmptyMetadata()
     {
-        var result = await _service.ExtractMetadataAsync(null!);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(null!);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().BeNull();
@@ -58,7 +58,7 @@ M109 S210
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Contain("PrusaSlicer");
@@ -76,7 +76,7 @@ G28
 M109 S220
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Contain("OrcaSlicer");
@@ -94,7 +94,7 @@ M109 S220
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Be("Cura");
@@ -111,7 +111,7 @@ G28
 M109 S200
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(150.75, 0.01);
@@ -126,7 +126,7 @@ M109 S200
 M104 S200
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.FilamentWeightGrams.Should().Be(42.5);
@@ -142,7 +142,7 @@ M104 S200
 
         string gcodeContent = string.Join("\n", lines);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Contain("PrusaSlicer");
@@ -157,7 +157,7 @@ M104 S200
 M109 S200
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().BeNull();
@@ -175,7 +175,7 @@ M109 S200
 M104 S200
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Contain("PrusaSlicer");
@@ -194,7 +194,7 @@ M104 S200
 ; Nozzle_Diameter = 0.6
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         // Should handle case-insensitive matching
@@ -210,7 +210,7 @@ M104 S200
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         // Should not throw and should still extract what it can
@@ -228,7 +228,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.ThumbnailData.Should().NotBeNull();
@@ -246,7 +246,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.ThumbnailData.Should().NotBeNull();
@@ -260,7 +260,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.ThumbnailData.Should().BeNull();
@@ -276,7 +276,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.ThumbnailData.Should().BeNull();
@@ -291,7 +291,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(60.0, 0.01);
@@ -306,7 +306,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(120.0, 0.01);
@@ -320,7 +320,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(75.5, 0.01);
@@ -333,7 +333,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().Be(0);
@@ -347,7 +347,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.NozzleDiameter.Should().Be(0.6);
@@ -362,7 +362,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.Material.Should().Be("TPU");
@@ -376,7 +376,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.FilamentLengthMm.Should().Be(15000);
@@ -390,7 +390,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.FilamentWeightGrams.Should().Be(50.25);
@@ -406,7 +406,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.Material.Should().Be("PLA");
@@ -421,7 +421,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.SlicerName.Should().Contain("SuperSlicer");
@@ -431,19 +431,19 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_ProcessesFirstAndLast500Lines()
     {
-        // Metadata is processed from first 200 and last 1000 lines
-        // Create file with > 2200 lines so metadata at line 501 won't be in first 200 or last 1000
+        // Metadata is processed from first 200 and last 2000 lines (increased for PrusaSlicer PNG thumbnails)
+        // Create file with > 2200 lines so metadata at line 501 will be in the last 2000 lines
         var lines = new List<string>();
         lines.AddRange(Enumerable.Range(0, 500).Select(i => $"G1 X{i} Y{i}"));
-        lines.Add("; filament_type = PLA"); // Line 501 - not in first 200, not in last 1000
+        lines.Add("; filament_type = PLA"); // Line 501 - now IN the last 2000 lines
         lines.AddRange(Enumerable.Range(0, 1700).Select(i => $"G1 X{i}"));  // Total > 2200 lines
 
         string gcodeContent = string.Join("\n", lines);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
-        result.Material.Should().BeNull(); // Metadata at line 501 is not in first 200 or last 1000 lines
+        result.Material.Should().Be("PLA"); // Metadata at line 501 is now in the last 2000 lines (changed from 1000)
     }
 
     [Fact]
@@ -453,7 +453,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.Material.Should().Be("PLA");
@@ -466,7 +466,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.NozzleDiameter.Should().Be(0.25);
@@ -480,7 +480,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(1605.5, 0.01);
@@ -494,7 +494,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.ThumbnailData.Should().BeNull();
@@ -520,7 +520,7 @@ G28
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Verify OrcaSlicer metadata - all parseable properties
         result.Should().NotBeNull();
@@ -570,7 +570,7 @@ G28
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Verify PrusaSlicer metadata - all parseable properties
         result.Should().NotBeNull();
@@ -620,7 +620,7 @@ G28
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Verify OrcaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
         result.Should().NotBeNull();
@@ -677,7 +677,7 @@ G28
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Verify PrusaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
         result.Should().NotBeNull();
@@ -722,7 +722,7 @@ G28
 G28
 ";
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.BedTemperature.Should().Be(60);
@@ -746,7 +746,7 @@ G28
         );
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.InfillPercentage.Should().Be(15.0);
@@ -769,7 +769,7 @@ G28
         );
 
         string gcodeContent = await File.ReadAllTextAsync(filePath);
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
         result.InfillPercentage.Should().Be(15.0);
@@ -782,10 +782,10 @@ G28
         string line1 = "; perimeters = 7";
         string line2 = "; wall_loops = 5";
 
-        var pattern = @"(?:wall_loops|perimeters)\s*[:=]\s*(\d+)";
+        string pattern = @"(?:wall_loops|perimeters)\s*[:=]\s*(\d+)";
 
-        var match1 = Regex.Match(line1, pattern, RegexOptions.IgnoreCase);
-        var match2 = Regex.Match(line2, pattern, RegexOptions.IgnoreCase);
+        System.Text.RegularExpressions.Match match1 = Regex.Match(line1, pattern, RegexOptions.IgnoreCase);
+        System.Text.RegularExpressions.Match match2 = Regex.Match(line2, pattern, RegexOptions.IgnoreCase);
 
         match1.Success.Should().BeTrue("Prusa perimeters line should match");
         match1.Groups[1].Value.Should().Be("7", "Should extract 7 from Prusa line");
@@ -813,9 +813,9 @@ G28
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
         // Check if perimeters line is in the content
-        var hasPerimeters = gcodeContent.Contains("; perimeters = 7");
+        bool hasPerimeters = gcodeContent.Contains("; perimeters = 7");
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Force failure with detailed debug info if not matching
         if (result.Perimeters != 7)
@@ -830,8 +830,6 @@ G28
 
         result.Perimeters.Should().Be(7);
     }
-
-
 
     [Fact]
     public async Task ExtractMetadataAsync_DebugOrcaPerimeters()
@@ -852,9 +850,9 @@ G28
         string gcodeContent = await File.ReadAllTextAsync(filePath);
 
         // Check if wall_loops line is in the content
-        var hasWallLoops = gcodeContent.Contains("; wall_loops = 5");
+        bool hasWallLoops = gcodeContent.Contains("; wall_loops = 5");
 
-        var result = await _service.ExtractMetadataAsync(gcodeContent);
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
 
         // Force failure with detailed debug info if not matching
         if (result.Perimeters != 5)

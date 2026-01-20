@@ -10,6 +10,7 @@ namespace Farm.Infrastructure.Settings;
 public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "NetworkDiscovery";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Enable Discovery", Description = "Enable or disable network printer discovery.", InputType = SettingInputType.Boolean)]
@@ -72,6 +73,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             throw new ValidationException("At least one valid subnet is required.");
         }
+
         foreach (string subnet in DiscoverySubnets)
         {
             if (!IsValidCidr(subnet))
@@ -87,6 +89,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return;
         }
+
         List<string> unique = DiscoverySubnets.Distinct().ToList();
         if (unique.Count != DiscoverySubnets.Count)
         {
@@ -105,19 +108,10 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return false;
         }
+
         string[] parts = cidr.Split('/');
-        if (parts.Length != 2)
-        {
-            return false;
-        }
-        if (!IPAddress.TryParse(parts[0], out _))
-        {
-            return false;
-        }
-        if (!int.TryParse(parts[1], out int prefix) || prefix < 0 || prefix > 32)
-        {
-            return false;
-        }
-        return true;
+        return parts.Length != 2
+            ? false
+            : !IPAddress.TryParse(parts[0], out _) ? false : int.TryParse(parts[1], out int prefix) && prefix >= 0 && prefix <= 32;
     }
 }

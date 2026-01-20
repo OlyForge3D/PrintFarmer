@@ -37,62 +37,48 @@ namespace Farm.Web.Api.Services.Slicing
     /// - Worker HTTP communication abstraction
     /// - Profile metadata parsing and validation
     /// - Database transaction coordination
-    /// 
+    ///
     /// All operations maintain data integrity through validation, error handling,
     /// and proper logging. External worker communication uses HttpClient with
     /// error handling for offline scenarios.
     /// </remarks>
-    public class ProfilesService : IProfilesService
+    /// <remarks>
+    /// Initializes a new instance of the ProfilesService with required dependencies.
+    /// </remarks>
+    /// <param name="repo">Repository for SlicerProfile CRUD operations</param>
+    /// <param name="logger">Unified logging service for diagnostic and error logs</param>
+    /// <param name="processProfileRepo">Repository for process profile operations</param>
+    /// <param name="machineProfileRepo">Repository for machine profile operations</param>
+    /// <param name="filamentProfileRepo">Repository for filament profile operations</param>
+    /// <param name="unitOfWork">Unit of work for coordinating database transactions</param>
+    /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
+    /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
+    /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
+    /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
+    /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
+    public class ProfilesService(
+        IProfilesRepository repo,
+        IUnifiedLoggingService logger,
+        IProcessProfileRepository processProfileRepo,
+        IMachineProfileRepository machineProfileRepo,
+        IFilamentProfileRepository filamentProfileRepo,
+        IUnitOfWork unitOfWork,
+        IWorkerRepository workerRepository,
+        ICatalogService catalogService,
+        IProfileParsingService parsingService,
+        IHubContext<SlicerHub> slicerHubContext) : IProfilesService
     {
-        private readonly IProfilesRepository _repo;
-        private readonly IUnifiedLoggingService _logger;
-        private readonly IHubContext<SlicerHub> _slicerHubContext;
+        private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        private readonly IHubContext<SlicerHub> _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
 
-        private readonly IProcessProfileRepository _processProfileRepo;
-        private readonly IMachineProfileRepository _machineProfileRepo;
-        private readonly IFilamentProfileRepository _filamentProfileRepo;
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IWorkerRepository _workerRepository;
-        private readonly ICatalogService _catalogService;
-        private readonly IProfileParsingService _parsingService;
-
-        /// <summary>
-        /// Initializes a new instance of the ProfilesService with required dependencies.
-        /// </summary>
-        /// <param name="repo">Repository for SlicerProfile CRUD operations</param>
-        /// <param name="logger">Unified logging service for diagnostic and error logs</param>
-        /// <param name="processProfileRepo">Repository for process profile operations</param>
-        /// <param name="machineProfileRepo">Repository for machine profile operations</param>
-        /// <param name="filamentProfileRepo">Repository for filament profile operations</param>
-        /// <param name="unitOfWork">Unit of work for coordinating database transactions</param>
-        /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
-        /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
-        /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
-        /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
-        /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
-        public ProfilesService(
-            IProfilesRepository repo,
-            IUnifiedLoggingService logger,
-            IProcessProfileRepository processProfileRepo,
-            IMachineProfileRepository machineProfileRepo,
-            IFilamentProfileRepository filamentProfileRepo,
-            IUnitOfWork unitOfWork,
-            IWorkerRepository workerRepository,
-            ICatalogService catalogService,
-            IProfileParsingService parsingService,
-            IHubContext<SlicerHub> slicerHubContext)
-        {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
-            _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
-            _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
-            _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
-            _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
-            _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
-        }
+        private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
+        private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
+        private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
+        private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+        private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+        private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
 
         /// <summary>
         /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -112,13 +98,13 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Checks for existing profiles with same hash to prevent duplicates
         /// - Supports optional system profile override by administrators
         /// - Returns 201 Created for new profiles, 200 OK for updated existing profiles
-        /// 
+        ///
         /// The method is idempotent: importing the same profile multiple times will update the existing one
         /// rather than creating duplicates (based on content hash).
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if request is null</exception>
         /// <exception cref="ArgumentException">Thrown if rawJson is missing or slicerType is invalid</exception>
-        public async Task<(ProcessProfileExtendedDto dto, bool created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct)
+        public async Task<(ProcessProfileExtendedDto Dto, bool Created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct)
         {
             _logger.LogInformation($"[ImportProfileAsync] Starting profile import with name: {req.Name}, slicerType: {req.SlicerType}, allowSystemOverride: {req.AllowSystemOverride}");
 
@@ -137,6 +123,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             (string? sanitizedRaw, string? settingsJson, string? hash) = _parsingService.ParseAndPrepare(req.RawJson);
             _logger.LogDebug($"[ImportProfileAsync] Profile parsed successfully. Hash: {hash}, SettingsJson length: {settingsJson?.Length ?? 0}");
+
             // Attempt to derive basic fields from metadata
             double layerHeight = 0.2;
             int infillPct = 20;
@@ -150,18 +137,22 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     layerHeight = lhVal;
                 }
+
                 if (root.TryGetProperty("infillPercentage", out JsonElement inf) && inf.TryGetInt32(out int infVal))
                 {
                     infillPct = infVal;
                 }
+
                 if (root.TryGetProperty("material", out JsonElement mat) && mat.ValueKind == JsonValueKind.String)
                 {
                     material = mat.GetString() ?? material;
                 }
+
                 if (root.TryGetProperty("quality", out JsonElement q) && q.ValueKind == JsonValueKind.String)
                 {
                     quality = q.GetString() ?? quality;
                 }
+
                 _logger.LogDebug($"[ImportProfileAsync] Metadata extracted: layerHeight={layerHeight}, infillPct={infillPct}, material={material}, quality={quality}");
             }
             catch (Exception ex)
@@ -258,7 +249,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Extracted metadata (layer height, infill, material, quality)
         /// - Profile creation timestamp and version information
         /// - Hash for integrity verification
-        /// 
+        ///
         /// The exported profile can be reimported into another PrintFarmer instance using ImportProfileAsync.
         /// Exports include all data necessary to recreate the profile in another installation.
         /// </remarks>
@@ -288,6 +279,7 @@ namespace Farm.Web.Api.Services.Slicing
                         _ => null
                     };
                 }
+
                 _logger.LogDebug($"[ExportProfileAsync] Settings parsed successfully. Keys: {string.Join(", ", settingsDict.Keys)}");
             }
             catch (Exception ex)
@@ -317,7 +309,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// This method marks a profile as the default choice for new slicing jobs.
         /// When no specific profile is selected, the default profile is automatically used.
         /// Only one profile per slicer type can be marked as default at a time.
-        /// 
+        ///
         /// Setting a new default automatically unsets the previous default for the same slicer type.
         /// Default profile changes are logged for audit trails and change tracking.
         /// </remarks>
@@ -350,7 +342,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// <remarks>
         /// This method provides the most comprehensive view of available profiles, organized by type.
         /// It includes both system-provided and user-created profiles, with manufacturer-based grouping.
-        /// 
+        ///
         /// This is primarily used for UI components that need to display all available profile options
         /// organized by category and manufacturer.
         /// </remarks>
@@ -438,7 +430,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Top level: Manufacturer (e.g., "Prusa", "MK4")
         /// - Second level: Model (e.g., "Prusa CORE One", "Prusa Mk4S")
         /// - Third level: Individual profiles with compatibility information
-        /// 
+        ///
         /// Both filters are optional and work together with AND logic:
         /// - If manufacturer is specified: Returns only that manufacturer's profiles
         /// - If machineProfileId is specified: Returns only compatible profiles for that machine
@@ -611,11 +603,13 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     continue;
                 }
+
                 if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
                 {
-                    list = new List<MachineProfileListItemDto>();
+                    list = [];
                     machinesByModelId[pmid] = list;
                 }
+
                 list.Add(m);
             }
 
@@ -629,6 +623,7 @@ namespace Farm.Web.Api.Services.Slicing
                         manufacturerName = mName;
                     }
                 }
+
                 if (string.IsNullOrWhiteSpace(manufacturerName))
                 {
                     manufacturerName = "Unknown";
@@ -699,13 +694,13 @@ namespace Farm.Web.Api.Services.Slicing
         /// <remarks>
         /// System profiles are pre-configured profiles provided by PrintFarmer for OrcaSlicer.
         /// These are typically optimized profiles for common printer models and materials.
-        /// 
+        ///
         /// This method is used for:
         /// - Listing available profiles to users for printer assignment
         /// - Bulk import operations
         /// - Default profile selection
         /// - Profile availability checking
-        /// 
+        ///
         /// Results are typically cached and refreshed via SeedSystemProfilesFromWorkerAsync.
         /// </remarks>
         public async Task<IReadOnlyList<SlicerProfileListItemDto>> ListSystemOrcaProfilesAsync(CancellationToken ct)
@@ -743,12 +738,12 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Parsing and validating profile data
         /// - Detecting duplicates based on content hash
         /// - Updating existing profiles with new versions
-        /// 
+        ///
         /// This operation is typically run:
         /// - During system initialization
         /// - Periodically to refresh profiles (hourly/daily)
         /// - On-demand by administrators
-        /// 
+        ///
         /// If no worker is configured, returns an empty result.
         /// </remarks>
         public async Task<object> SeedSystemProfilesFromWorkerAsync(HttpClient httpClient, CancellationToken ct)
@@ -789,7 +784,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
             {
-                if (!catalogManufacturerNames.Contains(manufacturerKey ?? ""))
+                if (!catalogManufacturerNames.Contains(manufacturerKey ?? string.Empty))
                 {
                     continue;
                 }
@@ -801,7 +796,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                 foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
                 {
-                    if (!catalogModelNames.Contains(modelProfiles?.Name ?? ""))
+                    if (!catalogModelNames.Contains(modelProfiles?.Name ?? string.Empty))
                     {
                         continue;
                     }
@@ -975,13 +970,13 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Removes all existing system profiles from the database
         /// - Downloads all profiles fresh from the worker
         /// - Rebuilds the entire system profile catalog
-        /// 
+        ///
         /// Use this when:
         /// - The profile database is corrupted or inconsistent
         /// - Profiles have accumulated unwanted duplicates
         /// - A major system profile update needs to be forced
         /// - Administrative reset is required
-        /// 
+        ///
         /// WARNING: This operation is destructive and should only be run by administrators.
         /// It will remove all user-created system profiles.
         /// </remarks>
@@ -1031,7 +1026,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
             {
-                if (!catalogManufacturerNames.Contains(manufacturerKey ?? ""))
+                if (!catalogManufacturerNames.Contains(manufacturerKey ?? string.Empty))
                 {
                     continue;
                 }
@@ -1043,7 +1038,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                 foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
                 {
-                    if (!catalogModelNames.Contains(modelProfiles?.Name ?? ""))
+                    if (!catalogModelNames.Contains(modelProfiles?.Name ?? string.Empty))
                     {
                         continue;
                     }
@@ -1244,7 +1239,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Comparing worker inventory with database inventory
         /// - Validating worker connectivity
         /// - Pre-import validation
-        /// 
+        ///
         /// The profiles returned are not persisted to the database; use ImportProfileAsync
         /// or SeedSystemProfilesFromWorkerAsync to persist them.
         /// </remarks>
@@ -1281,7 +1276,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Looking up the printer in the database
         /// - Finding profiles that are compatible with the printer's capabilities
         /// - Returning system OrcaSlicer profiles that match the printer type
-        /// 
+        ///
         /// This is typically used to populate profile selection dropdowns in the UI
         /// when a specific printer is selected.
         /// </remarks>
@@ -1320,7 +1315,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Checking for duplicate profiles
         /// - Recording profile assignments
         /// - Returning detailed import results
-        /// 
+        ///
         /// Use this for bulk-assigning profiles to newly configured printers or updating a printer's
         /// available profiles all at once.
         /// </remarks>
@@ -1417,7 +1412,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Customize cloned profiles with new settings (layer height, infill, etc.)
         /// - Create new profiles based on templates
         /// - Preserve relationships between machine, process, and filament profiles
-        /// 
+        ///
         /// This is particularly useful for:
         /// - Setting up identical printer configurations
         /// - Creating custom profile variants based on templates
@@ -1511,12 +1506,12 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Imports them into the database
         /// - Assigns them to the specified printer
         /// - Handles duplicate detection
-        /// 
+        ///
         /// This is useful for:
         /// - Initial printer setup with latest worker profiles
         /// - Adding new profiles from the worker to an existing printer
         /// - Comparing and syncing worker inventory with database
-        /// 
+        ///
         /// The worker URL is typically stored in the database or can be passed in the request.
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if request is null</exception>
@@ -1619,7 +1614,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Optional advanced JSON settings
         /// - Public/private visibility settings
         /// - Default profile option
-        /// 
+        ///
         /// The created profile is immediately available for use and can be:
         /// - Assigned to printers
         /// - Exported for sharing
@@ -1675,7 +1670,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Viewing profile details in the UI
         /// - Validating profile existence
         /// - Getting profile metadata for export/import operations
-        /// 
+        ///
         /// Returns null if the profile ID does not exist; no exception is thrown.
         /// </remarks>
         public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
@@ -1687,6 +1682,7 @@ namespace Farm.Web.Api.Services.Slicing
                 _logger.LogWarning($"[GetProfileAsync] Profile not found with ID: {id}");
                 return null;
             }
+
             _logger.LogDebug($"[GetProfileAsync] Retrieved profile: {profile.Name}");
             return ToResponseDto(profile);
         }
@@ -1704,13 +1700,13 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Machine profile (hardware configuration)
         /// - Process profile (print quality and speed settings)
         /// - Filament profile (material properties)
-        /// 
+        ///
         /// This is typically used for:
         /// - UI profile selectors and lists
         /// - API endpoints that need to return all available profiles
         /// - Profile searching and filtering operations
         /// - Dashboard and overview displays
-        /// 
+        ///
         /// Results are sorted by profile name for consistent ordering.
         /// </remarks>
         public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct)
@@ -1734,12 +1730,12 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Removes any associations with printers
         /// - Cannot be undone
         /// - Is logged for audit purposes
-        /// 
+        ///
         /// After deletion:
         /// - The profile ID cannot be used to retrieve the profile
         /// - Any printers that used this profile will no longer have it available
         /// - The space is freed in the database
-        /// 
+        ///
         /// Note: System profiles should typically not be deleted, only custom/user-created profiles.
         /// </remarks>
         /// <exception cref="KeyNotFoundException">Thrown if the profile with the specified ID is not found</exception>
@@ -1890,12 +1886,9 @@ namespace Farm.Web.Api.Services.Slicing
 
                 string versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
                 using JsonDocument versionDoc = JsonDocument.Parse(versionJson);
-                if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String)
-                {
-                    return versionElem.GetString();
-                }
-
-                return null;
+                return versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String
+                    ? versionElem.GetString()
+                    : null;
             }
             catch
             {

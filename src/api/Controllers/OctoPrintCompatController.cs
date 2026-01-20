@@ -1,0 +1,133 @@
+﻿using System;
+using System.IO;
+using System.Threading.Tasks;
+using Farm.Web.Api.Services.Gcode;
+using Farm.Web.Api.Services.OctoPrint;
+using Farm.Web.Api.Services.PrintJobQueue;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace Farm.Web.Api.Controllers
+{
+    [ApiController]
+    [Route("api")]
+    public class OctoPrintCompatController(
+        ILogger<OctoPrintCompatController> logger,
+        IOctoPrintAuthService authService,
+        IOptions<OctoPrintSettings> settings,
+        IGcodeFilesService gcodeFilesService) : ControllerBase
+    {
+        private readonly ILogger<OctoPrintCompatController> _logger = logger;
+        private readonly IOctoPrintAuthService _authService = authService;
+        private readonly OctoPrintSettings _settings = settings.Value;
+        private readonly IGcodeFilesService _gcodeFilesService = gcodeFilesService;
+
+        [HttpPost("files/local")]
+        [AllowAnonymous]
+        [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
+#pragma warning disable S6932 // OctoPrint compatibility requires raw request access
+        public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId, [FromQuery] bool print = false)
+        {
+            string apiKey = Request.Headers["X-Api-Key"].ToString();
+
+            bool allowed = await _authService.ValidateApiKeyAsync(string.IsNullOrWhiteSpace(apiKey) ? null : apiKey, printerId, null);
+            if (!allowed)
+            {
+                return Unauthorized(new { message = "Invalid API key" });
+            }
+
+            // Rate limiting: key by apiKey if present otherwise by remote IP
+            var rateLimiter = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Middleware.SimpleRateLimitService)) as Farm.Web.Api.Middleware.SimpleRateLimitService;
+            OctoPrintSettings octoSettings = _settings;
+            string rateKey = !string.IsNullOrWhiteSpace(apiKey) ? $"apikey:{apiKey}" : $"ip:{HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+            bool limitOk = rateLimiter?.TryConsume(rateKey, octoSettings.RateLimitPerMinute, TimeSpan.FromMinutes(1)) ?? true;
+            if (!limitOk)
+            {
+                _logger.LogWarning("Rate limit exceeded for {Key}", rateKey);
+                return StatusCode(429, new { message = "Rate limit exceeded" });
+            }
+
+            if (!Request.HasFormContentType || Request.Form.Files.Count == 0)
+            {
+                return BadRequest(new { message = "No file uploaded" });
+            }
+
+            IFormFile file = Request.Form.Files[0];
+#pragma warning restore S6932
+
+            if (file.Length == 0)
+            {
+                return BadRequest(new { message = "Uploaded file is empty" });
+            }
+
+            // Save to IFormFile directly using existing file upload pipeline
+            // Both "upload" and "upload and print" buttons treat the file the same way:
+            // just upload and save it. The print parameter is ignored.
+            try
+            {
+                var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
+                var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
+                GcodeFileEntryDto uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
+
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
+                }
+
+                // Simple response: always return the file. Ignore print parameter.
+                // User can queue from the dashboard UI if desired.
+                return Ok(new { file = uploadDto });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process OctoPrint upload: {Message}", ex.Message);
+                return StatusCode(500, new { message = $"Upload failed: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// OctoPrint API: Get version information
+        /// Slicers use this to verify OctoPrint compatibility
+        ///
+        /// ⚠️ CRITICAL: The response format MUST match OctoPrint/fdm-monster exactly!
+        /// Slicers validate the 'text' field for the keyword "OctoPrint" to detect
+        /// the print host type. If this field contains anything else, slicers will
+        /// reject the connection with "Mismatched type of print host" error.
+        ///
+        /// The exact values are:
+        /// - api: "0.1" (OctoPrint API version)
+        /// - server: "1.9.0" (server version - must match what OctoPrint returns)
+        /// - text: "OctoPrint 1.9.3" (MUST contain "OctoPrint" keyword for slicer validation)
+        ///
+        /// Do not modify these values without verifying slicer compatibility!
+        /// </summary>
+        [HttpGet("version")]
+        [AllowAnonymous]
+        public IActionResult GetVersion()
+        {
+            return Ok(new
+            {
+                api = "0.1",
+                server = "1.9.0",
+                text = "OctoPrint 1.9.3"
+            });
+        }
+
+        /// <summary>
+        /// OctoPrint API: Get server status
+        /// </summary>
+        [HttpGet("server")]
+        [AllowAnonymous]
+        public IActionResult GetServer()
+        {
+            return Ok(new
+            {
+                version = "1.9.3",
+                safemode = (string?)null
+            });
+        }
+    }
+}

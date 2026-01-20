@@ -15,24 +15,16 @@ namespace Farm.Web.Api.Services.Setup;
 /// <summary>
 /// Service for handling initial application setup and configuration.
 /// </summary>
-public class SetupService : ISetupService
+public class SetupService(
+    IUsersRepository usersRepository,
+    IAuthenticationService authService,
+    IPasswordHashingService passwordHashingService,
+    IUnifiedLoggingService logger) : ISetupService
 {
-    private readonly IUsersRepository _usersRepository;
-    private readonly IAuthenticationService _authService;
-    private readonly IPasswordHashingService _passwordHashingService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public SetupService(
-        IUsersRepository usersRepository,
-        IAuthenticationService authService,
-        IPasswordHashingService passwordHashingService,
-        IUnifiedLoggingService logger)
-    {
-        _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
-        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-        _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IUsersRepository _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
+    private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+    private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<bool> NeedsSetupAsync(CancellationToken ct)
     {
@@ -69,8 +61,7 @@ public class SetupService : ISetupService
                         Success: true,
                         Token: tokenExisting,
                         ExpiresAt: DateTime.UtcNow.AddDays(7),
-                        User: userDtoExisting
-                    );
+                        User: userDtoExisting);
                 }
             }
 
@@ -85,12 +76,9 @@ public class SetupService : ISetupService
             bool duplicateUser = await _usersRepository.AnyUserByUsernameOrEmailAsync(
                 request.Username, request.Email, ct);
 
-            if (duplicateUser)
-            {
-                return new AuthenticationResult(false, Error: "Username or email is already taken");
-            }
-
-            return new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system.");
+            return duplicateUser
+                ? new AuthenticationResult(false, Error: "Username or email is already taken")
+                : new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system.");
         }
 
         // Validate required fields
@@ -178,21 +166,19 @@ public class SetupService : ISetupService
             Success: true,
             Token: token,
             ExpiresAt: DateTime.UtcNow.AddDays(7),
-            User: userDto
-        );
+            User: userDto);
     }
 
     public SetupConfigurationOptions GetConfigurationOptions()
     {
         return new SetupConfigurationOptions(
-            DatabaseProviders: new[] { "SQLite", "SQL Server", "PostgreSQL", "MySQL" },
+            DatabaseProviders: new[] { "SQLite", "SQL Server", "PostgreSQL" },
             DefaultNetworkRanges: new[] { "192.168.1.0/24", "192.168.0.0/24", "10.0.0.0/24" },
             RecommendedPorts: new Dictionary<string, int>
             {
                 ["Moonraker"] = 7125,
                 ["PrusaLink"] = 8080,
                 ["SDCP"] = 3000
-            }
-        );
+            });
     }
 }

@@ -5,13 +5,14 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge } from '@/common/components/ui/Badge';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 import { Label } from '@/common/components/ui/Label';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 
 export function WorkerManagementPage() {
   const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>('workers');
@@ -28,6 +29,7 @@ export function WorkerManagementPage() {
   const [expandedWorker, setExpandedWorker] = useState<string | null>(null);
   const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
+  const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -160,14 +162,20 @@ export function WorkerManagementPage() {
     }
   };
 
-  const handleDeleteWorker = async (worker: WorkerResponse) => {
-    if (!confirm(`Are you sure you want to delete worker "${worker.name}"?`)) return;
+  const handleDeleteWorker = (worker: WorkerResponse) => {
+    setWorkerToDelete(worker);
+  };
+
+  const confirmDeleteWorker = async () => {
+    if (!workerToDelete) return;
 
     try {
-      await workerService.deleteWorker(worker.id);
+      await workerService.deleteWorker(workerToDelete.id);
+      setWorkerToDelete(null);
       loadWorkers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete worker');
+      setWorkerToDelete(null);
     }
   };
 
@@ -606,6 +614,18 @@ export function WorkerManagementPage() {
           </div>
         </Modal>
       )}
+
+      {/* Delete Worker Confirmation */}
+      <ConfirmationModal
+        isOpen={!!workerToDelete}
+        title="Delete Worker?"
+        message={`Are you sure you want to delete worker "${workerToDelete?.name}"? This action cannot be undone.`}
+        confirmButtonText="Delete Worker"
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={confirmDeleteWorker}
+        onCancel={() => setWorkerToDelete(null)}
+      />
     </PageTemplate>
   );
 }

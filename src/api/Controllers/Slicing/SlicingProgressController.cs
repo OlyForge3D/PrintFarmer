@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -7,8 +8,10 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Progress")]
-public class SlicingProgressController : ControllerBase
+public class SlicingProgressController(IStoredFileOperationsService fileOperations) : ControllerBase
 {
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+
     [HttpGet("progress/{jobId}")]
     public async Task GetProgressAsync([FromRoute] string jobId)
     {
@@ -19,6 +22,7 @@ public class SlicingProgressController : ControllerBase
         {
             HttpContext.Response.Headers["Content-Type"] = "text/event-stream";
         }
+
         HttpContext.Response.Headers["Cache-Control"] = "no-cache";
         HttpContext.Response.Headers["X-Accel-Buffering"] = "no"; // disable buffering for nginx
 
@@ -40,7 +44,7 @@ public class SlicingProgressController : ControllerBase
                 status = job.Status.ToString(),
                 progress = job.Progress,
                 message = job.Message,
-                gcodeUrl = string.IsNullOrWhiteSpace(job.GcodeFilePath) ? null : $"/api/slicer/jobs/{job.JobId}/gcode"
+                gcodeUrl = string.IsNullOrWhiteSpace(job.GcodeFilePath) ? null : _fileOperations.BuildSlicerJobGcodeUrl(Guid.Parse(job.JobId))
             });
             await HttpContext.Response.WriteAsync($"data: {payload}\n\n");
             await HttpContext.Response.Body.FlushAsync();
@@ -48,6 +52,7 @@ public class SlicingProgressController : ControllerBase
             {
                 break;
             }
+
             try
             {
                 await Task.Delay(1000, ct);

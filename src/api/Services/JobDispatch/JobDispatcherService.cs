@@ -9,59 +9,26 @@ using Farm.Web.Api.Services.Slicing;
 
 namespace Farm.Web.Api.Services.JobDispatch;
 
-/// <summary>
-/// Service for dispatching jobs to available workers based on capabilities and load balancing
-/// </summary>
-public interface IJobDispatcherService
+public class JobDispatcherService(
+    ISliceJobRepository jobRepository,
+    IWorkerRepository workerRepository,
+    ISliceJobEventService eventService,
+    IUnifiedLoggingService logger,
+    IHttpClientFactory httpClientFactory,
+    RetryOptions retryOptions) : IJobDispatcherService
 {
-    /// <summary>
-    /// Attempt to dispatch the next queued job to an available worker
-    /// </summary>
-    /// <returns>True if a job was dispatched, false if no suitable worker was found</returns>
-    Task<bool> DispatchNextJobAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Dispatch a specific job to the best available worker
-    /// </summary>
-    Task<bool> DispatchJobAsync(Guid jobId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Find the best worker for a job based on capabilities and load
-    /// </summary>
-    Task<Worker?> FindBestWorkerForJobAsync(SliceJob job, CancellationToken cancellationToken = default);
-}
-
-public class JobDispatcherService : IJobDispatcherService
-{
-    private readonly ISliceJobRepository _jobRepository;
-    private readonly IWorkerRepository _workerRepository;
-    private readonly ISliceJobEventService _eventService;
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly RetryOptions _retryOptions;
+    private readonly ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+    private readonly ISliceJobEventService _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly RetryOptions _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
 
     private static volatile int _lastAvailableWorkers;
     private static readonly System.Diagnostics.Metrics.Meter _meter = new("PrintFarmer.Slicing", "1.0.0");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatched = _meter.CreateCounter<int>("slicing_jobs_dispatched");
     private static readonly System.Diagnostics.Metrics.Counter<int> _jobsDispatchFailed = _meter.CreateCounter<int>("slicing_jobs_dispatch_failed");
     private static readonly System.Diagnostics.Metrics.Histogram<double> _dispatchDurationMs = _meter.CreateHistogram<double>("slicing_job_dispatch_duration_ms", unit: "ms", description: "Duration of job dispatch attempts");
-    //private static readonly System.Diagnostics.Metrics.ObservableGauge<int> _availableWorkersGauge = _meter.CreateObservableGauge("slicing_available_workers", () => new System.Diagnostics.Metrics.Measurement<int>(_lastAvailableWorkers));
-
-    public JobDispatcherService(
-        ISliceJobRepository jobRepository,
-        IWorkerRepository workerRepository,
-        ISliceJobEventService eventService,
-        IUnifiedLoggingService logger,
-        IHttpClientFactory httpClientFactory,
-        RetryOptions retryOptions)
-    {
-        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
-        _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
-        _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _retryOptions = retryOptions ?? throw new ArgumentNullException(nameof(retryOptions));
-    }
 
     public async Task<bool> DispatchNextJobAsync(CancellationToken cancellationToken = default)
     {
@@ -184,7 +151,10 @@ public class JobDispatcherService : IJobDispatcherService
                 staleSeconds = parsed;
             }
         }
-        catch { }
+        catch
+        {
+        }
+
         DateTime cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(staleSeconds);
         availableWorkers = availableWorkers.Where(w => w.LastHeartbeat == null || w.LastHeartbeat >= cutoff).ToList();
 #pragma warning disable S2696 // Static field updated from instance method (used for worker availability metrics)
@@ -218,7 +188,6 @@ public class JobDispatcherService : IJobDispatcherService
         // - Fewer active jobs = better
         // - Faster average processing time = better
         // - Worker with matching slicer engine capability = bonus
-
         Worker? bestWorker = null;
         double bestScore = double.MinValue;
 
@@ -339,6 +308,7 @@ public class JobDispatcherService : IJobDispatcherService
                         await Task.Delay(delayMs, cancellationToken);
                         continue;
                     }
+
                     return false;
                 }
                 else
@@ -358,6 +328,7 @@ public class JobDispatcherService : IJobDispatcherService
                     await Task.Delay(delayMs, cancellationToken);
                     continue;
                 }
+
                 return false;
             }
             catch (TaskCanceledException)
@@ -371,6 +342,7 @@ public class JobDispatcherService : IJobDispatcherService
                 return false;
             }
         }
+
         return false;
     }
 }

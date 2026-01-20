@@ -26,7 +26,7 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void Constructor_WithoutEnvironmentVariable_SetsDefaultExtensions()
     {
-        var extensions = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
 
         extensions.Should().Contain(".gcode");
         extensions.Should().Contain(".bgcode");
@@ -36,7 +36,7 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void AllowedExtensions_Returns_ReadOnlyCollection()
     {
-        var extensions = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
 
         extensions.Should().NotBeNull();
         extensions.Should().BeAssignableTo<IReadOnlyCollection<string>>();
@@ -45,11 +45,11 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void UpdateAllowedExtensions_ReplacesPreviousExtensions()
     {
-        var newExtensions = new[] { ".gcode", ".bgcode", ".ufp" };
+        string[] newExtensions = new[] { ".gcode", ".bgcode", ".ufp" };
 
         _settings.UpdateAllowedExtensions(newExtensions);
 
-        var updated = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> updated = _settings.GetAllowedExtensions();
         updated.Should().Contain(".gcode");
         updated.Should().Contain(".bgcode");
         updated.Should().Contain(".ufp");
@@ -60,18 +60,18 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     {
         _settings.UpdateAllowedExtensions(new string[] { });
 
-        var extensions = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
         extensions.Should().BeEmpty();
     }
 
     [Fact]
     public void UpdateAllowedExtensions_WithDuplicates_HandlesDuplicates()
     {
-        var extensions = new[] { ".gcode", ".gcode", ".bgcode", ".bgcode" };
+        string[] extensions = new[] { ".gcode", ".gcode", ".bgcode", ".bgcode" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().Contain(".gcode");
         result.Should().Contain(".bgcode");
         result.Count.Should().Be(2);
@@ -80,33 +80,33 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void UpdateAllowedExtensions_IsCaseInsensitive()
     {
-        var extensions = new[] { ".GCODE", ".BgCode" };
+        string[] extensions = new[] { ".GCODE", ".BgCode" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().HaveCount(2);
     }
 
     [Fact]
     public void UpdateAllowedExtensions_AutoAddsDotsToExtensions()
     {
-        var extensions = new[] { "gcode", "bgcode" };
+        string[] extensions = new[] { "gcode", "bgcode" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().AllSatisfy(e => e.Should().StartWith("."));
     }
 
     [Fact]
     public void UpdateAllowedExtensions_WithMixedDotNotation()
     {
-        var extensions = new[] { ".gcode", "bgcode", ".ufp", "txt" };
+        string[] extensions = new[] { ".gcode", "bgcode", ".ufp", "txt" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().AllSatisfy(e => e.Should().StartWith("."));
         result.Should().HaveCount(4);
     }
@@ -114,8 +114,8 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void AllowedExtensions_ReturnsNewCollectionEachTime()
     {
-        var extensions1 = _settings.AllowedExtensions;
-        var extensions2 = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> extensions1 = _settings.GetAllowedExtensions();
+        IReadOnlyCollection<string> extensions2 = _settings.GetAllowedExtensions();
 
         // Collections should have same content but be different instances
         extensions1.Should().Equal(extensions2);
@@ -124,13 +124,13 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void UpdateAllowedExtensions_CanBeCalledMultipleTimes()
     {
-        var extensions1 = new[] { ".gcode" };
+        string[] extensions1 = new[] { ".gcode" };
         _settings.UpdateAllowedExtensions(extensions1);
-        var result1 = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result1 = _settings.GetAllowedExtensions();
 
-        var extensions2 = new[] { ".gcode", ".bgcode" };
+        string[] extensions2 = new[] { ".gcode", ".bgcode" };
         _settings.UpdateAllowedExtensions(extensions2);
-        var result2 = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result2 = _settings.GetAllowedExtensions();
 
         result1.Should().HaveCount(1);
         result2.Should().HaveCount(2);
@@ -139,11 +139,11 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void UpdateAllowedExtensions_PreservesOrderApproximately()
     {
-        var extensions = new[] { ".ufp", ".bgcode", ".gcode" };
+        string[] extensions = new[] { ".ufp", ".bgcode", ".gcode" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().HaveCount(3);
         result.Should().Contain(".ufp");
         result.Should().Contain(".bgcode");
@@ -153,11 +153,11 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void UpdateAllowedExtensions_WithSpecialCharacters()
     {
-        var extensions = new[] { ".gcode", ".g-code", ".g_code" };
+        string[] extensions = new[] { ".gcode", ".g-code", ".g_code" };
 
         _settings.UpdateAllowedExtensions(extensions);
 
-        var result = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> result = _settings.GetAllowedExtensions();
         result.Should().Contain(".gcode");
         result.Should().Contain(".g-code");
         result.Should().Contain(".g_code");
@@ -166,7 +166,7 @@ public class InMemoryGcodeUploadSettingsTests : IDisposable
     [Fact]
     public void AllowedExtensions_IsNotNull()
     {
-        var extensions = _settings.AllowedExtensions;
+        IReadOnlyCollection<string> extensions = _settings.GetAllowedExtensions();
 
         extensions.Should().NotBeNull();
     }

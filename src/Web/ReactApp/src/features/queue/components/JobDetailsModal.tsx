@@ -1,54 +1,52 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition } from 'react';
 import { Button } from '@/common/components/ui/Button';
-import { printQueueService } from '../../../services/printQueueService';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { apiClient } from '@/services/api';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
 import JobTagsEditor from './JobTagsEditor';
 import '../styles/JobDetailsModal.css';
-import type { JobDetails } from '@/types/queue';
+import type { JobDetails, JobDetailsTabType } from '@/types/queue';
 import type { JobDetailsModalProps } from '@/types/components';
 
-const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
-  jobId,
-  isOpen,
-  onClose,
-  onSave,
-}) => {
-  const [jobDetails, setJobDetails] = useState<JobDetails | null>(null);
-  const [loading, setLoading] = useState(false);
+/**
+ * React 19 async data fetching: returns a promise that resolves to job details
+ */
+function fetchJobDetails(jobId: string): Promise<JobDetails> {
+  return apiClient.getAnalyticsJobDetails(jobId).then(response => response as unknown as JobDetails);
+}
+
+/**
+ * Content component that uses the use() hook to unwrap the promise
+ * This is separated from the modal to use Suspense boundary
+ */
+interface JobDetailsContentProps {
+  jobDetailsPromise: Promise<JobDetails>;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave?: (job: JobDetails) => void;
+}
+
+function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDetailsContentProps) {
+  // React 19: use() hook unwraps the promise and suspends rendering
+  const initialJobDetails = use(jobDetailsPromise);
+  
+  const [jobDetails, setJobDetails] = useState<JobDetails>(initialJobDetails);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [editedDetails, setEditedDetails] = useState<JobDetails | null>(null);
-
-  // Load job details when modal opens
-  useEffect(() => {
-    if (!isOpen || !jobId) return;
-
-    const loadJobDetails = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const response = await printQueueService.getJobDetailsAsync(jobId);
-        const jobDetailsData = response as unknown as JobDetails;
-        setJobDetails(jobDetailsData);
-        setEditedDetails(jobDetailsData);
-        setIsEditing(false);
-        setHasChanges(false);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load job details';
-        setError(errorMessage);
-        console.error('Failed to load job details:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadJobDetails();
-  }, [isOpen, jobId]);
+  const [activeTab, setActiveTab] = useState<JobDetailsTabType>('overview');
+  const [editedDetails, setEditedDetails] = useState<JobDetails>(initialJobDetails);
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+  
+  // React 19: useTransition for managing async operations
+  const [isPending, startTransition] = useTransition();
+  
+  // React 19: useOptimistic for immediate UI feedback on save
+  const [optimisticDetails, addOptimisticUpdate] = useOptimistic<JobDetails, JobDetails>(
+    jobDetails,
+    (_, newDetails) => newDetails
+  );
 
   const handleEditClick = useCallback(() => {
     setIsEditing(true);
@@ -63,8 +61,6 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   }, [jobDetails]);
 
   const handleFieldChange = useCallback((field: keyof JobDetails, value: string | number | undefined) => {
-    if (!editedDetails) return;
-
     const updated = { ...editedDetails, [field]: value };
     setEditedDetails(updated);
     setHasChanges(true);
@@ -72,8 +68,6 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   }, [editedDetails]);
 
   const handleTagsChange = useCallback((tags: string[]) => {
-    if (!editedDetails) return;
-
     const updated = { ...editedDetails, tags };
     setEditedDetails(updated);
     setHasChanges(true);
@@ -81,8 +75,6 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   }, [editedDetails]);
 
   const handleNotesChange = useCallback((notes: string) => {
-    if (!editedDetails) return;
-
     const updated = { ...editedDetails, notes };
     setEditedDetails(updated);
     setHasChanges(true);
@@ -90,60 +82,66 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   }, [editedDetails]);
 
   const handleSave = useCallback(async () => {
-    if (!editedDetails || !hasChanges) {
+    if (!hasChanges) {
       setIsEditing(false);
       return;
     }
 
-    try {
-      setIsSaving(true);
-      setError(null);
+    // React 19: Use startTransition for async operations
+    startTransition(async () => {
+      try {
+        setError(null);
 
-      // Call update endpoint with changed fields
-      const updatedJob = await printQueueService.updateJobDetailsAsync(
-        jobId,
-        editedDetails
-      );
+        // React 19: Optimistic update - show new details immediately
+        addOptimisticUpdate(editedDetails);
 
-      const jobDetailsData = updatedJob as unknown as JobDetails;
-      setJobDetails(jobDetailsData);
-      setEditedDetails(jobDetailsData);
-      setIsEditing(false);
-      setHasChanges(false);
+        // Call update endpoint with changed fields
+        const updatedJob = await apiClient.updateJobDetails(
+          jobDetails.id,
+          editedDetails
+        );
 
-      // Call callback if provided
-      if (onSave) {
-        onSave(updatedJob);
+        const jobDetailsData = updatedJob as unknown as JobDetails;
+        setJobDetails(jobDetailsData);
+        setEditedDetails(jobDetailsData);
+        setIsEditing(false);
+        setHasChanges(false);
+
+        // Call callback if provided
+        if (onSave) {
+          onSave(jobDetailsData);
+        }
+
+        // Show success message
+        if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
+        setError(errorMessage);
+        console.error('Failed to save job details:', err);
       }
+    });
+  }, [jobDetails.id, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
 
-      // Show success message
-      if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
-      setError(errorMessage);
-      console.error('Failed to save job details:', err);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [jobId, editedDetails, hasChanges, onSave]);
-
-  const handleClose = useCallback(() => {
-    if (hasChanges) {
-      const confirmed = window.confirm(
-        'You have unsaved changes. Are you sure you want to close?'
-      );
-      if (!confirmed) return;
-    }
-
+  const doClose = useCallback(() => {
     setIsEditing(false);
     setHasChanges(false);
     setError(null);
+    setShowUnsavedConfirm(false);
     onClose();
-  }, [hasChanges, onClose]);
+  }, [onClose]);
+
+  const handleClose = useCallback(() => {
+    if (hasChanges) {
+      setShowUnsavedConfirm(true);
+      return;
+    }
+    doClose();
+  }, [hasChanges, doClose]);
 
   if (!isOpen) return null;
 
-  const displayDetails = isEditing ? editedDetails : jobDetails;
+  // React 19: Use optimistic details for immediate UI feedback
+  const displayDetails = isEditing ? editedDetails : optimisticDetails;
 
   return (
     <div className="job-details-modal-overlay" onClick={handleClose}>
@@ -196,19 +194,10 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
           </div>
         )}
 
-        {/* Loading State */}
-        {loading && (
-          <div className="modal-loading">
-            <div className="spinner"></div>
-            <p>Loading job details...</p>
-          </div>
-        )}
-
-        {/* Content */}
-        {!loading && displayDetails && (
-          <>
-            {/* Tabs */}
-            <div className="modal-tabs">
+        {/* Content - No loading state needed, Suspense handles it */}
+        <>
+          {/* Tabs */}
+          <div className="modal-tabs">
               <Button
                 className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
                 onClick={() => setActiveTab('overview')}
@@ -385,7 +374,6 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
               )}
             </div>
           </>
-        )}
 
         {/* Footer */}
         <div className="modal-footer">
@@ -394,7 +382,7 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
               <Button
                 className="btn btn-secondary"
                 onClick={handleCancelEdit}
-                disabled={isSaving}
+                disabled={isPending}
                 variant="secondary"
               >
                 Cancel
@@ -402,10 +390,10 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
               <Button
                 className="btn btn-primary"
                 onClick={handleSave}
-                disabled={!hasChanges || isSaving}
+                disabled={!hasChanges || isPending}
                 variant="primary"
               >
-                {isSaving ? 'Saving...' : 'Save Changes'}
+                {isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </>
           ) : (
@@ -428,7 +416,53 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Unsaved changes confirmation */}
+      <ConfirmationModal
+        isOpen={showUnsavedConfirm}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to close?"
+        confirmButtonText="Discard Changes"
+        cancelButtonText="Keep Editing"
+        isDangerous
+        onConfirm={doClose}
+        onCancel={() => setShowUnsavedConfirm(false)}
+      />
     </div>
+  );
+}
+
+/**
+ * React 19 Modal wrapper with Suspense boundary
+ * Handles async data fetching and error states
+ */
+const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
+  jobId,
+  isOpen,
+  onClose,
+  onSave,
+}) => {
+  if (!isOpen || !jobId) return null;
+
+  return (
+    // React 19 Suspense boundary shows fallback while promise resolves
+    <Suspense fallback={
+      <div className="job-details-modal-overlay">
+        <div className="job-details-modal-container" role="dialog" aria-modal="true">
+          <div className="modal-loading">
+            <div className="spinner"></div>
+            <p>Loading job details...</p>
+          </div>
+        </div>
+      </div>
+    }>
+      <JobDetailsContent
+        jobDetailsPromise={fetchJobDetails(jobId)}
+        isOpen={isOpen}
+        onClose={onClose}
+        onSave={onSave}
+      />
+    </Suspense>
   );
 };
 

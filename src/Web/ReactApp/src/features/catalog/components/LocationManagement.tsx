@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useOptimistic, useTransition } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { Location, CreateLocationRequest, UpdateLocationRequest, locationService } from '@/services/locationService';
-// ConfirmationModal removed; not used in this component
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import { Button, Textarea } from '@/common/components/ui';
 
@@ -20,7 +20,18 @@ export const LocationManagement: React.FC = () => {
     name: '',
     description: '',
   });
-  // locationToDelete state removed - deletion uses immediate confirmation
+  
+  // React 19: useTransition for async delete operations
+  const [,startTransition] = useTransition();
+  
+  // React 19: useOptimistic for optimistic location deletion
+  const [optimisticLocations, addOptimisticDelete] = useOptimistic<Location[], string>(
+    locations,
+    (state, deletedLocationId) => state.filter(loc => loc.id !== deletedLocationId)
+  );
+
+  // State for delete confirmation modal
+  const [locationToDelete, setLocationToDelete] = useState<string | null>(null);
 
   // Load locations on component mount
   useEffect(() => {
@@ -80,20 +91,31 @@ export const LocationManagement: React.FC = () => {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Delete this location? This action cannot be undone.');
-    if (!confirmed) return;
+  const handleDelete = (id: string) => {
+    setLocationToDelete(id);
+  };
 
-    try {
-      setLoading(true);
-      setError(null);
-      await locationService.deleteLocation(id);
-      await loadLocations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete location');
-    } finally {
-      setLoading(false);
-    }
+  const confirmDelete = () => {
+    if (!locationToDelete) return;
+
+    const id = locationToDelete;
+    setLocationToDelete(null);
+
+    // React 19: Use startTransition for optimistic deletion
+    startTransition(async () => {
+      try {
+        // Optimistically remove the location immediately
+        addOptimisticDelete(id);
+        
+        // Execute deletion in background
+        setError(null);
+        await locationService.deleteLocation(id);
+        await loadLocations();
+      } catch (err) {
+        // State rolls back automatically via useOptimistic on error
+        setError(err instanceof Error ? err.message : 'Failed to delete location');
+      }
+    });
   };
 
   const handleCancel = () => {
@@ -185,7 +207,7 @@ export const LocationManagement: React.FC = () => {
       <div className="shadow overflow-hidden rounded-lg bg-pf-bg-1 border border-pf-border">
         {loading && !showForm ? (
           <div className="p-6 text-center text-pf-text-primary">Loading locations...</div>
-        ) : locations.length === 0 ? (
+        ) : optimisticLocations.length === 0 ? (
           <div className="p-6 text-center text-pf-text-secondary">
             No locations found. Create one to get started!
           </div>
@@ -212,7 +234,7 @@ export const LocationManagement: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {locations.map((location) => (
+                {optimisticLocations.map((location) => (
                   <SelectableRow key={location.id} className="border-b border-pf-border" isSelected={false}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-pf-text-primary">
                       {location.name}
@@ -254,11 +276,23 @@ export const LocationManagement: React.FC = () => {
       </div>
 
       {/* Drag and Drop Printer Assignment - Only show if locations exist */}
-      {locations.length > 0 && (
+      {optimisticLocations.length > 0 && (
         <div className="border-t pt-8 mt-8">
-          <PrinterLocationDragDrop key={locations.length} locations={locations} />
+          <PrinterLocationDragDrop key={optimisticLocations.length} locations={optimisticLocations} />
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={!!locationToDelete}
+        title="Delete Location?"
+        message="Delete this location? This action cannot be undone."
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={confirmDelete}
+        onCancel={() => setLocationToDelete(null)}
+      />
     </div>
   );
 };

@@ -3,7 +3,7 @@
  * Consolidated from scattered definitions across the queue feature
  */
 
-import type { QueueJob } from './api';
+import type { JobQueuePrintJob } from './api';
 
 /**
  * Status of a job in the print queue or history
@@ -52,7 +52,7 @@ export interface ModelStats {
   pausedCount: number;
   totalCount: number;
   averageWaitTimeMinutes: number;
-  jobs: QueueJob[];
+  jobs: JobQueuePrintJob[];
 }
 
 /**

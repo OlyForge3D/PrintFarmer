@@ -22,7 +22,7 @@ public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLogg
     {
         try
         {
-            var all = await _service.GetAllAsync(cancellationToken).ConfigureAwait(false);
+            IEnumerable<PrintJobDto> all = await _service.GetAllAsync(cancellationToken).ConfigureAwait(false);
             return Ok(all);
         }
         catch (Exception ex)
@@ -42,13 +42,8 @@ public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLogg
 
         try
         {
-            var added = await _service.EnqueueAsync(req, cancellationToken).ConfigureAwait(false);
-            if (added == null)
-            {
-                return BadRequest("Could not enqueue job");
-            }
-
-            return CreatedAtAction(nameof(GetByIdAsync), new { id = added.Id }, added);
+            PrintJobDto? added = await _service.EnqueueAsync(req, cancellationToken).ConfigureAwait(false);
+            return added == null ? BadRequest("Could not enqueue job") : CreatedAtAction(nameof(GetByIdAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -60,25 +55,15 @@ public class PrintJobQueueController(IPrintJobQueueService service, IUnifiedLogg
     [HttpGet("{id}")]
     public async Task<ActionResult<PrintJobDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var job = await _service.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        if (job == null)
-        {
-            return NotFound();
-        }
-
-        return Ok(job);
+        PrintJobDto? job = await _service.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        return job == null ? NotFound() : Ok(job);
     }
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        var ok = await _service.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
-        if (!ok)
-        {
-            return NotFound();
-        }
-
-        return NoContent();
+        bool ok = await _service.RemoveAsync(id, cancellationToken).ConfigureAwait(false);
+        return !ok ? NotFound() : NoContent();
     }
 }
 

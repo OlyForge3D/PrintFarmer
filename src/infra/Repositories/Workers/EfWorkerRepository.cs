@@ -8,14 +8,9 @@ namespace Farm.Infrastructure.Repositories.Workers;
 /// <summary>
 /// EF Core implementation of IWorkerRepository
 /// </summary>
-public class EfWorkerRepository : IWorkerRepository
+public class EfWorkerRepository(AppDbContext context) : IWorkerRepository
 {
-    private readonly AppDbContext _context;
-
-    public EfWorkerRepository(AppDbContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
+    private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
     public async Task AddAsync(Worker worker)
     {
@@ -33,6 +28,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task<Worker?> GetByServiceIdAsync(string serviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceId);
+
         // Return tracked entity so callers (e.g., SlicersService heartbeat sync) can mutate and persist.
         return await _context.Workers.FirstOrDefaultAsync(w => w.ServiceId == serviceId);
     }
@@ -151,6 +147,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.LastHeartbeat = DateTime.UtcNow;
+
             // FreeSlots is now calculated as TotalSlots - ActiveJobs
             // Calculate ActiveJobs from the reported freeSlots
             worker.TotalSlots = totalSlots;
@@ -175,6 +172,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.ActiveJobs++;
+
             // FreeSlots is calculated as TotalSlots - ActiveJobs
             worker.UpdatedAt = DateTime.UtcNow;
 
@@ -191,6 +189,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.ActiveJobs = Math.Max(0, worker.ActiveJobs - 1);
+
             // FreeSlots is calculated as TotalSlots - ActiveJobs
             worker.UpdatedAt = DateTime.UtcNow;
 
@@ -262,6 +261,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.TotalSlots = totalSlots;
+
             // NOTE: Do NOT recalculate ActiveJobs or FreeSlots here.
             // ActiveJobs is managed exclusively by JobDispatcherService (increment on dispatch, decrement on complete).
             // FreeSlots is maintained by the worker heartbeat.

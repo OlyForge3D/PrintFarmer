@@ -400,6 +400,6 @@ public class PasswordResetIntegrationTests : IAsyncLifetime
             .CountAsync();
 
         // Should have created tokens for the first 3 requests only
-        _ = tokenCount.Should().BeLessOrEqualTo(3);
+        _ = tokenCount.Should().BeLessThanOrEqualTo(3);
     }
 }

@@ -32,21 +32,21 @@ public class TagsControllerTests
     public async Task GetAllTagsAsync_WithTags_ReturnsOkWithTags()
     {
         // Arrange
-        var tags = new List<Model3DTagDto>
+        var tags = new List<TagDto>
         {
-            new Model3DTagDto { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000" },
-            new Model3DTagDto { Id = Guid.NewGuid(), Name = "Miniature", Color = "#00FF00" }
-        } as IReadOnlyList<Model3DTagDto>;
+            new TagDto { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000" },
+            new TagDto { Id = Guid.NewGuid(), Name = "Miniature", Color = "#00FF00" }
+        } as IReadOnlyList<TagDto>;
 
         _tagServiceMock
             .Setup(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(tags);
 
         // Act
-        var result = await _controller.GetAllTagsAsync(CancellationToken.None);
+        ActionResult<IEnumerable<TagDto>> result = await _controller.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(tags, okResult.Value);
         _tagServiceMock.Verify(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -55,17 +55,17 @@ public class TagsControllerTests
     public async Task GetAllTagsAsync_WithNoTags_ReturnsOkWithEmptyList()
     {
         // Arrange
-        IReadOnlyList<Model3DTagDto> emptyTags = new List<Model3DTagDto>();
+        IReadOnlyList<TagDto> emptyTags = new List<TagDto>();
         _tagServiceMock
             .Setup(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(emptyTags);
 
         // Act
-        var result = await _controller.GetAllTagsAsync(CancellationToken.None);
+        ActionResult<IEnumerable<TagDto>> result = await _controller.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedTags = Assert.IsAssignableFrom<IReadOnlyList<Model3DTagDto>>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        IReadOnlyList<TagDto> returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagDto>>(okResult.Value);
         Assert.Empty(returnedTags);
     }
 
@@ -78,10 +78,10 @@ public class TagsControllerTests
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
-        var result = await _controller.GetAllTagsAsync(CancellationToken.None);
+        ActionResult<IEnumerable<TagDto>> result = await _controller.GetAllTagsAsync(CancellationToken.None);
 
         // Assert
-        var statusResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult statusResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status500InternalServerError, statusResult.StatusCode);
     }
 
@@ -93,7 +93,7 @@ public class TagsControllerTests
     public async Task SearchTagsAsync_WithValidQuery_ReturnsOkWithResults()
     {
         // Arrange
-        var searchQuery = "support";
+        string searchQuery = "support";
         var results = new List<TagSuggestionDto>
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support Required", UsageCount = 5 },
@@ -105,10 +105,10 @@ public class TagsControllerTests
             .ReturnsAsync(results);
 
         // Act
-        var result = await _controller.SearchTagsAsync(searchQuery, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.SearchTagsAsync(searchQuery, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(results, okResult.Value);
         _tagServiceMock.Verify(s => s.SearchTagsAsync(searchQuery, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -117,11 +117,11 @@ public class TagsControllerTests
     public async Task SearchTagsAsync_WithNullQuery_ReturnsOkWithEmptyList()
     {
         // Arrange & Act
-        var result = await _controller.SearchTagsAsync(null, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.SearchTagsAsync(null, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        IReadOnlyList<TagSuggestionDto> returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
         Assert.Empty(returnedTags);
         _tagServiceMock.Verify(s => s.SearchTagsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -130,11 +130,11 @@ public class TagsControllerTests
     public async Task SearchTagsAsync_WithEmptyQuery_ReturnsOkWithEmptyList()
     {
         // Arrange & Act
-        var result = await _controller.SearchTagsAsync("   ", CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.SearchTagsAsync("   ", CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        IReadOnlyList<TagSuggestionDto> returnedTags = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
         Assert.Empty(returnedTags);
     }
 
@@ -147,10 +147,10 @@ public class TagsControllerTests
             .ThrowsAsync(new InvalidOperationException("Search error"));
 
         // Act
-        var result = await _controller.SearchTagsAsync("test", CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.SearchTagsAsync("test", CancellationToken.None);
 
         // Assert
-        var statusResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult statusResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status500InternalServerError, statusResult.StatusCode);
     }
 
@@ -173,10 +173,10 @@ public class TagsControllerTests
             .ReturnsAsync(popularTags);
 
         // Act
-        var result = await _controller.GetPopularTagsAsync(10, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetPopularTagsAsync(10, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(popularTags, okResult.Value);
     }
 
@@ -184,7 +184,7 @@ public class TagsControllerTests
     public async Task GetPopularTagsAsync_WithCustomCount_ReturnsOkWithRequestedCount()
     {
         // Arrange
-        var count = 20;
+        int count = 20;
         var popularTags = new List<TagSuggestionDto>
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Tag1", UsageCount = 100 }
@@ -195,10 +195,10 @@ public class TagsControllerTests
             .ReturnsAsync(popularTags);
 
         // Act
-        var result = await _controller.GetPopularTagsAsync(count, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetPopularTagsAsync(count, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(popularTags, okResult.Value);
         _tagServiceMock.Verify(s => s.GetPopularTagsAsync(count, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -213,10 +213,10 @@ public class TagsControllerTests
             .ReturnsAsync(popularTags);
 
         // Act
-        var result = await _controller.GetPopularTagsAsync(0, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetPopularTagsAsync(0, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         _tagServiceMock.Verify(s => s.GetPopularTagsAsync(10, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -245,10 +245,10 @@ public class TagsControllerTests
             .ReturnsAsync(analytics);
 
         // Act
-        var result = await _controller.GetTagAnalyticsAsync(CancellationToken.None);
+        ActionResult<TagAnalyticsDto> result = await _controller.GetTagAnalyticsAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(analytics, okResult.Value);
         _tagServiceMock.Verify(s => s.GetAnalyticsAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -262,10 +262,10 @@ public class TagsControllerTests
             .ThrowsAsync(new InvalidOperationException("Analytics calculation failed"));
 
         // Act
-        var result = await _controller.GetTagAnalyticsAsync(CancellationToken.None);
+        ActionResult<TagAnalyticsDto> result = await _controller.GetTagAnalyticsAsync(CancellationToken.None);
 
         // Assert
-        var statusResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult statusResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(StatusCodes.Status500InternalServerError, statusResult.StatusCode);
     }
 
@@ -277,7 +277,7 @@ public class TagsControllerTests
     public async Task GetTagSuggestionsAsync_WithValidQuery_ReturnsOkWithSuggestions()
     {
         // Arrange
-        var query = "sup";
+        string query = "sup";
         var suggestions = new List<TagSuggestionDto>
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support", UsageCount = 50 },
@@ -289,10 +289,10 @@ public class TagsControllerTests
             .ReturnsAsync(suggestions);
 
         // Act
-        var result = await _controller.GetTagSuggestionsAsync(query, 10, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetTagSuggestionsAsync(query, 10, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(suggestions, okResult.Value);
     }
 
@@ -306,11 +306,11 @@ public class TagsControllerTests
             .ReturnsAsync(emptyResults);
 
         // Act
-        var result = await _controller.GetTagSuggestionsAsync(null, 10, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetTagSuggestionsAsync(null, 10, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedSuggestions = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        IReadOnlyList<TagSuggestionDto> returnedSuggestions = Assert.IsAssignableFrom<IReadOnlyList<TagSuggestionDto>>(okResult.Value);
         Assert.Empty(returnedSuggestions);
     }
 
@@ -318,8 +318,8 @@ public class TagsControllerTests
     public async Task GetTagSuggestionsAsync_WithCustomLimit_ReturnsOkWithRequestedLimit()
     {
         // Arrange
-        var query = "test";
-        var limit = 25;
+        string query = "test";
+        int limit = 25;
         var suggestions = new List<TagSuggestionDto>
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Test", UsageCount = 100 }
@@ -330,10 +330,10 @@ public class TagsControllerTests
             .ReturnsAsync(suggestions);
 
         // Act
-        var result = await _controller.GetTagSuggestionsAsync(query, limit, CancellationToken.None);
+        ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetTagSuggestionsAsync(query, limit, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(suggestions, okResult.Value);
         _tagServiceMock.Verify(s => s.GetTagSuggestionsAsync(query, limit, It.IsAny<CancellationToken>()), Times.Once);
     }

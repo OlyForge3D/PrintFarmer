@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using FluentValidation;
 
 namespace Farm.Web.Api.Validators;
@@ -29,7 +30,6 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
             .NotEmpty().WithMessage("Server URL is required")
             .Must(BeValidUrl).WithMessage("Server URL must be a valid HTTP/HTTPS URL")
             .Must(NotContainSqlInjectionPatterns).WithMessage("Server URL contains potentially harmful content");
-
 
         _ = RuleFor(x => x.ApiKey)
             .Length(0, 500).WithMessage("API Key cannot exceed 500 characters")

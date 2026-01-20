@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import tagService, { TagSuggestionDto } from '@/services/tagService';
+import tagService from '@/services/tagService';
 import { Card } from '@/common/components/ui/Card';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge } from '@/common/components/ui/Badge';
@@ -34,23 +34,25 @@ const TagAnalyticsDashboard: React.FC = () => {
 
   // Calculate statistics
   const stats = useMemo(() => {
-    if (!data?.mostUsedTags) {
+    if (!data?.topTags) {
       return {
-        topTags: [] as TagSuggestionDto[],
+        topTags: [],
         totalTags: 0,
-        totalAssignments: 0,
+        tagsInUse: 0,
+        totalModelTagAssociations: 0,
         averageTagsPerModel: 0,
         maxUsage: 0,
       };
     }
 
-    const topTags = data.mostUsedTags || [];
-    const maxUsage = topTags[0]?.usageCount || 0;
+    const topTags = data.topTags || [];
+    const maxUsage = topTags[0]?.modelCount || 0;
 
     return {
       topTags,
       totalTags: data.totalTags || 0,
-      totalAssignments: data.totalAssignments || 0,
+      tagsInUse: data.tagsInUse || 0,
+      totalModelTagAssociations: data.totalModelTagAssociations || 0,
       averageTagsPerModel: data.averageTagsPerModel || 0,
       maxUsage,
     };
@@ -90,13 +92,13 @@ const TagAnalyticsDashboard: React.FC = () => {
     );
   }
 
-  if (!data?.mostUsedTags || stats.totalTags === 0) {
+  if (!data?.topTags || stats.totalTags === 0) {
     return (
       <div className="space-y-6">
         <h2 className="text-2xl font-bold text-pf-text-primary">Tag Analytics</h2>
         
         <Alert type="info" title="No tags yet">
-          Start by creating tags for your 3D models to see analytics data here.
+          Start by creating tags to see analytics data here.
         </Alert>
       </div>
     );
@@ -133,7 +135,7 @@ const TagAnalyticsDashboard: React.FC = () => {
           <div>
             <p className="text-sm text-pf-text-secondary">Total Assignments</p>
             <p className="mt-2 text-3xl font-bold text-pf-text-primary">
-              {stats.totalAssignments}
+              {stats.totalModelTagAssociations}
             </p>
           </div>
           <Badge variant="success">✓</Badge>
@@ -158,7 +160,7 @@ const TagAnalyticsDashboard: React.FC = () => {
               {stats.topTags[0]?.name || 'N/A'}
             </p>
             <p className="text-sm text-pf-text-secondary">
-              {stats.topTags[0]?.usageCount || 0} uses
+              {stats.topTags[0]?.modelCount || 0} uses
             </p>
           </div>
           <Badge variant="warning">★</Badge>
@@ -198,12 +200,12 @@ const TagAnalyticsDashboard: React.FC = () => {
                   <div className="h-8 bg-pf-bg-1 rounded-md overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-pf-accent to-pf-accent/80 transition-all duration-300"
-                      style={{ width: `${getBarPercentage(tag.usageCount)}%` }}
+                      style={{ width: `${getBarPercentage(tag.modelCount)}%` }}
                       role="progressbar"
-                      aria-valuenow={tag.usageCount}
+                      aria-valuenow={tag.modelCount}
                       aria-valuemin={0}
                       aria-valuemax={stats.maxUsage}
-                      aria-label={`${tag.name} usage: ${tag.usageCount}`}
+                      aria-label={`${tag.name} usage: ${tag.modelCount}`}
                     />
                   </div>
                 </div>
@@ -211,7 +213,7 @@ const TagAnalyticsDashboard: React.FC = () => {
                 {/* Count */}
                 <div className="flex-shrink-0 w-12 text-right">
                   <p className="text-sm font-semibold text-pf-text-primary">
-                    {tag.usageCount}
+                    {tag.modelCount}
                   </p>
                 </div>
               </div>

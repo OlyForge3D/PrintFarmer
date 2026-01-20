@@ -11,16 +11,10 @@ namespace Farm.Web.Api.Services.FileManagement;
 /// Implements file integrity verification with hash and size checking.
 /// Thread-safe and reusable across requests.
 /// </summary>
-public class FileIntegrityService : IFileIntegrityService
+public class FileIntegrityService(IFileManagementService fileManagementService, IUnifiedLoggingService logger) : IFileIntegrityService
 {
-    private readonly IFileManagementService _fileManagementService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public FileIntegrityService(IFileManagementService fileManagementService, IUnifiedLoggingService logger)
-    {
-        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public Task<bool> FileExistsAsync(string filePath, CancellationToken ct = default)
     {
@@ -91,8 +85,7 @@ public class FileIntegrityService : IFileIntegrityService
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "Missing"
-                );
+                    FailureReason: "Missing");
             }
 
             // Check 2: File size
@@ -104,8 +97,7 @@ public class FileIntegrityService : IFileIntegrityService
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "SizeMismatch"
-                );
+                    FailureReason: "SizeMismatch");
             }
 
             // Check 3: File hash
@@ -117,15 +109,13 @@ public class FileIntegrityService : IFileIntegrityService
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "HashMismatch"
-                );
+                    FailureReason: "HashMismatch");
             }
 
             return new FileIntegrityCheckResult(
                 IsValid: true,
                 ErrorMessage: null,
-                FailureReason: null
-            );
+                FailureReason: null);
         }
         catch (UnauthorizedAccessException)
         {
@@ -134,8 +124,7 @@ public class FileIntegrityService : IFileIntegrityService
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
-                FailureReason: "PermissionDenied"
-            );
+                FailureReason: "PermissionDenied");
         }
         catch (Exception ex)
         {
@@ -144,8 +133,7 @@ public class FileIntegrityService : IFileIntegrityService
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
-                FailureReason: "Unknown"
-            );
+                FailureReason: "Unknown");
         }
     }
 
@@ -153,12 +141,7 @@ public class FileIntegrityService : IFileIntegrityService
     {
         try
         {
-            if (!File.Exists(filePath))
-            {
-                return null;
-            }
-
-            return await _fileManagementService.ComputeFileHashAsync(filePath, algorithm, ct);
+            return !File.Exists(filePath) ? null : await _fileManagementService.ComputeFileHashAsync(filePath, algorithm, ct);
         }
         catch (Exception ex)
         {

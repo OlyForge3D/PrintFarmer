@@ -1,4 +1,4 @@
-﻿#pragma warning disable S1006, CA1033, S1939 // Default parameters, explicit interface implementations, and interface inheritance are intentional
+﻿#pragma warning disable S1006, CA1033, S1939, CS1066 // Default parameters, explicit interface implementations, interface inheritance, and optional arguments on interface implementations are intentional
 
 using System;
 using System.Net.Http;
@@ -12,31 +12,6 @@ using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.OctoPrint;
-
-#pragma warning disable CS1066 // Default value for optional parameter not enforced for interface members
-
-/// <summary>
-/// OctoPrint printer state DTO - encapsulates parsed /api/printer response.
-/// </summary>
-public sealed class OctoPrintPrinterState
-{
-    public bool Operational { get; set; }
-    public bool Printing { get; set; }
-    public string State { get; set; } = string.Empty;
-    public Dictionary<string, object>? Temperatures { get; set; }
-}
-
-/// <summary>
-/// OctoPrint job status DTO - encapsulates parsed /api/job response.
-/// </summary>
-public sealed class OctoPrintJobStatus
-{
-    public string? Filename { get; set; }
-    public double? Progress { get; set; }
-    public double? PrintTime { get; set; }
-    public double? PrintTimeLeft { get; set; }
-    public Dictionary<string, object>? Filament { get; set; }
-}
 
 public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null) : IOctoPrintClient,
     ISupportsFileDownload,
@@ -65,17 +40,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <returns>Normalized URL without trailing slash</returns>
     private static string NormalizeBaseUrl(string baseUrl)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl));
-        }
-
-        return baseUrl.TrimEnd('/');
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl))
+            : baseUrl.TrimEnd('/');
     }
 
     /// <summary>
     /// Logs an HTTP request for debugging purposes.
     /// </summary>
+    /// <param name="request">The HTTP request message to log.</param>
     private void LogRequest(HttpRequestMessage request)
     {
         if (_logger?.IsEnabled(LogLevel.Debug) == true)
@@ -83,14 +56,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             _logger.LogDebug(
                 "OctoPrint HTTP Request: {Method} {Uri}",
                 request.Method,
-                request.RequestUri
-            );
+                request.RequestUri);
         }
     }
 
     /// <summary>
     /// Logs an HTTP response for debugging purposes.
     /// </summary>
+    /// <param name="response">The HTTP response message to log.</param>
     private void LogResponse(HttpResponseMessage response)
     {
         if (_logger?.IsEnabled(LogLevel.Debug) == true)
@@ -98,14 +71,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             _logger.LogDebug(
                 "OctoPrint HTTP Response: {StatusCode} {ReasonPhrase}",
                 response.StatusCode,
-                response.ReasonPhrase
-            );
+                response.ReasonPhrase);
         }
     }
 
     /// <summary>
     /// Logs an error or warning.
     /// </summary>
+    /// <param name="message">The error or warning message to log.</param>
+    /// <param name="ex">Optional exception associated with the error.</param>
     private void LogError(string message, Exception? ex = null)
     {
         if (ex != null)
@@ -141,7 +115,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             attemptNumber++;
             try
             {
-                var response = await _httpClient.SendAsync(request, cts.Token);
+                HttpResponseMessage response = await _httpClient.SendAsync(request, cts.Token);
                 LogResponse(response);
                 return response;
             }
@@ -166,6 +140,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Determines if an exception is transient (worth retrying).
     /// </summary>
+    /// <param name="ex">The HTTP request exception to evaluate.</param>
+    /// <returns>True if the error is transient and worth retrying; otherwise, false.</returns>
     private static bool IsTransientError(HttpRequestException ex)
     {
         // Retry on connection errors, timeouts, and 5xx errors
@@ -177,12 +153,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Creates a copy of an HTTP request (since requests can only be sent once).
     /// </summary>
+    /// <param name="request">The HTTP request message to clone.</param>
+    /// <returns>A new HttpRequestMessage with the same properties as the original.</returns>
     private static HttpRequestMessage CloneRequest(HttpRequestMessage request)
     {
         var newRequest = new HttpRequestMessage(request.Method, request.RequestUri);
 
         // Copy headers
-        foreach (var header in request.Headers)
+        foreach (KeyValuePair<string, IEnumerable<string>> header in request.Headers)
         {
             newRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
@@ -191,7 +169,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         if (request.Content != null)
         {
 #pragma warning disable VSTHRD002
-            var contentAsString = request.Content.ReadAsStringAsync().Result;
+            string contentAsString = request.Content.ReadAsStringAsync().Result;
 #pragma warning restore VSTHRD002
             newRequest.Content = new StringContent(contentAsString, Encoding.UTF8, "application/json");
         }
@@ -258,6 +236,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // OctoPrint API: Select and start print via /api/files/local/{filename}
         // This endpoint requires URL encoding of special characters in filename
         string encodedFileName = Uri.EscapeDataString(fileName);
@@ -327,7 +306,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             List<string> files = new();
             if (root.TryGetProperty("files", out JsonElement filesArray))
             {
-                ExtractFileNamesFromJson(filesArray, files, "");
+                ExtractFileNamesFromJson(filesArray, files, string.Empty);
             }
 
             return files.ToArray();
@@ -347,8 +326,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 if (item.TryGetProperty("name", out JsonElement nameEl) && item.TryGetProperty("type", out JsonElement typeEl))
                 {
-                    string name = nameEl.GetString() ?? "";
-                    string type = typeEl.GetString() ?? "";
+                    string name = nameEl.GetString() ?? string.Empty;
+                    string type = typeEl.GetString() ?? string.Empty;
                     string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
 
                     // Filter for machine code files (gcode)
@@ -395,7 +374,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         // Parse printer state JSON
         bool isOnline = false;
@@ -417,6 +398,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     state = stateProp.GetString();
                     isOnline = state != null && state != "Offline";
                 }
+
                 if (root.TryGetProperty("temperature", out JsonElement tempProp))
                 {
                     if (tempProp.TryGetProperty("tool0", out JsonElement tool0))
@@ -425,17 +407,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                         {
                             hotendTemp = actual.GetDouble();
                         }
+
                         if (tool0.TryGetProperty("target", out JsonElement target))
                         {
                             hotendTarget = target.GetDouble();
                         }
                     }
+
                     if (tempProp.TryGetProperty("bed", out JsonElement bed))
                     {
                         if (bed.TryGetProperty("actual", out JsonElement actual))
                         {
                             bedTemp = actual.GetDouble();
                         }
+
                         if (bed.TryGetProperty("target", out JsonElement target))
                         {
                             bedTarget = target.GetDouble();
@@ -449,17 +434,21 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     {
                         x = xProp.GetDouble();
                     }
+
                     if (posProp.TryGetProperty("y", out JsonElement yProp))
                     {
                         y = yProp.GetDouble();
                     }
+
                     if (posProp.TryGetProperty("z", out JsonElement zProp))
                     {
                         z = zProp.GetDouble();
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         // Parse job JSON
@@ -478,6 +467,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                         progress = completion.GetDouble();
                     }
                 }
+
                 if (root.TryGetProperty("job", out JsonElement jobProp))
                 {
                     if (jobProp.TryGetProperty("file", out JsonElement fileProp))
@@ -489,7 +479,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return new PrinterDto(
@@ -520,8 +512,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
-        );
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
     }
 
     public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
@@ -536,7 +527,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", apiKey);
 
         // OctoPrint supports limit and start query parameters for pagination
-        var queryParams = new List<string>();
+        List<string> queryParams = [];
         if (limit.HasValue)
         {
             queryParams.Add($"limit={limit.Value}");
@@ -587,6 +578,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Gets history totals (wrapper for interface compatibility)
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -597,7 +590,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
             string content = await response.Content.ReadAsStringAsync();
-            var historyList = ParseOctoPrintHistoryList(content);
+            HistoryListResponse? historyList = ParseOctoPrintHistoryList(content);
             if (historyList == null)
             {
                 return null;
@@ -608,7 +601,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             double totalFilamentUsed = 0;
             int jobCount = 0;
 
-            foreach (var job in historyList.Jobs)
+            foreach (HistoryJob job in historyList.Jobs)
             {
                 if (job.Status == "Completed")
                 {
@@ -638,6 +631,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Deletes a job from history (wrapper for interface compatibility)
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
+    /// <param name="jobId">The job identifier to delete</param>
     public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string apiKey, string jobId)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -659,6 +655,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Sets temperatures (unified method for both bed and hotend temperatures)
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
+    /// <param name="hotendTemp">Target hotend temperature in Celsius (optional)</param>
+    /// <param name="bedTemp">Target bed temperature in Celsius (optional)</param>
     public async Task<bool> SetTemperaturesAsync(string baseUrl, string apiKey, double? hotendTemp = null, double? bedTemp = null)
     {
         bool success = true;
@@ -702,6 +702,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Homes all axes using native OctoPrint API (preferred over gcode).
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
     public async Task<bool> SendHomeAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -727,6 +729,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Homes XY axes only using native OctoPrint API.
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
     public async Task<bool> HomeXYAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -752,6 +756,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Homes Z axis only using native OctoPrint API.
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
     public async Task<bool> HomeZAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -778,6 +784,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Sets target temperature for bed using native OctoPrint API (preferred method).
     /// Uses /api/printer/bed endpoint which is the OctoPrint-native way to control bed temperature.
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
+    /// <param name="bedTemp">Target bed temperature in Celsius (0 to turn off)</param>
     public async Task<bool> SetBedTempAsync(string baseUrl, string apiKey, double bedTemp)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -833,6 +842,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Pauses the current print job.
     /// </summary>
+    /// <param name="baseUrl">Base URL of OctoPrint server</param>
+    /// <param name="apiKey">OctoPrint API key</param>
     public async Task<bool> PauseAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
@@ -994,6 +1005,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<string> GetFileDetailsAsync(string baseUrl, string apiKey, string path)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Ensure path doesn't start with slash (OctoPrint expects clean paths)
         string cleanPath = path.TrimStart('/');
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local/{cleanPath}");
@@ -1023,6 +1035,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> MoveFileAsync(string baseUrl, string apiKey, string source, string destination)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Clean paths
         string cleanSource = source.TrimStart('/');
         string cleanDestination = destination.TrimStart('/');
@@ -1058,6 +1071,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> DeleteFileAsync(string baseUrl, string apiKey, string path)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Clean path
         string cleanPath = path.TrimStart('/');
 
@@ -1088,8 +1102,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> CreateFolderAsync(string baseUrl, string apiKey, string path, string folderName)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Clean path - use empty string for root, otherwise clean the path
-        string cleanPath = string.IsNullOrWhiteSpace(path) ? "" : path.TrimStart('/');
+        string cleanPath = string.IsNullOrWhiteSpace(path) ? string.Empty : path.TrimStart('/');
 
         // Build the full endpoint path
         string endpoint = string.IsNullOrEmpty(cleanPath)
@@ -1130,6 +1145,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> UploadFileAsync(string baseUrl, string apiKey, byte[] fileContent, string fileName, string? path = null, bool startPrint = false)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Build endpoint URL
         string endpoint = path == null || string.IsNullOrWhiteSpace(path)
             ? $"{baseUrl}/api/files/local"
@@ -1234,7 +1250,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/restart");
         request.Headers.Add("X-Api-Key", apiKey);
-        request.Content = new StringContent("", Encoding.UTF8, "application/json");
+        request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
         try
         {
@@ -1286,7 +1302,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/{commandId}");
         request.Headers.Add("X-Api-Key", apiKey);
-        request.Content = new StringContent("", Encoding.UTF8, "application/json");
+        request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
         try
         {
@@ -1337,8 +1353,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<byte[]> DownloadFileAsync(string baseUrl, string apiKey, string filePath)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
+
         // Clean up file path - remove leading/trailing slashes
-        filePath = filePath?.TrimStart('/').TrimEnd('/') ?? "";
+        filePath = filePath?.TrimStart('/').TrimEnd('/') ?? string.Empty;
 
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/downloads/files/local/{filePath}");
         request.Headers.Add("X-Api-Key", apiKey);
@@ -1411,6 +1428,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Parses OctoPrint history JSON response into a HistoryListResponse object.
     /// </summary>
+    /// <param name="historyJson">JSON response from OctoPrint history endpoint</param>
     private static HistoryListResponse? ParseOctoPrintHistoryList(string historyJson)
     {
         try
@@ -1431,7 +1449,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 foreach (JsonElement jobElement in resultsProp.EnumerateArray())
                 {
-                    var job = ParseOctoPrintJobElement(jobElement);
+                    HistoryJob? job = ParseOctoPrintJobElement(jobElement);
                     if (job != null)
                     {
                         jobs.Add(job);
@@ -1456,6 +1474,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Parses a single OctoPrint job element into a HistoryJob object.
     /// </summary>
+    /// <param name="jobElement">JSON element representing a job from OctoPrint</param>
     private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
     {
         try
@@ -1509,6 +1528,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Parses an OctoPrint history job detail JSON response into a HistoryJob object.
     /// </summary>
+    /// <param name="jobJson">JSON response from OctoPrint job detail endpoint</param>
     private static HistoryJob? ParseOctoPrintHistoryJob(string jobJson)
     {
         try
@@ -1534,6 +1554,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Parses OctoPrint /api/printer response into OctoPrintPrinterState.
     /// </summary>
+    /// <param name="json">JSON response from OctoPrint printer state endpoint</param>
     private static OctoPrintPrinterState? ParsePrinterState(string json)
     {
         try
@@ -1549,12 +1570,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     state.State = textProp.GetString() ?? string.Empty;
                 }
+
                 if (stateObj.TryGetProperty("flags", out JsonElement flagsProp))
                 {
                     if (flagsProp.TryGetProperty("operational", out JsonElement opProp))
                     {
                         state.Operational = opProp.GetBoolean();
                     }
+
                     if (flagsProp.TryGetProperty("printing", out JsonElement printProp))
                     {
                         state.Printing = printProp.GetBoolean();
@@ -1565,7 +1588,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             if (root.TryGetProperty("temperature", out JsonElement tempObj))
             {
                 state.Temperatures = new Dictionary<string, object>();
-                foreach (var prop in tempObj.EnumerateObject())
+                foreach (JsonProperty prop in tempObj.EnumerateObject())
                 {
                     state.Temperatures[prop.Name] = prop.Value.GetRawText();
                 }
@@ -1582,6 +1605,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// Parses OctoPrint /api/job response into OctoPrintJobStatus.
     /// </summary>
+    /// <param name="json">JSON response from OctoPrint job status endpoint</param>
     private static OctoPrintJobStatus? ParseJobStatus(string json)
     {
         try
@@ -1597,10 +1621,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     status.Filename = nameProp.GetString();
                 }
+
                 if (jobObj.TryGetProperty("filament", out JsonElement filamentObj))
                 {
                     status.Filament = new Dictionary<string, object>();
-                    foreach (var prop in filamentObj.EnumerateObject())
+                    foreach (JsonProperty prop in filamentObj.EnumerateObject())
                     {
                         status.Filament[prop.Name] = prop.Value.GetRawText();
                     }
@@ -1613,10 +1638,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 {
                     status.Progress = completionProp.GetDouble(); // OctoPrint sends 0-100, keep as-is
                 }
+
                 if (progressObj.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
                 {
                     status.PrintTime = printTimeProp.GetDouble();
                 }
+
                 if (progressObj.TryGetProperty("printTimeLeft", out JsonElement leftProp) && leftProp.ValueKind != JsonValueKind.Null)
                 {
                     status.PrintTimeLeft = leftProp.GetDouble();
@@ -1632,20 +1659,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     }
 
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-
     async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default)
     {
         try
         {
-            var url = $"{baseUrl.TrimEnd('/')}/api/files/local/{Uri.EscapeDataString(filePath)}";
-            var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct);
+            string url = $"{baseUrl.TrimEnd('/')}/api/files/local/{Uri.EscapeDataString(filePath)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            return await response.Content.ReadAsByteArrayAsync(ct);
+            return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
         }
         catch
         {
@@ -1655,7 +1676,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var filesWithMetadata = await GetFileListWithMetadataAsync(baseUrl, apiKey ?? "");
+        List<PrinterFileInfo> filesWithMetadata = await GetFileListWithMetadataAsync(baseUrl, apiKey ?? string.Empty);
         return filesWithMetadata;
     }
 
@@ -1670,7 +1691,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
             if (!response.IsSuccessStatusCode)
             {
-                return new List<PrinterFileInfo>();
+                return [];
             }
 
             string jsonContent = await response.Content.ReadAsStringAsync();
@@ -1680,7 +1701,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             List<PrinterFileInfo> files = new();
             if (root.TryGetProperty("files", out JsonElement filesArray))
             {
-                ExtractFileInfoFromJson(filesArray, files, "");
+                ExtractFileInfoFromJson(filesArray, files, string.Empty);
             }
 
             return files;
@@ -1688,7 +1709,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         catch (Exception ex)
         {
             LogError("Get file list failed", ex);
-            return new List<PrinterFileInfo>();
+            return [];
         }
     }
 
@@ -1700,8 +1721,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 if (item.TryGetProperty("name", out JsonElement nameEl) && item.TryGetProperty("type", out JsonElement typeEl))
                 {
-                    string name = nameEl.GetString() ?? "";
-                    string type = typeEl.GetString() ?? "";
+                    string name = nameEl.GetString() ?? string.Empty;
+                    string type = typeEl.GetString() ?? string.Empty;
                     string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
 
                     // Filter for machine code files (gcode)
@@ -1741,17 +1762,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // Convert Stream to byte array for the existing UploadFileAsync method
         if (fileContent is MemoryStream ms)
         {
-            return await UploadFileAsync(baseUrl, apiKey ?? "", ms.ToArray(), fileName, null, false);
+            return await UploadFileAsync(baseUrl, apiKey ?? string.Empty, ms.ToArray(), fileName, null, false);
         }
 
         using var memoryStream = new MemoryStream();
         await fileContent.CopyToAsync(memoryStream, ct);
-        return await UploadFileAsync(baseUrl, apiKey ?? "", memoryStream.ToArray(), fileName, null, false);
+        return await UploadFileAsync(baseUrl, apiKey ?? string.Empty, memoryStream.ToArray(), fileName, null, false);
     }
 
     async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
     {
-        return await GetCameraStreamUrlAsync(baseUrl, apiKey ?? "");
+        return await GetCameraStreamUrlAsync(baseUrl, apiKey ?? string.Empty);
     }
 
     async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
@@ -1771,7 +1792,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     {
         try
         {
-            var state = await GetPrinterStateAsync(baseUrl, apiKey ?? "");
+            OctoPrintPrinterState? state = await GetPrinterStateAsync(baseUrl, apiKey ?? string.Empty);
             return new StandardPrinterInfo
             {
                 Name = "OctoPrint Printer",
@@ -1788,25 +1809,31 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <summary>
     /// ISupportsHistory implementations - get and manage print history.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
+    /// <param name="limit">Maximum number of history entries to return.</param>
+    /// <param name="start">Starting index for pagination.</param>
+    /// <param name="apiKey">API key for authentication.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
     async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, apiKey ?? "", limit, start);
+        => await GetHistoryListAsync(baseUrl, apiKey ?? string.Empty, limit, start);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
-        => await GetHistoryJobAsync(baseUrl, apiKey ?? "", jobId);
+        => await GetHistoryJobAsync(baseUrl, apiKey ?? string.Empty, jobId);
 
     async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
-        => await GetHistoryTotalsAsync(baseUrl, apiKey ?? "");
+        => await GetHistoryTotalsAsync(baseUrl, apiKey ?? string.Empty);
 
     async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
-        => await DeleteHistoryJobAsync(baseUrl, apiKey ?? "", jobId);
+        => await DeleteHistoryJobAsync(baseUrl, apiKey ?? string.Empty, jobId);
 
     /// <summary>
     /// ISupportsTemperatureControl implementation - set temperatures.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
+    /// <param name="hotendTemp">Target hotend temperature in Celsius.</param>
+    /// <param name="bedTemp">Target bed temperature in Celsius.</param>
+    /// <param name="apiKey">API key for authentication.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
     async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
-        => await SetTemperaturesAsync(baseUrl, apiKey ?? "", hotendTemp, bedTemp);
+        => await SetTemperaturesAsync(baseUrl, apiKey ?? string.Empty, hotendTemp, bedTemp);
 }
-
-#pragma warning restore CS1066
-
-

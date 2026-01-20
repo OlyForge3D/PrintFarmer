@@ -9,13 +9,14 @@
  */
 export interface Model {
   id: string;
+  path: string;
   name: string;
   fileName: string;
   fileSize: number;
   fileType: 'stl' | '3mf' | 'obj' | 'ply';
   uploadedAt: string;
   url?: string;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
   tags?: Array<{
     id: string;
     name: string;
@@ -43,4 +44,15 @@ export interface ModelListItem {
   fileFormat: number;
   uploadedAt: string;
   filePath?: string;
+}
+
+/**
+ * Response from backend /3d-models/query endpoint
+ */
+export interface Model3DSearchResponse {
+  models: Model[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }

@@ -63,8 +63,13 @@ public class GcodeHarvestQueueProcessorService(
                         .SelectMany(a =>
                         {
                             try
-                            { return a.GetTypes(); }
-                            catch { return Type.EmptyTypes; }
+                            {
+                                return a.GetTypes();
+                            }
+                            catch
+                            {
+                                return Type.EmptyTypes;
+                            }
                         })
                         .FirstOrDefault(t => t.Name == "IGcodeHarvestService" && t.IsInterface);
 
@@ -77,7 +82,7 @@ public class GcodeHarvestQueueProcessorService(
                         continue;
                     }
 
-                    var harvestService = scope.ServiceProvider.GetService(harvestServiceType);
+                    object? harvestService = scope.ServiceProvider.GetService(harvestServiceType);
                     logger.LogInformation("xxx_CHECKPOINT_3: Got harvest service instance: {IsNull}", harvestService == null);
                     if (harvestService == null)
                     {
@@ -99,7 +104,7 @@ public class GcodeHarvestQueueProcessorService(
                     logger.LogInformation("xxx_CHECKPOINT_5: About to invoke StartHarvestAsync");
                     logger.LogError("[DIAGNOSTIC] About to call StartHarvestAsync for queue item {QueueItemId}", queueItem.Id);
                     logger.LogInformation("xxx_CHECKPOINT_5b: After error log");
-                    var result = (object?)await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
+                    object? result = (object?)await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
                     logger.LogError("[DIAGNOSTIC] StartHarvestAsync returned result = {ResultType}", result == null ? "NULL" : result.GetType().FullName);
 
                     // Extract result properties if available
@@ -115,7 +120,9 @@ public class GcodeHarvestQueueProcessorService(
                             success = dynResult.Success;
                             message = dynResult.Message;
                         }
-                        catch { }
+                        catch
+                        {
+                        }
                     }
 
                     logger.LogInformation(
@@ -148,6 +155,7 @@ public class GcodeHarvestQueueProcessorService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error in harvest queue processor");
+
                 // Wait before retrying to avoid tight loop on persistent errors
                 await Task.Delay(QueueCheckIntervalMs, stoppingToken);
             }

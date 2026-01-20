@@ -3,14 +3,9 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Gcode;
 
-public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
+public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGcodeMetadataExtractorService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public GcodeMetadataExtractorService(IUnifiedLoggingService logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Extract metadata from G-code file content by parsing comment lines.
@@ -21,7 +16,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         return await Task.Run(() =>
         {
             _logger.LogInformation("ExtractMetadataAsync: Starting metadata extraction");
-            GcodeMetadataExtracted metadata = new GcodeMetadataExtracted();
+            GcodeMetadataExtracted metadata = new();
 
             if (string.IsNullOrWhiteSpace(gcodeContent))
             {
@@ -33,9 +28,10 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-                // Combine first 200 lines and last 1000 lines for metadata extraction
-                // Most metadata (including embedded thumbnails) is in the last 1000 lines (CONFIG_BLOCK),
-                // but we need the first 200 for basic slicer info and comments
+                // Include a wider range to capture all thumbnails:
+                // - First 200 lines: basic slicer info and comments
+                // - Last 2000 lines: config block with all thumbnails (PrusaSlicer embeds multiple)
+                // This ensures we capture all thumbnail formats (QOI + PNG) which can appear deep in the file
                 List<string> metadataLines = new List<string>();
 
                 // Add first 200 lines
@@ -43,12 +39,13 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 metadataLines.AddRange(allLines.Take(firstLinesCount));
                 _logger.LogInformation("ExtractMetadataAsync: Added {Count} lines from start", firstLinesCount.ToString());
 
-                // Add last 1000 lines (if file is long enough)
-                if (allLines.Length > 1000)
+                // Add last 2000 lines (increased from 1000 to capture all PrusaSlicer thumbnails)
+                // PrusaSlicer embeds 3 QOI thumbnails + 1 PNG thumbnail, and PNG can start at line ~1300
+                if (allLines.Length > 2000)
                 {
-                    int startIndex = allLines.Length - 1000;
-                    metadataLines.AddRange(allLines.Skip(startIndex).Take(1000));
-                    _logger.LogInformation("ExtractMetadataAsync: Added 1000 lines from end (starting at line {StartLine})", startIndex.ToString());
+                    int startIndex = allLines.Length - 2000;
+                    metadataLines.AddRange(allLines.Skip(startIndex).Take(2000));
+                    _logger.LogInformation("ExtractMetadataAsync: Added 2000 lines from end (starting at line {StartLine})", startIndex.ToString());
                 }
 
                 _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines total from {TotalLines} total", metadataLines.Count.ToString(), allLines.Length.ToString());
@@ -66,10 +63,10 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 ExtractInfill(metadataLines, metadata);
                 ExtractPerimeters(metadataLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
-                ExtractThumbnail(metadataLines, metadata);
+                ExtractThumbnail(allLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
 
-                _logger.LogInformation($"ExtractMetadataAsync: Extracted metadata - Slicer={metadata.SlicerName ?? "(unknown)"} {metadata.SlicerVersion ?? ""}, Material={metadata.Material ?? "(unknown)"}, NozzleDiameter={metadata.NozzleDiameter?.ToString("F1") ?? "0"}, PrintTime={metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0"}min, Filament={metadata.FilamentWeightGrams?.ToString("F1") ?? "0"}g, LayerHeight={metadata.LayerHeight?.ToString("F2") ?? "0"}, BedTemp={metadata.BedTemperature?.ToString("F0") ?? "0"}°C, PrintTemp={metadata.PrintTemperature?.ToString("F0") ?? "0"}°C");
+                _logger.LogInformation($"ExtractMetadataAsync: Extracted metadata - Slicer={metadata.SlicerName ?? "(unknown)"} {metadata.SlicerVersion ?? string.Empty}, Material={metadata.Material ?? "(unknown)"}, NozzleDiameter={metadata.NozzleDiameter?.ToString("F1") ?? "0"}, PrintTime={metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0"}min, Filament={metadata.FilamentWeightGrams?.ToString("F1") ?? "0"}g, LayerHeight={metadata.LayerHeight?.ToString("F2") ?? "0"}, BedTemp={metadata.BedTemperature?.ToString("F0") ?? "0"}°C, PrintTemp={metadata.PrintTemperature?.ToString("F0") ?? "0"}°C");
 
                 return metadata;
             }
@@ -170,7 +167,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         // Cura: "; Time: 123456" (seconds)
         // Priority: normal mode > generic/TIME > other modes
 
-        // First pass: Look specifically for "normal mode" 
+        // First pass: Look specifically for "normal mode"
         foreach (string line in lines)
         {
             if (line.Contains("estimated printing time (normal mode)", StringComparison.OrdinalIgnoreCase))
@@ -182,7 +179,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     int hours = int.Parse(hoursMatch.Groups[1].Value);
                     int minutes = int.Parse(hoursMatch.Groups[2].Value);
                     int seconds = int.Parse(hoursMatch.Groups[3].Value);
-                    metadata.EstimatedPrintTimeMinutes = hours * 60 + minutes + seconds / 60.0;
+                    metadata.EstimatedPrintTimeMinutes = (hours * 60) + minutes + (seconds / 60.0);
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (normal mode)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
@@ -193,7 +190,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 {
                     int minutes = int.Parse(minMatch.Groups[1].Value);
                     int seconds = int.Parse(minMatch.Groups[2].Value);
-                    metadata.EstimatedPrintTimeMinutes = minutes + seconds / 60.0;
+                    metadata.EstimatedPrintTimeMinutes = minutes + (seconds / 60.0);
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (normal mode)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
@@ -234,7 +231,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     int hours = int.Parse(hoursMatch.Groups[1].Value);
                     int minutes = int.Parse(hoursMatch.Groups[2].Value);
                     int seconds = int.Parse(hoursMatch.Groups[3].Value);
-                    metadata.EstimatedPrintTimeMinutes = hours * 60 + minutes + seconds / 60.0;
+                    metadata.EstimatedPrintTimeMinutes = (hours * 60) + minutes + (seconds / 60.0);
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
@@ -245,7 +242,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 {
                     int minutes = int.Parse(minMatch.Groups[1].Value);
                     int seconds = int.Parse(minMatch.Groups[2].Value);
-                    metadata.EstimatedPrintTimeMinutes = minutes + seconds / 60.0;
+                    metadata.EstimatedPrintTimeMinutes = minutes + (seconds / 60.0);
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
@@ -325,7 +322,6 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         // OrcaSlicer: "; first_layer_bed_temperature = 55" and "; first_layer_temperature = 220"
         // PrusaSlicer: "; first_layer_bed_temperature = 110" and "; first_layer_temperature = 260"
         // Explicitly match comment syntax
-
         foreach (string line in lines)
         {
             // Bed temperature - explicit comment syntax
@@ -346,24 +342,35 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractThumbnail(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractThumbnail(string[] allLines, GcodeMetadataExtracted metadata)
     {
-        // PrusaSlicer/OrcaSlicer format: `;thumbnail` comment blocks with base64-encoded PNG
-        // Example:
+        // PrusaSlicer/OrcaSlicer format: `;thumbnail` comment blocks with base64-encoded image data
+        //
+        // PrusaSlicer embeds multiple thumbnails at different sizes in this order:
+        // 1. Three QOI-format thumbnails (thumbnail_QOI begin/end blocks) at different resolutions
+        // 2. One PNG-format thumbnail (thumbnail begin/end block) - typically appears around line 1300+
+        //
+        // OrcaSlicer embeds QOI format thumbnails early in the file
+        //
+        // Examples:
         // ;thumbnail_QOI begin 200x200 Q0/10
         // ;iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAA...
         // ;thumbnail_QOI end
         //
-        // Or alternative format:
-        // ;thumbnail begin 200x200
-        // ;base64 data...
+        // ;thumbnail begin 380x285
+        // ;base64 PNG data...
         // ;thumbnail end
-
         try
         {
-            _logger.LogInformation("ExtractThumbnail: Starting thumbnail extraction from {LineCount} lines", lines.Count.ToString());
+            _logger.LogInformation("ExtractThumbnail: Starting thumbnail extraction from {LineCount} lines", allLines.Length.ToString());
 
-            List<string> thumbnailLines = new List<string>();
+            // Convert to list for easier processing
+            var lines = new List<string>(allLines);
+
+            // Store all found thumbnails with their format
+            Dictionary<string, (string Format, List<string> Data)> thumbnailBlocks = new Dictionary<string, (string, List<string>)>();
+            List<string> currentThumbnailLines = new List<string>();
+            string? currentThumbnailFormat = null;
             bool inThumbnail = false;
 
             foreach (string line in lines)
@@ -378,8 +385,11 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
                         if (line.Contains("begin", StringComparison.OrdinalIgnoreCase))
                         {
+                            // Detect format: QOI or PNG
+                            currentThumbnailFormat = line.Contains("_QOI", StringComparison.OrdinalIgnoreCase) ? "QOI" : "PNG";
                             inThumbnail = true;
-                            _logger.LogInformation("ExtractThumbnail: Thumbnail block started");
+                            currentThumbnailLines = new List<string>();
+                            _logger.LogInformation("ExtractThumbnail: {Format} thumbnail block started", currentThumbnailFormat);
                             continue;
                         }
 
@@ -387,8 +397,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                         {
                             if (inThumbnail)
                             {
-                                _logger.LogInformation("ExtractThumbnail: Thumbnail block ended, collected {DataLines} lines", thumbnailLines.Count.ToString());
-                                break;
+                                // Store this thumbnail block
+                                string key = currentThumbnailFormat!;
+                                thumbnailBlocks[key] = (currentThumbnailFormat!, new List<string>(currentThumbnailLines));
+                                _logger.LogInformation("ExtractThumbnail: {Format} thumbnail block ended, collected {DataLines} lines", currentThumbnailFormat, currentThumbnailLines.Count.ToString());
+                                inThumbnail = false;
+                                currentThumbnailFormat = null;
                             }
                         }
                     }
@@ -396,27 +410,48 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
                 if (inThumbnail && line.StartsWith(';'))
                 {
-                    // Extract base64 data from comment line (remove leading ";")
+                    // Extract base64/data from comment line (remove leading ";")
                     string data = line.TrimStart(';').Trim();
                     if (!string.IsNullOrEmpty(data) && !data.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase) && !data.StartsWith("THUMBNAIL", StringComparison.OrdinalIgnoreCase))
                     {
-                        thumbnailLines.Add(data);
+                        currentThumbnailLines.Add(data);
                     }
                 }
             }
 
-            if (thumbnailLines.Count > 0)
+            // Prioritize PNG over QOI (PNG is typically higher quality)
+            // If both exist, use PNG; otherwise use whatever we found
+            (string? Format, List<string>? Lines) selectedThumbnail = default;
+
+            if (thumbnailBlocks.TryGetValue("PNG", out (string Format, List<string> Data) pngThumbnail))
             {
-                string base64Data = string.Concat(thumbnailLines);
-                _logger.LogInformation("ExtractThumbnail: Attempting to decode {ByteCount} bytes of base64 data (lines={LineCount})", base64Data.Length.ToString(), thumbnailLines.Count.ToString());
+                selectedThumbnail = pngThumbnail;
+                _logger.LogInformation("ExtractThumbnail: Selected PNG thumbnail (preferred over QOI)");
+            }
+            else if (thumbnailBlocks.TryGetValue("QOI", out (string Format, List<string> Data) qoiThumbnail))
+            {
+                selectedThumbnail = qoiThumbnail;
+                _logger.LogInformation("ExtractThumbnail: Selected QOI thumbnail (PNG not found)");
+            }
+            else if (thumbnailBlocks.Count > 0)
+            {
+                // Fallback: use first available thumbnail
+                selectedThumbnail = thumbnailBlocks.Values.First();
+                _logger.LogInformation("ExtractThumbnail: Selected {Format} thumbnail (first available)", selectedThumbnail.Format);
+            }
+
+            if (selectedThumbnail.Lines != null && selectedThumbnail.Lines.Count > 0)
+            {
+                string base64Data = string.Concat(selectedThumbnail.Lines);
+                _logger.LogInformation("ExtractThumbnail: Attempting to decode thumbnail with {ByteCount} bytes", base64Data.Length.ToString());
 
                 // Log first and last lines for debugging
-                if (thumbnailLines.Count > 0)
+                if (selectedThumbnail.Lines.Count > 0)
                 {
-                    _logger.LogDebug("ExtractThumbnail: First base64 line (len={Len}): {Data}", thumbnailLines[0].Length.ToString(), thumbnailLines[0].Substring(0, Math.Min(50, thumbnailLines[0].Length)));
-                    if (thumbnailLines.Count > 1)
+                    _logger.LogDebug("ExtractThumbnail: First base64 line (len={Len}): {Data}", selectedThumbnail.Lines[0].Length.ToString(), selectedThumbnail.Lines[0].Substring(0, Math.Min(50, selectedThumbnail.Lines[0].Length)));
+                    if (selectedThumbnail.Lines.Count > 1)
                     {
-                        _logger.LogDebug("ExtractThumbnail: Last base64 line (len={Len}): {Data}", thumbnailLines[thumbnailLines.Count - 1].Length.ToString(), thumbnailLines[thumbnailLines.Count - 1].Substring(0, Math.Min(50, thumbnailLines[thumbnailLines.Count - 1].Length)));
+                        _logger.LogDebug("ExtractThumbnail: Last base64 line (len={Len}): {Data}", selectedThumbnail.Lines[selectedThumbnail.Lines.Count - 1].Length.ToString(), selectedThumbnail.Lines[selectedThumbnail.Lines.Count - 1].Substring(0, Math.Min(50, selectedThumbnail.Lines[selectedThumbnail.Lines.Count - 1].Length)));
                     }
                 }
 
@@ -433,7 +468,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     if (IsValidBase64(base64Data))
                     {
                         metadata.ThumbnailData = Convert.FromBase64String(base64Data);
-                        _logger.LogInformation("ExtractThumbnail: Successfully decoded {ThumbnailBytes} bytes of PNG data", metadata.ThumbnailData.Length.ToString());
+                        _logger.LogInformation("ExtractThumbnail: Successfully decoded {ThumbnailBytes} bytes of {Format} thumbnail data", metadata.ThumbnailData.Length.ToString(), selectedThumbnail.Format ?? "Unknown");
                     }
                     else
                     {
@@ -479,7 +514,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
     private void ExtractPrinterModel(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // OrcaSlicer: "; printer_model = Phrozen Arco"
-        // Cura: "; machine_name = Prusa CORE One"  
+        // Cura: "; machine_name = Prusa CORE One"
         // PrusaSlicer: "; printer_model = COREONEL"
         // Note: Avoid matching patterns like "printer_model=~/(COREONEL|.../ " which are conditions
         foreach (string line in lines)

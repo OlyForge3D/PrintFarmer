@@ -16,10 +16,10 @@ public class ModelAnalysisService : IModelAnalysisService
         {
             extension = Path.GetExtension(filePath) ?? string.Empty;
         }
+
         // Normalize extension to lower-case once for comparison convenience
         // Keep original extension casing and use explicit OrdinalIgnoreCase comparisons where needed
         // extension = extension.ToLowerInvariant();
-
         if (extension == ".stl")
         {
             return await AnalyzeStlAsync(filePath, cancellationToken);
@@ -58,7 +58,9 @@ public class ModelAnalysisService : IModelAnalysisService
         // Simple heuristic: if header starts with "solid" then treat as ASCII for small files
         string headerString = Encoding.ASCII.GetString(header).Trim();
         _ = fs.Seek(0, SeekOrigin.Begin);
-        if (headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000) // small ASCII models are often ASCII
+
+        // Small ASCII models (under 10MB) are often ASCII STL format
+        if (headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000)
         {
             // ASCII parser: scan for vertex lines and compute bounding box
             using StreamReader sr = new(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
@@ -80,17 +82,34 @@ public class ModelAnalysisService : IModelAnalysisService
                     {
                         vertexCount++;
                         if (vx < minX)
-                        { minX = vx; }
+                        {
+                            minX = vx;
+                        }
+
                         if (vy < minY)
-                        { minY = vy; }
+                        {
+                            minY = vy;
+                        }
+
                         if (vz < minZ)
-                        { minZ = vz; }
+                        {
+                            minZ = vz;
+                        }
+
                         if (vx > maxX)
-                        { maxX = vx; }
+                        {
+                            maxX = vx;
+                        }
+
                         if (vy > maxY)
-                        { maxY = vy; }
+                        {
+                            maxY = vy;
+                        }
+
                         if (vz > maxZ)
-                        { maxZ = vz; }
+                        {
+                            maxZ = vz;
+                        }
                     }
                 }
             }
@@ -103,6 +122,7 @@ public class ModelAnalysisService : IModelAnalysisService
             double dimX = maxX - minX;
             double dimY = maxY - minY;
             double dimZ = maxZ - minZ;
+
             // Volume estimation is complex; leave null for now
             return new ModelAnalysisResult(dimX, dimY, dimZ, vertexCount / 3);
         }
@@ -124,27 +144,46 @@ public class ModelAnalysisService : IModelAnalysisService
                     {
                         break;
                     }
+
                     // 3 floats for normal (ignored) + 9 floats for vertices = 12 floats (4 bytes each)
                     // Vertex data starts at offset 12
                     for (int v = 0; v < 3; v++)
                     {
-                        int baseIndex = 12 + v * 12; // normal(12) + v*(3*4)
+                        int baseIndex = 12 + (v * 12); // normal(12) + v*(3*4)
                         float vx = BitConverter.ToSingle(buffer, baseIndex);
                         float vy = BitConverter.ToSingle(buffer, baseIndex + 4);
                         float vz = BitConverter.ToSingle(buffer, baseIndex + 8);
                         if (vx < minX)
-                        { minX = vx; }
+                        {
+                            minX = vx;
+                        }
+
                         if (vy < minY)
-                        { minY = vy; }
+                        {
+                            minY = vy;
+                        }
+
                         if (vz < minZ)
-                        { minZ = vz; }
+                        {
+                            minZ = vz;
+                        }
+
                         if (vx > maxX)
-                        { maxX = vx; }
+                        {
+                            maxX = vx;
+                        }
+
                         if (vy > maxY)
-                        { maxY = vy; }
+                        {
+                            maxY = vy;
+                        }
+
                         if (vz > maxZ)
-                        { maxZ = vz; }
+                        {
+                            maxZ = vz;
+                        }
                     }
+
                     actualTriangles++;
                 }
 

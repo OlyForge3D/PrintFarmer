@@ -1,9 +1,10 @@
-﻿namespace Farm.Web.Api.Extensions;
+﻿#pragma warning disable CA1303, S3885 // Debug logging strings don't need localization; Assembly.LoadFrom intentional for plugin discovery
 
-#pragma warning disable CA1303, S3885 // Debug logging strings don't need localization; Assembly.LoadFrom intentional for plugin discovery
-
+using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Microsoft.Extensions.DependencyInjection;
+
+namespace Farm.Web.Api.Extensions;
 
 /// <summary>
 /// Extension methods for registering and discovering backend client plugins.
@@ -61,13 +62,13 @@ public static class BackendPluginExtensions
         {
             try
             {
-                var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
                 Console.WriteLine($"[Plugin Discovery] Plugin search directory: {appDirectory}");
 
-                var pluginDlls = Directory.GetFiles(appDirectory, "Farm.Backend.Plugin.*.dll");
+                string[] pluginDlls = Directory.GetFiles(appDirectory, "Farm.Backend.Plugin.*.dll");
                 Console.WriteLine($"[Plugin Discovery] Found {pluginDlls.Length} plugin DLLs to load");
 
-                foreach (var dllPath in pluginDlls)
+                foreach (string dllPath in pluginDlls)
                 {
                     try
                     {
@@ -87,11 +88,11 @@ public static class BackendPluginExtensions
             }
         }
 
-        var assemblies = assembliesToSearch ?? AppDomain.CurrentDomain.GetAssemblies();
+        IEnumerable<Assembly> assemblies = assembliesToSearch ?? AppDomain.CurrentDomain.GetAssemblies();
         Console.WriteLine($"[Plugin Discovery] Scanning {assemblies.Count()} assemblies for plugins");
 
-        var discoveredCount = 0;
-        foreach (var assembly in assemblies)
+        int discoveredCount = 0;
+        foreach (Assembly assembly in assemblies)
         {
             try
             {
@@ -99,7 +100,7 @@ public static class BackendPluginExtensions
                 var pluginAttribute = assembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
                     .FirstOrDefault() as BackendPluginAttribute;
 
-                var assemblyName = assembly.GetName().Name ?? "Unknown";
+                string assemblyName = assembly.GetName().Name ?? "Unknown";
 
                 if (pluginAttribute != null)
                 {
@@ -124,7 +125,7 @@ public static class BackendPluginExtensions
                                !t.IsAbstract &&
                                t.GetConstructor(Type.EmptyTypes) != null).ToList();
 
-                foreach (var pluginType in pluginTypes)
+                foreach (Type? pluginType in pluginTypes)
                 {
                     try
                     {
@@ -180,7 +181,7 @@ public static class BackendPluginExtensions
     /// <returns>An enumerable of supported capability types, or empty if plugin not found.</returns>
     public static IEnumerable<Type> GetCapabilities(this IBackendPluginRegistry registry, string backendType)
     {
-        var plugin = registry.GetPlugin(backendType);
+        IBackendClientPlugin? plugin = registry.GetPlugin(backendType);
         return plugin?.GetCapabilities() ?? [];
     }
 
@@ -192,7 +193,7 @@ public static class BackendPluginExtensions
     /// <returns>The client type, or null if plugin not found.</returns>
     public static Type? GetClientType(this IBackendPluginRegistry registry, string backendType)
     {
-        var plugin = registry.GetPlugin(backendType);
+        IBackendClientPlugin? plugin = registry.GetPlugin(backendType);
         return plugin?.ClientType;
     }
 
@@ -204,7 +205,7 @@ public static class BackendPluginExtensions
     /// <returns>The client interface type, or null if plugin not found.</returns>
     public static Type? GetClientInterfaceType(this IBackendPluginRegistry registry, string backendType)
     {
-        var plugin = registry.GetPlugin(backendType);
+        IBackendClientPlugin? plugin = registry.GetPlugin(backendType);
         return plugin?.ClientInterfaceType;
     }
 
@@ -216,7 +217,7 @@ public static class BackendPluginExtensions
     /// <returns>The status client type, or null if plugin not found or doesn't support extended functionality.</returns>
     public static Type? GetStatusClientType(this IBackendPluginRegistry registry, string backendType)
     {
-        var extendedPlugin = registry.GetExtendedPlugin(backendType);
+        IExtendedBackendPlugin? extendedPlugin = registry.GetExtendedPlugin(backendType);
         return extendedPlugin?.StatusClientType;
     }
 
@@ -228,7 +229,7 @@ public static class BackendPluginExtensions
     /// <returns>The status client interface type, or null if plugin not found or doesn't support extended functionality.</returns>
     public static Type? GetStatusClientInterfaceType(this IBackendPluginRegistry registry, string backendType)
     {
-        var extendedPlugin = registry.GetExtendedPlugin(backendType);
+        IExtendedBackendPlugin? extendedPlugin = registry.GetExtendedPlugin(backendType);
         return extendedPlugin?.StatusClientInterfaceType;
     }
 

@@ -49,12 +49,7 @@ public class UsersController(
     public async Task<ActionResult<UserDto>> GetUserAsync(Guid id, CancellationToken ct)
     {
         UserDto? user = await _authService.GetUserWithRolesAndPermissionsAsync(id);
-        if (user == null)
-        {
-            return NotFound();
-        }
-
-        return Ok(user);
+        return user == null ? NotFound() : Ok(user);
     }
 
     /// <summary>
@@ -106,6 +101,7 @@ public class UsersController(
         {
             return NotFound();
         }
+
         string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation($"User {currentUserId} updated user {id}");
         return Ok(updated);
@@ -131,6 +127,7 @@ public class UsersController(
         {
             return NotFound();
         }
+
         _logger.LogInformation($"User {currentUserId} deleted user {id}");
         return NoContent();
     }

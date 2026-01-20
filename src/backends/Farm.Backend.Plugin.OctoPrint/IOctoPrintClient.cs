@@ -11,27 +11,41 @@ namespace Farm.Backend.Plugin.OctoPrint
     public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload
     {
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
+
         Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, string apiKey);
+
         Task<OctoPrintJobStatus?> GetJobStatusAsync(string baseUrl, string apiKey);
+
         Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName);
+
         Task<bool> CancelJobAsync(string baseUrl, string apiKey);
+
         Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Gets the list of available gcode files on the printer.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<string[]> GetFileListAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Gets the list of completed print jobs from OctoPrint history.
         /// Returns null if history is not available or API call fails.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        /// <param name="limit">Maximum number of history entries to return</param>
+        /// <param name="start">Offset index for pagination</param>
         Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null);
 
         /// <summary>
         /// Gets details for a specific print job from OctoPrint history.
         /// Returns null if the job is not found or API call fails.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        /// <param name="jobId">Unique identifier of the history job</param>
         Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId);
 
         /// <summary>
@@ -51,31 +65,45 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// This exposes plugin and non-standard endpoints without requiring callers to
         /// reference a concrete implementation.
         /// </summary>
+        /// <param name="request">The HTTP request message to send</param>
+        /// <param name="cancellationToken">Cancellation token for the operation</param>
         Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Sends a gcode command to the printer.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        /// <param name="gcode">The gcode command string to send</param>
         Task<bool> SendGcodeAsync(string baseUrl, string apiKey, string gcode);
 
         /// <summary>
         /// Homes all axes using native OctoPrint /api/printer/printhead endpoint.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> SendHomeAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Homes XY axes using native OctoPrint /api/printer/printhead endpoint.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> HomeXYAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Homes Z axis using native OctoPrint /api/printer/printhead endpoint.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> HomeZAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Sets target temperature for bed using native OctoPrint API endpoint /api/printer/bed.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        /// <param name="bedTemp">Target bed temperature in Celsius (0 to turn off)</param>
         Task<bool> SetBedTempAsync(string baseUrl, string apiKey, double bedTemp);
 
         /// <summary>
@@ -90,16 +118,22 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <summary>
         /// Pauses the current print job.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> PauseAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Resumes a paused print job.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> ResumeAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Cancels the current print job.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> CancelPrintAsync(string baseUrl, string apiKey);
 
         /// <summary>
@@ -117,17 +151,23 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <summary>
         /// Connects the printer (initiates connection to physical device) using native OctoPrint API.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> ConnectAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Disconnects the printer (closes connection to physical device) using native OctoPrint API.
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<bool> DisconnectAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Gets the current connection state of the printer using native OctoPrint API.
         /// Returns JSON with connection information (current port, baudrate, printerProfile, state).
         /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
         Task<string> GetConnectionStateAsync(string baseUrl, string apiKey);
 
         /// <summary>
@@ -180,7 +220,6 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <returns>Success status</returns>
         Task<bool> UploadFileAsync(string baseUrl, string apiKey, byte[] fileContent, string fileName, string? path = null, bool startPrint = false);
 
-        // Priority 3: Settings Management
         /// <summary>
         /// Gets OctoPrint server configuration/settings.
         /// Includes API version, data folder, temperature profiles, and other settings.
@@ -200,7 +239,6 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <returns>Success status</returns>
         Task<bool> UpdateSettingsAsync(string baseUrl, string apiKey, string settingsJson);
 
-        // Priority 3: System Operations
         /// <summary>
         /// Restarts the OctoPrint server.
         /// </summary>
@@ -228,7 +266,6 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <returns>Success status</returns>
         Task<bool> ExecuteSystemCommandAsync(string baseUrl, string apiKey, string commandId);
 
-        // Priority 3: Server Info
         /// <summary>
         /// Gets detailed version information for OctoPrint server components.
         /// Includes OctoPrint version, OS, Python version, and plugin versions.
@@ -238,7 +275,6 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <returns>JSON string with detailed version information</returns>
         Task<string> GetVersionInfoAsync(string baseUrl, string apiKey);
 
-        // Priority 2: File Operations
         /// <summary>
         /// Downloads the contents of a gcode file from the OctoPrint server.
         /// </summary>

@@ -1,0 +1,16 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "PrintFarmer PostgreSQL",
+            "Group": "Servers",
+            "Port": 5432,
+            "Username": "postgres",
+            "Host": "database",
+            "MaintenanceDB": "postgres",
+            "ConnectionParameters": {
+                "sslmode": "prefer"
+            },
+            "Comment": "PrintFarmer database server - password must be entered manually on first connection"
+        }
+    }
+}

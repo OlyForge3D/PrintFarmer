@@ -25,19 +25,16 @@ public interface IPrinterModelAliasService
 /// <summary>
 /// Default implementation of printer model alias resolution.
 /// </summary>
-public class PrinterModelAliasService : IPrinterModelAliasService
+public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAliasService
 {
-    private readonly AppDbContext _dbContext;
-
-    public PrinterModelAliasService(AppDbContext dbContext)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    }
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
     /// <summary>
     /// Resolves a slicer model name to its canonical PrinterModel ID.
     /// Priority: Exact slicer-type match > Null slicer-type (applies to all)
     /// </summary>
+    /// <param name="slicerModelName">The model name as it appears in gcode.</param>
+    /// <param name="slicerType">Optional slicer type for slicer-specific matching.</param>
     public async Task<Guid?> ResolveModelAliasAsync(string slicerModelName, string? slicerType = null)
     {
         if (string.IsNullOrWhiteSpace(slicerModelName))
@@ -48,7 +45,7 @@ public class PrinterModelAliasService : IPrinterModelAliasService
         // Try exact match with slicer type first
         if (!string.IsNullOrEmpty(slicerType))
         {
-            var exactMatch = await _dbContext.PrinterModelAliases
+            Guid exactMatch = await _dbContext.PrinterModelAliases
                 .AsNoTracking()
                 .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == slicerType)
                 .Select(a => a.PrinterModelId)
@@ -61,7 +58,7 @@ public class PrinterModelAliasService : IPrinterModelAliasService
         }
 
         // Fall back to slicer-agnostic alias (SlicerType is null)
-        var genericMatch = await _dbContext.PrinterModelAliases
+        Guid genericMatch = await _dbContext.PrinterModelAliases
             .AsNoTracking()
             .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == null)
             .Select(a => a.PrinterModelId)

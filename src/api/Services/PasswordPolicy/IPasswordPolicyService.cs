@@ -7,5 +7,6 @@ namespace Farm.Web.Api.Services.PasswordPolicy;
 public interface IPasswordPolicyService
 {
     Task<PasswordPolicyDto> GetAsync(CancellationToken ct = default);
+
     Task<PasswordPolicyDto> UpdateAsync(UpdatePasswordPolicyRequest request, CancellationToken ct = default);
 }

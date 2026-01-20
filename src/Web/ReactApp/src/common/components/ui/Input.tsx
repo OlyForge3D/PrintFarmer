@@ -3,13 +3,15 @@ import clsx from 'clsx';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
+  ref?: React.Ref<HTMLInputElement>;
 }
 
-export const Input: React.FC<InputProps> = ({ invalid, className, ...rest }) => {
+export const Input: React.FC<InputProps> = ({ invalid, className, ref, ...rest }) => {
   return (
     <input
+      ref={ref}
       className={clsx(
-        'border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed',
+        'w-full border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed',
         invalid && 'border-pf-error focus:ring-pf-error focus:border-pf-error',
         className
       )}

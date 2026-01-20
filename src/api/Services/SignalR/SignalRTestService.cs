@@ -3,14 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SignalR;
 
-public class SignalRTestService : ISignalRTestService
+public class SignalRTestService(IHubContext<PrinterHub> hubContext) : ISignalRTestService
 {
-    private readonly IHubContext<PrinterHub> _hubContext;
-
-    public SignalRTestService(IHubContext<PrinterHub> hubContext)
-    {
-        _hubContext = hubContext;
-    }
+    private readonly IHubContext<PrinterHub> _hubContext = hubContext;
 
     public async Task SendTestMessageAsync(string? connectionId, string? groupName, string? message, CancellationToken ct = default)
     {

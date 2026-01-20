@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -38,9 +39,9 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
 
     private async Task<User> CreateTestUserAsync(string username, string email, bool isActive = true, bool emailConfirmed = true)
     {
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashingService = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashingService = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
         var user = new User
         {
@@ -67,12 +68,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task AuthenticateAsync_WithValidCredentials_ReturnsSuccessfulResult()
     {
         // Arrange
-        var user = await CreateTestUserAsync("auth-valid-user", "auth-valid@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("auth-valid-user", "auth-valid@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.AuthenticateAsync(user.Username, "TestPassword123!");
+        AuthenticationResult result = await authService.AuthenticateAsync(user.Username, "TestPassword123!");
 
         // Assert
         result.Success.Should().BeTrue();
@@ -87,12 +88,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task AuthenticateAsync_WithInvalidPassword_ReturnsFailure()
     {
         // Arrange
-        var user = await CreateTestUserAsync("auth-invalid-pwd", "auth-invalid-pwd@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("auth-invalid-pwd", "auth-invalid-pwd@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.AuthenticateAsync(user.Username, "WrongPassword123!");
+        AuthenticationResult result = await authService.AuthenticateAsync(user.Username, "WrongPassword123!");
 
         // Assert
         result.Success.Should().BeFalse();
@@ -104,11 +105,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task AuthenticateAsync_WithNonExistentUser_ReturnsFailure()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.AuthenticateAsync("nonexistent-user", "AnyPassword123!");
+        AuthenticationResult result = await authService.AuthenticateAsync("nonexistent-user", "AnyPassword123!");
 
         // Assert
         result.Success.Should().BeFalse();
@@ -120,12 +121,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task AuthenticateAsync_WithInactiveUser_ReturnsFailure()
     {
         // Arrange
-        var user = await CreateTestUserAsync("auth-inactive-user", "auth-inactive@test.com", isActive: false);
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("auth-inactive-user", "auth-inactive@test.com", isActive: false);
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.AuthenticateAsync(user.Username, "TestPassword123!");
+        AuthenticationResult result = await authService.AuthenticateAsync(user.Username, "TestPassword123!");
 
         // Assert
         result.Success.Should().BeFalse();
@@ -136,18 +137,18 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task AuthenticateAsync_SuccessfulLogin_UpdatesLastLoginTimestamp()
     {
         // Arrange
-        var user = await CreateTestUserAsync("auth-timestamp-user", "auth-timestamp@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        User user = await CreateTestUserAsync("auth-timestamp-user", "auth-timestamp@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var beforeLogin = DateTime.UtcNow;
+        DateTime beforeLogin = DateTime.UtcNow;
 
         // Act
         await authService.AuthenticateAsync(user.Username, "TestPassword123!");
 
         // Assert
-        var updatedUser = context.Users.First(u => u.Id == user.Id);
+        User updatedUser = context.Users.First(u => u.Id == user.Id);
         updatedUser.LastLogin.Should().NotBeNull();
         updatedUser.LastLogin.Should().BeOnOrAfter(beforeLogin);
     }
@@ -160,9 +161,9 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task RegisterAsync_WithValidRequest_CreatesNewUser()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var request = new RegisterRequest
         {
@@ -175,7 +176,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await authService.RegisterAsync(request);
+        AuthenticationResult result = await authService.RegisterAsync(request);
 
         // Assert
         result.Success.Should().BeTrue();
@@ -183,7 +184,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         result.User.Should().NotBeNull();
         result.User?.Username.Should().Be(request.Username);
 
-        var createdUser = context.Users.FirstOrDefault(u => u.Username == request.Username);
+        User? createdUser = context.Users.FirstOrDefault(u => u.Username == request.Username);
         createdUser.Should().NotBeNull();
         createdUser?.Email.Should().Be(request.Email);
         createdUser?.IsActive.Should().BeFalse(); // New users start inactive
@@ -193,9 +194,9 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task RegisterAsync_WithDuplicateUsername_ReturnsFailure()
     {
         // Arrange
-        var existingUser = await CreateTestUserAsync("duplicate-username", "existing@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User existingUser = await CreateTestUserAsync("duplicate-username", "existing@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         var request = new RegisterRequest
         {
@@ -208,7 +209,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await authService.RegisterAsync(request);
+        AuthenticationResult result = await authService.RegisterAsync(request);
 
         // Assert
         result.Success.Should().BeFalse();
@@ -219,9 +220,9 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task RegisterAsync_WithDuplicateEmail_ReturnsFailure()
     {
         // Arrange
-        var existingUser = await CreateTestUserAsync("existing-user", "duplicate@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User existingUser = await CreateTestUserAsync("existing-user", "duplicate@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         var request = new RegisterRequest
         {
@@ -234,7 +235,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await authService.RegisterAsync(request);
+        AuthenticationResult result = await authService.RegisterAsync(request);
 
         // Assert
         result.Success.Should().BeFalse();
@@ -245,8 +246,8 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task RegisterAsync_WithNullRequest_ThrowsArgumentNullException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentNullException>(() => authService.RegisterAsync(null!));
@@ -260,12 +261,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GenerateJwtTokenAsync_CreatesValidToken()
     {
         // Arrange
-        var user = await CreateTestUserAsync("jwt-token-user", "jwt-token@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("jwt-token-user", "jwt-token@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var token = await authService.GenerateJwtTokenAsync(user);
+        string token = await authService.GenerateJwtTokenAsync(user);
 
         // Assert
         token.Should().NotBeNullOrEmpty();
@@ -276,14 +277,14 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ValidateTokenAsync_WithValidToken_ReturnsTrue()
     {
         // Arrange
-        var user = await CreateTestUserAsync("validate-token-user", "validate-token@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("validate-token-user", "validate-token@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
-        var token = await authService.GenerateJwtTokenAsync(user);
+        string token = await authService.GenerateJwtTokenAsync(user);
 
         // Act
-        var isValid = await authService.ValidateTokenAsync(token);
+        bool isValid = await authService.ValidateTokenAsync(token);
 
         // Assert
         isValid.Should().BeTrue();
@@ -293,14 +294,14 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetPrincipalFromTokenAsync_WithValidToken_ReturnsPrincipal()
     {
         // Arrange
-        var user = await CreateTestUserAsync("principal-token-user", "principal-token@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("principal-token-user", "principal-token@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
-        var token = await authService.GenerateJwtTokenAsync(user);
+        string token = await authService.GenerateJwtTokenAsync(user);
 
         // Act
-        var principal = await authService.GetPrincipalFromTokenAsync(token);
+        ClaimsPrincipal? principal = await authService.GetPrincipalFromTokenAsync(token);
 
         // Assert
         principal.Should().NotBeNull();
@@ -312,11 +313,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetPrincipalFromTokenAsync_WithInvalidToken_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var principal = await authService.GetPrincipalFromTokenAsync("invalid.token.here");
+        ClaimsPrincipal? principal = await authService.GetPrincipalFromTokenAsync("invalid.token.here");
 
         // Assert
         principal.Should().BeNull();
@@ -330,18 +331,18 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ChangePasswordAsync_WithValidCurrentPassword_UpdatesPassword()
     {
         // Arrange
-        var user = await CreateTestUserAsync("change-pwd-user", "changepwd@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("change-pwd-user", "changepwd@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.ChangePasswordAsync(user.Id, "TestPassword123!", "NewPassword456!");
+        bool result = await authService.ChangePasswordAsync(user.Id, "TestPassword123!", "NewPassword456!");
 
         // Assert
         result.Should().BeTrue();
 
         // Verify new password works
-        var authResult = await authService.AuthenticateAsync(user.Username, "NewPassword456!");
+        AuthenticationResult authResult = await authService.AuthenticateAsync(user.Username, "NewPassword456!");
         authResult.Success.Should().BeTrue();
     }
 
@@ -349,12 +350,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ChangePasswordAsync_WithInvalidCurrentPassword_ReturnsFalse()
     {
         // Arrange
-        var user = await CreateTestUserAsync("change-pwd-invalid", "changepwdinvalid@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("change-pwd-invalid", "changepwdinvalid@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.ChangePasswordAsync(user.Id, "WrongPassword123!", "NewPassword456!");
+        bool result = await authService.ChangePasswordAsync(user.Id, "WrongPassword123!", "NewPassword456!");
 
         // Assert
         result.Should().BeFalse();
@@ -364,11 +365,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ChangePasswordAsync_WithNonExistentUser_ReturnsFalse()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.ChangePasswordAsync(Guid.NewGuid(), "OldPassword123!", "NewPassword456!");
+        bool result = await authService.ChangePasswordAsync(Guid.NewGuid(), "OldPassword123!", "NewPassword456!");
 
         // Assert
         result.Should().BeFalse();
@@ -378,18 +379,18 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task InitiatePasswordResetAsync_WithValidEmail_CreatesResetToken()
     {
         // Arrange
-        var user = await CreateTestUserAsync("reset-pwd-user", "resetpwd@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        User user = await CreateTestUserAsync("reset-pwd-user", "resetpwd@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Act
-        var result = await authService.InitiatePasswordResetAsync(user.Email, "192.168.1.1");
+        bool result = await authService.InitiatePasswordResetAsync(user.Email, "192.168.1.1");
 
         // Assert
         result.Should().BeTrue();
 
-        var resetToken = context.PasswordResetTokens.FirstOrDefault(t => t.UserId == user.Id);
+        PasswordResetToken? resetToken = context.PasswordResetTokens.FirstOrDefault(t => t.UserId == user.Id);
         resetToken.Should().NotBeNull();
         resetToken?.IsUsed.Should().BeFalse();
     }
@@ -398,11 +399,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task InitiatePasswordResetAsync_WithNonExistentEmail_ReturnsTrue()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act - Returns true to prevent email enumeration
-        var result = await authService.InitiatePasswordResetAsync("nonexistent@test.com", "192.168.1.1");
+        bool result = await authService.InitiatePasswordResetAsync("nonexistent@test.com", "192.168.1.1");
 
         // Assert
         result.Should().BeTrue();
@@ -412,24 +413,24 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ResetPasswordAsync_WithValidToken_ResetsPassword()
     {
         // Arrange
-        var user = await CreateTestUserAsync("reset-token-user", "resettoken@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("reset-token-user", "resettoken@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Initiate reset to create token
         await authService.InitiatePasswordResetAsync(user.Email, "192.168.1.1");
 
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var resetToken = context.PasswordResetTokens.First(t => t.UserId == user.Id);
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        PasswordResetToken resetToken = context.PasswordResetTokens.First(t => t.UserId == user.Id);
 
         // Act
-        var result = await authService.ResetPasswordAsync(resetToken.Token, user.Email, "NewResetPassword123!", "192.168.1.1");
+        bool result = await authService.ResetPasswordAsync(resetToken.Token, user.Email, "NewResetPassword123!", "192.168.1.1");
 
         // Assert
         result.Should().BeTrue();
 
         // Verify new password works
-        var authResult = await authService.AuthenticateAsync(user.Username, "NewResetPassword123!");
+        AuthenticationResult authResult = await authService.AuthenticateAsync(user.Username, "NewResetPassword123!");
         authResult.Success.Should().BeTrue();
     }
 
@@ -437,12 +438,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ResetPasswordAsync_WithInvalidToken_ReturnsFalse()
     {
         // Arrange
-        var user = await CreateTestUserAsync("reset-invalid-token", "resetinvalidtoken@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("reset-invalid-token", "resetinvalidtoken@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.ResetPasswordAsync("invalid-token", user.Email, "NewPassword123!", "192.168.1.1");
+        bool result = await authService.ResetPasswordAsync("invalid-token", user.Email, "NewPassword123!", "192.168.1.1");
 
         // Assert
         result.Should().BeFalse();
@@ -452,10 +453,10 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ResetPasswordAsync_WithExpiredToken_ReturnsFalse()
     {
         // Arrange
-        var user = await CreateTestUserAsync("reset-expired-token", "resetexpiredtoken@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("reset-expired-token", "resetexpiredtoken@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Create an expired reset token manually
         var expiredToken = new PasswordResetToken
@@ -471,7 +472,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await authService.ResetPasswordAsync(expiredToken.Token, user.Email, "NewPassword123!", "192.168.1.1");
+        bool result = await authService.ResetPasswordAsync(expiredToken.Token, user.Email, "NewPassword123!", "192.168.1.1");
 
         // Assert
         result.Should().BeFalse();
@@ -485,12 +486,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task SendEmailConfirmationAsync_WithValidUser_ReturnsTrue()
     {
         // Arrange
-        var user = await CreateTestUserAsync("email-confirm-user", "emailconfirm@test.com", emailConfirmed: false);
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("email-confirm-user", "emailconfirm@test.com", emailConfirmed: false);
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.SendEmailConfirmationAsync(user);
+        bool result = await authService.SendEmailConfirmationAsync(user);
 
         // Assert
         // The service returns true when email confirmation is initiated successfully
@@ -501,12 +502,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ConfirmEmailAsync_WithAlreadyConfirmedEmail_StaysConfirmed()
     {
         // Arrange - User created with emailConfirmed: true by default
-        var user = await CreateTestUserAsync("email-already-confirmed", "emailalreadyconfirmed@test.com", emailConfirmed: true);
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("email-already-confirmed", "emailalreadyconfirmed@test.com", emailConfirmed: true);
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act - Try to confirm with an arbitrary token (should fail gracefully since email is already confirmed)
-        var result = await authService.ConfirmEmailAsync("arbitrary-token");
+        bool result = await authService.ConfirmEmailAsync("arbitrary-token");
 
         // Assert
         // With an arbitrary token for a non-matching user, this should return false
@@ -517,11 +518,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ConfirmEmailAsync_WithInvalidToken_ReturnsFalse()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.ConfirmEmailAsync("invalid-confirmation-token");
+        bool result = await authService.ConfirmEmailAsync("invalid-confirmation-token");
 
         // Assert
         result.Should().BeFalse();
@@ -535,12 +536,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserByUsernameAsync_WithValidUsername_ReturnsUser()
     {
         // Arrange
-        var user = await CreateTestUserAsync("lookup-by-username", "lookupusername@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("lookup-by-username", "lookupusername@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.GetUserByUsernameAsync(user.Username);
+        User? result = await authService.GetUserByUsernameAsync(user.Username);
 
         // Assert
         result.Should().NotBeNull();
@@ -552,11 +553,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserByUsernameAsync_WithNonExistentUsername_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.GetUserByUsernameAsync("nonexistent-username");
+        User? result = await authService.GetUserByUsernameAsync("nonexistent-username");
 
         // Assert
         result.Should().BeNull();
@@ -566,12 +567,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserByEmailAsync_WithValidEmail_ReturnsUser()
     {
         // Arrange
-        var user = await CreateTestUserAsync("lookup-by-email", "lookupbyemail@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("lookup-by-email", "lookupbyemail@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.GetUserByEmailAsync(user.Email);
+        User? result = await authService.GetUserByEmailAsync(user.Email);
 
         // Assert
         result.Should().NotBeNull();
@@ -583,11 +584,11 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserByEmailAsync_WithNonExistentEmail_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.GetUserByEmailAsync("nonexistent@test.com");
+        User? result = await authService.GetUserByEmailAsync("nonexistent@test.com");
 
         // Assert
         result.Should().BeNull();
@@ -597,12 +598,12 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserWithRolesAndPermissionsAsync_ReturnsCompleteUserDto()
     {
         // Arrange
-        var user = await CreateTestUserAsync("dto-user", "dtouser@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("dto-user", "dtouser@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Act
-        var result = await authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+        UserDto? result = await authService.GetUserWithRolesAndPermissionsAsync(user.Id);
 
         // Assert
         result.Should().NotBeNull();
@@ -622,16 +623,16 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task HasPermissionAsync_WithUserHavingPermission_ReturnsTrue()
     {
         // Arrange
-        var user = await CreateTestUserAsync("permission-user", "permissionuser@test.com");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+        User user = await CreateTestUserAsync("permission-user", "permissionuser@test.com");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Note: This test depends on user roles having permissions
         // In a fresh database, we may need to assign roles first
         // For now, we test the permission check method exists
 
         // Act
-        var hasPermission = await authService.HasPermissionAsync(user.Id, "printers", "read");
+        bool hasPermission = await authService.HasPermissionAsync(user.Id, "printers", "read");
 
         // Assert - Result depends on role configuration
         hasPermission.Should().BeFalse(); // New users likely don't have permissions by default

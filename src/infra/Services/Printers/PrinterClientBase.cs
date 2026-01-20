@@ -28,6 +28,7 @@ public abstract class PrinterClientBase
         {
             trimmed = "http://" + trimmed;
         }
+
         try
         {
             UriBuilder ub = new(trimmed);
@@ -39,6 +40,7 @@ public abstract class PrinterClientBase
             {
                 ub.Port = defaultPort;
             }
+
             return ub.Uri.ToString().TrimEnd('/');
         }
         catch
@@ -55,6 +57,7 @@ public abstract class PrinterClientBase
         {
             ub.Port = defaultPort;
         }
+
         return ub.Uri.ToString().TrimEnd('/');
     }
 
@@ -87,7 +90,10 @@ public abstract class PrinterClientBase
                     return ub.Uri.ToString();
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return abs.ToString();
         }
 
@@ -96,6 +102,7 @@ public abstract class PrinterClientBase
         {
             return baseNorm.TrimEnd('/') + s;
         }
+
         try
         {
             Uri baseUri = new(baseNorm.EndsWith('/') ? baseNorm : baseNorm + "/");

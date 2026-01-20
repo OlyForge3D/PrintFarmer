@@ -1,9 +1,10 @@
-﻿namespace Farm.Backend.Plugin.Sdcp;
-
-using Farm.Backend.Plugin.Core;
+﻿using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+namespace Farm.Backend.Plugin.Sdcp;
 
 /// <summary>
 /// Plugin descriptor for SDCP (Simple Data Communication Protocol) backend client support.
@@ -71,16 +72,20 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
         // Using AddScoped because HTTP clients need fresh instances per request scope
         services.AddScoped<ISdcpClient>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            IUnifiedLoggingService logger = provider.GetRequiredService<IUnifiedLoggingService>();
             return new SdcpClient(httpClient, logger);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated
         // on-demand by PrinterStatusClientFactory which properly handles their dependencies
         // on scoped services.
+
+        // Register the SdcpPollingService hosted service
+        // This service polls SDCP printers for status updates every 5 seconds
+        services.AddSingleton<IHostedService, SdcpPollingService>();
     }
 
     /// <summary>

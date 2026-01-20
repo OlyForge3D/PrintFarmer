@@ -120,5 +120,12 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
     // vite-tsconfig-paths will handle aliases for tests too
+    // Exclude e2e tests - they use Playwright and must be run separately
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/e2e/**',
+      '**/*.spec.ts'  // Playwright convention is .spec.ts
+    ],
   },
 });

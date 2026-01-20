@@ -1,6 +1,6 @@
-﻿namespace Farm.Web.Api.Services.Slicing;
+﻿using Farm.Infrastructure;
 
-using Farm.Infrastructure;
+namespace Farm.Web.Api.Services.Slicing;
 
 /// <summary>
 /// Service for exporting PrintFarmer profiles to OrcaSlicer config bundle format.

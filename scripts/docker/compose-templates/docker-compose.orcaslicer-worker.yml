@@ -8,11 +8,11 @@ x-orcaslicer-build: &orcaslicer-build
   dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
   target: orcaslicer-worker
   args:
-    SDK_TAG: ${SDK_TAG:-9.0}
-    ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
-    NODE_TAG: ${NODE_TAG:-22-alpine}
-    NGINX_TAG: ${NGINX_TAG:-alpine}
-    UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
+    SDK_TAG: ${SDK_TAG}
+    ASPNET_TAG: ${ASPNET_TAG}
+    NODE_TAG: ${NODE_TAG}
+    NGINX_TAG: ${NGINX_TAG}
+    UBUNTU_TAG: ${UBUNTU_TAG}
     ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}

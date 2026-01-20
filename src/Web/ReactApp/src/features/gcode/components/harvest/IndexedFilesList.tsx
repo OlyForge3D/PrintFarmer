@@ -7,7 +7,7 @@ import { signalRService as harvestSignalRService } from '@/services/harvest-sign
 import { Button } from '@/common/components/ui/Button';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Select } from '@/common/components/ui/Select';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 import { ArrowLeftIcon, ArrowRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from '@/common/components/icons/MdiIcons';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];

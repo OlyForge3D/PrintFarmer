@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, FormField, Input, Checkbox } from '@/common/components/ui';
 import { SettingsIcon } from '@/common/components/icons/MdiIcons';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import type { SlicerSettingsDto } from '@/types/slicer';
 
@@ -12,11 +12,7 @@ export const SlicerSettingsPage: React.FC = () => {
   const { data, isLoading } = useQuery<SlicerSettingsDto, Error>({
     queryKey: ['slicerSettings'],
     queryFn: async () => {
-      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, {
-        headers: getAuthHeaders()
-      });
-      if (!res.ok) throw new Error('Failed to fetch settings');
-      return res.json();
+      return (await apiClient.genericGet('/slicer/settings')) as unknown as SlicerSettingsDto;
     }
   });
 
@@ -45,17 +41,12 @@ export const SlicerSettingsPage: React.FC = () => {
   // Enhance save mutation to surface server messages
   const saveMutation = useMutation<void, Error, SlicerSettingsDto>({
     mutationFn: async (payload: SlicerSettingsDto) => {
-      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Save failed with status ${res.status}`);
+      try {
+        await apiClient.genericPost('/slicer/settings', payload as unknown as Record<string, unknown>);
+      } catch (err: unknown) {
+        const error = err as Record<string, unknown>;
+        const text = (error.response as Record<string, unknown>)?.data || `Save failed with status ${(error.response as Record<string, unknown>)?.status}`;
+        throw new Error(String(text));
       }
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['slicerSettings'] }); setSaveError(null); },

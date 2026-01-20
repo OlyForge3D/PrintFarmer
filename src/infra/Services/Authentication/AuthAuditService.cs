@@ -8,16 +8,10 @@ namespace Farm.Infrastructure.Services.Authentication;
 /// <summary>
 /// Service for logging authentication and authorization events for security audit trail
 /// </summary>
-public class AuthAuditService : IAuthAuditService
+public class AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedLoggingService logging) : IAuthAuditService
 {
-    private readonly IAuthAuditLogRepository _auditRepository;
-    private readonly IUnifiedLoggingService _logging;
-
-    public AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedLoggingService logging)
-    {
-        _auditRepository = auditRepository;
-        _logging = logging;
-    }
+    private readonly IAuthAuditLogRepository _auditRepository = auditRepository;
+    private readonly IUnifiedLoggingService _logging = logging;
 
     // Centralized save helper
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
@@ -28,7 +22,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -47,7 +41,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { UsernameOrEmail = usernameOrEmail };
 
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = null, // User doesn't exist or credentials invalid
@@ -67,7 +61,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogLogoutAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -85,7 +79,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogRegisterAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -103,7 +97,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogPasswordChangeAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -123,7 +117,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { Email = email };
 
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = null, // Could lookup user by email, but keeping null for simplicity
@@ -142,7 +136,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogPasswordResetAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -166,7 +160,7 @@ public class AuthAuditService : IAuthAuditService
             LockoutDurationMinutes = lockoutDuration.TotalMinutes
         };
 
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -187,7 +181,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { Reason = reason };
 
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -206,7 +200,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogRefreshTokenAsync(Guid userId, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -230,7 +224,7 @@ public class AuthAuditService : IAuthAuditService
             Reason = reason
         };
 
-        AuthAuditLog auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,

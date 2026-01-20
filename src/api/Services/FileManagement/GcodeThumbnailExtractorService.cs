@@ -5,25 +5,20 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.FileManagement;
 
-public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
+public class GcodeThumbnailExtractorService(
+    IGcodeMetadataExtractorService metadataExtractor,
+    IStoragePathService storagePathService,
+    IUnifiedLoggingService logger) : IGcodeThumbnailExtractorService
 {
-    private readonly IGcodeMetadataExtractorService _metadataExtractor;
-    private readonly IStoragePathService _storagePathService;
-    private readonly IUnifiedLoggingService _logger;
-
-    public GcodeThumbnailExtractorService(
-        IGcodeMetadataExtractorService metadataExtractor,
-        IStoragePathService storagePathService,
-        IUnifiedLoggingService logger)
-    {
-        _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
-        _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Extract and save a thumbnail from a G-code file stream.
     /// </summary>
+    /// <param name="gcodeStream">The G-code file stream to extract thumbnail from.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<string?> ExtractAndSaveThumbnailAsync(Stream gcodeStream, CancellationToken ct = default)
     {
         if (gcodeStream == null)
@@ -50,6 +45,8 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
     /// <summary>
     /// Extract and save a thumbnail from G-code text content.
     /// </summary>
+    /// <param name="gcodeContent">The G-code text content to extract thumbnail from.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<string?> ExtractAndSaveThumbnailFromTextAsync(string gcodeContent, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(gcodeContent))
@@ -60,7 +57,7 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
         try
         {
             // Extract metadata which includes thumbnail
-            var extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+            GcodeMetadataExtracted extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
 
             if (extractedMetadata?.ThumbnailData == null || extractedMetadata.ThumbnailData.Length == 0)
             {

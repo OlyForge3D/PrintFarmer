@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { apiClient } from '@/services/api';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { Button, TemperatureInput, MovementInput, Select, ControlPadButton } from '@/common/components/ui';
@@ -101,12 +100,29 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
 
   const handleControlAction = async (action: string) => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) {
-        console.error(`Failed to ${action}:`, response.statusText);
+      let result;
+      switch (action) {
+        case 'pause':
+          result = await apiClient.pausePrint(printer.id);
+          break;
+        case 'resume':
+          result = await apiClient.resumePrint(printer.id);
+          break;
+        case 'stop':
+          result = await apiClient.emergencyStop(printer.id);
+          break;
+        case 'firmware-restart':
+          result = await apiClient.firmwareRestart(printer.id);
+          break;
+        case 'disable-motors':
+          result = await apiClient.disableMotors(printer.id);
+          break;
+        default:
+          console.warn(`Unknown action: ${action}`);
+          return;
+      }
+      if (!result.success) {
+        console.error(`Failed to ${action}:`, result.error);
       }
     } catch (error) {
       console.error(`Error during ${action}:`, error);
@@ -224,7 +240,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   };
 
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border w-full min-w-0 max-w-sm`}>
+    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border w-full min-w-[23rem]`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">

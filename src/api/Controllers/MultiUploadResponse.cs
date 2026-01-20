@@ -1,0 +1,28 @@
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Farm.Infrastructure.Contracts.FileManagement;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
+using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.Tags;
+using Microsoft.AspNetCore.Http.Headers;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Net.Http.Headers;
+
+namespace Farm.Web.Api.Controllers;
+
+/// <summary>Response for multi-file upload endpoint.</summary>
+public record MultiUploadResponse(
+    [property: JsonPropertyName("created")] IReadOnlyList<GcodeFileEntryDto> Created,
+    [property: JsonPropertyName("failed")] IReadOnlyList<MultiUploadFailure> Failed,
+    [property: JsonPropertyName("succeededCount")] int SucceededCount,
+    [property: JsonPropertyName("failedCount")] int FailedCount);

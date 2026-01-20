@@ -14,6 +14,12 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:firefox": "playwright test --project=firefox",
+    "test:e2e:mobile": "playwright test --project=mobile-chrome --project=mobile-safari",
+    "test:e2e:update-snapshots": "playwright test --update-snapshots",
     "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"
   },
   "dependencies": {
@@ -41,8 +47,8 @@
     "date-fns": "^4.1.0",
     "lucide-react": "^0.542.0",
     "postcss": "^8.5.6",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "react-hook-form": "^7.62.0",
     "react-router-dom": "^6.26.1",
     "sonner": "^2.0.7",
@@ -51,6 +57,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.35.0",
+    "@playwright/test": "^1.57.0",
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",
     "@tanstack/react-query-devtools": "5.87.1",

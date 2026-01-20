@@ -15,8 +15,7 @@ public class PrintQueueService(
     AppDbContext dbContext,
     ILogger<PrintQueueService> logger,
     INotificationService? notificationService = null,
-    IRetryService? retryService = null
-) : IPrintQueueService
+    IRetryService? retryService = null) : IPrintQueueService
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<PrintQueueService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -28,18 +27,23 @@ public class PrintQueueService(
     /// <summary>
     /// Get all queued and printing jobs with file metadata
     /// </summary>
+    /// <param name="filterStatus">Optional filter by job status.</param>
+    /// <param name="filterModel">Optional filter by printer model name.</param>
+    /// <param name="filterMaterial">Optional filter by required material type.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="offset">Number of jobs to skip for pagination.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<List<QueuedPrintJobWithFileMetaDto>> GetAllQueuedJobsAsync(
         string? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
         int limit = 100,
         int offset = 0,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var query = _dbContext.PrintJobs
+            IQueryable<PrintJob> query = _dbContext.PrintJobs
                 .Include(pj => pj.GcodeFile)
                 .Include(pj => pj.AssignedPrinter)
                     .ThenInclude(p => p!.Model)
@@ -48,7 +52,7 @@ public class PrintQueueService(
             // Filter by status
             if (!string.IsNullOrEmpty(filterStatus))
             {
-                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out var status))
+                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus status))
                 {
                     query = query.Where(pj => pj.Status == status);
                 }
@@ -77,7 +81,7 @@ public class PrintQueueService(
             }
 
             // Apply pagination
-            var jobs = await query
+            List<PrintJob> jobs = await query
                 .OrderByDescending(pj => pj.Priority)
                 .ThenBy(pj => pj.QueuePosition)
                 .Skip(offset)
@@ -97,16 +101,18 @@ public class PrintQueueService(
     /// <summary>
     /// Get print jobs for a specific printer
     /// </summary>
+    /// <param name="printerId">The unique identifier of the printer.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<List<QueuedPrintJobDto>> GetPrinterQueueAsync(
         string printerId,
         int limit = 50,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
             var printerId_guid = Guid.Parse(printerId);
-            var jobs = await _dbContext.PrintJobs
+            List<PrintJob> jobs = await _dbContext.PrintJobs
                 .Where(pj => pj.AssignedPrinterId == printerId_guid &&
                     (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
                 .OrderByDescending(pj => pj.Priority)
@@ -126,11 +132,12 @@ public class PrintQueueService(
     /// <summary>
     /// Get aggregated queue statistics
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueStatsDto> GetQueueStatsAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            var allJobs = await _dbContext.PrintJobs.ToListAsync(cancellationToken);
+            List<PrintJob> allJobs = await _dbContext.PrintJobs.ToListAsync(cancellationToken);
 
             var stats = new QueueStatsDto
             {
@@ -152,11 +159,12 @@ public class PrintQueueService(
     /// <summary>
     /// Get printer model statistics with queue counts
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<List<QueuePrinterModelStatsDto>> GetModelStatsAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            var stats = await _dbContext.PrintJobs
+            List<QueuePrinterModelStatsDto> stats = await _dbContext.PrintJobs
                 .Include(pj => pj.AssignedPrinter)
                     .ThenInclude(p => p!.Model)
                 .Where(pj => pj.AssignedPrinter != null && pj.AssignedPrinter.Model != null)
@@ -184,16 +192,19 @@ public class PrintQueueService(
     /// <summary>
     /// Get print job history (Phase 2)
     /// </summary>
+    /// <param name="limit">Maximum number of history entries to return.</param>
+    /// <param name="offset">Number of entries to skip for pagination.</param>
+    /// <param name="sortBy">Field to sort results by.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var allCompletedJobs = await _dbContext.PrintJobs
+            List<PrintJob> allCompletedJobs = await _dbContext.PrintJobs
                 .Where(pj => pj.Status == PrintJobStatus.Completed ||
                             pj.Status == PrintJobStatus.Failed ||
                             pj.Status == PrintJobStatus.Cancelled)
@@ -209,7 +220,7 @@ public class PrintQueueService(
                     CompletionPercentage = pj.Status == PrintJobStatus.Completed ? 100 : 0,
                     StartedAtUtc = pj.ActualStartTime ?? pj.CreatedAt,
                     CompletedAtUtc = pj.ActualEndTime,
-                    ActualPrintTimeSeconds = (int?)(pj.ActualPrintTime?.TotalSeconds) ?? 0,
+                    ActualPrintTimeSeconds = (int?)pj.ActualPrintTime?.TotalSeconds ?? 0,
                     FailureReason = pj.FailureReason
                 })
                 .OrderByDescending(e => e.CompletedAtUtc)
@@ -237,11 +248,13 @@ public class PrintQueueService(
     /// <summary>
     /// Enqueue a print job
     /// </summary>
+    /// <param name="request">The request containing job details to enqueue.</param>
+    /// <param name="userId">The unique identifier of the user enqueuing the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> EnqueueJobAsync(
         EnqueueQueueJobRequest request,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -251,7 +264,7 @@ public class PrintQueueService(
             }
 
             // Verify gcode file exists
-            var gcodeFile = await _dbContext.GcodeFiles.FindAsync(new object[] { request.GcodeFileId }, cancellationToken);
+            GcodeFile? gcodeFile = await _dbContext.GcodeFiles.FindAsync(new object[] { request.GcodeFileId }, cancellationToken);
             if (gcodeFile == null)
             {
                 throw new InvalidOperationException($"G-code file {request.GcodeFileId} not found");
@@ -278,7 +291,7 @@ public class PrintQueueService(
             };
 
             // Calculate queue position
-            var maxPosition = await _dbContext.PrintJobs
+            int maxPosition = await _dbContext.PrintJobs
                 .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
                 .MaxAsync(pj => (int?)pj.QueuePosition, cancellationToken) ?? -1;
             job.QueuePosition = maxPosition + 1;
@@ -299,16 +312,19 @@ public class PrintQueueService(
     /// <summary>
     /// Update print job (status, priority, printer assignment)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="request">The request containing update details.</param>
+    /// <param name="userId">The unique identifier of the user performing the update.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> UpdateJobAsync(
         string jobId,
         UpdateQueueJobRequest request,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -327,7 +343,7 @@ public class PrintQueueService(
 
             if (!string.IsNullOrEmpty(request.Status))
             {
-                if (Enum.TryParse<PrintJobStatus>(request.Status, ignoreCase: true, out var newStatus))
+                if (Enum.TryParse<PrintJobStatus>(request.Status, ignoreCase: true, out PrintJobStatus newStatus))
                 {
                     job.Status = newStatus;
                 }
@@ -355,16 +371,19 @@ public class PrintQueueService(
     /// <summary>
     /// Update job priority (for reordering queue)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="newPriority">The new priority value for the job.</param>
+    /// <param name="userId">The unique identifier of the user performing the update.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
         string jobId,
         int newPriority,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -388,15 +407,17 @@ public class PrintQueueService(
     /// <summary>
     /// Pause a printing job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user pausing the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> PauseJobAsync(
         string jobId,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -428,15 +449,17 @@ public class PrintQueueService(
     /// <summary>
     /// Resume a paused job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user resuming the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> ResumeJobAsync(
         string jobId,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -468,15 +491,17 @@ public class PrintQueueService(
     /// <summary>
     /// Cancel a job (remove from queue or stop printing)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user cancelling the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task CancelJobAsync(
         string jobId,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -506,11 +531,13 @@ public class PrintQueueService(
     /// <summary>
     /// Cancel multiple jobs at once
     /// </summary>
+    /// <param name="jobIds">The list of job identifiers to cancel.</param>
+    /// <param name="userId">The unique identifier of the user performing the bulk cancel.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueBulkOperationResultDto> BulkCancelJobsAsync(
         List<string> jobIds,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         var result = new QueueBulkOperationResultDto
         {
@@ -523,7 +550,7 @@ public class PrintQueueService(
 
         try
         {
-            foreach (var jobId in jobIds)
+            foreach (string jobId in jobIds)
             {
                 try
                 {
@@ -542,7 +569,8 @@ public class PrintQueueService(
                 }
             }
 
-            _logger.LogInformation("Bulk cancel completed: {SuccessCount} succeeded, {FailureCount} failed",
+            _logger.LogInformation(
+                "Bulk cancel completed: {SuccessCount} succeeded, {FailureCount} failed",
                 result.SuccessfulCount, result.FailedCount);
 
             return result;
@@ -557,11 +585,13 @@ public class PrintQueueService(
     /// <summary>
     /// Reorder multiple jobs in queue
     /// </summary>
+    /// <param name="moves">The list of job reorder moves to apply.</param>
+    /// <param name="userId">The unique identifier of the user performing the reorder.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueBulkOperationResultDto> BulkReorderJobsAsync(
         List<QueueJobReorderMove> moves,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         var result = new QueueBulkOperationResultDto
         {
@@ -574,11 +604,11 @@ public class PrintQueueService(
 
         try
         {
-            foreach (var move in moves)
+            foreach (QueueJobReorderMove move in moves)
             {
                 try
                 {
-                    var job = await _dbContext.PrintJobs.FindAsync(new object[] { move.JobId }, cancellationToken);
+                    PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { move.JobId }, cancellationToken);
                     if (job == null)
                     {
                         throw new InvalidOperationException($"Job {move.JobId} not found");
@@ -605,7 +635,8 @@ public class PrintQueueService(
                 await _dbContext.SaveChangesAsync(cancellationToken);
             }
 
-            _logger.LogInformation("Bulk reorder completed: {SuccessCount} succeeded, {FailureCount} failed",
+            _logger.LogInformation(
+                "Bulk reorder completed: {SuccessCount} succeeded, {FailureCount} failed",
                 result.SuccessfulCount, result.FailedCount);
 
             return result;
@@ -620,11 +651,13 @@ public class PrintQueueService(
     /// <summary>
     /// Rerun a completed job (add it back to queue)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job to rerun.</param>
+    /// <param name="userId">The unique identifier of the user requesting the rerun.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> RerunJobAsync(
         string jobId,
         string userId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -634,7 +667,7 @@ public class PrintQueueService(
             }
 
             // Find the job to rerun
-            var originalJob = await _dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken)
+            PrintJob originalJob = await _dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken)
                 ?? throw new InvalidOperationException($"Job {jobId} not found");
 
             // Create new print job with same properties as original
@@ -657,7 +690,7 @@ public class PrintQueueService(
             };
 
             // Calculate queue position
-            var maxPosition = await _dbContext.PrintJobs
+            int maxPosition = await _dbContext.PrintJobs
                 .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
                 .MaxAsync(pj => (int?)pj.QueuePosition, cancellationToken) ?? -1;
             newJob.QueuePosition = maxPosition + 1;
@@ -667,8 +700,7 @@ public class PrintQueueService(
 
             _logger.LogInformation(
                 "Job {JobId} rerun as {NewJobId} by user {UserId}",
-                originalJob.Id, newJob.Id, userId
-            );
+                originalJob.Id, newJob.Id, userId);
 
             return MapToQueuedPrintJobDto(newJob);
         }
@@ -684,15 +716,18 @@ public class PrintQueueService(
     /// <summary>
     /// Seed print job history from printer history (Phase 2)
     /// </summary>
+    /// <param name="printerIds">Optional list of printer identifiers to seed from.</param>
+    /// <param name="daysBack">Number of days of history to seed.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
         int daysBack = 30,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
             _logger.LogInformation("Seeding history from printers for last {DaysBack} days", daysBack);
+
             // TODO: Implement in Phase 2 when PrintJobHistory table is added
             await Task.CompletedTask;
         }
@@ -704,7 +739,6 @@ public class PrintQueueService(
     }
 
     // ============= PRIVATE HELPERS =============
-
     private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
     {
         return new QueuedPrintJobWithFileMetaDto
@@ -776,10 +810,11 @@ public class PrintQueueService(
     /// <summary>
     /// Get detailed information about a specific job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto?> GetJobByIdAsync(
         string jobId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -788,7 +823,7 @@ public class PrintQueueService(
                 return null;
             }
 
-            var job = await _dbContext.PrintJobs
+            PrintJob? job = await _dbContext.PrintJobs
                 .AsNoTracking()
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
@@ -804,11 +839,13 @@ public class PrintQueueService(
     /// <summary>
     /// Update job details (name, priority, notes, tags, material, nozzle)
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="updates">The update details to apply to the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto?> UpdateJobDetailsAsync(
         string jobId,
         UpdateJobDetailsRequest updates,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -822,7 +859,7 @@ public class PrintQueueService(
                 throw new ArgumentNullException(nameof(updates), "Update data is required");
             }
 
-            var job = await _dbContext.PrintJobs
+            PrintJob? job = await _dbContext.PrintJobs
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
             if (job == null)
@@ -881,7 +918,8 @@ public class PrintQueueService(
             job.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
+            _logger.LogInformation(
+                "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
                 jobId, job.Name, job.Priority, job.Notes?.Length ?? 0);
 
             return MapToQueuedPrintJobDto(job);
@@ -900,11 +938,13 @@ public class PrintQueueService(
     /// <summary>
     /// Update job notes
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="notes">The notes to set on the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<bool> UpdateJobNotesAsync(
         string jobId,
         string? notes,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -918,7 +958,7 @@ public class PrintQueueService(
                 throw new ArgumentException("Notes must be 500 characters or less", nameof(notes));
             }
 
-            var job = await _dbContext.PrintJobs
+            PrintJob? job = await _dbContext.PrintJobs
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
             if (job == null)
@@ -945,18 +985,23 @@ public class PrintQueueService(
     /// <summary>
     /// Get timeline events for visualization with optional filtering
     /// </summary>
+    /// <param name="dateFrom">Optional start date filter.</param>
+    /// <param name="dateTo">Optional end date filter.</param>
+    /// <param name="printerId">Optional filter by printer identifier.</param>
+    /// <param name="filterStatus">Optional filter by job status.</param>
+    /// <param name="limit">Maximum number of events to return.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<IEnumerable<TimelineEventDto>> GetTimelineAsync(
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
         string? printerId = null,
         string? filterStatus = null,
         int limit = 100,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var query = _dbContext.PrintJobs
+            IQueryable<PrintJob> query = _dbContext.PrintJobs
                 .Include(pj => pj.AssignedPrinter)
                 .AsQueryable();
 
@@ -965,6 +1010,7 @@ public class PrintQueueService(
             {
                 query = query.Where(pj => pj.ActualStartTime >= dateFrom || pj.CreatedAt >= dateFrom);
             }
+
             if (dateTo.HasValue)
             {
                 query = query.Where(pj => pj.ActualEndTime <= dateTo || pj.CreatedAt <= dateTo);
@@ -979,13 +1025,13 @@ public class PrintQueueService(
             // Apply status filter
             if (!string.IsNullOrEmpty(filterStatus))
             {
-                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out var status))
+                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus status))
                 {
                     query = query.Where(pj => pj.Status == status);
                 }
             }
 
-            var jobs = await query
+            List<PrintJob> jobs = await query
                 .OrderByDescending(pj => pj.CreatedAt)
                 .Take(limit)
                 .ToListAsync(cancellationToken);
@@ -1020,10 +1066,11 @@ public class PrintQueueService(
     /// <summary>
     /// Get complete state history for a specific job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<JobStateHistoryDto> GetJobStateHistoryAsync(
         string jobId,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -1032,7 +1079,7 @@ public class PrintQueueService(
                 throw new ArgumentException("Job ID is required", nameof(jobId));
             }
 
-            var job = await _dbContext.PrintJobs
+            PrintJob? job = await _dbContext.PrintJobs
                 .Include(pj => pj.StateHistory)
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
@@ -1042,7 +1089,7 @@ public class PrintQueueService(
             }
 
             // Build state transitions from job history
-            var transitions = new List<StateTransitionDto>();
+            List<StateTransitionDto> transitions = [];
 
             // Add initial Queued state
             transitions.Add(new StateTransitionDto
@@ -1086,13 +1133,14 @@ public class PrintQueueService(
                 });
             }
 
-            var totalDuration = job.ActualPrintTime.HasValue ? (int)job.ActualPrintTime.Value.TotalSeconds : (job.ActualEndTime.HasValue
+            int? totalDuration = job.ActualPrintTime.HasValue ? (int)job.ActualPrintTime.Value.TotalSeconds : (job.ActualEndTime.HasValue
                 ? (int)(job.ActualEndTime.Value - (job.ActualStartTime ?? job.CreatedAt)).TotalSeconds
                 : (int?)null);
 
-            var estimatedDuration = job.EstimatedPrintTime.HasValue ? (int?)job.EstimatedPrintTime.Value.TotalSeconds : null;
+            int? estimatedDuration = job.EstimatedPrintTime.HasValue ? (int?)job.EstimatedPrintTime.Value.TotalSeconds : null;
 
-            _logger.LogInformation("Retrieved state history for job {JobId} with {Count} transitions",
+            _logger.LogInformation(
+                "Retrieved state history for job {JobId} with {Count} transitions",
                 jobId, transitions.Count);
 
             return new JobStateHistoryDto
@@ -1119,16 +1167,19 @@ public class PrintQueueService(
     /// <summary>
     /// Get duration analytics comparing estimated vs actual durations
     /// </summary>
+    /// <param name="printerId">Optional filter by printer identifier.</param>
+    /// <param name="dateFrom">Optional start date filter.</param>
+    /// <param name="dateTo">Optional end date filter.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<DurationAnalyticsDto> GetDurationAnalyticsAsync(
         string? printerId = null,
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
-        CancellationToken cancellationToken = default
-    )
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var query = _dbContext.PrintJobs
+            IQueryable<PrintJob> query = _dbContext.PrintJobs
                 .Include(pj => pj.AssignedPrinter)
                 .Where(pj => pj.Status == PrintJobStatus.Completed || pj.Status == PrintJobStatus.Failed)
                 .AsQueryable();
@@ -1138,6 +1189,7 @@ public class PrintQueueService(
             {
                 query = query.Where(pj => pj.ActualEndTime >= dateFrom);
             }
+
             if (dateTo.HasValue)
             {
                 query = query.Where(pj => pj.ActualEndTime <= dateTo);
@@ -1149,7 +1201,7 @@ public class PrintQueueService(
                 query = query.Where(pj => pj.AssignedPrinterId.ToString() == printerId);
             }
 
-            var jobs = await query.ToListAsync(cancellationToken);
+            List<PrintJob> jobs = await query.ToListAsync(cancellationToken);
 
             if (jobs.Count == 0)
             {
@@ -1168,18 +1220,18 @@ public class PrintQueueService(
                 .Select(j => j.ActualPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
                 .ToList();
 
-            var avgEstimated = estimatedTimes.Any() ? estimatedTimes.Average() : 0;
-            var avgActual = actualTimes.Any() ? actualTimes.Average() : 0;
-            var accuracy = avgEstimated > 0 ? (1 - Math.Abs(avgActual - avgEstimated) / avgEstimated) * 100 : 0;
-            var variance = avgEstimated > 0 ? ((avgActual - avgEstimated) / avgEstimated) * 100 : 0;
+            double avgEstimated = estimatedTimes.Any() ? estimatedTimes.Average() : 0;
+            double avgActual = actualTimes.Any() ? actualTimes.Average() : 0;
+            double accuracy = avgEstimated > 0 ? (1 - (Math.Abs(avgActual - avgEstimated) / avgEstimated)) * 100 : 0;
+            double variance = avgEstimated > 0 ? (avgActual - avgEstimated) / avgEstimated * 100 : 0;
 
             // Group by printer for detailed stats
             var byPrinter = new Dictionary<string, DurationStatsDto>();
-            foreach (var printerGroup in jobs.GroupBy(j => j.AssignedPrinterId))
+            foreach (IGrouping<Guid?, PrintJob> printerGroup in jobs.GroupBy(j => j.AssignedPrinterId))
             {
                 var printerJobs = printerGroup.ToList();
-                var printerName = printerJobs.FirstOrDefault()?.AssignedPrinter?.Name ?? "Unknown";
-                var printerIdStr = printerGroup.Key?.ToString() ?? "unassigned";
+                string printerName = printerJobs.FirstOrDefault()?.AssignedPrinter?.Name ?? "Unknown";
+                string printerIdStr = printerGroup.Key?.ToString() ?? "unassigned";
 
                 var printerEstimated = printerJobs
                     .Where(j => j.EstimatedPrintTime.HasValue)
@@ -1191,13 +1243,13 @@ public class PrintQueueService(
                     .Select(j => j.ActualPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
                     .ToList();
 
-                var printerAvgEst = printerEstimated.Any() ? printerEstimated.Average() : 0;
-                var printerAvgAct = printerActual.Any() ? printerActual.Average() : 0;
-                var printerAccuracy = printerAvgEst > 0
-                    ? (1 - Math.Abs(printerAvgAct - printerAvgEst) / printerAvgEst) * 100
+                double printerAvgEst = printerEstimated.Any() ? printerEstimated.Average() : 0;
+                double printerAvgAct = printerActual.Any() ? printerActual.Average() : 0;
+                double printerAccuracy = printerAvgEst > 0
+                    ? (1 - (Math.Abs(printerAvgAct - printerAvgEst) / printerAvgEst)) * 100
                     : 0;
-                var printerVariance = printerAvgEst > 0
-                    ? ((printerAvgAct - printerAvgEst) / printerAvgEst) * 100
+                double printerVariance = printerAvgEst > 0
+                    ? (printerAvgAct - printerAvgEst) / printerAvgEst * 100
                     : 0;
 
                 byPrinter[printerIdStr] = new DurationStatsDto
@@ -1219,7 +1271,8 @@ public class PrintQueueService(
             var topPerformers = allStats.Take(3).ToList();
             var needsAttention = allStats.OrderBy(s => s.AccuracyPercent).Take(3).ToList();
 
-            _logger.LogInformation("Duration analytics: {TotalJobs} jobs, {AvgEst}s est, {AvgAct}s act, {Accuracy}% accuracy",
+            _logger.LogInformation(
+                "Duration analytics: {TotalJobs} jobs, {AvgEst}s est, {AvgAct}s act, {Accuracy}% accuracy",
                 jobs.Count, (int)avgEstimated, (int)avgActual, (int)accuracy);
 
             return new DurationAnalyticsDto
@@ -1246,14 +1299,13 @@ public class PrintQueueService(
     /// <summary>
     /// Calculate variance percentage between estimated and actual duration
     /// </summary>
+    /// <param name="estimated">The estimated duration in seconds.</param>
+    /// <param name="actual">The actual duration in seconds.</param>
     private static decimal? CalculateVariancePercent(int? estimated, int? actual)
     {
-        if (!estimated.HasValue || !actual.HasValue || estimated.Value == 0)
-        {
-            return null;
-        }
-
-        return ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
+        return !estimated.HasValue || !actual.HasValue || estimated.Value == 0
+            ? null
+            : (decimal)(actual.Value - estimated.Value) / estimated.Value * 100;
     }
 
     // ============= NOTIFICATION HELPERS (Phase 4.3) =============
@@ -1263,7 +1315,9 @@ public class PrintQueueService(
     /// NOTE: This method is reserved for future use when job completion events are refactored
     /// to trigger through PrintQueueService instead of through background printer services.
     /// </summary>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051:Remove unused private members")]
+    /// <param name="job">The print job that was completed.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051:Remove unused private members", Justification = "This method is reserved for future use.")]
     private async Task SendJobCompletionNotificationAsync(
         PrintJob job,
         CancellationToken cancellationToken = default)
@@ -1287,6 +1341,7 @@ public class PrintQueueService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending job completion notification for job {JobId}", job.Id);
+
             // Don't rethrow - notification failure shouldn't block queue operations
         }
     }
@@ -1294,6 +1349,9 @@ public class PrintQueueService(
     /// <summary>
     /// Send job failure notification to user
     /// </summary>
+    /// <param name="job">The print job that failed.</param>
+    /// <param name="errorMessage">Optional error message describing the failure.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     private async Task SendJobFailureNotificationAsync(
         PrintJob job,
         string? errorMessage = null,
@@ -1318,6 +1376,7 @@ public class PrintQueueService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending job failure notification for job {JobId}", job.Id);
+
             // Don't rethrow - notification failure shouldn't block queue operations
         }
     }
@@ -1325,6 +1384,9 @@ public class PrintQueueService(
     /// <summary>
     /// Send job pause notification to user
     /// </summary>
+    /// <param name="job">The print job that was paused.</param>
+    /// <param name="reason">Optional reason for pausing the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     private async Task SendJobPauseNotificationAsync(
         PrintJob job,
         string? reason = null,
@@ -1349,6 +1411,7 @@ public class PrintQueueService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending job pause notification for job {JobId}", job.Id);
+
             // Don't rethrow - notification failure shouldn't block queue operations
         }
     }
@@ -1356,6 +1419,8 @@ public class PrintQueueService(
     /// <summary>
     /// Send job resume notification to user
     /// </summary>
+    /// <param name="job">The print job that was resumed.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     private async Task SendJobResumeNotificationAsync(
         PrintJob job,
         CancellationToken cancellationToken = default)
@@ -1378,6 +1443,7 @@ public class PrintQueueService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending job resume notification for job {JobId}", job.Id);
+
             // Don't rethrow - notification failure shouldn't block queue operations
         }
     }
@@ -1387,6 +1453,10 @@ public class PrintQueueService(
     /// <summary>
     /// Handle job failure and initiate retry if appropriate
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="failureReason">The reason for the job failure.</param>
+    /// <param name="errorCategory">The category of error that caused the failure.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task HandleJobFailureWithRetryAsync(
         Guid jobId,
         string failureReason,
@@ -1401,11 +1471,11 @@ public class PrintQueueService(
 
         try
         {
-            var shouldRetry = await _retryService.ShouldRetryAsync(jobId, errorCategory, cancellationToken);
+            bool shouldRetry = await _retryService.ShouldRetryAsync(jobId, errorCategory, cancellationToken);
 
             if (shouldRetry)
             {
-                var jobRetry = await _retryService.CreateRetryAsync(
+                JobRetry jobRetry = await _retryService.CreateRetryAsync(
                     jobId,
                     errorCategory,
                     failureReason,
@@ -1417,13 +1487,15 @@ public class PrintQueueService(
             }
             else
             {
-                _logger.LogInformation("Job {JobId} failure not eligible for retry: {Reason}",
+                _logger.LogInformation(
+                    "Job {JobId} failure not eligible for retry: {Reason}",
                     jobId, failureReason);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling job failure with retry for job {JobId}", jobId);
+
             // Don't rethrow - retry handling failure shouldn't block queue operations
         }
     }
@@ -1431,29 +1503,21 @@ public class PrintQueueService(
     /// <summary>
     /// Get retry history for a specific job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<IEnumerable<JobRetry>> GetJobRetryHistoryAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        if (_retryService == null)
-        {
-            return Enumerable.Empty<JobRetry>();
-        }
-
-        return await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
+        return _retryService == null ? Enumerable.Empty<JobRetry>() : await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
     }
 
     /// <summary>
     /// Get all pending retries that are due to execute
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<IEnumerable<JobRetry>> GetDueRetriesAsync(CancellationToken cancellationToken = default)
     {
-        if (_retryService == null)
-        {
-            return Enumerable.Empty<JobRetry>();
-        }
-
-        return await _retryService.GetDueRetriesAsync(cancellationToken);
+        return _retryService == null ? Enumerable.Empty<JobRetry>() : await _retryService.GetDueRetriesAsync(cancellationToken);
     }
 }
-

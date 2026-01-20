@@ -27,14 +27,9 @@ public interface I3MfToStlConversionService
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMfToStlConversionService : I3MfToStlConversionService
+public class ThreeMfToStlConversionService(IUnifiedLoggingService logger) : I3MfToStlConversionService
 {
-    private readonly IUnifiedLoggingService _logger;
-
-    public ThreeMfToStlConversionService(IUnifiedLoggingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly IUnifiedLoggingService _logger = logger;
 
     /// <inheritdoc/>
     public async Task<byte[]?> ConvertToSTLAsync(byte[] threeMfBytes, CancellationToken cancellationToken = default)
@@ -47,7 +42,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             using var zipArchive = new ZipArchive(memoryStream, ZipArchiveMode.Read);
 
             // Find the main 3D/3dmodel.model file
-            var mainModelEntry = zipArchive.Entries.FirstOrDefault(e =>
+            ZipArchiveEntry? mainModelEntry = zipArchive.Entries.FirstOrDefault(e =>
                 e.FullName.Equals("3D/3dmodel.model", StringComparison.OrdinalIgnoreCase));
 
             if (mainModelEntry == null)
@@ -58,26 +53,26 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
 
             // Parse the main model file
             XmlDocument mainModelXml = new XmlDocument();
-            using (var modelStream = mainModelEntry.Open())
+            using (Stream modelStream = await mainModelEntry.OpenAsync(cancellationToken))
             {
                 await Task.Run(() => mainModelXml.Load(modelStream), cancellationToken);
             }
 
             // Collect component data with bounding boxes for grid layout
-            var components = new List<ComponentData>();
+            List<ComponentData> components = [];
 
             // Parse component references and convert them
             var namespaceManager = new XmlNamespaceManager(mainModelXml.NameTable);
             namespaceManager.AddNamespace("model", "http://schemas.microsoft.com/3dmanufacturing/core/2015/02");
             namespaceManager.AddNamespace("p", "http://schemas.microsoft.com/3dmanufacturing/production/2015/06");
 
-            var componentNodes = mainModelXml.SelectNodes("//model:component", namespaceManager);
+            XmlNodeList? componentNodes = mainModelXml.SelectNodes("//model:component", namespaceManager);
             _logger.LogInformation($"Found {componentNodes?.Count ?? 0} components in assembly");
 
             if (componentNodes?.Count == 0)
             {
                 _logger.LogWarning("No components found in main model, attempting to extract direct mesh");
-                var stlBytes = await ConvertMeshToSTLAsync(mainModelXml, cancellationToken);
+                byte[]? stlBytes = await ConvertMeshToSTLAsync(mainModelXml, cancellationToken);
                 if (stlBytes != null)
                 {
                     _logger.LogInformation("Successfully converted main model directly");
@@ -88,8 +83,8 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             int componentIndex = 0;
             foreach (XmlNode componentNode in componentNodes!)
             {
-                var pathAttr = componentNode.Attributes?["p:path"] ?? componentNode.Attributes?["path"];
-                var transformAttr = componentNode.Attributes?["transform"];
+                XmlAttribute? pathAttr = componentNode.Attributes?["p:path"] ?? componentNode.Attributes?["path"];
+                XmlAttribute? transformAttr = componentNode.Attributes?["transform"];
 
                 if (pathAttr == null)
                 {
@@ -98,11 +93,11 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
                     continue;
                 }
 
-                var refPath = pathAttr.Value.TrimStart('/');
+                string refPath = pathAttr.Value.TrimStart('/');
                 _logger.LogInformation($"Processing component {componentIndex}: {refPath}");
 
                 // Find the referenced object file in the archive
-                var refEntry = zipArchive.Entries.FirstOrDefault(e =>
+                ZipArchiveEntry? refEntry = zipArchive.Entries.FirstOrDefault(e =>
                     e.FullName.Equals(refPath, StringComparison.OrdinalIgnoreCase));
 
                 if (refEntry == null)
@@ -114,13 +109,13 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
 
                 // Parse the referenced object file
                 XmlDocument refXmlDoc = new XmlDocument();
-                using (var refStream = refEntry.Open())
+                using (Stream refStream = await refEntry.OpenAsync(cancellationToken))
                 {
                     await Task.Run(() => refXmlDoc.Load(refStream), cancellationToken);
                 }
 
                 // Extract vertices and triangles from this object
-                (var vertices, var triangles) = ExtractMeshData(refXmlDoc);
+                (List<(float X, float Y, float Z)>? vertices, List<(int V1, int V2, int V3)>? triangles) = ExtractMeshData(refXmlDoc);
 
                 if (vertices.Count == 0)
                 {
@@ -132,10 +127,10 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
                 _logger.LogInformation($"Component {componentIndex}: {vertices.Count} vertices, {triangles.Count} triangles");
 
                 // Parse and apply original transform matrix if present
-                var transformedVertices = ApplyTransform(vertices, transformAttr?.Value);
+                List<(float X, float Y, float Z)> transformedVertices = ApplyTransform(vertices, transformAttr?.Value);
 
                 // Calculate bounding box for this component
-                CalculateBoundingBox(transformedVertices, out var minX, out var maxX, out var minY, out var maxY, out var minZ, out var maxZ);
+                CalculateBoundingBox(transformedVertices, out float minX, out float maxX, out float minY, out float maxY, out float minZ, out float maxZ);
 
                 components.Add(new ComponentData
                 {
@@ -164,27 +159,26 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             ApplyGridLayout(components, padding);
 
             // Merge all positioned components into a single mesh
-            var allVertices = new List<(float x, float y, float z)>();
-            var allTriangles = new List<(int v1, int v2, int v3)>();
+            List<(float X, float Y, float Z)> allVertices = [];
+            List<(int V1, int V2, int V3)> allTriangles = [];
 
-            foreach (var component in components)
+            foreach (ComponentData component in components)
             {
                 // Apply grid position offset to vertices
                 var positionedVertices = component.Vertices.Select(v =>
-                    (v.x + component.GridOffsetX, v.y + component.GridOffsetY, v.z)
-                ).ToList();
+                    (v.X + component.GridOffsetX, v.Y + component.GridOffsetY, v.Z))
+                .ToList();
 
                 int vertexOffset = allVertices.Count;
                 allVertices.AddRange(positionedVertices);
                 allTriangles.AddRange(component.Triangles.Select(t =>
-                    (t.v1 + vertexOffset, t.v2 + vertexOffset, t.v3 + vertexOffset)
-                ));
+                    (t.V1 + vertexOffset, t.V2 + vertexOffset, t.V3 + vertexOffset)));
             }
 
             _logger.LogInformation($"Combined mesh (grid layout): {allVertices.Count} total vertices, {allTriangles.Count} total triangles");
 
             // Generate STL from the combined mesh
-            var stlResult = GenerateBinarySTL(allVertices, allTriangles);
+            byte[] stlResult = GenerateBinarySTL(allVertices, allTriangles);
             _logger.LogInformation($"3MF to STL conversion completed, output size: {stlResult.Length} bytes");
             return stlResult;
         }
@@ -198,25 +192,25 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     /// <summary>
     /// Extracts vertices and triangles from a 3MF model XML document
     /// </summary>
-    private (List<(float x, float y, float z)> vertices, List<(int v1, int v2, int v3)> triangles) ExtractMeshData(XmlDocument xmlDoc)
+    private (List<(float X, float Y, float Z)> Vertices, List<(int V1, int V2, int V3)> Triangles) ExtractMeshData(XmlDocument xmlDoc)
     {
-        var vertices = new List<(float x, float y, float z)>();
-        var triangles = new List<(int v1, int v2, int v3)>();
+        List<(float X, float Y, float Z)> vertices = [];
+        List<(int V1, int V2, int V3)> triangles = [];
 
         var namespaceManager = new XmlNamespaceManager(xmlDoc.NameTable);
         namespaceManager.AddNamespace("model", "http://schemas.microsoft.com/3dmanufacturing/core/2015/02");
 
         // Extract vertices
-        var verticesNode = xmlDoc.SelectSingleNode("//model:vertices", namespaceManager);
+        XmlNode? verticesNode = xmlDoc.SelectSingleNode("//model:vertices", namespaceManager);
         if (verticesNode != null)
         {
             foreach (XmlNode vertexNode in verticesNode.SelectNodes("model:vertex", namespaceManager)!)
             {
                 try
                 {
-                    var x = float.Parse(vertexNode.Attributes!["x"]!.Value);
-                    var y = float.Parse(vertexNode.Attributes!["y"]!.Value);
-                    var z = float.Parse(vertexNode.Attributes!["z"]!.Value);
+                    float x = float.Parse(vertexNode.Attributes!["x"]!.Value);
+                    float y = float.Parse(vertexNode.Attributes!["y"]!.Value);
+                    float z = float.Parse(vertexNode.Attributes!["z"]!.Value);
                     vertices.Add((x, y, z));
                 }
                 catch (Exception ex)
@@ -227,16 +221,16 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         }
 
         // Extract triangles
-        var trianglesNode = xmlDoc.SelectSingleNode("//model:triangles", namespaceManager);
+        XmlNode? trianglesNode = xmlDoc.SelectSingleNode("//model:triangles", namespaceManager);
         if (trianglesNode != null)
         {
             foreach (XmlNode triangleNode in trianglesNode.SelectNodes("model:triangle", namespaceManager)!)
             {
                 try
                 {
-                    var v1 = int.Parse(triangleNode.Attributes!["v1"]!.Value);
-                    var v2 = int.Parse(triangleNode.Attributes!["v2"]!.Value);
-                    var v3 = int.Parse(triangleNode.Attributes!["v3"]!.Value);
+                    int v1 = int.Parse(triangleNode.Attributes!["v1"]!.Value);
+                    int v2 = int.Parse(triangleNode.Attributes!["v2"]!.Value);
+                    int v3 = int.Parse(triangleNode.Attributes!["v3"]!.Value);
                     triangles.Add((v1, v2, v3));
                 }
                 catch (Exception ex)
@@ -254,7 +248,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     /// Transform format: "m00 m01 m02 m10 m11 m12 m20 m21 m22 tx ty tz"
     /// Or 16 floats for a full 4x4 matrix (we use top-left 3x3 and rightmost column)
     /// </summary>
-    private List<(float x, float y, float z)> ApplyTransform(List<(float x, float y, float z)> vertices, string? transformStr)
+    private List<(float X, float Y, float Z)> ApplyTransform(List<(float X, float Y, float Z)> vertices, string? transformStr)
     {
         if (string.IsNullOrWhiteSpace(transformStr))
         {
@@ -264,7 +258,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
 
         try
         {
-            var parts = transformStr.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = transformStr.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 12)
             {
                 _logger.LogWarning($"Invalid transform matrix: expected at least 12 values, got {parts.Length}");
@@ -272,27 +266,28 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             }
 
             // Parse 4x3 or 4x4 matrix
-            var matrix = new float[parts.Length];
+            float[] matrix = new float[parts.Length];
             for (int i = 0; i < parts.Length; i++)
             {
-                if (!float.TryParse(parts[i], System.Globalization.CultureInfo.InvariantCulture, out var val))
+                if (!float.TryParse(parts[i], System.Globalization.CultureInfo.InvariantCulture, out float val))
                 {
                     _logger.LogWarning($"Failed to parse transform matrix value at index {i}: {parts[i]}");
                     return vertices;
                 }
+
                 matrix[i] = val;
             }
 
             // Apply transformation to each vertex
-            var transformed = new List<(float x, float y, float z)>();
-            foreach (var (x, y, z) in vertices)
+            List<(float X, float Y, float Z)> transformed = [];
+            foreach ((float x, float y, float z) in vertices)
             {
                 // 4x3 matrix multiplication: [x' y' z'] = [x y z 1] * M^T
                 // But stored as row-major: m0 m1 m2 m3, m4 m5 m6 m7, m8 m9 m10 m11
                 // So: x' = m0*x + m4*y + m8*z + m12
-                var x_new = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-                var y_new = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-                var z_new = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+                float x_new = (matrix[0] * x) + (matrix[4] * y) + (matrix[8] * z) + matrix[12];
+                float y_new = (matrix[1] * x) + (matrix[5] * y) + (matrix[9] * z) + matrix[13];
+                float z_new = (matrix[2] * x) + (matrix[6] * y) + (matrix[10] * z) + matrix[14];
 
                 transformed.Add((x_new, y_new, z_new));
             }
@@ -313,7 +308,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     {
         try
         {
-            (var vertices, var triangles) = ExtractMeshData(xmlDoc);
+            (List<(float X, float Y, float Z)>? vertices, List<(int V1, int V2, int V3)>? triangles) = ExtractMeshData(xmlDoc);
 
             if (vertices.Count == 0)
             {
@@ -331,14 +326,14 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         }
     }
 
-    private static byte[] GenerateBinarySTL(List<(float x, float y, float z)> vertices, List<(int v1, int v2, int v3)> triangles)
+    private static byte[] GenerateBinarySTL(List<(float X, float Y, float Z)> vertices, List<(int V1, int V2, int V3)> triangles)
     {
         using var memoryStream = new MemoryStream();
         using var writer = new BinaryWriter(memoryStream);
 
         // STL header (80 bytes) - can be anything
-        var header = new byte[80];
-        var headerText = "Converted from 3MF"u8.ToArray();
+        byte[] header = new byte[80];
+        byte[] headerText = "Converted from 3MF"u8.ToArray();
         Array.Copy(headerText, header, Math.Min(headerText.Length, 80));
         writer.Write(header);
 
@@ -346,24 +341,23 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         writer.Write((uint)triangles.Count);
 
         // Write each triangle
-        foreach (var triangle in triangles)
+        foreach ((int V1, int V2, int V3) triangle in triangles)
         {
-            var v1 = vertices[triangle.v1];
-            var v2 = vertices[triangle.v2];
-            var v3 = vertices[triangle.v3];
+            (float X, float Y, float Z) v1 = vertices[triangle.V1];
+            (float X, float Y, float Z) v2 = vertices[triangle.V2];
+            (float X, float Y, float Z) v3 = vertices[triangle.V3];
 
             // Calculate normal vector (cross product)
-            var edge1 = (v2.x - v1.x, v2.y - v1.y, v2.z - v1.z);
-            var edge2 = (v3.x - v1.x, v3.y - v1.y, v3.z - v1.z);
+            (float, float, float) edge1 = (v2.X - v1.X, v2.Y - v1.Y, v2.Z - v1.Z);
+            (float, float, float) edge2 = (v3.X - v1.X, v3.Y - v1.Y, v3.Z - v1.Z);
 
-            var normal = (
-                edge1.Item2 * edge2.Item3 - edge1.Item3 * edge2.Item2,
-                edge1.Item3 * edge2.Item1 - edge1.Item1 * edge2.Item3,
-                edge1.Item1 * edge2.Item2 - edge1.Item2 * edge2.Item1
-            );
+            (float, float, float) normal = (
+                (edge1.Item2 * edge2.Item3) - (edge1.Item3 * edge2.Item2),
+                (edge1.Item3 * edge2.Item1) - (edge1.Item1 * edge2.Item3),
+                (edge1.Item1 * edge2.Item2) - (edge1.Item2 * edge2.Item1));
 
             // Normalize the normal vector
-            var length = (float)Math.Sqrt(normal.Item1 * normal.Item1 + normal.Item2 * normal.Item2 + normal.Item3 * normal.Item3);
+            float length = (float)Math.Sqrt((normal.Item1 * normal.Item1) + (normal.Item2 * normal.Item2) + (normal.Item3 * normal.Item3));
             if (length > 0)
             {
                 normal = (normal.Item1 / length, normal.Item2 / length, normal.Item3 / length);
@@ -375,15 +369,15 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             writer.Write(normal.Item3);
 
             // Write vertices (36 bytes total)
-            writer.Write(v1.x);
-            writer.Write(v1.y);
-            writer.Write(v1.z);
-            writer.Write(v2.x);
-            writer.Write(v2.y);
-            writer.Write(v2.z);
-            writer.Write(v3.x);
-            writer.Write(v3.y);
-            writer.Write(v3.z);
+            writer.Write(v1.X);
+            writer.Write(v1.Y);
+            writer.Write(v1.Z);
+            writer.Write(v2.X);
+            writer.Write(v2.Y);
+            writer.Write(v2.Z);
+            writer.Write(v3.X);
+            writer.Write(v3.Y);
+            writer.Write(v3.Z);
 
             // Attribute byte count (2 bytes) - usually 0
             writer.Write((ushort)0);
@@ -398,22 +392,31 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     private class ComponentData
     {
         public int Index { get; set; }
-        public List<(float x, float y, float z)> Vertices { get; set; } = new();
-        public List<(int v1, int v2, int v3)> Triangles { get; set; } = new();
+
+        public List<(float X, float Y, float Z)> Vertices { get; set; } = new();
+
+        public List<(int V1, int V2, int V3)> Triangles { get; set; } = new();
 
         // Bounding box in original coordinates
         public float MinX { get; set; }
+
         public float MaxX { get; set; }
+
         public float MinY { get; set; }
+
         public float MaxY { get; set; }
+
         public float MinZ { get; set; }
+
         public float MaxZ { get; set; }
 
         // Grid layout offsets to position on XY plane
         public float GridOffsetX { get; set; }
+
         public float GridOffsetY { get; set; }
 
         public float Width => MaxX - MinX;
+
         public float Length => MaxY - MinY;
     }
 
@@ -421,7 +424,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     /// Calculates the bounding box of a set of vertices
     /// </summary>
     private void CalculateBoundingBox(
-        List<(float x, float y, float z)> vertices,
+        List<(float X, float Y, float Z)> vertices,
         out float minX, out float maxX,
         out float minY, out float maxY,
         out float minZ, out float maxZ)
@@ -429,7 +432,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         minX = minY = minZ = float.MaxValue;
         maxX = maxY = maxZ = float.MinValue;
 
-        foreach (var (x, y, z) in vertices)
+        foreach ((float x, float y, float z) in vertices)
         {
             minX = Math.Min(minX, x);
             maxX = Math.Max(maxX, x);
@@ -461,8 +464,8 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         _logger.LogInformation($"Grid layout: {gridRows} rows × {gridCols} columns");
 
         // Calculate column widths and row heights for better packing
-        var colWidths = new float[gridCols];
-        var rowHeights = new float[gridRows];
+        float[] colWidths = new float[gridCols];
+        float[] rowHeights = new float[gridRows];
 
         // First pass: determine required space for each cell
         for (int i = 0; i < sortedComponents.Count; i++)
@@ -475,8 +478,8 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         }
 
         // Calculate positions based on accumulated widths and heights
-        var colPositions = new float[gridCols];
-        var rowPositions = new float[gridRows];
+        float[] colPositions = new float[gridCols];
+        float[] rowPositions = new float[gridRows];
 
         float accum = 0;
         for (int col = 0; col < gridCols; col++)
@@ -508,7 +511,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         // Re-sync back to original components list
         for (int i = 0; i < components.Count; i++)
         {
-            var sorted = sortedComponents.FirstOrDefault(c => c.Index == components[i].Index);
+            ComponentData? sorted = sortedComponents.FirstOrDefault(c => c.Index == components[i].Index);
             if (sorted != null)
             {
                 components[i].GridOffsetX = sorted.GridOffsetX;

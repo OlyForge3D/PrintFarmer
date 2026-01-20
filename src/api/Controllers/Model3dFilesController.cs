@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
+using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -12,6 +13,7 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
+using Farm.Web.Api.Services.IO;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Mvc;
@@ -30,22 +32,18 @@ public class Model3DFilesController(
     IConfiguration configuration,
     Services.IO.IFileSystem fileSystem,
     IFileManagementService fileManagementService,
-    ITagService tagService,
     IUnitOfWork unitOfWork,
     IFolderManagementService folderService,
     IStoredFileOperationsService fileOperations,
-    IStoragePathService storagePathService,
     I3MfToStlConversionService threeMfConverter) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IModel3DFileService _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
     private readonly Services.IO.IFileSystem _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-    private readonly ITagService _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
     private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
     private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter ?? throw new ArgumentNullException(nameof(threeMfConverter));
     private readonly string _modelsPath = InitializeModelsPath(configuration, fileSystem);
 
@@ -53,6 +51,7 @@ public class Model3DFilesController(
     {
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
+
         // Ensure path is absolute - if relative, combine with current directory first
         string modelsPath = Path.IsPathRooted(configPath)
             ? configPath
@@ -62,7 +61,7 @@ public class Model3DFilesController(
         {
             fileSystem.CreateDirectory(modelsPath);
         }
-        
+
         return modelsPath;
     }
 
@@ -73,48 +72,13 @@ public class Model3DFilesController(
     /// </summary>
     private string ResolvePath(string? relativePath)
     {
-        if (string.IsNullOrEmpty(relativePath))
-        {
-            return string.Empty;
-        }
-
-        // Normalize virtual paths - strip leading slashes to handle virtual path format
-        string normalizedPath = relativePath.TrimStart('/').Trim();
-        if (string.IsNullOrEmpty(normalizedPath))
-        {
-            return _modelsPath;
-        }
-
-        // If the normalized path is already absolute, return as-is (Windows C:\ or Unix /mnt/etc)
-        if (Path.IsPathRooted(normalizedPath))
-        {
-            return normalizedPath;
-        }
-
-        // Combine relative path with models directory (guaranteed to be absolute)
-        return Path.Combine(_modelsPath, normalizedPath);
-    }
-
-    /// <summary>
-    /// Generates the appropriate viewer URL for a model based on its file type.
-    /// For 3MF files, returns the file endpoint with forceStl=true parameter.
-    /// For other formats, returns the direct file download URL.
-    /// </summary>
-    private string GenerateViewerUrl(Model3D model)
-    {
-        if (model.FileFormat == ModelFileFormat.TMF) // 3MF format
-        {
-            // Return the file endpoint with forceStl=true to trigger conversion
-            return $"/api/3d-models/{model.Id}/file?forceStl=true";
-        }
-
-        // For STL, PLY, OBJ, STEP - return direct file URL
-        return $"/api/3d-models/{model.Id}/file";
+        return _fileOperations.ResolveStoragePath(relativePath, _modelsPath);
     }
 
     /// <summary>
     /// Upload a 3D model file
     /// </summary>
+    /// <param name="modelFile">The 3D model file to upload.</param>
     /// <returns>Model upload result with ID and URL</returns>
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
@@ -181,48 +145,23 @@ public class Model3DFilesController(
     }
 
     /// <summary>
-    /// List models and subdirectories within a specific path (hierarchical browsing)
+    /// Lists all 3D model folders recursively for building a folder tree structure.
     /// </summary>
-    /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder')</param>
-    /// <param name="sortBy">Sort field: name, size, or date</param>
-    /// <param name="sortOrder">asc or desc</param>
-    /// <param name="search">Optional search term to filter by filename</param>
-    /// <param name="page">Page number (1-based)</param>
-    /// <param name="pageSize">Items per page</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Hierarchical listing with files and directories</returns>
-    [HttpGet("hierarchy")]
-    [ProducesResponseType(typeof(Model3DListResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ListModelsHierarchicalAsync(
-        [FromQuery] string? path = "/",
-        [FromQuery] string? sortBy = "name",
-        [FromQuery] string? sortOrder = "asc",
-        [FromQuery] string? search = null,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50,
-        CancellationToken ct = default)
+    /// <param name="ct">Cancellation token for the async operation.</param>
+    /// <returns>Flat list of all folders in the models directory hierarchy</returns>
+    [HttpGet("folders")]
+    [ProducesResponseType(typeof(List<Model3DEntryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListAllFoldersAsync(CancellationToken ct = default)
     {
         try
         {
-            var response = await _modelService.ListModelsWithHierarchyAsync(
-                path ?? "/",
-                sortBy ?? "name",
-                sortOrder ?? "asc",
-                search,
-                page,
-                pageSize,
-                ct);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
+            List<Model3DEntryDto> folders = await _modelService.ListAllFoldersAsync(ct);
+            return Ok(folders);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to list models hierarchically: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
+            _logger.LogError($"Failed to list model folders: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list folders");
         }
     }
 
@@ -237,11 +176,7 @@ public class Model3DFilesController(
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
         Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-        if (dto == null)
-        {
-            return NotFound();
-        }
-        return Ok(dto);
+        return dto == null ? NotFound() : Ok(dto);
     }
 
     /// <summary>
@@ -270,8 +205,8 @@ public class Model3DFilesController(
                 FileSize = model.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
-                Url = GenerateViewerUrl(model),
-                ThumbnailPath = _fileOperations.BuildThumbnailUrl(model, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
+                Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
+                ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id),
                 Description = model.Description,
                 DimensionX = model.DimensionX,
                 DimensionY = model.DimensionY,
@@ -279,12 +214,12 @@ public class Model3DFilesController(
                 TriangleCount = model.TriangleCount,
                 IsValid = model.IsValid,
                 ValidationErrors = model.ValidationErrors,
-                Tags = model.TagMappings.Select(tm => new Model3DTagDto
+                Tags = model.Tags.Select(t => new TagDto
                 {
-                    Id = tm.Tag!.Id,
-                    Name = tm.Tag!.Name,
-                    Color = tm.Tag!.Color,
-                    Description = tm.Tag!.Description
+                    Id = t.Id,
+                    Name = t.Name,
+                    Color = t.Color,
+                    Description = t.Description
                 }).ToArray()
             };
 
@@ -303,7 +238,7 @@ public class Model3DFilesController(
     /// <param name="id">Model ID</param>
     /// <param name="forceStl">Force conversion of 3MF files to STL format</param>
     /// <returns>Model file</returns>
-    [HttpGet("{id:guid}/file")]
+    [HttpGet("file/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelFileAsync(Guid id, [FromQuery] bool forceStl = false)
@@ -317,7 +252,8 @@ public class Model3DFilesController(
 
         string fullPath = ResolvePath(path);
 
-        if (!_fileManagementService.IsSafePath(fullPath, _modelsPath) || !_fileSystem.FileExists(fullPath))
+        // Use consolidated service for safety and existence checks
+        if (!_fileOperations.FileExistsAndIsSafe(fullPath, _modelsPath))
         {
             _logger.LogWarning($"Model {id} file path is unsafe or does not exist: {fullPath}");
             return NotFound();
@@ -343,7 +279,7 @@ public class Model3DFilesController(
                 {
                     // File was successfully converted - set up to return STL
                     Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-                    fileName = dto?.FileName ?? Path.GetFileName(fullPath);
+                    fileName = dto?.Name ?? dto?.FileName ?? Path.GetFileName(fullPath);
                     fileName = Path.ChangeExtension(fileName, ".stl");
                     fileExtension = ".stl";
                     fileData = stlBytes;
@@ -366,25 +302,14 @@ public class Model3DFilesController(
         if (fileName == null)
         {
             Model3DDto? modelDto = await _modelService.GetModelAsync(id, CancellationToken.None);
-            fileName = modelDto?.FileName ?? Path.GetFileName(fullPath);
+            fileName = modelDto?.Name ?? modelDto?.FileName ?? Path.GetFileName(fullPath);
         }
 
-        string contentType = fileExtension.ToLowerInvariant() switch
-        {
-            ".stl" => "application/vnd.ms-pki.stl",
-            ".3mf" => "model/3mf",
-            ".obj" => "text/plain",
-            ".ply" => "application/octet-stream",
-            _ => "application/octet-stream"
-        };
+        // Use consolidated service for content type resolution
+        string contentType = _fileOperations.GetContentTypeForFile(fileExtension);
 
         // Return converted data or original file from disk
-        if (fileData != null)
-        {
-            return File(fileData, contentType, fileName);
-        }
-
-        return PhysicalFile(fullPath, contentType, fileName);
+        return fileData != null ? File(fileData, contentType, fileName) : PhysicalFile(fullPath, contentType, fileName);
     }
 
     /// <summary>
@@ -392,7 +317,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">Model ID</param>
     /// <returns>Thumbnail image</returns>
-    [HttpGet("{id:guid}/thumbnail")]
+    [HttpGet("thumbnail/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
@@ -424,7 +349,7 @@ public class Model3DFilesController(
             }
 
             string contentType = "image/png";
-            var fileInfo = _fileSystem.GetFileInfo(absolutePath);
+            FileInfoData fileInfo = _fileSystem.GetFileInfo(absolutePath);
             _logger.LogInformation($"[Thumbnail] File size: {fileInfo.Length} bytes");
             _logger.LogInformation($"[Thumbnail] Serving thumbnail from {absolutePath}");
             return PhysicalFile(absolutePath, contentType);
@@ -442,45 +367,9 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="path">Relative file path within model storage directory</param>
     /// <returns>File content with appropriate media type</returns>
-    /// <remarks>
-    /// This endpoint serves both model files and thumbnails using a path-based query parameter approach,
-    /// consistent with the Gcode files download endpoint. This allows efficient thumbnail serving without
-    /// database lookups on each request.
-    /// </remarks>
-    [HttpGet("download")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DownloadAsync([FromQuery] string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return BadRequest("path is required");
-        }
-
-        try
-        {
-            // Get file bytes (validates path internally)
-            (byte[] bytes, string fileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
-            if (result == null)
-            {
-                return NotFound();
-            }
-
-            var (fileBytes, safeFileName) = result.Value;
-            string contentType = GetContentType(safeFileName);
-            return File(fileBytes, contentType, safeFileName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to download file {path}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to download file");
-        }
-    }
-
     /// <summary>
     /// Downloads a 3D model file, converting 3MF files to STL format for viewing
     /// </summary>
-    /// <param name="path">Path to the model file</param>
     /// <param name="forceStl">If true, converts 3MF files to STL for viewer compatibility</param>
     /// <returns>The model file, optionally converted to STL format</returns>
     [HttpGet("download-for-viewer")]
@@ -496,24 +385,24 @@ public class Model3DFilesController(
         try
         {
             // Get file bytes (validates path internally)
-            (byte[] bytes, string fileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
+            (byte[] Bytes, string FileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
             if (result == null)
             {
                 return NotFound();
             }
 
-            var (fileBytes, safeFileName) = result.Value;
+            (byte[]? fileBytes, string? safeFileName) = result.Value;
 
             // Check if this is a 3MF file that needs conversion
             if (forceStl && safeFileName.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation($"Converting 3MF file {safeFileName} to STL for viewer");
 
-                var stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
+                byte[]? stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
                 if (stlBytes != null)
                 {
                     // Return as STL file
-                    var stlFileName = Path.ChangeExtension(safeFileName, ".stl");
+                    string stlFileName = Path.ChangeExtension(safeFileName, ".stl");
                     return File(stlBytes, "application/octet-stream", stlFileName);
                 }
                 else
@@ -524,7 +413,9 @@ public class Model3DFilesController(
             }
 
             // Return original file
-            string contentType = GetContentType(safeFileName);
+            string contentType = _fileOperations.GetContentTypeForFile(
+                Path.GetExtension(safeFileName));
+
             return File(fileBytes, contentType, safeFileName);
         }
         catch (Exception ex)
@@ -561,50 +452,48 @@ public class Model3DFilesController(
     }
 
     /// <summary>
-    /// Delete models by file paths (for hierarchical browser)
+    /// Delete multiple models by ID
     /// </summary>
-    /// <param name="request">Request with list of model paths to delete</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
+    /// <param name="request">Request with list of model IDs (GUIDs) to delete</param>
+    /// <returns>Deletion result with count</returns>
     [HttpDelete]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> DeleteModelsAsync([FromBody] DeleteModelsRequest request, CancellationToken ct = default)
+    public async Task<ActionResult> DeleteModelsAsync([FromBody] DeleteModelsRequest request)
     {
+        if (request?.ModelIds == null || request.ModelIds.Count == 0)
+        {
+            return BadRequest("modelIds is required");
+        }
+
         try
         {
-            if (request?.ModelPaths == null || request.ModelPaths.Count == 0)
-            {
-                return BadRequest("At least one model path is required");
-            }
-
-            // Find models by file paths and delete them
-            int deleted = 0;
-            foreach (var path in request.ModelPaths)
+            int deletedCount = 0;
+            foreach (Guid id in request.ModelIds)
             {
                 try
                 {
-                    // Find model by path and delete
-                    var model = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
-                    var matchingModel = model.FirstOrDefault(m => m.FilePath == path);
-                    if (matchingModel != null)
-                    {
-                        await _modelService.DeleteModelAsync(matchingModel.Id, ct);
-                        deleted++;
-                    }
+                    await _modelService.DeleteModelAsync(id, CancellationToken.None);
+                    deletedCount++;
                 }
-                catch (Exception ex)
+                catch (KeyNotFoundException)
                 {
-                    _logger.LogWarning($"Failed to delete model at path {path}: {ex.Message}");
+                    _logger.LogWarning($"Model {id} not found during bulk delete");
+
+                    // Continue deleting other files
                 }
             }
 
-            return NoContent();
+            return Ok(new
+            {
+                deleted = deletedCount,
+                totalRequested = request.ModelIds.Count
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to delete models: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete models");
+            _logger.LogError($"Error deleting models: {ex.Message}");
+            return Problem("Failed to delete models", statusCode: 500);
         }
     }
 
@@ -666,197 +555,15 @@ public class Model3DFilesController(
     }
 
     /// <summary>
-    /// Get all available tags
-    /// </summary>
-    /// <returns>List of all tags</returns>
-    [HttpGet("tags")]
-    [ProducesResponseType(typeof(Model3DTagDto[]), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetTagsAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            IReadOnlyList<Model3DTagDto> tags = await _tagService.GetAllTagsAsync(ct);
-            return Ok(tags);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to get tags: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get tags");
-        }
-    }
-
-    /// <summary>
-    /// Create a new tag
-    /// </summary>
-    /// <param name="dto">Tag creation parameters</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Created tag</returns>
-    [HttpPost("tags")]
-    [ProducesResponseType(typeof(Model3DTagDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CreateTagAsync([FromBody] CreateModel3DTagDto dto, CancellationToken ct = default)
-    {
-        try
-        {
-            Model3DTagDto result = await _tagService.CreateTagAsync(dto, ct);
-            // Return 201 Created with the location of the created resource
-            return Created($"/api/3d-models/tags/{result.Id}", result);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[CreateTagAsync] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-            Console.WriteLine($"[CreateTagAsync] InnerException: {ex.InnerException?.GetType().Name}: {ex.InnerException?.Message}");
-            Console.WriteLine($"[CreateTagAsync] StackTrace: {ex.StackTrace}");
-            _logger.LogError($"Failed to create tag: {ex.GetType().Name} - {ex.Message}\nInnerException: {ex.InnerException?.Message}\n{ex.StackTrace}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                error = "An unexpected error occurred",
-                message = ex.Message,
-                innerMessage = ex.InnerException?.Message,
-                details = ex.StackTrace
-            });
-        }
-    }
-
-    /// <summary>
-    /// Delete a tag
-    /// </summary>
-    /// <param name="tagId">Tag ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
-    [HttpDelete("tags/{tagId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteTagAsync(Guid tagId, CancellationToken ct = default)
-    {
-        try
-        {
-            await _tagService.DeleteTagAsync(tagId, ct);
-            return NoContent();
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to delete tag {tagId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete tag");
-        }
-    }
-
-    /// <summary>
-    /// Assign tags to a model
-    /// </summary>
-    /// <param name="modelId">Model ID</param>
-    /// <param name="dto">Tag IDs to assign</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
-    [HttpPost("{modelId:guid}/tags")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AssignTagsAsync(Guid modelId, AssignTagsToModelDto dto, CancellationToken ct = default)
-    {
-        try
-        {
-            _logger.LogInformation($"AssignTagsAsync called: modelId={modelId}, tagCount={dto?.TagIds?.Length ?? 0}");
-            await _tagService.AssignTagsToModelAsync(modelId, dto?.TagIds ?? [], ct);
-            _logger.LogInformation($"Successfully assigned tags to model {modelId}");
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            _logger.LogError($"Model not found: {ex.Message}");
-            return NotFound();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to assign tags to model {modelId}: {ex.GetType().Name} - {ex.Message}");
-            _logger.LogError($"Stack trace: {ex.StackTrace}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to assign tags");
-        }
-    }
-
-    /// <summary>
-    /// Remove a tag from a model
-    /// </summary>
-    /// <param name="modelId">Model ID</param>
-    /// <param name="tagId">Tag ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>No content if successful</returns>
-    [HttpDelete("{modelId:guid}/tags/{tagId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RemoveTagAsync(Guid modelId, Guid tagId, CancellationToken ct = default)
-    {
-        try
-        {
-            await _tagService.RemoveTagFromModelAsync(modelId, tagId, ct);
-            return NoContent();
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to remove tag {tagId} from model {modelId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to remove tag");
-        }
-    }
-
-    /// <summary>
-    /// Bulk assign tags to multiple models
-    /// </summary>
-    /// <param name="bulkRequest">Model IDs and tag IDs</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Number of models updated</returns>
-    [HttpPost("bulk/assign-tags")]
-    [ProducesResponseType(typeof(BulkOperationResultDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> BulkAssignTagsAsync(BulkAssignTagsDto bulkRequest, CancellationToken ct = default)
-    {
-        try
-        {
-            if (bulkRequest.ModelIds == null || bulkRequest.ModelIds.Length == 0)
-            {
-                return BadRequest("No models specified");
-            }
-
-            if (bulkRequest.TagIds == null || bulkRequest.TagIds.Length == 0)
-            {
-                return BadRequest("No tags specified");
-            }
-
-            await _tagService.BulkAssignTagsAsync(bulkRequest.ModelIds, bulkRequest.TagIds, ct);
-
-            return Ok(new BulkOperationResultDto { SuccessCount = bulkRequest.ModelIds.Length, TotalCount = bulkRequest.ModelIds.Length });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to bulk assign tags: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to bulk assign tags");
-        }
-    }
-
-    /// <summary>
-    /// Search and filter models with pagination
+    /// Search and filter models with pagination (query endpoint for consistency with GCode API)
     /// </summary>
     /// <param name="request">Search parameters</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Paginated search results</returns>
-    [HttpPost("search")]
+    [HttpPost("query")]
     [ProducesResponseType(typeof(Model3DSearchResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> SearchModelsAsync(Model3DSearchRequestDto request, CancellationToken ct)
+    public async Task<IActionResult> QueryModelsAsync(Model3DSearchRequestDto request, CancellationToken ct)
     {
         try
         {
@@ -890,14 +597,14 @@ public class Model3DFilesController(
                 FileSize = m.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
-                Url = GenerateViewerUrl(m),
-                ThumbnailPath = _fileOperations.BuildThumbnailUrl(m, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
-                Tags = m.TagMappings.Select(tm => new Model3DTagDto
+                Url = _fileOperations.BuildModel3DFileUrl(m.Id, m.FileFormat),
+                ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(m.Id),
+                Tags = m.Tags.Select(t => new TagDto
                 {
-                    Id = tm.Tag!.Id,
-                    Name = tm.Tag!.Name,
-                    Color = tm.Tag!.Color,
-                    Description = tm.Tag!.Description
+                    Id = t.Id,
+                    Name = t.Name,
+                    Color = t.Color,
+                    Description = t.Description
                 }).ToArray()
             }).ToList();
 
@@ -950,12 +657,13 @@ public class Model3DFilesController(
                 return BadRequest(new FolderOperationResultDto(false, "Folder path cannot be empty. Please provide a folder name."));
             }
 
-            foreach (var part in pathParts)
+            foreach (string part in pathParts)
             {
                 if (string.IsNullOrWhiteSpace(part))
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Folder path contains empty segments. Path: '{relativePath}'"));
                 }
+
                 if (part.Contains("..") || part.Contains("\\") || part == ".")
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Invalid folder name: '{part}' in path '{relativePath}'. Cannot use '.', '..', or backslashes."));
@@ -1000,6 +708,7 @@ public class Model3DFilesController(
             catch (Exception dbEx)
             {
                 _logger.LogError($"[CreateFolder] Failed to record folder in database: {dbEx.Message}. Physical folder was created but not tracked.");
+
                 // Don't fail the request - the physical folder exists, just not tracked yet
             }
 
@@ -1060,10 +769,10 @@ public class Model3DFilesController(
 
             int movedCount = 0;
             int failedCount = 0;
-            var failedFiles = new List<(string id, string reason)>();
+            List<(string Id, string Reason)> failedFiles = [];
 
             // Move each file - this is a virtual move (just update database)
-            foreach (var modelIdStr in request.ModelIds)
+            foreach (string modelIdStr in request.ModelIds)
             {
                 try
                 {
@@ -1128,7 +837,7 @@ public class Model3DFilesController(
 
             if (failedFiles.Count > 0)
             {
-                var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
+                var failureDetails = failedFiles.Take(3).Select(f => $"{f.Id} ({f.Reason})").ToList();
                 message += $" - Failed: {string.Join(", ", failureDetails)}";
                 if (failedFiles.Count > 3)
                 {
@@ -1159,30 +868,4 @@ public class Model3DFilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
-
-    /// <summary>
-    /// Helper method to determine content type from file extension.
-    /// </summary>
-    private string GetContentType(string fileName)
-    {
-        string extension = Path.GetExtension(fileName).ToLowerInvariant();
-        return extension switch
-        {
-            ".png" => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".webp" => "image/webp",
-            ".stl" => "model/stl",
-            ".obj" => "model/obj",
-            ".3mf" => "model/3mf",
-            ".gcode" => "text/plain",
-            ".bgcode" => "application/octet-stream",
-            _ => "application/octet-stream"
-        };
-    }
 }
-
-/// <summary>
-/// Request DTO for creating a new folder
-/// </summary>
-public record CreateFolderRequest(string Path);

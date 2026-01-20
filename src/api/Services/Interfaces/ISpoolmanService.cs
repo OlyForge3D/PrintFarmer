@@ -14,6 +14,7 @@ public interface ISpoolmanService
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing a read-only list of all material types</returns>
     Task<IReadOnlyList<SpoolmanMaterialDto>> ListMaterialsAsync(CancellationToken ct);
+
     /// <summary>
     /// Gets the current Spoolman configuration including the base URL.
     /// </summary>
@@ -58,10 +59,13 @@ public interface ISpoolmanService
     /// Probes a candidate Spoolman base URL for basic health/version endpoints without persisting configuration.
     /// Returns a SpoolmanProbeResult with normalized URL and success details.
     /// </summary>
+    /// <param name="candidateBaseUrl">The base URL of the Spoolman instance to probe.</param>
+    /// <param name="ct">The cancellation token.</param>
     Task<SpoolmanProbeResult> ProbeAsync(string candidateBaseUrl, CancellationToken ct);
 
     /// <summary>
     /// Performs a minimal health probe against the currently configured Spoolman instance.
     /// </summary>
+    /// <param name="ct">The cancellation token.</param>
     Task<SpoolmanProbeResult> HealthProbeAsync(CancellationToken ct);
 }

@@ -39,10 +39,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(files);
 
         // Act
-        var result = await _controller.GetLibraryAsync();
+        ActionResult<IEnumerable<GcodeFileDto>> result = await _controller.GetLibraryAsync();
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(files, okResult.Value);
     }
 
@@ -59,10 +59,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(files);
 
         // Act
-        var result = await _controller.GetLibraryAsync("pla", "PLA", 0.4, null);
+        ActionResult<IEnumerable<GcodeFileDto>> result = await _controller.GetLibraryAsync("pla", "PLA", 0.4, null);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(files, okResult.Value);
     }
 
@@ -75,10 +75,10 @@ public class GcodeLibraryControllerTests
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
-        var result = await _controller.GetLibraryAsync();
+        ActionResult<IEnumerable<GcodeFileDto>> result = await _controller.GetLibraryAsync();
 
         // Assert
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, objectResult.StatusCode);
     }
 
@@ -93,10 +93,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(file);
 
         // Act
-        var result = await _controller.GetFileAsync(fileId);
+        ActionResult<GcodeFileDto> result = await _controller.GetFileAsync(fileId);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(file, okResult.Value);
     }
 
@@ -110,10 +110,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync((GcodeFileDto?)null);
 
         // Act
-        var result = await _controller.GetFileAsync(fileId);
+        ActionResult<GcodeFileDto> result = await _controller.GetFileAsync(fileId);
 
         // Assert
-        var notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
         Assert.Contains(fileId.ToString(), notFoundResult.Value?.ToString());
     }
 
@@ -133,10 +133,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(created);
 
         // Act
-        var result = await _controller.UploadFileAsync(fileMock.Object, metadata);
+        ActionResult<GcodeFileDto> result = await _controller.UploadFileAsync(fileMock.Object, metadata);
 
         // Assert
-        var createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
         Assert.Equal(nameof(GcodeLibraryController.GetFileAsync), createdResult.ActionName);
         Assert.Equal(created, createdResult.Value);
     }
@@ -149,10 +149,10 @@ public class GcodeLibraryControllerTests
         fileMock.Setup(f => f.FileName).Returns("test.gcode");
 
         // Act
-        var result = await _controller.UploadFileAsync(fileMock.Object, null!);
+        ActionResult<GcodeFileDto> result = await _controller.UploadFileAsync(fileMock.Object, null!);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Equal("Metadata is required", badRequestResult.Value);
     }
 
@@ -163,10 +163,10 @@ public class GcodeLibraryControllerTests
         var metadata = new CreateGcodeFileDto { FileName = "Test" };
 
         // Act
-        var result = await _controller.UploadFileAsync(null!, metadata);
+        ActionResult<GcodeFileDto> result = await _controller.UploadFileAsync(null!, metadata);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Equal("No file provided", badRequestResult.Value);
     }
 
@@ -180,10 +180,10 @@ public class GcodeLibraryControllerTests
         var metadata = new CreateGcodeFileDto { FileName = "Test" };
 
         // Act
-        var result = await _controller.UploadFileAsync(fileMock.Object, metadata);
+        ActionResult<GcodeFileDto> result = await _controller.UploadFileAsync(fileMock.Object, metadata);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Equal("File must be a .gcode file", badRequestResult.Value);
     }
 
@@ -201,10 +201,10 @@ public class GcodeLibraryControllerTests
             .ThrowsAsync(new InvalidOperationException("duplicate"));
 
         // Act
-        var result = await _controller.UploadFileAsync(fileMock.Object, metadata);
+        ActionResult<GcodeFileDto> result = await _controller.UploadFileAsync(fileMock.Object, metadata);
 
         // Assert
-        var conflictResult = Assert.IsType<ConflictObjectResult>(result.Result);
+        ConflictObjectResult conflictResult = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal("File already exists in library", conflictResult.Value);
     }
 
@@ -221,10 +221,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(updated);
 
         // Act
-        var result = await _controller.UpdateFileAsync(fileId, request);
+        ActionResult<GcodeFileDto> result = await _controller.UpdateFileAsync(fileId, request);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(updated, okResult.Value);
     }
 
@@ -232,10 +232,10 @@ public class GcodeLibraryControllerTests
     public async Task UpdateFileAsync_WithNullRequest_ReturnsBadRequest()
     {
         // Act
-        var result = await _controller.UpdateFileAsync(Guid.NewGuid(), null!);
+        ActionResult<GcodeFileDto> result = await _controller.UpdateFileAsync(Guid.NewGuid(), null!);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Equal("Request body is required", badRequestResult.Value);
     }
 
@@ -249,7 +249,7 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(true);
 
         // Act
-        var result = await _controller.DeleteFileAsync(fileId);
+        IActionResult result = await _controller.DeleteFileAsync(fileId);
 
         // Assert
         Assert.IsType<NoContentResult>(result);
@@ -265,10 +265,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(false);
 
         // Act
-        var result = await _controller.DeleteFileAsync(fileId);
+        IActionResult result = await _controller.DeleteFileAsync(fileId);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("Cannot delete file", badRequestResult.Value?.ToString());
     }
 
@@ -278,7 +278,7 @@ public class GcodeLibraryControllerTests
         // Arrange
         var fileId = Guid.NewGuid();
         var file = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
-        var fileBytes = new byte[] { 1, 2, 3, 4 };
+        byte[] fileBytes = new byte[] { 1, 2, 3, 4 };
 
         _gcodeServiceMock
             .Setup(s => s.GetFileAsync(fileId, It.IsAny<CancellationToken>()))
@@ -288,10 +288,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync(fileBytes);
 
         // Act
-        var result = await _controller.DownloadFileAsync(fileId);
+        IActionResult result = await _controller.DownloadFileAsync(fileId);
 
         // Assert
-        var fileResult = Assert.IsType<FileContentResult>(result);
+        FileContentResult fileResult = Assert.IsType<FileContentResult>(result);
         Assert.Equal("application/octet-stream", fileResult.ContentType);
         Assert.Equal("test.gcode", fileResult.FileDownloadName);
     }
@@ -306,10 +306,10 @@ public class GcodeLibraryControllerTests
             .ReturnsAsync((GcodeFileDto?)null);
 
         // Act
-        var result = await _controller.DownloadFileAsync(fileId);
+        IActionResult result = await _controller.DownloadFileAsync(fileId);
 
         // Assert
-        var notFoundResult = Assert.IsType<NotFoundObjectResult>(result);
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains(fileId.ToString(), notFoundResult.Value?.ToString());
     }
 }

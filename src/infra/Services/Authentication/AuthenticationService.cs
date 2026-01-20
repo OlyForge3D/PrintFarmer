@@ -1,5 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
@@ -8,6 +7,7 @@ using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Infrastructure.Services.Authentication;
@@ -117,14 +117,17 @@ public class AuthenticationService(
                 UserDto? dtoExisting = await GetUserWithRolesAndPermissionsAsync(existing.Id);
                 return new AuthenticationResult(true, tokenExisting, DateTime.UtcNow.AddDays(7), dtoExisting);
             }
+
             if (await _usersRepository.UsernameExistsStrictAsync(request.Username))
             {
                 return new AuthenticationResult(false, Error: "Username is already taken");
             }
+
             if (await _usersRepository.EmailExistsStrictAsync(request.Email))
             {
                 return new AuthenticationResult(false, Error: "Email is already registered");
             }
+
             User user = new()
             {
                 Id = Guid.NewGuid(),
@@ -144,6 +147,7 @@ public class AuthenticationService(
             {
                 await _usersRepository.UpdateUserRolesAsync(user.Id, new[] { defaultRole.Id });
             }
+
             await _usersRepository.SaveChangesAsync();
 
             // Audit log successful registration
@@ -186,62 +190,31 @@ public class AuthenticationService(
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(permissions.Select(p => new Claim("permission", $"{p.Resource}:{p.Action}")));
-        JwtSecurityToken token = new(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: creds);
-        return new JwtSecurityTokenHandler().WriteToken(token);
+
+        SecurityTokenDescriptor tokenDescriptor = new()
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = DateTime.UtcNow.AddDays(7),
+            Issuer = _configuration["Jwt:Issuer"],
+            Audience = _configuration["Jwt:Audience"],
+            SigningCredentials = creds
+        };
+
+        JsonWebTokenHandler handler = new();
+        return handler.CreateToken(tokenDescriptor);
     }
 
     public async Task<bool> ValidateTokenAsync(string token)
     {
         try
         {
-            JwtSecurityTokenHandler handler = new();
+            JsonWebTokenHandler handler = new();
             string? rawKey = _configuration["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(rawKey))
             {
                 return false;
             }
-            byte[] keyBytes = Encoding.UTF8.GetBytes(rawKey);
-#pragma warning disable S6781
-            TokenValidationParameters parms = new()
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-                ValidateIssuer = true,
-                ValidIssuer = _configuration["Jwt:Issuer"],
-                ValidateAudience = true,
-                ValidAudience = _configuration["Jwt:Audience"],
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero
-            };
-#pragma warning restore S6781
-            _ = await handler.ValidateTokenAsync(token, parms);
-            return true;
-        }
-        catch (SecurityTokenException)
-        {
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
 
-    public async Task<ClaimsPrincipal?> GetPrincipalFromTokenAsync(string token)
-    {
-        try
-        {
-            JwtSecurityTokenHandler handler = new();
-            string? rawKey = _configuration["Jwt:Key"];
-            if (string.IsNullOrWhiteSpace(rawKey))
-            {
-                return null;
-            }
             byte[] keyBytes = Encoding.UTF8.GetBytes(rawKey);
 #pragma warning disable S6781
             TokenValidationParameters parms = new()
@@ -257,11 +230,47 @@ public class AuthenticationService(
             };
 #pragma warning restore S6781
             TokenValidationResult result = await handler.ValidateTokenAsync(token, parms);
-            if (!result.IsValid || result.SecurityToken is not JwtSecurityToken jwt || jwt.ValidTo < DateTime.UtcNow)
+            return result.IsValid;
+        }
+        catch (SecurityTokenException)
+        {
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<ClaimsPrincipal?> GetPrincipalFromTokenAsync(string token)
+    {
+        try
+        {
+            JsonWebTokenHandler handler = new();
+            string? rawKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(rawKey))
             {
                 return null;
             }
-            return result.ClaimsIdentity != null ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
+
+            byte[] keyBytes = Encoding.UTF8.GetBytes(rawKey);
+#pragma warning disable S6781
+            TokenValidationParameters parms = new()
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+                ValidateIssuer = true,
+                ValidIssuer = _configuration["Jwt:Issuer"],
+                ValidateAudience = true,
+                ValidAudience = _configuration["Jwt:Audience"],
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+#pragma warning restore S6781
+            TokenValidationResult result = await handler.ValidateTokenAsync(token, parms);
+            return !result.IsValid || result.SecurityToken is not JsonWebToken jwt || jwt.ValidTo < DateTime.UtcNow
+                ? null
+                : result.ClaimsIdentity != null ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
         }
         catch (SecurityTokenException)
         {
@@ -282,6 +291,7 @@ public class AuthenticationService(
     }
 
     public Task<User?> GetUserByUsernameAsync(string username) => _usersRepository.GetByUsernameAsync(username);
+
     public Task<User?> GetUserByEmailAsync(string email) => _usersRepository.GetByEmailAsync(email);
 
     public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
@@ -291,13 +301,16 @@ public class AuthenticationService(
         {
             return false;
         }
+
         // Diagnostic logging to help tests: print a short preview of the stored hash and verification result
         try
         {
             string? preview = user.PasswordHash != null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : user.PasswordHash;
             Console.WriteLine($"[AuthenticationService] ChangePassword: UserId={userId} StoredHashPreview={preview}");
         }
-        catch { }
+        catch
+        {
+        }
 
         if (string.IsNullOrEmpty(user.PasswordHash))
         {
@@ -311,6 +324,7 @@ public class AuthenticationService(
         {
             return false;
         }
+
         string newHash = _passwordHashing.HashPassword(newPassword);
         bool success = await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
 
@@ -351,7 +365,7 @@ public class AuthenticationService(
             string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
                 .Replace("+", "-")
                 .Replace("/", "_")
-                .Replace("=", "");
+                .Replace("=", string.Empty);
 
             // Update user with confirmation token
             user.EmailConfirmationToken = token;
@@ -446,6 +460,7 @@ public class AuthenticationService(
                     RemainingAttempts = rateLimit.RemainingAttempts,
                     RetryAfter = rateLimit.RetryAfter
                 });
+
                 // Still return true to prevent information leakage
                 return true;
             }
@@ -455,8 +470,10 @@ public class AuthenticationService(
             {
                 // Don't reveal that the email doesn't exist (security best practice)
                 _logger.LogWarning($"Password reset requested for non-existent email: {email}");
+
                 // Record attempt even for non-existent emails to prevent enumeration via rate limiting
                 await _rateLimitService.RecordPasswordResetAttemptAsync(email);
+
                 // Audit log the attempt (even for non-existent email)
                 await _authAuditService.LogPasswordResetInitiatedAsync(email, ipAddress, null);
                 return true; // Return true to prevent email enumeration
@@ -469,10 +486,10 @@ public class AuthenticationService(
             string token = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
                 .Replace("+", "-")
                 .Replace("/", "_")
-                .Replace("=", "");
+                .Replace("=", string.Empty);
 
             // Create password reset token entity
-            PasswordResetToken resetToken = new PasswordResetToken
+            PasswordResetToken resetToken = new()
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
@@ -587,6 +604,7 @@ public class AuthenticationService(
         {
             return null;
         }
+
         string[] roles = (await _usersRepository.GetActiveRoleNamesAsync(user.Id)).ToArray();
         string[] permissions = (await _usersRepository.GetGrantedPermissionsAsync(user.Id))
             .Select(p => $"{p.Resource}:{p.Action}")

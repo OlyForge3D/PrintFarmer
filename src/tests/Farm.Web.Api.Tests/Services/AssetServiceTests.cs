@@ -19,7 +19,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetManifestAsync_Returns_Null()
     {
-        var result = await _service.GetManifestAsync();
+        AssetManifestDto? result = await _service.GetManifestAsync();
 
         result.Should().BeNull();
     }
@@ -46,7 +46,7 @@ public class AssetServiceTests
     {
         using var cts = new CancellationTokenSource();
 
-        var result = await _service.GetManifestAsync(cts.Token);
+        AssetManifestDto? result = await _service.GetManifestAsync(cts.Token);
 
         result.Should().BeNull();
     }
@@ -54,7 +54,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetManufacturerAsync_WithNullManufacturerId_Returns_Null()
     {
-        var result = await _service.GetManufacturerAsync(null!);
+        ManufacturerAssetsDto? result = await _service.GetManufacturerAsync(null!);
 
         result.Should().BeNull();
     }
@@ -62,7 +62,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetManufacturerAsync_WithEmptyManufacturerId_Returns_Null()
     {
-        var result = await _service.GetManufacturerAsync("");
+        ManufacturerAssetsDto? result = await _service.GetManufacturerAsync("");
 
         result.Should().BeNull();
     }
@@ -70,7 +70,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetManufacturerAsync_WithWhitespaceManufacturerId_Returns_Null()
     {
-        var result = await _service.GetManufacturerAsync("   ");
+        ManufacturerAssetsDto? result = await _service.GetManufacturerAsync("   ");
 
         result.Should().BeNull();
     }
@@ -78,7 +78,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetManufacturerAsync_WithValidManufacturerId_Returns_Null()
     {
-        var result = await _service.GetManufacturerAsync("Prusa");
+        ManufacturerAssetsDto? result = await _service.GetManufacturerAsync("Prusa");
 
         result.Should().BeNull();
     }
@@ -103,7 +103,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithNullManufacturerId_Returns_Null()
     {
-        var result = await _service.GetPrinterAssetAsync(null!, "model");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync(null!, "model");
 
         result.Should().BeNull();
     }
@@ -111,7 +111,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithNullModelId_Returns_Null()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", null!);
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", null!);
 
         result.Should().BeNull();
     }
@@ -119,7 +119,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithEmptyManufacturerId_Returns_Null()
     {
-        var result = await _service.GetPrinterAssetAsync("", "model");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("", "model");
 
         result.Should().BeNull();
     }
@@ -127,7 +127,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithEmptyModelId_Returns_Null()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", "");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "");
 
         result.Should().BeNull();
     }
@@ -135,7 +135,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithValidParameters_Returns_Asset()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
 
         result.Should().NotBeNull();
         result!.Name.Should().Be("CORE One");
@@ -145,7 +145,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithValidParameters_Sets_Cover_Url()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
 
         result!.Cover.Should().Be("/assets/orcaslicer/printers/prusa/core_one/cover.png");
     }
@@ -153,7 +153,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetPrinterAssetAsync_WithValidParameters_Sets_BedTexture_Url()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
 
         result!.BedTexture.Should().Be("/assets/orcaslicer/printers/prusa/core_one/bed-texture.png");
     }
@@ -164,7 +164,7 @@ public class AssetServiceTests
     [InlineData("Ultimaker", "ultimaker")]
     public async Task GetPrinterAssetAsync_NormalizesManufacturerIdToLowercase(string input, string expected)
     {
-        var result = await _service.GetPrinterAssetAsync(input, "Model");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync(input, "Model");
 
         result!.Cover.Should().Contain($"/printers/{expected}/");
     }
@@ -178,7 +178,7 @@ public class AssetServiceTests
     [InlineData("Core&One", "coreandone")]
     public async Task GetPrinterAssetAsync_NormalizesModelIdCorrectly(string input, string expected)
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", input);
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", input);
 
         result!.Id.Should().Be(expected.ToLowerInvariant().Replace(" ", "_").Replace("(", "").Replace(")", "").Replace("+", "plus").Replace("&", "and"));
     }
@@ -203,7 +203,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetCoverImageUrlAsync_Returns_Cover_Url()
     {
-        var result = await _service.GetCoverImageUrlAsync("Prusa", "CORE One");
+        string? result = await _service.GetCoverImageUrlAsync("Prusa", "CORE One");
 
         result.Should().Be("/assets/orcaslicer/printers/prusa/core_one/cover.png");
     }
@@ -211,7 +211,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetCoverImageUrlAsync_WithNullManufacturerId_Returns_Null()
     {
-        var result = await _service.GetCoverImageUrlAsync(null!, "model");
+        string? result = await _service.GetCoverImageUrlAsync(null!, "model");
 
         result.Should().BeNull();
     }
@@ -219,7 +219,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetBedTextureUrlAsync_Returns_BedTexture_Url()
     {
-        var result = await _service.GetBedTextureUrlAsync("Prusa", "CORE One");
+        string? result = await _service.GetBedTextureUrlAsync("Prusa", "CORE One");
 
         result.Should().Be("/assets/orcaslicer/printers/prusa/core_one/bed-texture.png");
     }
@@ -227,7 +227,7 @@ public class AssetServiceTests
     [Fact]
     public async Task GetBedTextureUrlAsync_WithNullManufacturerId_Returns_Null()
     {
-        var result = await _service.GetBedTextureUrlAsync(null!, "model");
+        string? result = await _service.GetBedTextureUrlAsync(null!, "model");
 
         result.Should().BeNull();
     }
@@ -237,7 +237,7 @@ public class AssetServiceTests
     {
         using var cts = new CancellationTokenSource();
 
-        var result = await _service.GetCoverImageUrlAsync("Prusa", "CORE One", cts.Token);
+        string? result = await _service.GetCoverImageUrlAsync("Prusa", "CORE One", cts.Token);
 
         result.Should().NotBeNull();
     }
@@ -247,7 +247,7 @@ public class AssetServiceTests
     {
         using var cts = new CancellationTokenSource();
 
-        var result = await _service.GetBedTextureUrlAsync("Prusa", "CORE One", cts.Token);
+        string? result = await _service.GetBedTextureUrlAsync("Prusa", "CORE One", cts.Token);
 
         result.Should().NotBeNull();
     }
@@ -257,7 +257,7 @@ public class AssetServiceTests
     {
         using var cts = new CancellationTokenSource();
 
-        var result = await _service.GetPrinterAssetAsync("Prusa", "CORE One", cts.Token);
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "CORE One", cts.Token);
 
         result.Should().NotBeNull();
     }
@@ -267,7 +267,7 @@ public class AssetServiceTests
     {
         using var cts = new CancellationTokenSource();
 
-        var result = await _service.GetManufacturerAsync("Prusa", cts.Token);
+        ManufacturerAssetsDto? result = await _service.GetManufacturerAsync("Prusa", cts.Token);
 
         result.Should().BeNull();
     }
@@ -283,7 +283,7 @@ public class AssetServiceTests
     [Fact]
     public async Task PrinterAssetDto_Properties_Are_Set_Correctly()
     {
-        var result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync("Prusa", "CORE One");
 
         result.Should().NotBeNull();
         result!.Id.Should().NotBeNullOrEmpty();
@@ -298,7 +298,7 @@ public class AssetServiceTests
     [InlineData("Creality", "K1 Max")]
     public async Task GetPrinterAssetAsync_Multiple_Manufacturers_And_Models(string mfg, string model)
     {
-        var result = await _service.GetPrinterAssetAsync(mfg, model);
+        PrinterAssetDto? result = await _service.GetPrinterAssetAsync(mfg, model);
 
         result.Should().NotBeNull();
         result!.Cover.Should().Contain("/assets/orcaslicer/printers/");

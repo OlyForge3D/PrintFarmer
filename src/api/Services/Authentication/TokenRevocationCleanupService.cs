@@ -7,19 +7,13 @@ namespace Farm.Web.Api.Services.Authentication;
 /// Background service that periodically cleans up expired token revocations.
 /// Runs daily to remove revocation records that are past their expiration date.
 /// </summary>
-public class TokenRevocationCleanupService : BackgroundService
+public class TokenRevocationCleanupService(
+    IServiceScopeFactory scopeFactory,
+    IUnifiedLoggingService logger) : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(24); // Run daily
-
-    public TokenRevocationCleanupService(
-        IServiceScopeFactory scopeFactory,
-        IUnifiedLoggingService logger)
-    {
-        _scopeFactory = scopeFactory;
-        _logger = logger;
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

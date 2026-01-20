@@ -27,8 +27,8 @@ declare -a IMAGES=(
     "nginx:alpine-upgraded"
     "node:22-alpine-upgraded"
     "postgres:17-alpine-upgraded"
-    "sdk:9.0.302-alpine-upgraded"
-    "aspnet:9.0.1-alpine-upgraded"
+    "sdk:10.0.102-alpine-upgraded"
+    "aspnet:10.0.1-alpine-upgraded"
     "ubuntu:24.04-upgraded"
 )
 

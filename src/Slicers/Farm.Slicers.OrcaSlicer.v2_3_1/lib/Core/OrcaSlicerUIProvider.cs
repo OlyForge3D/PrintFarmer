@@ -11,13 +11,21 @@ public class OrcaSlicerUIProvider_v2_3_1 : ISlicerUIProvider
 #pragma warning restore S101
 {
     public string SlicerName => "OrcaSlicer";
+
     public string SlicerVersion => "2.3.1";
-    public bool HasBundleSupport => true;  // OrcaSlicer has bundle import/export
-    public bool HasAssetCustomization => true;  // OrcaSlicer has specific bed texture formats
-    public bool HasEngineSpecificSettings => true;  // OrcaSlicer has jitter and other settings
+
+    // OrcaSlicer has bundle import/export
+    public bool HasBundleSupport => true;
+
+    // OrcaSlicer has specific bed texture formats
+    public bool HasAssetCustomization => true;
+
+    // OrcaSlicer has jitter and other settings
+    public bool HasEngineSpecificSettings => true;
 
     // TODO: Update these to actual OrcaSlicer-specific types when available
     public Type ProfileConfigType => typeof(object);
+
     public Type SettingsType => typeof(object);
 
 #pragma warning disable CA1024 // Use property instead of method

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.SignalR;
@@ -97,10 +98,10 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var fileName = "test-file.gcode";
+            string fileName = "test-file.gcode";
             long bytesCopied = 5000;
             long totalBytes = 10000;
-            var expectedPercent = 50.0;
+            double expectedPercent = 50.0;
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, fileName, bytesCopied, totalBytes);
@@ -125,10 +126,10 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var fileName = "test-file.gcode";
+            string fileName = "test-file.gcode";
             long bytesCopied = 0;
             long totalBytes = 0;
-            var expectedPercent = 0.0;
+            double expectedPercent = 0.0;
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, fileName, bytesCopied, totalBytes);
@@ -147,10 +148,10 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var fileName = "test-file.gcode";
+            string fileName = "test-file.gcode";
             long bytesCopied = 10000;
             long totalBytes = 10000;
-            var expectedPercent = 100.0;
+            double expectedPercent = 100.0;
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, fileName, bytesCopied, totalBytes);
@@ -169,10 +170,10 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var fileName = "test-file.gcode";
+            string fileName = "test-file.gcode";
             long bytesCopied = 2500;
             long totalBytes = 10000;
-            var expectedPercent = 25.0;
+            double expectedPercent = 25.0;
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, fileName, bytesCopied, totalBytes);
@@ -191,8 +192,8 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var file1 = "file1.gcode";
-            var file2 = "file2.gcode";
+            string file1 = "file1.gcode";
+            string file2 = "file2.gcode";
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, file1, 1000, 10000);
@@ -215,10 +216,10 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            var fileName = "large-file.gcode";
+            string fileName = "large-file.gcode";
             long bytesCopied = 5_000_000_000; // 5GB
             long totalBytes = 10_000_000_000; // 10GB
-            var expectedPercent = 50.0;
+            double expectedPercent = 50.0;
 
             // Act
             await _hub.BroadcastFileProgressAsync(operationId, fileName, bytesCopied, totalBytes);
@@ -266,24 +267,19 @@ namespace Farm.Web.Api.Tests.Hubs
                 return false;
             }
 
-            var property = obj.GetType().GetProperty(propertyName);
+            PropertyInfo? property = obj.GetType().GetProperty(propertyName);
             if (property == null)
             {
                 return false;
             }
 
-            var value = property.GetValue(obj);
+            object? value = property.GetValue(obj);
             if (value == null && expectedValue == null)
             {
                 return true;
             }
 
-            if (value == null || expectedValue == null)
-            {
-                return false;
-            }
-
-            return value.Equals(expectedValue);
+            return value == null || expectedValue == null ? false : value.Equals(expectedValue);
         }
     }
 }

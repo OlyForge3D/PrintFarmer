@@ -182,11 +182,7 @@ public class SignalRSlicerProgressNotifier(
     {
         lock (_lockObject)
         {
-            if (_jobSubscriptions.TryGetValue(jobId, out HashSet<string>? subscribers))
-            {
-                return [.. subscribers];
-            }
-            return [];
+            return _jobSubscriptions.TryGetValue(jobId, out HashSet<string>? subscribers) ? [.. subscribers] : [];
         }
     }
 
@@ -202,7 +198,6 @@ public class SignalRSlicerProgressNotifier(
 /// <summary>
 /// SignalR Hub for slicer progress updates
 /// </summary>
-
 public class SlicerProgressHub(IUnifiedLoggingService logger, ISlicerProgressNotifier progressNotifier) : Hub
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -260,16 +255,27 @@ public class SlicerProgressHub(IUnifiedLoggingService logger, ISlicerProgressNot
 public class SlicingCompletionNotification
 {
     public Guid JobId { get; set; }
+
     public Guid UserId { get; set; }
+
     public SlicingJobStatus Status { get; set; }
+
     public bool Success { get; set; }
+
     public Uri? ResultFileUrl { get; set; }
+
     public double ProcessingTimeSeconds { get; set; }
+
     public double EstimatedPrintTimeSeconds { get; set; }
+
     public double EstimatedFilamentUsageGrams { get; set; }
+
     public int LayerCount { get; set; }
+
     public string? ErrorMessage { get; set; }
+
     public DateTime CompletedAt { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
 }
 
@@ -279,11 +285,18 @@ public class SlicingCompletionNotification
 public class SlicingFailureNotification
 {
     public Guid JobId { get; set; }
+
     public Guid UserId { get; set; }
+
     public SlicingJobStatus Status { get; set; }
+
     public string? ErrorMessage { get; set; }
+
     public DateTime FailedAt { get; set; }
+
     public int RetryCount { get; set; }
+
     public bool CanRetry { get; set; }
+
     public Dictionary<string, object> Metadata { get; } = [];
 }

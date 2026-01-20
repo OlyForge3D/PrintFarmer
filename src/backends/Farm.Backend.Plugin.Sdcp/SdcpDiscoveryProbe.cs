@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.Sdcp;
 
@@ -18,6 +19,7 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
     private const int SDCP_DISCOVERY_PORT = 3000;
 
     public string DisplayName => "SDCP";
+
     public PrinterBackend Backend => PrinterBackend.SDCP;
 
     public virtual async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
@@ -103,10 +105,6 @@ internal static class JsonElementExtensions
 {
     public static JsonElement? GetPropertyOrNull(this JsonElement element, string propertyName)
     {
-        if (element.TryGetProperty(propertyName, out JsonElement property))
-        {
-            return property;
-        }
-        return null;
+        return element.TryGetProperty(propertyName, out JsonElement property) ? property : null;
     }
 }

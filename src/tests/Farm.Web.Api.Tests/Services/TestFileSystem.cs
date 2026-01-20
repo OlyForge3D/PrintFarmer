@@ -67,20 +67,14 @@ namespace Farm.Web.Api.Tests.Services
             {
                 return new MemoryStream(data);
             }
-            if (File.Exists(path))
-            {
-                return File.OpenRead(path);
-            }
-            throw new FileNotFoundException(path);
+            return File.Exists(path) ? File.OpenRead(path) : throw new FileNotFoundException(path);
         }
 
         public Task<byte[]> ReadAllBytesAsync(string path, CancellationToken ct = default)
         {
-            if (_files.TryGetValue(path, out byte[]? data))
-            {
-                return System.Threading.Tasks.Task.FromResult(data);
-            }
-            return System.Threading.Tasks.Task.FromResult(File.ReadAllBytes(path));
+            return _files.TryGetValue(path, out byte[]? data)
+                ? System.Threading.Tasks.Task.FromResult(data)
+                : System.Threading.Tasks.Task.FromResult(File.ReadAllBytes(path));
         }
 
         public Task WriteAllBytesAsync(string path, byte[] data, CancellationToken ct = default)
@@ -96,11 +90,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public string ReadAllText(string path)
         {
-            if (_files.TryGetValue(path, out byte[]? data))
-            {
-                return Encoding.UTF8.GetString(data);
-            }
-            return File.ReadAllText(path);
+            return _files.TryGetValue(path, out byte[]? data) ? Encoding.UTF8.GetString(data) : File.ReadAllText(path);
         }
 
         public string[] GetFiles(string path, string searchPattern, SearchOption option)
@@ -174,16 +164,10 @@ namespace Farm.Web.Api.Tests.Services
             }
         }
 
-        private class TestFileStream : MemoryStream
+        private class TestFileStream(TestFileSystem fs, string path) : MemoryStream
         {
-            private readonly TestFileSystem _fs;
-            private readonly string _path;
-
-            public TestFileStream(TestFileSystem fs, string path)
-            {
-                _fs = fs;
-                _path = path;
-            }
+            private readonly TestFileSystem _fs = fs;
+            private readonly string _path = path;
 
             public override void Close()
             {

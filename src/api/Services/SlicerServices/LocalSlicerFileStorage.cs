@@ -29,10 +29,58 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         }
     }
 
+    private static string GetContentType(string extension)
+    {
+        if (extension.Equals(".stl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/stl";
+        }
+
+        if (extension.Equals(".obj", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/obj";
+        }
+
+        if (extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/vnd.ms-3mfdocument";
+        }
+
+        if (extension.Equals(".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model/ply";
+        }
+
+        if (extension.Equals(".gcode", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+
+        if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application/json";
+        }
+
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text/plain";
+        }
+
+        return extension.Equals(".log", StringComparison.OrdinalIgnoreCase) ? "text/plain" : "application/octet-stream";
+    }
+
+    private static string GenerateETag(FileInfoData fileInfo)
+    {
+        // Simple ETag based on last write time and size
+        int hash = $"{fileInfo.LastWriteTimeUtc.Ticks}-{fileInfo.Length}".GetHashCode();
+        return $"\"{hash:X}\"";
+    }
+
+    private static string GetSidecarPath(string filePath) => filePath + ".meta.json";
+
     // NOTE: LocalSlicerFileStorage is DI-only. The parameterless/back-compat
     // constructor that instantiated SystemFileSystem was intentionally removed
     // to enforce providing an IFileSystem via DI.
-
     public async Task<string> UploadFileAsync(string key, Stream fileStream, string contentType, CancellationToken cancellationToken = default)
     {
         try
@@ -54,8 +102,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             {
                 await fileWriteStream.FlushAsync(cancellationToken);
             }
-            catch { }
-            // Dispose (via using) will close the stream; no explicit Close() required
+            catch
+            {
+            }
 
             // Persist minimal metadata (e.g., content type) alongside the file
             TryWriteSidecarMetadata(filePath, contentType);
@@ -87,6 +136,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             }
 
             await _fileSystem.WriteAllBytesAsync(filePath, fileData, cancellationToken);
+
             // If the underlying file stream needs explicit commit/close semantics ensure any write streams are finalized.
 
             // Persist minimal metadata (e.g., content type) alongside the file
@@ -176,6 +226,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 _fileSystem.DeleteFile(filePath);
                 _logger.LogDebug($"Deleted file {keyOrUrl} from {filePath}");
             }
+
             return Task.CompletedTask;
         }
         catch (Exception ex)
@@ -210,6 +261,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 ETag = GenerateETag(fileInfo)
             };
             meta.CustomMetadata["FilePath"] = filePath;
+
             // Store extension as-is; consumers should compare using OrdinalIgnoreCase when needed
             meta.CustomMetadata["Extension"] = fileInfo.Extension;
             return Task.FromResult<SlicerFileMetadata?>(meta);
@@ -263,15 +315,28 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
             // Also cleanup empty directories
             string[] directories = _fileSystem.GetDirectories(tempDirectory, "*", SearchOption.AllDirectories);
-            foreach (string? dir in directories.OrderByDescending(d => d.Length)) // Delete deepest first
+
+            // Delete deepest first
+            foreach (string? dir in directories.OrderByDescending(d => d.Length))
             {
                 try
                 {
                     if (!_fileSystem.EnumerateFileSystemEntries(dir).Any())
                     {
                         try
-                        { _fileSystem.DeleteDirectory(dir); }
-                        catch { try { Directory.Delete(dir); } catch { } }
+                        {
+                            _fileSystem.DeleteDirectory(dir);
+                        }
+                        catch
+                        {
+                            try
+                            {
+                                Directory.Delete(dir);
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -292,7 +357,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     private string GetFilePath(string key)
     {
         // Ensure key is safe for file system
-        string safeKey = key.Replace("..", "").Replace(":", "_").Replace("?", "_").Replace("&", "_");
+        string safeKey = key.Replace("..", string.Empty).Replace(":", "_").Replace("?", "_").Replace("&", "_");
         return Path.Combine(_options.BasePath, safeKey);
     }
 
@@ -305,6 +370,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             string key = uri.AbsolutePath.TrimStart('/');
             return GetFilePath(key);
         }
+
         if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase) &&
             Uri.TryCreate(keyOrUrl, UriKind.Absolute, out Uri? fileUri))
         {
@@ -324,12 +390,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFileUrl(string key)
     {
-        if (string.IsNullOrEmpty(_options.BaseUrl))
-        {
-            return $"file://{GetFilePath(key)}";
-        }
-
-        return $"{_options.BaseUrl.TrimEnd('/')}/{key}";
+        return string.IsNullOrEmpty(_options.BaseUrl) ? $"file://{GetFilePath(key)}" : $"{_options.BaseUrl.TrimEnd('/')}/{key}";
     }
 
     private string GetFileUrlFromKeyOrUrl(string keyOrUrl)
@@ -356,52 +417,6 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         return Path.GetRelativePath(_options.BasePath, filePath).Replace(Path.DirectorySeparatorChar, '/');
     }
 
-    private static string GetContentType(string extension)
-    {
-        if (extension.Equals(".stl", StringComparison.OrdinalIgnoreCase))
-        {
-            return "model/stl";
-        }
-        if (extension.Equals(".obj", StringComparison.OrdinalIgnoreCase))
-        {
-            return "model/obj";
-        }
-        if (extension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
-        {
-            return "application/vnd.ms-3mfdocument";
-        }
-        if (extension.Equals(".ply", StringComparison.OrdinalIgnoreCase))
-        {
-            return "model/ply";
-        }
-        if (extension.Equals(".gcode", StringComparison.OrdinalIgnoreCase))
-        {
-            return "text/plain";
-        }
-        if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
-        {
-            return "application/json";
-        }
-        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
-        {
-            return "text/plain";
-        }
-        if (extension.Equals(".log", StringComparison.OrdinalIgnoreCase))
-        {
-            return "text/plain";
-        }
-        return "application/octet-stream";
-    }
-
-    private static string GenerateETag(FileInfoData fileInfo)
-    {
-        // Simple ETag based on last write time and size
-        int hash = $"{fileInfo.LastWriteTimeUtc.Ticks}-{fileInfo.Length}".GetHashCode();
-        return $"\"{hash:X}\"";
-    }
-
-    private static string GetSidecarPath(string filePath) => filePath + ".meta.json";
-
     private void TryWriteSidecarMetadata(string filePath, string contentType)
     {
         try
@@ -409,6 +424,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             string metaPath = GetSidecarPath(filePath);
             var meta = new { ContentType = contentType };
             string json = System.Text.Json.JsonSerializer.Serialize(meta);
+
             // Ensure metadata persisted via the configured file system
             _fileSystem.WriteAllText(metaPath, json);
         }
@@ -427,6 +443,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             {
                 return null;
             }
+
             string json = _fileSystem.ReadAllText(metaPath);
             JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("ContentType", out JsonElement ctElem) && ctElem.ValueKind == System.Text.Json.JsonValueKind.String)
@@ -438,15 +455,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         {
             _logger.LogWarning($"Failed to read sidecar metadata for {filePath}: {ex.Message}");
         }
+
         return null;
     }
-}
-
-/// <summary>
-/// Configuration options for local file storage
-/// </summary>
-public class LocalFileStorageOptions
-{
-    public string BasePath { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "storage");
-    public string? BaseUrl { get; set; }
 }

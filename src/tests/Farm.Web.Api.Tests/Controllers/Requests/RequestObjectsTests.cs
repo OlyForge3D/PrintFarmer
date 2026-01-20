@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Controllers.Requests;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -19,9 +20,9 @@ public class CreateManufacturerRequestTests
     [Fact]
     public void Constructor_WithDifferentNames_Succeeds()
     {
-        var names = new[] { "Prusa", "Ultimaker", "Creality", "Anycubic", "3D Systems" };
+        string[] names = new[] { "Prusa", "Ultimaker", "Creality", "Anycubic", "3D Systems" };
 
-        foreach (var name in names)
+        foreach (string? name in names)
         {
             var request = new CreateManufacturerRequest(Name: name);
             request.Name.Should().Be(name);
@@ -51,7 +52,7 @@ public class CreateManufacturerRequestTests
     {
         var request = new CreateManufacturerRequest("Prusa");
 
-        var name = request.Name;
+        string name = request.Name;
 
         name.Should().Be("Prusa");
     }
@@ -79,7 +80,7 @@ public class CreateManufacturerRequestTests
     [Fact]
     public void CreateManufacturerRequest_WithLongName()
     {
-        var longName = "Very Long Manufacturer Name With Many Words";
+        string longName = "Very Long Manufacturer Name With Many Words";
 
         var request = new CreateManufacturerRequest(longName);
 
@@ -154,7 +155,7 @@ public class DiscoveryStreamRequestTests
     [Fact]
     public void DiscoveryStreamRequest_WithAllBackends()
     {
-        var allBackends = new[]
+        PrinterBackend[] allBackends = new[]
         {
             PrinterBackend.Moonraker,
             PrinterBackend.PrusaLink,
@@ -268,7 +269,7 @@ public class FileOperationRequestTests
     [Fact]
     public void FileName_WithLongPath()
     {
-        var longPath = string.Join("/", Enumerable.Range(0, 20).Select(i => $"folder{i}")) + "/file.gcode";
+        string longPath = string.Join("/", Enumerable.Range(0, 20).Select(i => $"folder{i}")) + "/file.gcode";
 
         var request = new FileOperationRequest { FileName = longPath };
 
@@ -291,7 +292,7 @@ public class UpdateModelRequestTests
     {
         var request = new UpdateModelRequest(
             Name: "Prusa CORE One",
-            Type: null,
+            MotionType: null,
             MaxX: null,
             MaxY: null,
             MaxZ: null,
@@ -304,37 +305,33 @@ public class UpdateModelRequestTests
     [Fact]
     public void Constructor_WithAllParameters_Succeeds()
     {
-        var filamentIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        Guid[] filamentIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
         var request = new UpdateModelRequest(
             Name: "Prusa CORE One",
-            Type: MotionType.Cartesian,
+            MotionType: MotionType.Cartesian,
             MaxX: 200,
             MaxY: 200,
             MaxZ: 200,
             DefaultBackend: PrinterBackend.Moonraker,
             SupportedFilamentTypeIds: filamentIds,
-            DefaultNozzleDiameter: 0.4,
             HasHeatedBed: true,
             HasEnclosure: false,
             MultiMaterial: false,
             NumberOfExtruders: 1,
             SupportsAutoLeveling: true,
-            MaxHotendTemp: 300,
             MaxBedTemp: 120,
             MaxPrintSpeed: 200);
 
         request.Name.Should().Be("Prusa CORE One");
-        request.Type.Should().Be(MotionType.Cartesian);
+        request.MotionType.Should().Be(MotionType.Cartesian);
         request.MaxX.Should().Be(200);
         request.MaxY.Should().Be(200);
         request.MaxZ.Should().Be(200);
         request.DefaultBackend.Should().Be(PrinterBackend.Moonraker);
         request.SupportedFilamentTypeIds.Should().HaveCount(2);
-        request.DefaultNozzleDiameter.Should().Be(0.4);
         request.HasHeatedBed.Should().BeTrue();
         request.HasEnclosure.Should().BeFalse();
         request.NumberOfExtruders.Should().Be(1);
-        request.MaxHotendTemp.Should().Be(300);
         request.MaxBedTemp.Should().Be(120);
         request.MaxPrintSpeed.Should().Be(200);
     }
@@ -342,9 +339,9 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithDifferentBackends()
     {
-        var backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint };
+        PrinterBackend[] backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint };
 
-        foreach (var backend in backends)
+        foreach (PrinterBackend backend in backends)
         {
             var request = new UpdateModelRequest("Model", null, null, null, null, backend, null);
             request.DefaultBackend.Should().Be(backend);
@@ -354,12 +351,12 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithMotionTypes()
     {
-        var motionTypes = new[] { MotionType.Cartesian, MotionType.Delta, MotionType.Unknown };
+        MotionType[] motionTypes = new[] { MotionType.Cartesian, MotionType.Delta, MotionType.Unknown };
 
-        foreach (var motionType in motionTypes)
+        foreach (MotionType motionType in motionTypes)
         {
             var request = new UpdateModelRequest("Model", motionType, null, null, null, null, null);
-            request.Type.Should().Be(motionType);
+            request.MotionType.Should().Be(motionType);
         }
     }
 
@@ -386,17 +383,14 @@ public class UpdateModelRequestTests
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null, null,
-            DefaultNozzleDiameter: 0.8,
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MaxHotendTemp: 350,
             MaxBedTemp: 140,
             MaxPrintSpeed: 250);
 
-        request.MaxHotendTemp.Should().Be(350);
         request.MaxBedTemp.Should().Be(140);
     }
 
@@ -421,7 +415,7 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithLongModelName()
     {
-        var longName = "Very Long Printer Model Name With Many Words And Characters";
+        string longName = "Very Long Printer Model Name With Many Words And Characters";
         var request = new UpdateModelRequest(longName, null, null, null, null, null, null);
 
         request.Name.Should().Be(longName);
@@ -441,17 +435,14 @@ public class UpdateModelRequestTests
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null, null,
-            DefaultNozzleDiameter: null,
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MaxHotendTemp: 0,
             MaxBedTemp: 0,
             MaxPrintSpeed: 0);
 
-        request.MaxHotendTemp.Should().Be(0);
         request.MaxBedTemp.Should().Be(0);
         request.MaxPrintSpeed.Should().Be(0);
     }
@@ -459,7 +450,7 @@ public class UpdateModelRequestTests
     [Fact]
     public void UpdateModelRequest_WithMultipleFilamentTypes()
     {
-        var filamentIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+        Guid[] filamentIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
         var request = new UpdateModelRequest(
             "Model",
             null, null, null, null, null,

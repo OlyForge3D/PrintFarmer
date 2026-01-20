@@ -17,7 +17,7 @@ public static class PrinterStateNormalizer
         }
 
         // Convert to lowercase first, then capitalize first letter
-        var lower = state.ToLowerInvariant();
+        string lower = state.ToLowerInvariant();
         return char.ToUpperInvariant(lower[0]) + lower.Substring(1);
     }
 }

@@ -38,6 +38,17 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/docker-utils.sh"
 source "$SCRIPT_DIR/common-utils.sh"
 
+# Source container versions from single source of truth
+VERSIONS_FILE="$SCRIPT_DIR/docker/container-versions.conf"
+if [[ -f "$VERSIONS_FILE" ]]; then
+    source "$VERSIONS_FILE"
+    # Export all sourced variables so they're available to called scripts
+    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
+fi
+
+# Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
+DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
+
 # Default flags
 DRY_RUN=false
 NON_INTERACTIVE=false
@@ -45,6 +56,7 @@ TEAR_DOWN=false
 SHOW_HELP=false
 REDEPLOY=false
 PREPULL=false
+NO_CACHE=false
 AUTO_ADMIN=false
 AUTO_ADMIN_USERNAME=""
 AUTO_ADMIN_PASSWORD=""
@@ -132,34 +144,59 @@ if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
 fi
 # On Linux or other systems, leave DOCKER_BUILD_PLATFORM empty to use system defaults
 
-# Base container images for offline deployment (standard upstream images)
-# These are pulled as fallback if upgraded images aren't available
-DOCKER_BASE_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:9.0"
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim"
-    "ubuntu:24.04"
-    "node:22-alpine"
-    "postgres:16-alpine"
-    "nginx:alpine"
-    "docker/dockerfile:1"  # BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
+# ============================================================================
+# CONSOLIDATED IMAGE DEFINITIONS FOR OFFLINE DEPLOYMENT
+# ============================================================================
+# Single source of truth for all offline deployment images
+# Format: "base_image|dockerfile|upgraded_image"
+# 
+# - base_image: Standard upstream image (pulled as fallback)
+# - dockerfile: Dockerfile for building pre-upgraded version (in scripts/docker/dockerfiles/)
+# - upgraded_image: Pre-upgraded image with apt/apk updates and tools (preferred, built during --prepare-offline)
+#
+# Note: SDK_TAG and ASPNET_TAG are sourced from container-versions.conf
+# Update that file to change .NET versions for future migrations
+declare -a DOCKER_IMAGES_CONFIG=(
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}-upgraded"
+    "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}-upgraded"
+    "ubuntu:${UBUNTU_TAG:-24.04}|Dockerfile.base-ubuntu|ubuntu:${UBUNTU_TAG:-24.04}-upgraded"
+    "node:${NODE_TAG:-22-alpine}|Dockerfile.base-node|node:${NODE_TAG:-22-alpine}-upgraded"
+    "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
+    "nginx:${NGINX_TAG:-alpine}|Dockerfile.base-nginx|nginx:${NGINX_TAG:-alpine}-upgraded"
 )
 
-# Pre-upgraded base images with apt/apk updates and tools pre-installed
-# These are built during --prepare-offline and preferred over standard images
-DOCKER_UPGRADED_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
-    "ubuntu:24.04-upgraded"
-    "node:22-alpine-upgraded"
-    "postgres:16-alpine-upgraded"
-    "nginx:alpine-upgraded"
-    "docker/dockerfile:1"  # No upgrade needed - just cache the original
-)
+# BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
+# This image doesn't need upgrading
+DOCKER_BUILDKIT_IMAGE="docker/dockerfile:1"
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
 DOCKER_LOCAL_IMAGES=(
     "orcaslicer-binaries:2.3.1"
 )
+
+# Derived arrays from DOCKER_IMAGES_CONFIG (for backward compatibility with existing code)
+# These are automatically populated from DOCKER_IMAGES_CONFIG
+DOCKER_BASE_IMAGES=()
+DOCKER_UPGRADED_IMAGES=()
+
+# Initialize derived arrays from consolidated config
+_init_image_arrays() {
+    DOCKER_BASE_IMAGES=()
+    DOCKER_UPGRADED_IMAGES=()
+    
+    for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+        IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
+        DOCKER_BASE_IMAGES+=("$base_image")
+        DOCKER_UPGRADED_IMAGES+=("$upgraded_image")
+    done
+    
+    # Add BuildKit image to base images (it doesn't need upgrading)
+    DOCKER_BASE_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
+    DOCKER_UPGRADED_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
+}
+
+# Initialize on script load
+_init_image_arrays
 
 # ============================================================================
 # OFFLINE DEPLOYMENT FUNCTIONS
@@ -172,6 +209,20 @@ test_image_exists() {
         return 0
     fi
     return 1
+}
+
+# Resolve image tag to use upgraded version if available
+# Returns the tag with -upgraded suffix if that image exists, otherwise returns original tag
+resolve_image_tag() {
+    local image_prefix="$1"  # e.g., "mcr.microsoft.com/dotnet/sdk"
+    local base_tag="$2"      # e.g., "10.0-noble"
+    local upgraded_tag="${base_tag}-upgraded"
+    
+    if test_image_exists "${image_prefix}:${upgraded_tag}"; then
+        echo "$upgraded_tag"
+    else
+        echo "$base_tag"
+    fi
 }
 
 # Find cached Docker images in common locations
@@ -335,6 +386,31 @@ auto_load_cached_images() {
     
     # Use the core loading function
     _load_tar_images "$images_dir" "quiet"
+    
+    # Create aliases for upgraded images so they can be used as base images
+    # If upgraded images are loaded (e.g., aspnet:${ASPNET_TAG}-upgraded),
+    # also tag them as the base image (e.g., aspnet:${ASPNET_TAG}) so Dockerfile.multistage can use them
+    print_info "Creating aliases for upgraded images..."
+    local alias_count=0
+    
+    # Temporarily disabled - image aliasing logic needs debugging
+    # for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+    #     IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
+    #     if timeout 5 docker image inspect "$upgraded_image" >/dev/null 2>&1 && ! timeout 5 docker image inspect "$base_image" >/dev/null 2>&1; then
+    #         if timeout 10 docker tag "$upgraded_image" "$base_image" >/dev/null 2>&1; then
+    #             print_info "  Tagged: $upgraded_image → $base_image"
+    #             ((alias_count++))
+    #         fi
+    #     fi
+    # done
+    
+    if [ $alias_count -eq 0 ]; then
+        print_info "  Note: Upgraded base images will be used directly by docker-compose if available"
+    fi
+    
+    if [ $alias_count -gt 0 ]; then
+        print_success "✓ Created $alias_count image alias/aliases for faster builds"
+    fi
     
     # After loading, check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
     # This enables the build system to skip downloading OrcaSlicer from GitHub
@@ -1086,8 +1162,8 @@ pull_base_images() {
     print_header "📥 Pulling Base Container Images"
     
     print_info "Pulling essential images for PrintFarmer core services:"
-    print_info "  - .NET SDK 9.0 (multi-stage builds during deployment)"
-    print_info "  - .NET ASP.NET 9.0 (API runtime)"
+    print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
+    print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
     print_info "  - Node.js 22 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
     print_info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
@@ -1475,17 +1551,8 @@ build_base_images() {
     
     local docker_dir="scripts/docker/dockerfiles"
     
-    # Array of base images to build: "base-tag|dockerfile|new-tag"
-    declare -a BASE_IMAGES=(
-        "ubuntu:24.04|Dockerfile.base-ubuntu|ubuntu:24.04-upgraded"
-        "node:22-alpine|Dockerfile.base-node|node:22-alpine-upgraded"
-        "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
-        "mcr.microsoft.com/dotnet/sdk:9.0|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
-        "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
-        "nginx:alpine|Dockerfile.base-nginx|nginx:alpine-upgraded"
-    )
-    
-    local total_images=${#BASE_IMAGES[@]}
+    # Use consolidated DOCKER_IMAGES_CONFIG instead of local duplicate array
+    local total_images=${#DOCKER_IMAGES_CONFIG[@]}
     local successful=0
     local failed=0
     
@@ -1493,17 +1560,17 @@ build_base_images() {
     local cache_bust
     cache_bust=$(date +%s)
     
-    for image_config in "${BASE_IMAGES[@]}"; do
-        IFS='|' read -r base_image dockerfile new_tag <<< "$image_config"
+    for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
+        IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
         
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        print_info "Building: $new_tag"
+        print_info "Building: $upgraded_image"
         print_info "  Base: $base_image"
         print_info "  Dockerfile: $dockerfile"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
         # Prepare build command with optional platform
-        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$new_tag" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
+        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
         
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -1514,10 +1581,10 @@ build_base_images() {
         
         if "${build_cmd[@]}" > /dev/null 2>&1; then
             
-            print_success "✓ Build successful: $new_tag"
+            print_success "✓ Build successful: $upgraded_image"
             ((successful++))
         else
-            print_error "✗ Build failed: $new_tag"
+            print_error "✗ Build failed: $upgraded_image"
             ((failed++))
         fi
         echo
@@ -2177,6 +2244,8 @@ OPTIONS:
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, and ALL bind-mounted storage including database).
         --clean             Useful for starting completely fresh.
+    --no-cache              Build Docker images without using cache. Use when NuGet
+                            packages are corrupted from .NET version migrations.
     --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
@@ -2704,12 +2773,13 @@ check_dotnet_sdk() {
         DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
         print_success ".NET SDK found: $DOTNET_VERSION"
         
-        # Check if version meets minimum requirement (9.0)
-        if [[ "$DOTNET_VERSION" =~ ^9\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
+        # Check if version meets minimum requirement (uses DOTNET_MAJOR_VERSION from config)
+        local major_ver="${DOTNET_MAJOR_VERSION%%.*}"  # Extract just the major number (e.g., "10")
+        if [[ "$DOTNET_VERSION" =~ ^${major_ver}\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
             print_success ".NET SDK version is compatible"
         else
             print_warning ".NET SDK version $DOTNET_VERSION detected"
-            print_warning "PrintFarmer requires .NET 9.0 or later"
+            print_warning "PrintFarmer requires .NET $DOTNET_MAJOR_VERSION or later"
             print_info "Docker builds will still work, but local development may have issues"
         fi
     else
@@ -2762,8 +2832,8 @@ install_dotnet_sdk() {
     chmod +x "$install_script"
     print_success "Installation script downloaded"
     
-    # Install .NET SDK 9.0 (required version)
-    print_info "Installing .NET SDK 9.0..."
+    # Install .NET SDK (required version from container-versions.conf)
+    print_info "Installing .NET SDK $DOTNET_MAJOR_VERSION..."
     print_info "This may take a few minutes..."
     
     if [ "$OS" = "windows" ]; then
@@ -2775,8 +2845,8 @@ install_dotnet_sdk() {
     fi
     
     # Run installation script
-    if ./"$install_script" --channel 9.0 --install-dir "$HOME/.dotnet"; then
-        print_success ".NET SDK 9.0 installed successfully"
+    if ./"$install_script" --channel "$DOTNET_MAJOR_VERSION" --install-dir "$HOME/.dotnet"; then
+        print_success ".NET SDK $DOTNET_MAJOR_VERSION installed successfully"
         
         # Add to PATH for current session
         export PATH="$HOME/.dotnet:$PATH"
@@ -3960,13 +4030,15 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
-# Docker Base Image Tags (override Dockerfile defaults for normal deployments)
+# Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
+# If not set by config file, these defaults are used
 # Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
-SDK_TAG=9.0
-ASPNET_TAG=9.0-noble
-NODE_TAG=22-alpine
-NGINX_TAG=alpine
-UBUNTU_TAG=24.04
+# Check for upgraded images and use them if available (appends -upgraded suffix)
+SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "${SDK_TAG:-10.0-noble}")
+ASPNET_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/aspnet" "${ASPNET_TAG:-10.0-noble}")
+NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-22-alpine}")
+NGINX_TAG=$(resolve_image_tag "nginx" "${NGINX_TAG:-alpine}")
+UBUNTU_TAG=$(resolve_image_tag "ubuntu" "${UBUNTU_TAG:-24.04}")
 
 # Standalone Service Image Tags (override compose template defaults for normal deployments)
 NGINX_IMAGE=nginx:alpine
@@ -4556,6 +4628,12 @@ EOF
         # Support passing --platform to docker compose build when requested
         # Prepare build args including ORCA_ASSET_PATH for offline deployments
         declare -a compose_build_args=(--build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}")
+        
+        # Add --no-cache if requested (useful when NuGet packages are corrupted from .NET version migrations)
+        if [ "$NO_CACHE" = "true" ]; then
+            compose_build_args+=(--no-cache)
+            print_info "Building without cache (--no-cache enabled)"
+        fi
         
         # Copy AppImage files to build context if they exist (for offline builds)
         # Docker cannot access host paths in build args, so we must copy files into the build context
@@ -6193,19 +6271,19 @@ main() {
     fi
     
     # Handle redeploy mode
-    if [ "$REDEPLOY" = "true" ]; then
+    if [ "${REDEPLOY:-false}" = "true" ]; then
         redeploy_existing
         # Function exits, so we never reach here
     fi
     
     # Handle tear-down mode
-    if [ "$TEAR_DOWN" = "true" ]; then
+    if [ "${TEAR_DOWN:-false}" = "true" ]; then
         tear_down_deployment
         # Function exits, so we never reach here
     fi
     
     # Handle regenerate-config mode (regenerates .env and docker-compose without affecting deployment)
-    if [ "$REGENERATE_CONFIG" = "true" ]; then
+    if [ "${REGENERATE_CONFIG:-false}" = "true" ]; then
         if [ ! -f "$CONFIG_FILE" ]; then
             print_error "No stored configuration found. Run normal setup first."
             exit 1
@@ -6399,7 +6477,8 @@ main() {
         fi
 
         # Minimal set of images used in compose; expand as needed
-        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim" "node:22-alpine")
+        # Uses ASPNET_TAG from container-versions.conf for consistency
+        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG}" "node:22-alpine")
         for img in "${images[@]}"; do
             print_info "Pulling $img ($platform_arg)"
             if docker pull $platform_arg "$img"; then
@@ -6501,6 +6580,10 @@ while [ $# -gt 0 ]; do
             ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
+            shift
+            ;;
+        --no-cache)
+            NO_CACHE=true
             shift
             ;;
         --regenerate-config)
@@ -6719,6 +6802,7 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${_ARGS_KEEP[@]:-}"
+
 postgres_readiness_check() {
     local pg_user="${POSTGRES_USER:-postgres}"
     local pg_db="${POSTGRES_DB:-printfarmer}"

@@ -65,12 +65,7 @@ namespace Farm.Web.Api.Controllers
             CancellationToken ct = default)
         {
             string? url = await _assetService.GetCoverImageUrlAsync(manufacturerId, modelId, ct);
-            if (url == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(url);
+            return url == null ? NotFound() : Ok(url);
         }
 
         /// <summary>
@@ -89,12 +84,7 @@ namespace Farm.Web.Api.Controllers
             CancellationToken ct = default)
         {
             string? url = await _assetService.GetBedTextureUrlAsync(manufacturerId, modelId, ct);
-            if (url == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(url);
+            return url == null ? NotFound() : Ok(url);
         }
 
         /// <summary>

@@ -97,8 +97,7 @@ public class SignalRHealthCheck(
         HealthCheckResult result = new(
             overallHealthy ? HealthStatus.Healthy : HealthStatus.Unhealthy,
             description: overallHealthy ? "SignalR fully operational" : string.Join("; ", issues),
-            data: checks
-        );
+            data: checks);
 
         return result;
     }

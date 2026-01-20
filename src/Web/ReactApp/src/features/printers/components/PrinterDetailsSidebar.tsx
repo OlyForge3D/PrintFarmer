@@ -4,7 +4,6 @@ import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import type { TempTargets, MoveRequest } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -236,16 +235,26 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart' | 'disable-motors') => {
     try {
-      let endpoint = action;
-      if (action === 'disable-motors') {
-        endpoint = 'disable-motors';
+      let result;
+      switch (action) {
+        case 'pause':
+          result = await apiClient.pausePrint(printer.id);
+          break;
+        case 'resume':
+          result = await apiClient.resumePrint(printer.id);
+          break;
+        case 'stop':
+          result = await apiClient.emergencyStop(printer.id);
+          break;
+        case 'firmware-restart':
+          result = await apiClient.firmwareRestart(printer.id);
+          break;
+        case 'disable-motors':
+          result = await apiClient.disableMotors(printer.id);
+          break;
       }
-      const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) {
-        console.error(`Failed to ${action}:`, response.statusText);
+      if (result && !result.success) {
+        console.error(`Failed to ${action}:`, result.error);
       }
     } catch (error) {
       console.error(`Error performing ${action}:`, error);

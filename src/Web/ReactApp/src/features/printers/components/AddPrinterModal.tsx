@@ -1,18 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
-import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
+import { LoadingIcon, CheckIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto, TestConnectionResponse } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-
-interface ManufacturerDto {
-  id: string;
-  name: string;
-}
-
+import { useManufacturers, useModels } from '@/common/hooks/useApi';
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -20,7 +15,22 @@ interface AddPrinterModalProps {
   onSuccess: () => void;
 }
 
-export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+/**
+ * Content component for the Add Printer modal
+ */
+function AddPrinterModalContent({ 
+  manufacturers, 
+  models,
+  isOpen,
+  onClose,
+  onSuccess
+}: {
+  manufacturers: ManufacturerDto[];
+  models: PrinterModelDto[];
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
     serverUrl: '',
@@ -35,65 +45,25 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     backendPort: 7125,
     frontendPort: 80,
   });
-  const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
-  const [models, setModels] = useState<PrinterModelDto[]>([]);
   const [filteredModels, setFilteredModels] = useState<PrinterModelDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   
-  // Load manufacturers on mount
-  useEffect(() => {
-    if (isOpen) {
-      loadManufacturers();
-      loadModels();
-    }
-  }, [isOpen]);
-
-  // Filter models when manufacturer changes
-  useEffect(() => {
-    if (formData.manufacturerId) {
-      setFilteredModels(models.filter(m => m.manufacturerId === formData.manufacturerId));
-    } else {
-      setFilteredModels([]);
-    }
-    // Reset model selection when manufacturer changes
-    setFormData(prev => ({ ...prev, modelId: undefined }));
-  }, [formData.manufacturerId, models]);
-
-  const loadManufacturers = async () => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/manufacturers`, {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setManufacturers(data);
-      }
-    } catch (err) {
-      console.error('Failed to load manufacturers:', err);
-    }
-  };
-
-  const loadModels = async () => {
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/catalog/printer-models`, {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setModels(data);
-      }
-    } catch (err) {
-      console.error('Failed to load models:', err);
-    }
-  };
+  // Test connection state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
+    // Filter models when manufacturer changes
+    if (field === 'manufacturerId' && value) {
+      const filtered = models.filter(m => m.manufacturerId === value);
+      setFilteredModels(filtered);
+    }
     // Clear validation error when user starts typing
     if (validationErrors[field]) {
       setValidationErrors(prev => {
@@ -101,6 +71,58 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
         delete newErrors[field];
         return newErrors;
       });
+    }
+    // Clear test result when server URL or backend type changes
+    if (field === 'serverUrl' || field === 'backend' || field === 'apiKey' || field === 'backendPort') {
+      setTestResult(null);
+    }
+  };
+
+  /**
+   * Tests connectivity to the printer before adding it.
+   * Uses backend-specific test methods (Moonraker, PrusaLink, OctoPrint).
+   */
+  const handleTestConnection = async () => {
+    // Validate required fields for test
+    if (!formData.serverUrl.trim()) {
+      setTestResult({ success: false, message: 'Server URL is required' });
+      return;
+    }
+
+    try {
+      new URL(formData.serverUrl);
+    } catch {
+      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
+      return;
+    }
+
+    // Check API key for backends that require it
+    if ((formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && !formData.apiKey?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: `API Key is required for ${formData.backend === PrinterBackend.OctoPrint ? 'OctoPrint' : 'PrusaLink'} printers` 
+      });
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      const result = await apiClient.testConnection({
+        serverUrl: formData.serverUrl,
+        backend: formData.backend,
+        apiKey: formData.apiKey,
+        backendPort: formData.backendPort,
+      });
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ 
+        success: false, 
+        message: err instanceof Error ? err.message : 'Connection test failed' 
+      });
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -144,29 +166,17 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setError('');
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/printers`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
-        onSuccess();
-        handleClose();
+      await apiClient.createPrinter(formData);
+      onSuccess();
+      handleClose();
+    } catch (err: unknown) {
+      const error = err as Record<string, unknown>;
+      if (error?.response && (error.response as Record<string, unknown>)?.status === 400 && ((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.errors) {
+        // Handle validation errors from the server
+        setValidationErrors((error.response as Record<string, unknown>).data as Record<string, string[]>);
       } else {
-        const errorData = await response.json().catch(() => null);
-        if (response.status === 400 && errorData?.errors) {
-          // Handle validation errors from the server
-          setValidationErrors(errorData.errors);
-        } else {
-          setError(errorData?.message || `Failed to add printer (${response.status})`);
-        }
+        setError(((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.message as string || 'Failed to add printer');
       }
-    } catch (err) {
-      setError('Network error. Please check your connection and try again.');
       console.error('Add printer error:', err);
     } finally {
       setIsLoading(false);
@@ -188,6 +198,8 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     });
     setValidationErrors({});
     setError('');
+    setTestResult(null);
+    setIsTesting(false);
     onClose();
   }, [onClose]);
 
@@ -208,25 +220,47 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
   if (!isOpen) return null;
 
   const modalFooter = (
-    <div className="flex gap-3">
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={handleClose}
-        className="flex-1"
-      >
-        Cancel
-      </Button>
-      <Button
-        type="submit"
-        form="add-printer-form"
-        variant="success"
-        disabled={isLoading}
-        className="flex-1"
-        iconLeft={isLoading ? <LoadingIcon className="w-4 h-4" /> : <CheckIcon className="w-4 h-4" />}
-      >
-        {isLoading ? 'Adding...' : 'Add Printer'}
-      </Button>
+    <div className="space-y-3">
+      {/* Test Connection Result */}
+      {testResult && (
+        <Alert 
+          type={testResult.success ? 'success' : 'error'} 
+          className="mb-0"
+        >
+          {testResult.message}
+        </Alert>
+      )}
+      
+      {/* Buttons */}
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleClose}
+          className="flex-1"
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="default"
+          onClick={handleTestConnection}
+          disabled={isTesting || !formData.serverUrl.trim()}
+          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+        >
+          {isTesting ? 'Testing...' : 'Test'}
+        </Button>
+        <Button
+          type="submit"
+          form="add-printer-form"
+          variant="success"
+          disabled={isLoading}
+          className="flex-1"
+          iconLeft={isLoading ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <CheckIcon className="w-4 h-4" />}
+        >
+          {isLoading ? 'Adding...' : 'Add Printer'}
+        </Button>
+      </div>
     </div>
   );
 
@@ -426,5 +460,72 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             </FormField>
           </form>
     </Modal>
+  );
+}
+
+/**
+ * Wrapper component that uses React Query hooks for data loading
+ */
+export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
+  const { data: manufacturers = [], isLoading: loadingMfg, error: mfgError } = useManufacturers();
+  const { data: models = [], isLoading: loadingModels, error: modelsError } = useModels();
+
+  const isLoadingData = loadingMfg || loadingModels;
+  const dataError = (mfgError || modelsError) as Error | null;
+
+  if (!isOpen) return null;
+
+  // Show loading state
+  if (isLoadingData) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Add New Printer"
+        width="max-w-2xl"
+      >
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <LoadingIcon className="w-8 h-8 animate-spin mx-auto mb-2" />
+            <p className="text-gray-500">Loading printers...</p>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  // Show error state
+  if (dataError) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Add New Printer"
+        width="max-w-2xl"
+      >
+        <div className="p-4">
+          <Alert type="error" title="Failed to load printer data">
+            <p>{dataError.message || 'Unable to load manufacturers and models'}</p>
+          </Alert>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={onClose} className="bg-gray-600 hover:bg-gray-700">
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <AddPrinterModalContent 
+      manufacturers={manufacturers}
+      models={models}
+      isOpen={isOpen}
+      onClose={onClose}
+      onSuccess={onSuccess}
+      isLoadingData={isLoadingData}
+      error={dataError}
+    />
   );
 }

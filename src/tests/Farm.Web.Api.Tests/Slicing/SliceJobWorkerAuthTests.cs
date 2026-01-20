@@ -304,7 +304,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         };
         requestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
         // Manually add auth header since SendAsync bypasses default headers
-        var authHeader = _client.DefaultRequestHeaders.Authorization;
+        AuthenticationHeaderValue? authHeader = _client.DefaultRequestHeaders.Authorization;
         if (authHeader != null)
         {
             requestMessage.Headers.Authorization = authHeader;
@@ -319,23 +319,16 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         _ = result.Status.Should().Be(SliceJobStatus.Processing);
     }
 
-    private sealed class TestFormFile : IFormFile
+    private sealed class TestFormFile(byte[] data, string fileName, string contentType) : IFormFile
     {
-        private readonly byte[] _data;
-        public TestFormFile(byte[] data, string fileName, string contentType)
-        {
-            _data = data;
-            FileName = fileName;
-            ContentType = contentType;
-            Name = "file";
-            Length = data.Length;
-        }
-        public string ContentType { get; }
+        private readonly byte[] _data = data;
+
+        public string ContentType { get; } = contentType;
         public string ContentDisposition { get; set; } = string.Empty;
         public IHeaderDictionary Headers { get; } = new HeaderDictionary();
-        public long Length { get; }
-        public string Name { get; }
-        public string FileName { get; }
+        public long Length { get; } = data.Length;
+        public string Name { get; } = "file";
+        public string FileName { get; } = fileName;
         public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
         public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {

@@ -22,32 +22,21 @@ namespace Farm.Web.Api.Services.Users
     /// - Logging of all user-related operations for audit trails
     /// All user operations are logged through IUnifiedLoggingService for observability.
     /// </remarks>
-    public class UsersService : IUsersService
+    /// <remarks>
+    /// Initializes a new instance of the UsersService with required dependencies.
+    /// </remarks>
+    /// <param name="users">Repository for user data persistence and retrieval</param>
+    /// <param name="authService">Service for authentication operations and token management</param>
+    /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+    public class UsersService(
+        IUsersRepository users,
+        IAuthenticationService authService,
+        IPasswordHashingService passwordHashingService) : IUsersService
     {
-        private readonly IUsersRepository _users;
-        private readonly IAuthenticationService _authService;
-        private readonly IPasswordHashingService _passwordHashingService;
-        private readonly IUnifiedLoggingService _logger;
-
-        /// <summary>
-        /// Initializes a new instance of the UsersService with required dependencies.
-        /// </summary>
-        /// <param name="users">Repository for user data persistence and retrieval</param>
-        /// <param name="authService">Service for authentication operations and token management</param>
-        /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
-        /// <param name="logger">Unified logging service for audit trails and operation tracking</param>
-        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
-        public UsersService(
-            IUsersRepository users,
-            IAuthenticationService authService,
-            IPasswordHashingService passwordHashingService,
-            IUnifiedLoggingService logger)
-        {
-            _users = users ?? throw new ArgumentNullException(nameof(users));
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+        private readonly IUsersRepository _users = users ?? throw new ArgumentNullException(nameof(users));
+        private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
 
         /// <summary>
         /// Retrieves all user accounts from the system.
@@ -112,7 +101,7 @@ namespace Farm.Web.Api.Services.Users
         /// - FirstName and LastName: User's display name information
         /// - IsActive: Account activation status
         /// - RoleIds: User's assigned roles and associated permissions
-        /// 
+        ///
         /// The update timestamp is automatically set to current UTC time. Role updates trigger a reload of the
         /// user's complete profile including permissions. Returns null if the specified user ID does not exist.
         /// </remarks>
@@ -128,14 +117,17 @@ namespace Farm.Web.Api.Services.Users
             {
                 user.FirstName = request.FirstName;
             }
+
             if (!string.IsNullOrWhiteSpace(request.LastName))
             {
                 user.LastName = request.LastName;
             }
+
             if (request.IsActive.HasValue)
             {
                 user.IsActive = request.IsActive.Value;
             }
+
             user.UpdatedAt = DateTime.UtcNow;
 
             if (request.RoleIds != null)
@@ -208,10 +200,12 @@ namespace Farm.Web.Api.Services.Users
             {
                 usernameExists = await _users.UsernameExistsAsync(username.Trim(), ct);
             }
+
             if (!string.IsNullOrWhiteSpace(email))
             {
                 emailExists = await _users.EmailExistsAsync(email.Trim(), ct);
             }
+
             return new UserAvailabilityDto(usernameExists, emailExists);
         }
     }

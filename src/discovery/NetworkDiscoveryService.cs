@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Discovery;
@@ -18,6 +19,10 @@ public interface ICoreNetworkDiscoveryService
     /// Attempt to discover a printer at the specified IP address using all available probes.
     /// Returns the result with the highest confidence score, or null if no probe matches.
     /// </summary>
+    /// <param name="ipAddress">The IP address to probe for printer discovery.</param>
+    /// <param name="timeoutMs">The timeout in milliseconds for each probe.</param>
+    /// <param name="backendFilter">Optional filter to limit discovery to specific backends.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     Task<DiscoveredPrinterDto?> DiscoverPrinterAsync(
         string ipAddress,
         int timeoutMs,
@@ -27,6 +32,11 @@ public interface ICoreNetworkDiscoveryService
     /// <summary>
     /// Discover multiple printers concurrently across a list of IP addresses.
     /// </summary>
+    /// <param name="ipAddresses">The list of IP addresses to probe.</param>
+    /// <param name="timeoutMs">The timeout in milliseconds for each probe.</param>
+    /// <param name="maxConcurrent">Maximum number of concurrent probe operations.</param>
+    /// <param name="backendFilter">Optional filter to limit discovery to specific backends.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     Task<List<DiscoveredPrinterDto>> DiscoverMultipleAsync(
         IEnumerable<string> ipAddresses,
         int timeoutMs,
@@ -38,22 +48,20 @@ public interface ICoreNetworkDiscoveryService
 /// <summary>
 /// Core implementation of network discovery using probes.
 /// </summary>
-public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
+public class CoreNetworkDiscoveryService(
+    IEnumerable<INetworkDiscoveryProbe> discoveryProbes,
+    ILogger<CoreNetworkDiscoveryService>? logger = null) : ICoreNetworkDiscoveryService
 {
-    private readonly IEnumerable<INetworkDiscoveryProbe> _discoveryProbes;
-    private readonly ILogger<CoreNetworkDiscoveryService>? _logger;
-
-    public CoreNetworkDiscoveryService(
-        IEnumerable<INetworkDiscoveryProbe> discoveryProbes,
-        ILogger<CoreNetworkDiscoveryService>? logger = null)
-    {
-        _discoveryProbes = discoveryProbes ?? throw new ArgumentNullException(nameof(discoveryProbes));
-        _logger = logger;
-    }
+    private readonly IEnumerable<INetworkDiscoveryProbe> _discoveryProbes = discoveryProbes ?? throw new ArgumentNullException(nameof(discoveryProbes));
+    private readonly ILogger<CoreNetworkDiscoveryService>? _logger = logger;
 
     /// <summary>
     /// Discover a single printer at the given IP address.
     /// </summary>
+    /// <param name="ipAddress">The IP address to probe for printer discovery.</param>
+    /// <param name="timeoutMs">The timeout in milliseconds for each probe.</param>
+    /// <param name="backendFilter">Optional filter to limit discovery to specific backends.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     public async Task<DiscoveredPrinterDto?> DiscoverPrinterAsync(
         string ipAddress,
         int timeoutMs,
@@ -121,6 +129,11 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
     /// <summary>
     /// Discover printers at multiple IP addresses concurrently.
     /// </summary>
+    /// <param name="ipAddresses">The list of IP addresses to probe.</param>
+    /// <param name="timeoutMs">The timeout in milliseconds for each probe.</param>
+    /// <param name="maxConcurrent">Maximum number of concurrent probe operations.</param>
+    /// <param name="backendFilter">Optional filter to limit discovery to specific backends.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     public async Task<List<DiscoveredPrinterDto>> DiscoverMultipleAsync(
         IEnumerable<string> ipAddresses,
         int timeoutMs,

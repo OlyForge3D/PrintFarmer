@@ -7,4 +7,6 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [ApiExplorerSettings(IgnoreApi = true)]
 [Route("api/legacy-slicer-placeholder")]
-public class SlicerController : ControllerBase { }
+public class SlicerController : ControllerBase
+{
+}

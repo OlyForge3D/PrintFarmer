@@ -1,6 +1,6 @@
-﻿namespace Farm.Backend.Plugin.Core;
+﻿using Microsoft.Extensions.DependencyInjection;
 
-using Microsoft.Extensions.DependencyInjection;
+namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Loader for discovering and initializing backend client plugins.
@@ -22,5 +22,6 @@ public interface IBackendPluginLoader
     /// <typeparam name="T">The plugin type to load.</typeparam>
     /// <param name="registry">The plugin registry to register the plugin with.</param>
     /// <param name="services">The service collection for dependency injection setup.</param>
-    void LoadPlugin<T>(IBackendPluginRegistry registry, IServiceCollection services) where T : IBackendClientPlugin, new();
+    void LoadPlugin<T>(IBackendPluginRegistry registry, IServiceCollection services)
+        where T : IBackendClientPlugin, new();
 }

@@ -36,11 +36,11 @@ public class PrintJobQueueAdapterTests
         jobQueueMock.Setup(s => s.AddJobToQueueAsync(It.IsAny<QueuePrintJobDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(returned);
 
-        var adapter = new PrintJobQueueAdapter(jobQueueMock.Object, loggerMock.Object);
+        var adapter = new PrintJobQueueAdapter(jobQueueMock.Object);
 
         var enqueueReq = new EnqueuePrintJobRequest(requestDto.GcodeFileId, null, "normal", 0.4, "PLA");
 
-        var result = await adapter.EnqueueAsync(enqueueReq, CancellationToken.None);
+        Api.Services.PrintJobQueue.PrintJobDto? result = await adapter.EnqueueAsync(enqueueReq, CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal(returned.Id, result!.Id);

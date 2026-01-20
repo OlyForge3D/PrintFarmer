@@ -56,11 +56,11 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         ArgumentNullException.ThrowIfNull(job);
 
         // Get printer model from GcodeFile metadata or assigned printer
-        var modelId = GetPrinterModelId(job);
-        var material = job.RequiredMaterialType;
+        Guid? modelId = GetPrinterModelId(job);
+        string? material = job.RequiredMaterialType;
 
         // Query similar historical jobs
-        var similarJobs = await repository.GetByModelAndMaterialAsync(
+        List<PrintJobStatistics> similarJobs = await repository.GetByModelAndMaterialAsync(
             modelId,
             material,
             successfulOnly: true,
@@ -83,14 +83,14 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         }
 
         // Calculate statistics from similar jobs
-        var avgDurationMs = similarJobs
+        double avgDurationMs = similarJobs
             .Where(s => s.ActualDurationMs.HasValue)
             .Average(s => s.ActualDurationMs!.Value);
 
         var estimatedDuration = TimeSpan.FromMilliseconds(avgDurationMs);
-        var variance = CalculateVariance(similarJobs, avgDurationMs);
-        var confidence = CalculateConfidenceLevel(similarJobs.Count);
-        var variancePercent = GetVariancePercent(confidence);
+        double variance = CalculateVariance(similarJobs, avgDurationMs);
+        ConfidenceLevel confidence = CalculateConfidenceLevel(similarJobs.Count);
+        double variancePercent = GetVariancePercent(confidence);
 
         return new CompletionPredictionDto
         {
@@ -116,7 +116,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        var job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
+        PrintJob job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Job {jobId} not found");
 
         return await PredictCompletionTimeAsync(jobId, job, cancellationToken);
@@ -140,7 +140,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         string? failureReason = null,
         CancellationToken cancellationToken = default)
     {
-        var job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
+        PrintJob job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Job {jobId} not found");
 
         await RecordJobCompletionAsync(job, actualDurationMs, isSuccess, failureReason, cancellationToken);
@@ -149,6 +149,11 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Records actual job completion for learning
     /// </summary>
+    /// <param name="job">The print job that completed.</param>
+    /// <param name="actualDurationMs">Actual duration in milliseconds.</param>
+    /// <param name="isSuccess">Whether the job completed successfully.</param>
+    /// <param name="failureReason">Reason for failure if not successful.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RecordJobCompletionAsync(
         PrintJob job,
         long actualDurationMs,
@@ -179,6 +184,12 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Gets duration statistics for a printer model and material combination
     /// </summary>
+    /// <param name="modelId">Optional printer model ID to filter by.</param>
+    /// <param name="material">Optional material type to filter by.</param>
+    /// <param name="fromDate">Optional start date for filtering statistics.</param>
+    /// <param name="minSampleSize">Minimum sample size required (default: 3).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Duration statistics DTO or null if insufficient data.</returns>
     public async Task<PredictionDurationStatsDto?> GetDurationStatsAsync(
         Guid? modelId = null,
         string? material = null,
@@ -238,14 +249,14 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             return null;
         }
 
-        var avg = validDurations.Average();
-        var variance = CalculateVariance(validDurations, avg);
-        var median = validDurations.Count % 2 == 0
-            ? (validDurations[validDurations.Count / 2 - 1] + validDurations[validDurations.Count / 2]) / 2
+        double avg = validDurations.Average();
+        double variance = CalculateVariance(validDurations, avg);
+        long median = validDurations.Count % 2 == 0
+            ? (validDurations[(validDurations.Count / 2) - 1] + validDurations[validDurations.Count / 2]) / 2
             : validDurations[validDurations.Count / 2];
 
-        var totalCount = stats.Count;
-        var successCount = stats.Count(s => s.IsSuccess);
+        int totalCount = stats.Count;
+        int successCount = stats.Count(s => s.IsSuccess);
 
         return new PredictionDurationStatsDto
         {
@@ -266,39 +277,42 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Gets recorded statistics for a specific job
     /// </summary>
+    /// <param name="jobId">The job ID to get statistics for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Job statistics DTO or null if not found.</returns>
     public async Task<PrintJobStatisticsDto?> GetJobStatisticsAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        var stats = await repository.GetByJobIdAsync(jobId, cancellationToken);
-        if (stats == null)
-        {
-            return null;
-        }
-
-        return new PrintJobStatisticsDto
-        {
-            JobId = jobId.ToString(),
-            ActualDurationMs = stats.ActualDurationMs,
-            EstimatedDurationMs = stats.EstimatedDurationMs,
-            Material = stats.Material,
-            NozzleTemperature = stats.NozzleTemperature,
-            BedTemperature = stats.BedTemperature,
-            SpeedPercentage = stats.SpeedPercentage,
-            IsSuccess = stats.IsSuccess,
-            FailureReason = stats.FailureReason,
-            CompletedAtUtc = stats.CompletedAtUtc
-        };
+        PrintJobStatistics? stats = await repository.GetByJobIdAsync(jobId, cancellationToken);
+        return stats == null
+            ? null
+            : new PrintJobStatisticsDto
+            {
+                JobId = jobId.ToString(),
+                ActualDurationMs = stats.ActualDurationMs,
+                EstimatedDurationMs = stats.EstimatedDurationMs,
+                Material = stats.Material,
+                NozzleTemperature = stats.NozzleTemperature,
+                BedTemperature = stats.BedTemperature,
+                SpeedPercentage = stats.SpeedPercentage,
+                IsSuccess = stats.IsSuccess,
+                FailureReason = stats.FailureReason,
+                CompletedAtUtc = stats.CompletedAtUtc
+            };
     }
 
     /// <summary>
     /// Gets material statistics across all printers
     /// </summary>
+    /// <param name="printerId">Optional printer ID to filter by.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Dictionary of material type to duration statistics.</returns>
     public async Task<Dictionary<string, PredictionDurationStatsDto>> GetMaterialStatsAsync(
         Guid? printerId = null,
         CancellationToken cancellationToken = default)
     {
-        var stats = await repository.GetSuccessfulJobsAsync(cancellationToken: cancellationToken);
+        List<PrintJobStatistics> stats = await repository.GetSuccessfulJobsAsync(cancellationToken: cancellationToken);
 
         if (printerId.HasValue)
         {
@@ -313,7 +327,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
 
         var result = new Dictionary<string, PredictionDurationStatsDto>();
 
-        foreach (var group in groupedByMaterial)
+        foreach (IGrouping<string, PrintJobStatistics>? group in groupedByMaterial)
         {
             var validDurations = group
                 .Where(s => s.ActualDurationMs.HasValue)
@@ -326,12 +340,12 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
                 continue;
             }
 
-            var avg = validDurations.Average();
-            var median = validDurations.Count % 2 == 0
-                ? (validDurations[validDurations.Count / 2 - 1] + validDurations[validDurations.Count / 2]) / 2
+            double avg = validDurations.Average();
+            long median = validDurations.Count % 2 == 0
+                ? (validDurations[(validDurations.Count / 2) - 1] + validDurations[validDurations.Count / 2]) / 2
                 : validDurations[validDurations.Count / 2];
 
-            var variance = CalculateVariance(validDurations, avg);
+            double variance = CalculateVariance(validDurations, avg);
 
             result[group.Key] = new PredictionDurationStatsDto
             {
@@ -354,6 +368,9 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Helper: Calculate average variance from jobs
     /// </summary>
+    /// <param name="stats">List of job statistics to calculate variance from.</param>
+    /// <param name="average">The average duration to calculate variance against.</param>
+    /// <returns>Standard deviation of durations.</returns>
     private static double CalculateVariance(List<PrintJobStatistics> stats, double average)
     {
         if (stats.Count <= 1)
@@ -361,7 +378,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             return 0;
         }
 
-        var variance = stats
+        double variance = stats
             .Where(s => s.ActualDurationMs.HasValue)
             .Average(s => Math.Pow(s.ActualDurationMs!.Value - average, 2));
 
@@ -371,6 +388,9 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Helper: Calculate variance from list of durations
     /// </summary>
+    /// <param name="durations">List of durations in milliseconds.</param>
+    /// <param name="average">The average duration to calculate variance against.</param>
+    /// <returns>Standard deviation of durations.</returns>
     private static double CalculateVariance(List<long> durations, double average)
     {
         if (durations.Count <= 1)
@@ -378,13 +398,15 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             return 0;
         }
 
-        var variance = durations.Average(d => Math.Pow(d - average, 2));
+        double variance = durations.Average(d => Math.Pow(d - average, 2));
         return Math.Sqrt(variance);
     }
 
     /// <summary>
     /// Helper: Get printer model ID from job
     /// </summary>
+    /// <param name="job">The print job to extract model ID from.</param>
+    /// <returns>Printer model ID or null if not available.</returns>
 #pragma warning disable S1172 // Parameter is reserved for future implementation
     private static Guid? GetPrinterModelId(PrintJob job)
     {
@@ -397,6 +419,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Helper: Calculate estimated completion time
     /// </summary>
+    /// <param name="job">The print job to calculate completion time for.</param>
+    /// <returns>Estimated completion time based on job data or default.</returns>
     private static DateTime CalculateEstimatedCompletion(PrintJob job)
     {
         if (job.EstimatedPrintTime.HasValue)
@@ -411,10 +435,15 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Helper: Generate human-friendly prediction note
     /// </summary>
+    /// <param name="confidence">The confidence level of the prediction.</param>
+    /// <param name="sampleSize">Number of historical samples used.</param>
+    /// <param name="material">Material type if available.</param>
+    /// <param name="modelId">Printer model ID if available.</param>
+    /// <returns>Human-readable prediction note.</returns>
 #pragma warning disable S1172 // Parameter is reserved for future implementation
     private static string GeneratePredictionNote(ConfidenceLevel confidence, int sampleSize, string? material, Guid? modelId)
     {
-        var materialStr = !string.IsNullOrWhiteSpace(material) ? $" {material}" : "";
+        string materialStr = !string.IsNullOrWhiteSpace(material) ? $" {material}" : string.Empty;
         return confidence switch
         {
             ConfidenceLevel.High => $"Based on {sampleSize}{materialStr} jobs with high confidence.",
@@ -432,8 +461,10 @@ public enum ConfidenceLevel
 {
     /// <summary>±10% accuracy with 10+ samples</summary>
     High,
+
     /// <summary>±20% accuracy with 3-9 samples</summary>
     Medium,
+
     /// <summary>±50% accuracy with 1-2 samples</summary>
     Low
 }
@@ -444,11 +475,17 @@ public enum ConfidenceLevel
 public class CompletionPredictionDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public DateTime EstimatedCompletionTime { get; set; }
+
     public TimeSpan? EstimatedDuration { get; set; }
+
     public ConfidenceLevel Confidence { get; set; }
+
     public int SampleSize { get; set; }
+
     public double? VariancePercent { get; set; }
+
     public string? Note { get; set; }
 }
 
@@ -458,15 +495,25 @@ public class CompletionPredictionDto
 public class PredictionDurationStatsDto
 {
     public int TotalJobs { get; set; }
+
     public int SuccessfulJobs { get; set; }
-    public double SuccessRate { get; set; }           // 0.0 to 1.0
+
+    public double SuccessRate { get; set; } // 0.0 to 1.0
+
     public TimeSpan AverageDuration { get; set; }
+
     public TimeSpan MedianDuration { get; set; }
+
     public TimeSpan MinDuration { get; set; }
+
     public TimeSpan MaxDuration { get; set; }
+
     public double StandardDeviation { get; set; }
+
     public double Variance { get; set; }
+
     public string? Material { get; set; }
+
     public string? PrinterModelName { get; set; }
 }
 
@@ -476,13 +523,22 @@ public class PredictionDurationStatsDto
 public class PrintJobStatisticsDto
 {
     public string JobId { get; set; } = string.Empty;
+
     public long? ActualDurationMs { get; set; }
+
     public long? EstimatedDurationMs { get; set; }
+
     public string? Material { get; set; }
+
     public int? NozzleTemperature { get; set; }
+
     public int? BedTemperature { get; set; }
+
     public int SpeedPercentage { get; set; }
+
     public bool IsSuccess { get; set; }
+
     public string? FailureReason { get; set; }
+
     public DateTime? CompletedAtUtc { get; set; }
 }

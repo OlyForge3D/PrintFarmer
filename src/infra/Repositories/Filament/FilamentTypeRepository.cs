@@ -10,19 +10,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Filament;
 
-public class FilamentTypeRepository : IFilamentTypeRepository
+public class FilamentTypeRepository(AppDbContext db) : IFilamentTypeRepository
 {
-    private readonly AppDbContext _db;
-
-    public FilamentTypeRepository(AppDbContext db)
-    {
-        _db = db;
-    }
+    private readonly AppDbContext _db = db;
 
     public async Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct = default)
     {
         return await _db.FilamentTypes.AsNoTracking()
-            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp)))
+            .Select(f => new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure))
             .ToListAsync(ct);
     }
 
@@ -42,7 +37,7 @@ public class FilamentTypeRepository : IFilamentTypeRepository
     public async Task<FilamentTypeDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         FilamentType? f = await _db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return f is null ? null : new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp));
+        return f is null ? null : new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp), f.IsAbrasive, f.NeedsEnclosure);
     }
 
     public Task UpdateFilamentTypeAsync(FilamentType ft, CancellationToken ct = default)

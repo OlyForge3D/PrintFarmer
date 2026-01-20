@@ -56,9 +56,12 @@ public static class NetworkRangeHelper
 
         byte[] networkBytes = network.GetAddressBytes();
         int hostBits = 32 - prefixLength;
-        int maxHosts = Math.Min(1 << hostBits, 1024); // Limit to 1024 IPs max
 
-        for (int i = 1; i < maxHosts - 1; i++) // Skip network and broadcast
+        // Limit to 1024 IPs max
+        int maxHosts = Math.Min(1 << hostBits, 1024);
+
+        // Skip network and broadcast addresses
+        for (int i = 1; i < maxHosts - 1; i++)
         {
             byte[] ipBytes = (byte[])networkBytes.Clone();
             ipBytes[3] += (byte)i;

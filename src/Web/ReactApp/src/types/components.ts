@@ -7,7 +7,7 @@ import type { Model } from './models';
 import type { HistoryJob, HistoryStats, ModelStats, JobAction, JobStatus, JobDetails } from './queue';
 import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
 import type { MachineProfile, SliceCompleteResult } from './slicer';
-import type { GcodeFile, Printer, QueueJob } from './api';
+import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
 
 // ====================================
 // Models3D Component Props
@@ -27,6 +27,11 @@ export interface ModelListViewProps {
   onViewerModel: (model: Model) => void;
   onTagModel: (model: Model) => void;
   formatFileSize: (bytes: number) => string;
+  onDelete?: (model: Model) => void;
+  onDownload?: (model: Model) => void;
+  selectedModelIds?: string[];
+  onSelectModel?: (modelId: string, selected: boolean) => void;
+  onSelectAllModels?: (modelIds: string[]) => void;
 }
 
 // ====================================
@@ -44,6 +49,7 @@ export interface JobDetailsModalProps {
   onClose: () => void;
   jobId: string;
   jobDetails?: JobDetails;
+  onSave?: (job: JobDetails) => void;
 }
 
 export interface JobNotesEditorProps {
@@ -64,7 +70,7 @@ export interface HistoryJobCardProps {
 }
 
 export interface QueueJobsTableProps {
-  jobs: QueueJob[];
+  jobs: JobQueuePrintJob[];
   isLoading: boolean;
   onJobAction?: (jobId: string, action: JobAction) => void;
 }
@@ -212,21 +218,6 @@ export interface QueueGcodeModalProps {
   isOpen: boolean;
   onClose: () => void;
   gcodeFile?: GcodeFile;
-}
-
-export interface GcodeListViewProps {
-  files: GcodeFile[];
-  isLoading: boolean;
-  selectedFiles: string[];
-  onSelectFile: (file: GcodeFile) => void;
-  onSelectAll: (files: GcodeFile[]) => void;
-  onDelete: (file: GcodeFile) => void;
-  onDownload: (file: GcodeFile) => void;
-  onNavigate: (file: GcodeFile) => void;
-  formatters: {
-    formatBytes: (bytes: number) => string;
-    formatDate: (date: string | Date) => string;
-  };
 }
 
 export interface HealthGaugeProps {

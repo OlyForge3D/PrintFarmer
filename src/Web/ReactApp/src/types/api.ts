@@ -316,6 +316,19 @@ export interface CreatePrinterDto {
   frontendPort?: number;
 }
 
+// Test connection request/response for verifying printer connectivity
+export interface TestConnectionRequest {
+  serverUrl: string;
+  backend: PrinterBackend;
+  apiKey?: string;
+  backendPort?: number;
+}
+
+export interface TestConnectionResponse {
+  success: boolean;
+  message?: string;
+}
+
 // Bulk import result item returned by /printers/bulk
 export interface BulkImportResultItem {
   index: number;
@@ -356,20 +369,380 @@ export interface UpdatePrinterDto {
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   supportsAutoLeveling?: boolean;
   maxPrintSpeed?: number;
   backendPort?: number;
   frontendPort?: number;
   isEnabled?: boolean;
+  // Toolheads - for updating individual toolhead settings
+  toolheads?: UpdateToolheadDto[];
+}
+
+// Update payload for modifying toolhead settings
+export interface UpdateToolheadDto {
+  id: string;
+  name?: string;
+  index?: number;
+  nozzleDiameter?: number;
+  maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType;
+  // Component model references
+  hotendModelId?: string;
+  extruderModelId?: string;
+  toolheadModelDefId?: string;
+  nozzleModelId?: string;
+  supportedMaterials?: string[];
+  isPrimary?: boolean;
 }
 
 export interface ManufacturerDto {
   id: string;
   name: string;
+  url?: string;
+  description?: string;
+}
+
+export interface SlicerModelAliasDto {
+  id: string;
+  printerModelId: string;
+  slicerModelName: string;
+  slicerType: string;
+}
+
+export interface UpdateModelAliasesRequest {
+  orcaSlicerNames: string[];
+  prusaSlicerNames: string[];
+}
+
+/**
+ * Nozzle material type for toolheads
+ */
+export enum NozzleType {
+  Brass = 0,
+  HardenedSteel = 1,
+  StainlessSteel = 2,
+  TungstenCarbide = 3,
+  Abrasive = 4,
+  Unknown = 99
+}
+
+export const NozzleTypeLabels: Record<NozzleType, string> = {
+  [NozzleType.Brass]: 'Brass',
+  [NozzleType.HardenedSteel]: 'Hardened Steel',
+  [NozzleType.StainlessSteel]: 'Stainless Steel',
+  [NozzleType.TungstenCarbide]: 'Tungsten Carbide',
+  [NozzleType.Abrasive]: 'Abrasive',
+  [NozzleType.Unknown]: 'Unknown'
+};
+
+/**
+ * String-keyed nozzle type labels for use with JSON string enum serialization.
+ * Backend sends NozzleType as string ("Brass", "HardenedSteel", etc.)
+ */
+export const NozzleTypeStringLabels: Record<string, string> = {
+  'Brass': 'Brass',
+  'HardenedSteel': 'Hardened Steel',
+  'StainlessSteel': 'Stainless Steel',
+  'TungstenCarbide': 'Tungsten Carbide',
+  'Abrasive': 'Abrasive',
+  'Unknown': 'Unknown'
+};
+
+/**
+ * Toolhead type - stock vs custom/aftermarket
+ */
+export enum ToolheadType {
+  Stock = 0,
+  Custom = 1
+}
+
+export const ToolheadTypeLabels: Record<ToolheadType, string> = {
+  [ToolheadType.Stock]: 'Stock',
+  [ToolheadType.Custom]: 'Custom'
+};
+
+/**
+ * String-keyed toolhead type labels for use with JSON string enum serialization.
+ * Backend sends ToolheadType as string ("Stock", "Custom")
+ */
+export const ToolheadTypeStringLabels: Record<string, string> = {
+  'Stock': 'Stock',
+  'Custom': 'Custom'
+};
+
+// ============== Nozzle Interface Types ==============
+/**
+ * Defines the nozzle thread/interface type that determines compatibility between hotends and nozzles.
+ * This is the physical interface standard - hotends and nozzles must match to be compatible.
+ */
+export enum NozzleInterfaceType {
+  /** Unknown or unspecified nozzle interface */
+  Unknown = 0,
+  /** E3D V6 standard thread (M6 x 1.0) - most common. Used by V6, Dragon, Rapido, Mosquito, CHC, most budget hotends */
+  V6 = 1,
+  /** E3D Volcano extended length (M6 x 1.0, longer melt zone) - for high-flow applications */
+  Volcano = 2,
+  /** E3D Revo quick-change system - no threading, magnetic/snap-fit */
+  Revo = 3,
+  /** Prusa Nextruder interface - proprietary for MK4/MK3.9S/CORE One */
+  Nextruder = 4,
+  /** BIQU H2 interface - proprietary for H2 hotend system */
+  H2 = 5,
+  /** Microswiss FlowTech interface - proprietary across their FlowTech line */
+  FlowTech = 6,
+  /** Bambu Lab proprietary interface - for X1/P1/A1 series */
+  BambuLab = 7,
+  /** Proprietary interface unique to a specific manufacturer/model */
+  Proprietary = 99
+}
+
+/** Labels for nozzle interface types */
+export const NozzleInterfaceTypeLabels: Record<NozzleInterfaceType, string> = {
+  [NozzleInterfaceType.Unknown]: 'Unknown',
+  [NozzleInterfaceType.V6]: 'V6 (M6 Thread)',
+  [NozzleInterfaceType.Volcano]: 'Volcano',
+  [NozzleInterfaceType.Revo]: 'Revo (Quick-Change)',
+  [NozzleInterfaceType.Nextruder]: 'Nextruder (Prusa)',
+  [NozzleInterfaceType.H2]: 'H2 (BIQU)',
+  [NozzleInterfaceType.FlowTech]: 'FlowTech (Microswiss)',
+  [NozzleInterfaceType.BambuLab]: 'Bambu Lab',
+  [NozzleInterfaceType.Proprietary]: 'Proprietary'
+};
+
+// ============== Component Model Definitions ==============
+// These are database-backed entities that allow extensible component tracking.
+// Instead of enums, we use ID/name pairs for hotends, extruders, toolheads, and nozzles.
+
+/**
+ * Hotend model definition (from database)
+ */
+export interface HotendModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  maxTemp?: number;
+  isHighFlow: boolean;
+  /** Nozzle interface type determines which nozzles are compatible with this hotend */
+  nozzleInterface: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Extruder model definition (from database)
+ */
+export interface ExtruderModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  gearRatio?: string;
+  isDirectDrive: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * Toolhead model definition (from database)
+ */
+export interface ToolheadModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  description?: string;
+  url?: string;
+  /** Default hotend ID for this toolhead */
+  defaultHotendId?: string;
+  /** Default extruder ID for this toolhead */
+  defaultExtruderId?: string;
+  /** Default nozzle ID for this toolhead */
+  defaultNozzleId?: string;
+}
+
+/**
+ * Nozzle model definition (from database)
+ */
+export interface NozzleModelDefinition {
+  id: string;
+  name: string;
+  manufacturerId: string;
+  manufacturerName?: string;
+  maxTemp?: number;
+  /** The material type of this nozzle */
+  nozzleType: NozzleType | string;
+  /** Whether this nozzle is hardened for abrasive filaments (computed from nozzleType) */
+  isHardened: boolean;
+  /** Nozzle interface type - must match hotend's interface to be compatible */
+  nozzleInterface: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+// ============== Component Model CRUD DTOs ==============
+
+/**
+ * DTO for creating a new hotend model
+ */
+export interface CreateHotendModelDto {
+  name: string;
+  manufacturerId: string;
+  maxTemp?: number;
+  isHighFlow?: boolean;
+  /** Nozzle interface type - defaults to V6 if not specified */
+  nozzleInterface?: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing hotend model
+ */
+export interface UpdateHotendModelDto {
+  name?: string;
+  manufacturerId?: string;
+  maxTemp?: number;
+  isHighFlow?: boolean;
+  nozzleInterface?: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for creating a new extruder model
+ */
+export interface CreateExtruderModelDto {
+  name: string;
+  manufacturerId: string;
+  gearRatio?: string;
+  isDirectDrive?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing extruder model
+ */
+export interface UpdateExtruderModelDto {
+  name?: string;
+  manufacturerId?: string;
+  gearRatio?: string;
+  isDirectDrive?: boolean;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for creating a new toolhead model
+ */
+export interface CreateToolheadModelDto {
+  name: string;
+  manufacturerId: string;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing toolhead model
+ */
+export interface UpdateToolheadModelDefDto {
+  name?: string;
+  manufacturerId?: string;
+  description?: string;
+  url?: string;
+  /** Default hotend ID for this toolhead */
+  defaultHotendId?: string | null;
+  /** Default extruder ID for this toolhead */
+  defaultExtruderId?: string | null;
+  /** Default nozzle ID for this toolhead */
+  defaultNozzleId?: string | null;
+}
+
+/**
+ * DTO for creating a new nozzle model
+ */
+export interface CreateNozzleModelDto {
+  name: string;
+  manufacturerId: string;
+  maxTemp?: number;
+  /** The material type of this nozzle - defaults to Brass if not specified */
+  nozzleType?: NozzleType | string;
+  /** Nozzle interface type - defaults to V6 if not specified */
+  nozzleInterface?: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+/**
+ * DTO for updating an existing nozzle model
+ */
+export interface UpdateNozzleModelDto {
+  name?: string;
+  manufacturerId?: string;
+  maxTemp?: number;
+  /** The material type of this nozzle */
+  nozzleType?: NozzleType | string;
+  nozzleInterface?: NozzleInterfaceType;
+  description?: string;
+  url?: string;
+}
+
+// ============== Contextual Manufacturer Types ==============
+
+/**
+ * Context types for filtering manufacturers by what items they have
+ */
+export enum CatalogContext {
+  Printers = 'Printers',
+  Hotends = 'Hotends',
+  Extruders = 'Extruders',
+  Toolheads = 'Toolheads',
+  Nozzles = 'Nozzles'
+}
+
+/**
+ * Manufacturer with item count for a specific context
+ */
+export interface ManufacturerWithCount {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
+/**
+ * Response DTO grouping manufacturers by whether they have items in a context
+ */
+export interface ManufacturersByContext {
+  withItems: ManufacturerWithCount[];
+  withoutItems: ManufacturerWithCount[];
+}
+
+/**
+ * Toolhead template for a printer model
+ */
+export interface PrinterModelToolheadDto {
+  id: string;
+  name: string;
+  index: number;
+  nozzleDiameter?: number;
+  maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType | string;
+  // Component model references (IDs and resolved names from database)
+  hotendModelId?: string;
+  hotendModelName?: string;
+  extruderModelId?: string;
+  extruderModelName?: string;
+  toolheadModelDefId?: string;
+  toolheadModelDefName?: string;
+  nozzleModelId?: string;
+  nozzleModelName?: string;
+  supportedMaterials?: string[];
+  isPrimary: boolean;
 }
 
 export interface PrinterModelDto {
@@ -380,21 +753,20 @@ export interface PrinterModelDto {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypes?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates for multi-toolhead printers
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 // Printer capabilities interface
@@ -410,9 +782,7 @@ export interface PrinterCapabilitiesExportDto {
   multiMaterial: boolean;
   supportsAutoLeveling: boolean;
   numberOfExtruders: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
   currentSpoolId?: number;
@@ -433,9 +803,7 @@ export interface PrinterCapabilitiesDto {
   hasEnclosure: boolean;
   multiMaterial: boolean;
   numberOfExtruders: number;
-  minHotendTemp?: number;
   maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
   currentSpoolId?: number;
@@ -443,6 +811,29 @@ export interface PrinterCapabilitiesDto {
   supportsAutoLeveling: boolean;
   maxPrintSpeed?: number;
   lastUpdated: Date;
+}
+
+// Toolhead data for reading/editing
+export interface ToolheadDto {
+  id: string;
+  name?: string;
+  index: number;
+  nozzleDiameter?: number;
+  maxHotendTemp?: number;
+  maxFlowRate?: number;
+  toolheadType?: ToolheadType | string;
+  // Component model references (IDs and resolved names from database)
+  hotendModelId?: string;
+  hotendModelName?: string;
+  extruderModelId?: string;
+  extruderModelName?: string;
+  toolheadModelDefId?: string;
+  toolheadModelDefName?: string;
+  nozzleModelId?: string;
+  nozzleModelName?: string;
+  supportedMaterials?: string[];
+  isPrimary: boolean;
+  lastUpdated?: Date;
 }
 
 // Printer details for edit page
@@ -462,11 +853,14 @@ export interface PrinterDetails {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
   originalServerUrl?: string;
   ipAddress?: string;
   backendPort?: number | null;
   frontendPort?: number | null;
   capabilities?: PrinterCapabilitiesDto;
+  toolheads?: ToolheadDto[];
 }
 
 // Temperature targets
@@ -545,16 +939,28 @@ export interface FilamentTypeDto {
   id: string;
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials (e.g., carbon fiber, glass fiber) that require hardened nozzles. */
+  isAbrasive: boolean;
+  /** True if the filament requires an enclosure for optimal printing (e.g., ABS, ASA, Nylon). */
+  needsEnclosure: boolean;
 }
 
 export interface CreateFilamentTypeRequest {
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials requiring hardened nozzles. */
+  isAbrasive?: boolean;
+  /** True if the filament requires an enclosure for optimal printing. */
+  needsEnclosure?: boolean;
 }
 
 export interface UpdateFilamentTypeRequest {
   name: string;
   defaultTemperatures: TempTargets;
+  /** True if the filament contains abrasive materials requiring hardened nozzles. */
+  isAbrasive?: boolean;
+  /** True if the filament requires an enclosure for optimal printing. */
+  needsEnclosure?: boolean;
 }
 
 export interface SpoolmanFilamentImportResult {
@@ -578,21 +984,20 @@ export interface UpdateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypeIds?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 export interface CreateModelRequest {
@@ -602,21 +1007,20 @@ export interface CreateModelRequest {
   maxX?: number;
   maxY?: number;
   maxZ?: number;
-  defaultBackend?: PrinterBackend;
+  defaultBackend?: PrinterBackendString;
   supportedFilamentTypeIds?: string[];
 
-  // Capability properties
-  defaultNozzleDiameter?: number;
+  // Capability properties (nozzle diameter and max hotend temp are now on toolheads)
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
   numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
-  minHotendTemp?: number;
-  maxHotendTemp?: number;
-  minBedTemp?: number;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
+
+  // Toolhead templates
+  toolheads?: PrinterModelToolheadDto[];
 }
 
 // Resolve hostname/IP utility
@@ -749,16 +1153,16 @@ export interface StartBulkHarvestRequest {
 
 // Lightweight file browser entry for hierarchical navigation
 export interface GcodeFile {
-  id: string;
+  id: string; // Unique ID for the gcode file
   path: string;
   fileName: string; // GUID-based filename for internal storage
-  name?: string; // Original filename uploaded by user (for display)
-  fileSize: number;
-  uploadedAt: Date;
+  name: string; // Original filename uploaded by user (for display)
+  fileSize: number; // File size in bytes
+  uploadedAt: Date; // Upload timestamp
   isDirectory: boolean;
-  harvestOperationId?: string;
-  thumbnailUrl?: string;
+  thumbnailUrl?: string; // URL to thumbnail image
   tags?: Array<{ id: string; name: string; color?: string; description?: string }>; // Tags applied to this gcode file
+  requiredMaterial?: string; // Material required for the print
   // Extracted metadata from G-code
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;
@@ -768,6 +1172,9 @@ export interface GcodeFile {
   extractedMaterial?: string;
   extractedPrinterModel?: string;
   extractedPrinterModelName?: string; // Raw extracted printer model name (fallback if resolution failed)
+  extractedLayerHeight?: number;
+  extractedInfill?: number;
+  extractedPerimeters?: number;
   extractedHotendTemp?: number;
   extractedBedTemp?: number;
 }
@@ -789,6 +1196,7 @@ export interface GetGcodeFilesResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+  availablePrinterModels?: Array<{ id: string | null; name: string }>;
 }
 
 // 3D Model file entry (hierarchical browser)
@@ -798,7 +1206,7 @@ export interface Model3DFile {
   size: number;
   modifiedAt: Date;
   isDirectory: boolean;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
 }
 
 export interface Model3DListResponse {
@@ -809,6 +1217,16 @@ export interface Model3DListResponse {
   pageSize?: number;
   totalPages?: number;
   totalItems?: number;
+}
+
+export interface Model3DUploadResultDto {
+  id: string;
+  name: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedAt: string;
+  url: string;
 }
 
 // G-code library runtime settings
@@ -1159,4 +1577,191 @@ export interface FileHealthDetailDto {
     status: FileHealthStatus;
     details?: string;
   }>;
+}
+
+// GCode Upload Progress - emitted via SignalR during multi-file uploads
+export interface GcodeUploadFailureSummary {
+  fileName: string;
+  error: string;
+}
+
+export interface GcodeUploadProgressDto {
+  sessionId: string;
+  totalFiles: number;
+  processedCount: number;
+  currentFileName?: string | null;
+  successfulFiles?: string[] | null;
+  failedFiles?: GcodeUploadFailureSummary[] | null;
+  errorMessage?: string | null;
+}
+
+// ============= PRINT QUEUE TYPES =============
+
+export interface QueuedPrintJobDto {
+  id: string;
+  name: string;
+  gcodeFileId: string;
+  assignedPrinterId?: string;
+  status: string;
+  priority: number;
+  queuePosition: number;
+  requiredNozzleDiameter?: number;
+  requiredMaterialType?: string;
+  requiredCapabilities?: string[];
+  estimatedPrintTimeSeconds?: number;
+  estimatedFilamentUsageGrams?: number;
+  actualStartTimeUtc?: string;
+  actualEndTimeUtc?: string;
+  actualPrintTimeSeconds?: number;
+  actualFilamentUsageGrams?: number;
+  failureReason?: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  queuedAtUtc: string;
+}
+
+export interface QueueGcodeFileMetaDto {
+  id: string;
+  fileName: string;
+  fileSizeBytes: number;
+  materialType?: string;
+  nozzleDiameter?: number;
+  estimatedPrintTimeSeconds?: number;
+  estimatedFilamentUsageGrams?: number;
+  createdAtUtc: string;
+}
+
+export interface QueuePrinterMetaDto {
+  id: string;
+  name: string;
+  modelName: string;
+  status: string;
+  isOnline: boolean;
+}
+
+export interface QueuedPrintJobWithFileMetaDto {
+  id: string;
+  job: QueuedPrintJobDto;
+  fileMetadata?: QueueGcodeFileMetaDto;
+  printerMetadata?: QueuePrinterMetaDto;
+}
+
+export interface QueueStatsDto {
+  totalQueued: number;
+  totalPrinting: number;
+  totalPaused: number;
+  averageWaitTimeMinutes: number;
+  byModel: Record<string, QueuePrinterModelStatsDto>;
+}
+
+export interface QueuePrinterModelStatsDto {
+  modelName: string;
+  totalQueued: number;
+  currentlyPrinting: number;
+  oldestQueuedAtUtc?: string;
+  averageQueueWaitMinutes: number;
+}
+
+export interface QueueHistoryPageDto {
+  entries: QueueHistoryEntryDto[];
+  totalCount: number;
+  currentPage: number;
+  pageSize: number;
+}
+
+export interface QueueHistoryEntryDto {
+  id: string;
+  jobName: string;
+  printerName: string;
+  status: string;
+  completionPercentage: number;
+  startedAtUtc: string;
+  completedAtUtc?: string;
+  actualPrintTimeSeconds: number;
+  failureReason?: string;
+}
+
+export interface TimelineEventDto {
+  jobId: string;
+  jobName: string;
+  printerName: string;
+  state: string;
+  enteredAtUtc: string;
+  exitedAtUtc?: string;
+  durationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface StateTransitionDto {
+  fromState: string;
+  toState: string;
+  transitionedAtUtc: string;
+  durationInStateSeconds?: number;
+  notes?: string;
+}
+
+export interface JobStateHistoryDto {
+  jobId: string;
+  jobName: string;
+  transitions: StateTransitionDto[];
+  totalDurationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface DurationStatsDto {
+  printerId: string;
+  printerName: string;
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  accuracyPercent?: number;
+  variancePercent?: number;
+  minActualSeconds?: number;
+  maxActualSeconds?: number;
+}
+
+export interface DurationAnalyticsDto {
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  overallAccuracyPercent?: number;
+  overallVariancePercent?: number;
+  byPrinter: Record<string, DurationStatsDto>;
+  topPerformers: DurationStatsDto[];
+  needsAttention: DurationStatsDto[];
+}
+
+export interface EnqueueQueueJobRequest {
+  gcodeFileId: string;
+  priority?: number;
+  assignedPrinterId?: string;
+  requiredNozzleDiameter?: number;
+  requiredMaterialType?: string;
+}
+
+export interface UpdateQueueJobRequest {
+  priority?: number;
+  assignedPrinterId?: string;
+  status?: string;
+  failureReason?: string;
+}
+
+export interface BulkCancelQueueJobsRequest {
+  jobIds: string[];
+}
+
+export interface QueueBulkOperationResultDto {
+  totalRequested: number;
+  successfulCount: number;
+  failedCount: number;
+  failures: QueueOperationFailureDto[];
+  completedAtUtc: string;
+}
+
+export interface QueueOperationFailureDto {
+  itemId: string;
+  errorMessage: string;
+  errorCode?: string;
 }

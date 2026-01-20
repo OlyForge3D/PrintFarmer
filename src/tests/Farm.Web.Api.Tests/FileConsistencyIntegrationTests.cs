@@ -93,7 +93,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(100.0);
     }
 
-
     [Fact]
     public async Task GetModel3DHealth_WithSpecificFile_ReturnsCorrectDetails()
     {
@@ -282,7 +281,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     private Model3D CreateAndPersistModel3D(string fileName, FileHealthStatus healthStatus)
     {
         // Root folder should already exist from database seeding, but if not, create it
-        var rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "models");
+        FolderNode? rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "models");
         if (rootFolder == null)
         {
             rootFolder = new FolderNode
@@ -321,7 +320,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     private GcodeFile CreateAndPersistGcodeFile(string fileName, FileHealthStatus healthStatus)
     {
         // Root folder should already exist from database seeding, but if not, create it
-        var rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "gcode");
+        FolderNode? rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "gcode");
         if (rootFolder == null)
         {
             rootFolder = new FolderNode

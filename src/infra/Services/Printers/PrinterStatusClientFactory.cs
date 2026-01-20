@@ -3,7 +3,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -14,7 +16,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Maps PrinterBackend enum values to status client types discovered from plugins.
 /// This factory discovers available status clients at initialization and resolves them on-demand
 /// using service scopes to properly handle scoped dependencies.
-/// 
+///
 /// NOTE: Status clients are NOT registered in DI. They are instantiated on-demand
 /// by this factory using dependency injection to resolve their dependencies.
 /// Status clients may depend on scoped services (like backend clients), so the factory
@@ -51,7 +53,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
     {
         try
         {
-            var plugins = pluginRegistry.GetAllExtendedPlugins();
+            IEnumerable<IExtendedBackendPlugin> plugins = pluginRegistry.GetAllExtendedPlugins();
             if (plugins == null)
             {
                 _logger.LogWarning("Plugin registry returned null for GetAllExtendedPlugins()");
@@ -61,10 +63,10 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
             var pluginsList = plugins.ToList();
             _logger.LogDebug($"Got {pluginsList.Count} plugins from registry");
 
-            var discoveredCount = 0;
+            int discoveredCount = 0;
             var duplicateIds = new HashSet<int>();
 
-            foreach (var plugin in pluginsList)
+            foreach (IExtendedBackendPlugin? plugin in pluginsList)
             {
                 if (plugin == null)
                 {
@@ -81,7 +83,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                 try
                 {
                     // Try to get BackendId from assembly attribute first
-                    var pluginAssembly = plugin.GetType().Assembly;
+                    Assembly pluginAssembly = plugin.GetType().Assembly;
                     var backendAttr = pluginAssembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
                         .FirstOrDefault() as BackendPluginAttribute;
 
@@ -95,7 +97,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                     else
                     {
                         // Fallback: Try to parse BackendType string to PrinterBackend enum
-                        if (Enum.TryParse<PrinterBackend>(plugin.BackendType, out var parsedBackend))
+                        if (Enum.TryParse<PrinterBackend>(plugin.BackendType, out PrinterBackend parsedBackend))
                         {
                             backendId = parsedBackend;
                         }
@@ -150,7 +152,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
 
     public IPrinterStatusClient GetStatusClient(PrinterBackend backend)
     {
-        if (!_statusClientTypeMap.TryGetValue(backend, out var statusClientType))
+        if (!_statusClientTypeMap.TryGetValue(backend, out Type? statusClientType))
         {
             _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available status client backends: {string.Join(", ", _statusClientTypeMap.Keys)}");
             throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
@@ -161,17 +163,12 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
             // Create a temporary scope to resolve the status client and its dependencies
             // Status clients depend on scoped services (like their backend client),
             // so we create them in a proper scope rather than registering them in DI.
-            using var scope = _serviceScopeFactory.CreateScope();
-            var scopedProvider = scope.ServiceProvider;
+            using IServiceScope scope = _serviceScopeFactory.CreateScope();
+            IServiceProvider scopedProvider = scope.ServiceProvider;
 
             // Activate the status client with its dependencies resolved from the scope
             // Use ActivatorUtilities which automatically resolves constructor dependencies
-            var statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType);
-
-            if (statusClient == null)
-            {
-                throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
-            }
+            object statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType) ?? throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
 
             // Verify it's assignable to IPrinterStatusClient
             // (don't use explicit cast due to potential assembly loading issues)

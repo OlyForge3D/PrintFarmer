@@ -3,21 +3,15 @@ using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.RateLimiting;
 
-public class InMemoryRateLimitService : IRateLimitService
+public class InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger) : IRateLimitService
 {
-    private readonly RateLimitOptions _options;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly RateLimitOptions _options = options;
+    private readonly IUnifiedLoggingService _logger = logger;
     private readonly ConcurrentDictionary<string, List<DateTime>> _passwordResetAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _emailConfirmationAttempts = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> _sliceJobSubmitAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _loginAttempts = new();
     private readonly ConcurrentDictionary<string, List<DateTime>> _registerAttempts = new();
-
-    public InMemoryRateLimitService(RateLimitOptions options, IUnifiedLoggingService logger)
-    {
-        _options = options;
-        _logger = logger;
-    }
 
     public Task<RateLimitResult> CheckPasswordResetLimitAsync(string email, CancellationToken ct = default)
     {
@@ -193,6 +187,7 @@ public class InMemoryRateLimitService : IRateLimitService
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (hourly)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Too many slice jobs this hour. Retry in {Math.Ceiling(retryAfter.TotalMinutes)} minutes."));
             }
+
             if (attemptsInLastDay >= maxPerDay)
             {
                 DateTime oldestInDay = attemptList.Min();
@@ -200,6 +195,7 @@ public class InMemoryRateLimitService : IRateLimitService
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (daily)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Daily slice job limit reached. Retry in {Math.Ceiling(retryAfter.TotalHours)} hours."));
             }
+
             int remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
             return Task.FromResult(new RateLimitResult(true, remaining));
         }
@@ -218,6 +214,7 @@ public class InMemoryRateLimitService : IRateLimitService
                     existing.Add(now);
                     existing.RemoveAll(a => (now - a).TotalHours > 24);
                 }
+
                 return existing;
             });
     }
@@ -235,9 +232,11 @@ public class InMemoryRateLimitService : IRateLimitService
                 lock (existing)
                 {
                     existing.Add(now);
+
                     // Clean up old attempts while recording
                     existing.RemoveAll(a => (now - a).TotalHours > 24);
                 }
+
                 return existing;
             });
     }

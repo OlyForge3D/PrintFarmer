@@ -11,9 +11,11 @@ public static class ModelBuilderExtensions
     /// <summary>
     /// Configures indexes and constraints for optimal query performance
     /// </summary>
+    /// <param name="modelBuilder">The model builder to configure.</param>
     public static void ConfigurePerformanceOptimizations(this ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
+
         // Printer table optimizations
         _ = modelBuilder.Entity<Printer>(entity =>
         {
@@ -73,10 +75,13 @@ public static class ModelBuilderExtensions
     /// <summary>
     /// Configures database-specific optimizations
     /// </summary>
+    /// <param name="modelBuilder">The model builder to configure.</param>
+    /// <param name="providerName">The database provider name (e.g., sqlite, postgres, sqlserver).</param>
     public static void ConfigureDatabaseSpecificOptimizations(this ModelBuilder modelBuilder, string providerName)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+
         // Perform provider detection using case-insensitive comparisons to avoid culture-sensitive casing
         string provider = providerName;
         if (provider.Contains("sqlite", StringComparison.OrdinalIgnoreCase))
@@ -90,10 +95,6 @@ public static class ModelBuilderExtensions
         else if (provider.Contains("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
             ConfigureSqlServerOptimizations(modelBuilder);
-        }
-        else if (provider.Contains("mysql", StringComparison.OrdinalIgnoreCase))
-        {
-            ConfigureMySqlOptimizations(modelBuilder);
         }
     }
 
@@ -118,11 +119,5 @@ public static class ModelBuilderExtensions
             _ = entity.HasIndex(p => p.Backend)
                 .HasDatabaseName("IX_Printers_Backend_Covering");
         });
-    }
-
-    private static void ConfigureMySqlOptimizations(ModelBuilder modelBuilder)
-    {
-        // MySQL-specific optimizations
-        // MySQL has good indexing capabilities
     }
 }

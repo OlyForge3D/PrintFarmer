@@ -15,11 +15,20 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     // Marker hub for broadcasting printer updates and discovery progress.
 
     // Group management for discovery sessions
+
+    /// <summary>
+    /// Joins a client to a discovery session group to receive progress updates.
+    /// </summary>
+    /// <param name="sessionId">The discovery session ID to join.</param>
     public async Task JoinDiscoveryGroupAsync(string sessionId)
     {
-        logger.LogInformation("[PrinterHub] Client {ConnectionId} joining discovery group for session {SessionId}",
-            Context.ConnectionId, sessionId);
+        logger.LogInformation(
+            "[PrinterHub] Client {ConnectionId} joining discovery group for session {SessionId}",
+            Context.ConnectionId,
+            sessionId);
+
         await Groups.AddToGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
+
         // After joining, replay latest cached progress if available. There is a narrow race where the
         // controller returns the session id before the discovery service has published & cached the
         // initial progress snapshot. To mitigate, perform a brief bounded retry.
@@ -30,29 +39,42 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
                 await Clients.Caller.SendAsync("discoveryprogress", progress);
                 break;
             }
+
             // If cancelled/connection aborted stop early
             if (Context.ConnectionAborted.IsCancellationRequested)
             {
                 break;
             }
+
             await Task.Delay(100, Context.ConnectionAborted);
         }
     }
 
+    /// <summary>
+    /// Removes a client from a discovery session group.
+    /// </summary>
+    /// <param name="sessionId">The discovery session ID to leave.</param>
     public async Task LeaveDiscoveryGroupAsync(string sessionId)
     {
-        logger.LogInformation("[PrinterHub] Client {ConnectionId} leaving discovery group for session {SessionId}",
-            Context.ConnectionId, sessionId);
+        logger.LogInformation(
+            "[PrinterHub] Client {ConnectionId} leaving discovery group for session {SessionId}",
+            Context.ConnectionId,
+            sessionId);
+
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
     }
 
     /// <summary>
     /// Called by the printer-discovery microservice to broadcast progress to clients.
     /// </summary>
+    /// <param name="progress">The discovery progress data to broadcast.</param>
     public async Task BroadcastDiscoveryProgressAsync(DiscoveryProgressDto progress)
     {
-        logger.LogDebug("[PrinterHub] Broadcasting progress for session {SessionId}: {Percentage}%",
-            progress.SessionId, progress.ProgressPercentage);
+        logger.LogDebug(
+            "[PrinterHub] Broadcasting progress for session {SessionId}: {Percentage}%",
+            progress.SessionId,
+            progress.ProgressPercentage);
+
         // Cache the progress for late-joining clients
         progressCache.Set(progress.SessionId, progress);
 
@@ -63,10 +85,14 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     /// <summary>
     /// Called by the printer-discovery microservice to broadcast when a printer is found.
     /// </summary>
+    /// <param name="found">The discovered printer data to broadcast.</param>
     public async Task BroadcastDiscoveryPrinterFoundAsync(DiscoveryPrinterFoundDto found)
     {
-        logger.LogInformation("[PrinterHub] Broadcasting printer found for session {SessionId}: {Name}",
-            found.SessionId, found.Printer.Name);
+        logger.LogInformation(
+            "[PrinterHub] Broadcasting printer found for session {SessionId}: {Name}",
+            found.SessionId,
+            found.Printer.Name);
+
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{found.SessionId}").SendAsync("discoveryprinterfound", found);
     }
@@ -74,10 +100,14 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     /// <summary>
     /// Called by the printer-discovery microservice to broadcast completion to clients.
     /// </summary>
+    /// <param name="completed">The discovery completion data to broadcast.</param>
     public async Task BroadcastDiscoveryCompletedAsync(DiscoveryCompletedDto completed)
     {
-        logger.LogInformation("[PrinterHub] Broadcasting completion for session {SessionId}: {Found} printers found",
-            completed.SessionId, completed.TotalPrintersFound);
+        logger.LogInformation(
+            "[PrinterHub] Broadcasting completion for session {SessionId}: {Found} printers found",
+            completed.SessionId,
+            completed.TotalPrintersFound);
+
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{completed.SessionId}").SendAsync("discoverycompleted", completed);
     }

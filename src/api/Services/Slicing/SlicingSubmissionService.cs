@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 
@@ -15,27 +16,20 @@ namespace Farm.Web.Api.Services.Slicing;
 /// <summary>
 /// Service for handling slicing job submissions
 /// </summary>
-public class SlicingSubmissionService : ISlicingSubmissionService
+public class SlicingSubmissionService(
+    IUnitOfWork unitOfWork,
+    ISlicerFileStorage fileStorage,
+    ISlicerOrchestrator orchestrator,
+    IHostEnvironment env,
+    IUnifiedLoggingService logger,
+    IStoredFileOperationsService fileOperations) : ISlicingSubmissionService
 {
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly ISlicerFileStorage _fileStorage;
-    private readonly ISlicerOrchestrator _orchestrator;
-    private readonly IHostEnvironment _env;
-    private readonly IUnifiedLoggingService _logger;
-
-    public SlicingSubmissionService(
-        IUnitOfWork unitOfWork,
-        ISlicerFileStorage fileStorage,
-        ISlicerOrchestrator orchestrator,
-        IHostEnvironment env,
-        IUnifiedLoggingService logger)
-    {
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
-        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
+    private readonly ISlicerOrchestrator _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+    private readonly IHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
 
     public async Task<SlicingSubmissionResult> SubmitSlicingJobAsync(
         IFormFile modelFile,
@@ -92,7 +86,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
             if (_env.IsEnvironment("Testing"))
             {
                 string jobId = response.JobId.ToString();
-                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode";
+                sliceResult.GcodeUrl = _fileOperations.BuildSlicerJobGcodeUrl(response.JobId);
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 
@@ -190,7 +184,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
             if (_env.IsEnvironment("Testing"))
             {
                 string jobId = response.JobId.ToString();
-                sliceResult.GcodeUrl = $"/api/slicer/jobs/{jobId}/gcode";
+                sliceResult.GcodeUrl = _fileOperations.BuildSlicerJobGcodeUrl(response.JobId);
                 sliceResult.Status = SlicingJobStatus.Queued.ToString();
                 sliceResult.Progress = 0;
 

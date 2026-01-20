@@ -16,9 +16,10 @@ public class UnifiedSettingsController(
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
-    
+
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
+
     private Dictionary<string, string> _keyNameToClassNameMapCache => _keyNameToClassNameMap ??= BuildKeyNameToClassNameMap();
 
     /// <summary>
@@ -39,6 +40,7 @@ public class UnifiedSettingsController(
             object settings = _modularSettingsService.GetByKey(meta.Key);
             result[meta.Key] = settings ?? new { };
         }
+
         return Ok(result);
     }
 
@@ -61,8 +63,7 @@ public class UnifiedSettingsController(
                 .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t) != null)
                 .ToDictionary(
                     t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t)!.Key,
-                    t => t
-                );
+                    t => t);
 
             foreach (KeyValuePair<string, object> kvp in settingsSections)
             {
@@ -103,6 +104,7 @@ public class UnifiedSettingsController(
                                 catch (ValidationException vex)
                                 {
                                     _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", key, vex.Message);
+
                                     // Return structured validation error for this section
                                     Dictionary<string, string> errors = new();
                                     if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
@@ -116,9 +118,11 @@ public class UnifiedSettingsController(
                                     {
                                         errors[key] = vex.Message;
                                     }
+
                                     return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
                                 }
                             }
+
                             System.Reflection.MethodInfo? saveMethod = typeof(ISettingsService).GetMethod("Save");
                             if (saveMethod != null)
                             {
@@ -167,6 +171,7 @@ public class UnifiedSettingsController(
                 : ex;
 
             _logger.LogError(actualException, "Settings POST: Exception during settings update");
+
             // If it's a ValidationException thrown from Save via reflection, return structured response
             if (actualException is ValidationException vex)
             {
@@ -180,8 +185,9 @@ public class UnifiedSettingsController(
                 }
                 else
                 {
-                    errors[""] = vex.Message;
+                    errors[string.Empty] = vex.Message;
                 }
+
                 return BadRequest(new { message = "Validation failed", errors });
             }
 
@@ -303,8 +309,9 @@ public class UnifiedSettingsController(
             }
             else
             {
-                errors[""] = vex.Message;
+                errors[string.Empty] = vex.Message;
             }
+
             return BadRequest(new { message = $"Validation failed for class '{keyName}'", errors });
         }
         catch (Exception ex)
@@ -339,7 +346,6 @@ public class UnifiedSettingsController(
         // For now, we'll use the modular settings service to save individual settings
         // and then reload the unified AppSettings. This approach allows us to support
         // any settings class without hardcoding specific mappings.
-
         string className = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
 
         // Save to modular settings service (this updates the underlying configuration)

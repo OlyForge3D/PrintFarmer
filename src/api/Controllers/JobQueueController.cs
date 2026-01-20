@@ -39,6 +39,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Add a new job to the queue
     /// </summary>
+    /// <param name="request">The print job request containing G-code file ID and optional settings.</param>
     [HttpPost]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 201)]
     [ProducesResponseType(400)]
@@ -50,15 +51,13 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
-            if (added == null)
-            {
-                return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
-            }
-
-            return CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
+            return added == null
+                ? NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer")
+                : CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
         }
         catch (Exception ex)
         {
@@ -70,6 +69,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Get a specific job
     /// </summary>
+    /// <param name="id">The unique identifier of the job to retrieve.</param>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(404)]
@@ -79,12 +79,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
-            if (dto == null)
-            {
-                return NotFound($"Print job with ID {id} not found");
-            }
-
-            return Ok(dto);
+            return dto == null ? NotFound($"Print job with ID {id} not found") : Ok(dto);
         }
         catch (Exception ex)
         {
@@ -96,6 +91,8 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Update job status, priority, or assignment
     /// </summary>
+    /// <param name="id">The unique identifier of the job to update.</param>
+    /// <param name="request">The update request containing new status, priority, or assignment.</param>
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(400)]
@@ -107,6 +104,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         {
             return BadRequest("Request body is required");
         }
+
         try
         {
             JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
@@ -128,6 +126,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// <summary>
     /// Delete a job from the queue
     /// </summary>
+    /// <param name="id">The unique identifier of the job to delete.</param>
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -138,12 +137,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             bool ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
-            if (!ok)
-            {
-                return BadRequest("Cannot delete the job (not found or currently printing)");
-            }
-
-            return NoContent();
+            return !ok ? BadRequest("Cannot delete the job (not found or currently printing)") : NoContent();
         }
         catch (Exception ex)
         {

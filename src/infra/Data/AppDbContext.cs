@@ -11,69 +11,127 @@ namespace Farm.Infrastructure.Data;
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<AppSettingsEntity> AppSettingsEntities => Set<AppSettingsEntity>();
+
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
+
     public DbSet<Printer> Printers => Set<Printer>();
+
     public DbSet<Location> Locations => Set<Location>();
+
     public DbSet<Spool> Spools => Set<Spool>();
+
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
+
     public DbSet<PrinterModel> PrinterModels => Set<PrinterModel>();
+
     public DbSet<PrinterModelAlias> PrinterModelAliases => Set<PrinterModelAlias>();
+
+    public DbSet<PrinterModelToolhead> PrinterModelToolheads => Set<PrinterModelToolhead>();
+
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
+
     public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
+
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
 
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
+
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+
     public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
+
     public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();
+
     public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
+
     public DbSet<PrintJobStatistics> PrintJobStatistics => Set<PrintJobStatistics>();
+
     public DbSet<RetryPolicy> RetryPolicies => Set<RetryPolicy>();
+
     public DbSet<JobRetry> JobRetries => Set<JobRetry>();
+
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
+
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
+
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
+
     public DbSet<HarvestFileGcodeFileMapping> HarvestFileGcodeFileMappings => Set<HarvestFileGcodeFileMapping>();
+
     public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
-    public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
-    public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
+
     public DbSet<Tag> Tags => Set<Tag>();
-    public DbSet<TagMapping> TagMappings => Set<TagMapping>();
+
     public DbSet<FolderNode> Folders => Set<FolderNode>();
+
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
+
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
+
     public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();
+
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
+
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
+
     public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
+
     public DbSet<Worker> Workers => Set<Worker>();
+
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
+
+    // Print approvals (pending Upload+Print approvals)
+    public DbSet<PrintApproval> PrintApprovals => Set<PrintApproval>();
 
     // File Health & Consistency Auditing
     public DbSet<FileHealthAudit> FileHealthAudits => Set<FileHealthAudit>();
 
     // Notifications & User Communication
     public DbSet<Notification> Notifications => Set<Notification>();
+
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
+
     public DbSet<Role> Roles => Set<Role>();
+
     public DbSet<Resource> Resources => Set<Resource>();
-    public DbSet<Domain.Action> Actions => Set<Domain.Action>();
+
+    public DbSet<UserAction> UserActions => Set<UserAction>();
+
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
     public DbSet<PasswordPolicyEntity> PasswordPolicies => Set<PasswordPolicyEntity>();
+
     public DbSet<FailedLoginAttempt> FailedLoginAttempts => Set<FailedLoginAttempt>();
+
     public DbSet<AuthAuditLog> AuthAuditLogs => Set<AuthAuditLog>();
+
     public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
+
+    // API Keys for OctoPrint API
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
+    // Component Model Definitions (extensible manufacturer-backed components)
+    public DbSet<HotendModelDefinition> HotendModelDefinitions => Set<HotendModelDefinition>();
+
+    public DbSet<ExtruderModelDefinition> ExtruderModelDefinitions => Set<ExtruderModelDefinition>();
+
+    public DbSet<ToolheadModelDefinition> ToolheadModelDefinitions => Set<ToolheadModelDefinition>();
+
+    public DbSet<NozzleModelDefinition> NozzleModelDefinitions => Set<NozzleModelDefinition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -111,6 +169,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(p => p.IpAddress).HasMaxLength(64);
             _ = b.Property(p => p.Backend).HasDefaultValue(0);
             _ = b.Property(p => p.ApiKey);
+
             // Prevent duplicate printers by IP address (unique constraint)
             // SQLite allows multiple NULLs in unique index by default
             // SQL Server needs a filtered index to allow NULLs
@@ -119,6 +178,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = ipIndex.HasFilter("[IpAddress] IS NOT NULL");
             }
+
             _ = b.HasOne(p => p.Manufacturer)
              .WithMany()
              .HasForeignKey(p => p.ManufacturerId)
@@ -140,13 +200,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // TODO: ApiKey entity mapping - entity not yet implemented
+        // _ = modelBuilder.Entity<Farm.Infrastructure.Domain.ApiKey>(b =>
+        // {
+        //     _ = b.HasKey(a => a.Id);
+        //     _ = b.Property(a => a.UserId);
+        //     _ = b.Property(a => a.Name).HasMaxLength(128);
+        //     _ = b.Property(a => a.KeyHash).IsRequired().HasMaxLength(128);
+        //     _ = b.Property(a => a.IsActive).HasDefaultValue(true);
+        //     _ = b.HasIndex(a => a.KeyHash).IsUnique();
+        //     _ = b.Property(a => a.CreatedAt).IsRequired();
+        // });
+
         // Toolhead Entity Configuration
         _ = modelBuilder.Entity<Toolhead>(b =>
         {
             _ = b.HasKey(t => t.Id);
             _ = b.Property(t => t.Name).HasMaxLength(128);
             _ = b.Property(t => t.Index).IsRequired();
-            _ = b.Property(t => t.NozzleDiameter).IsRequired();
             _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
             _ = b.Property(t => t.UpdatedAt).IsRequired();
@@ -157,16 +228,90 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                     v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
 
-            // Foreign Key
+            // Foreign Key to Printer
             _ = b.HasOne(t => t.Printer)
              .WithMany(p => p.Toolheads)
              .HasForeignKey(t => t.PrinterId)
              .OnDelete(DeleteBehavior.Cascade);
 
+            // Foreign Keys to Component Models (optional relationships)
+            _ = b.HasOne(t => t.HotendModel)
+             .WithMany()
+             .HasForeignKey(t => t.HotendModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ExtruderModel)
+             .WithMany()
+             .HasForeignKey(t => t.ExtruderModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ToolheadModelDef)
+             .WithMany()
+             .HasForeignKey(t => t.ToolheadModelDefId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.NozzleModel)
+             .WithMany()
+             .HasForeignKey(t => t.NozzleModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
             // Indexes
             _ = b.HasIndex(t => t.PrinterId);
             _ = b.HasIndex(t => t.Index);
         });
+
+        // PrinterModelToolhead Entity Configuration (template toolheads for printer models)
+        _ = modelBuilder.Entity<PrinterModelToolhead>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).HasMaxLength(128);
+            _ = b.Property(t => t.Index).IsRequired();
+            _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
+            _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
+
+            // JSON array properties
+            _ = b.Property(t => t.SupportedMaterials)
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+
+            // Foreign Key to PrinterModel
+            _ = b.HasOne(t => t.PrinterModel)
+             .WithMany(p => p.Toolheads)
+             .HasForeignKey(t => t.PrinterModelId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Foreign Keys to Component Models (optional relationships)
+            _ = b.HasOne(t => t.HotendModel)
+             .WithMany()
+             .HasForeignKey(t => t.HotendModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ExtruderModel)
+             .WithMany()
+             .HasForeignKey(t => t.ExtruderModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.ToolheadModelDef)
+             .WithMany()
+             .HasForeignKey(t => t.ToolheadModelDefId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            _ = b.HasOne(t => t.NozzleModel)
+             .WithMany()
+             .HasForeignKey(t => t.NozzleModelId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            _ = b.HasIndex(t => t.PrinterModelId);
+            _ = b.HasIndex(t => t.Index);
+        });
+
+        // Component Model Definitions (extensible manufacturer-backed components)
+        ConfigureHotendModelDefinition(modelBuilder);
+        ConfigureExtruderModelDefinition(modelBuilder);
+        ConfigureToolheadModelDefinition(modelBuilder);
+        ConfigureNozzleModelDefinition(modelBuilder);
 
         // Location Entity Configuration
         _ = modelBuilder.Entity<Location>(b =>
@@ -200,6 +345,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             // Persisted shadow column for cross-provider case-insensitive uniqueness.
             // We populate this in SaveChanges overrides (lower-invariant) to avoid provider-specific computed syntax.
             _ = b.Property<string>("NameLowered")
@@ -218,10 +364,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             _ = b.HasOne(m => m.Manufacturer)
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)
              .OnDelete(DeleteBehavior.NoAction); // Changed from Cascade to NoAction to prevent multiple cascade paths
+
             // Persisted shadow column for cross-provider case-insensitive uniqueness inside a manufacturer.
             _ = b.Property<string>("NameLowered")
                 .HasColumnName("NameLowered")
@@ -236,14 +384,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.MaxZ);
             _ = b.Property(m => m.DefaultBackend);
 
-            // Capability defaults
-            _ = b.Property(m => m.DefaultNozzleDiameter).HasDefaultValue(0.4);
+            // Capability defaults (nozzle diameter and max hotend temp are now on toolheads)
             _ = b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
             _ = b.Property(m => m.HasEnclosure).HasDefaultValue(false);
             _ = b.Property(m => m.MultiMaterial).HasDefaultValue(false);
             _ = b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
             _ = b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
-            _ = b.Property(m => m.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
             _ = b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
         });
@@ -257,6 +403,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 _ = nameProp.UseCollation("NOCASE");
             }
+
             _ = b.HasIndex(f => f.Name).IsUnique();
             _ = b.Property(f => f.DefaultHotendTemp);
             _ = b.Property(f => f.DefaultBedTemp);
@@ -286,6 +433,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(a => a.PrinterModelId)
              .OnDelete(DeleteBehavior.Cascade);
+
             // Unique constraint: SlicerModelName + SlicerType (NULL safe)
             _ = b.HasIndex(a => new { a.PrinterModelId, a.SlicerModelName, a.SlicerType }).IsUnique();
         });
@@ -335,6 +483,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(g => g.PrinterModelId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Navigation: GcodeFile -> Tags (skip-navigation collection)
+            // Skip-navigation: GcodeFile.Tags - join table managed by EF Core
+            _ = b.HasMany(g => g.Tags)
+                .WithMany();
 
             // Indexes
             _ = b.HasIndex(g => g.FileHash).IsUnique();
@@ -572,6 +725,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(h => h.Status);
         });
 
+        // TODO: PrintApproval entity mapping - entity not yet implemented
+        // _ = modelBuilder.Entity<Farm.Infrastructure.Domain.PrintApproval>(b =>
+        // {
+        //     _ = b.HasKey(p => p.Id);
+        //     _ = b.Property(p => p.PrintJobId).IsRequired();
+        //     _ = b.Property(p => p.PrinterId);
+        //     _ = b.Property(p => p.RequestedBy).HasMaxLength(128);
+        //     _ = b.Property(p => p.CreatedAt).IsRequired();
+        //     _ = b.HasIndex(p => p.CreatedAt);
+        // });
+
         // HarvestDiscoveredFile Entity Configuration
         _ = modelBuilder.Entity<HarvestDiscoveredFile>(b =>
         {
@@ -644,8 +808,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(r => r.IsActive);
         });
 
-        // Action Entity Configuration
-        _ = modelBuilder.Entity<Domain.Action>(b =>
+        // UserAction Entity Configuration
+        _ = modelBuilder.Entity<UserAction>(b =>
         {
             _ = b.HasKey(a => a.Id);
             _ = b.Property(a => a.Name).IsRequired().HasMaxLength(50);
@@ -673,7 +837,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Cascade);
 
             _ = b.HasOne(rp => rp.Action)
-                .WithMany(a => a.RolePermissions)
+                .WithMany(ua => ua.RolePermissions)
                 .HasForeignKey(rp => rp.ActionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
@@ -809,6 +973,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
             // Foreign Keys
+            // Foreign Keys
             _ = b.HasOne(m => m.Folder)
                 .WithMany(f => f.Models)
                 .HasForeignKey(m => m.FolderId)
@@ -818,11 +983,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(m => m.UploadedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // Navigation: Model3D -> TagMappings
-            _ = b.HasMany(m => m.TagMappings)
-                .WithOne(tm => tm.Model3D)
-                .HasForeignKey(tm => tm.Model3DId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // Navigation: Model3D -> Tags (skip-navigation collection)
+            // Skip-navigation: Model3D.Tags - join table managed by EF Core
+            _ = b.HasMany(m => m.Tags)
+                .WithMany();
 
             // Indexes
             _ = b.HasIndex(m => m.FileHash).IsUnique();
@@ -835,53 +999,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
         });
 
-        // Model3DTag Entity Configuration
-        _ = modelBuilder.Entity<Model3DTag>(b =>
-        {
-            _ = b.HasKey(t => t.Id);
-            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
-            _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
-            _ = b.Property(t => t.Description).HasMaxLength(512);
-
-            // Navigation: Model3DTag -> TagMappings
-            _ = b.HasMany(t => t.TagMappings)
-                .WithOne(tm => tm.Tag)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Index for quick tag lookups
-            _ = b.HasIndex(t => t.Name).IsUnique();
-
-            // Index for analytics (Phase 3D - tag creation trends)
-            _ = b.HasIndex(t => t.CreatedAt);
-        });
-
-        // Model3DTagMapping Entity Configuration
-        _ = modelBuilder.Entity<Model3DTagMapping>(b =>
-        {
-            _ = b.HasKey(tm => tm.Id);
-            _ = b.Property(tm => tm.Model3DId).IsRequired();
-            _ = b.Property(tm => tm.TagId).IsRequired();
-
-            // Foreign Keys
-            _ = b.HasOne(tm => tm.Model3D)
-                .WithMany(m => m.TagMappings)
-                .HasForeignKey(tm => tm.Model3DId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            _ = b.HasOne(tm => tm.Tag)
-                .WithMany(t => t.TagMappings)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Composite index to prevent duplicate tag assignments
-            _ = b.HasIndex(tm => new { tm.Model3DId, tm.TagId }).IsUnique();
-
-            // Index for finding all models with a tag
-            _ = b.HasIndex(tm => tm.TagId);
-        });
-
-        // Generic Tag Entity Configuration
+        // Tag Entity Configuration (Generic tag for all object types)
         _ = modelBuilder.Entity<Tag>(b =>
         {
             _ = b.HasKey(t => t.Id);
@@ -889,41 +1007,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
             _ = b.Property(t => t.Description).HasMaxLength(512);
 
-            // Navigation: Tag -> TagMappings
-            _ = b.HasMany(t => t.TagMappings)
-                .WithOne(tm => tm.Tag)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
             // Index for quick tag lookups
             _ = b.HasIndex(t => t.Name).IsUnique();
 
-            // Index for analytics (tag creation trends)
+            // Index for analytics
             _ = b.HasIndex(t => t.CreatedAt);
-        });
-
-        // Generic TagMapping Entity Configuration (Polymorphic join table)
-        _ = modelBuilder.Entity<TagMapping>(b =>
-        {
-            _ = b.HasKey(tm => tm.Id);
-            _ = b.Property(tm => tm.TagId).IsRequired();
-            _ = b.Property(tm => tm.ObjectType).IsRequired().HasMaxLength(50); // "Model3D", "GcodeFile", "Printer", etc.
-            _ = b.Property(tm => tm.ObjectId).IsRequired();
-
-            // Foreign Key to Tag
-            _ = b.HasOne(tm => tm.Tag)
-                .WithMany(t => t.TagMappings)
-                .HasForeignKey(tm => tm.TagId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Composite index to prevent duplicate tag assignments
-            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId, tm.TagId }).IsUnique();
-
-            // Index for finding all objects with a tag
-            _ = b.HasIndex(tm => tm.TagId);
-
-            // Index for finding all tags for an object
-            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId });
         });
 
         // FolderNode Entity Configuration
@@ -1295,6 +1383,43 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(np => np.UserId).IsUnique();
         });
 
+        // ApiKey Entity Configuration (OctoPrint API)
+        _ = modelBuilder.Entity<ApiKey>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.UserId).IsRequired(false); // Nullable for global keys
+            _ = b.Property(a => a.Name).IsRequired().HasMaxLength(256);
+            _ = b.Property(a => a.KeyHash).IsRequired().HasMaxLength(64); // SHA256 hex = 64 chars
+            _ = b.Property(a => a.IsActive).IsRequired().HasDefaultValue(true);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
+            _ = b.Property(a => a.ExpiresAt).IsRequired(false);
+
+            // Indexes for efficient querying
+            _ = b.HasIndex(a => a.KeyHash).IsUnique(); // Fast lookup by hash
+            _ = b.HasIndex(a => a.UserId); // Find user's keys
+            _ = b.HasIndex(a => new { a.UserId, a.IsActive }); // Active keys for user
+        });
+
+        // PrintApproval Entity Configuration (OctoPrint API Upload+Print)
+        _ = modelBuilder.Entity<PrintApproval>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.PrintJobId).IsRequired();
+            _ = b.Property(a => a.PrinterId).IsRequired(false);
+            _ = b.Property(a => a.RequestedBy).HasMaxLength(256);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
+
+            // Foreign keys
+            _ = b.HasOne<PrintJob>()
+                .WithMany()
+                .HasForeignKey(a => a.PrintJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for efficient querying
+            _ = b.HasIndex(a => a.PrintJobId);
+            _ = b.HasIndex(a => a.CreatedAt).IsDescending(); // Most recent first
+        });
+
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
         {
@@ -1334,6 +1459,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
             }
         }
+
         foreach (EntityEntry<PrinterModel> entry in ChangeTracker.Entries<PrinterModel>())
         {
             if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
@@ -1343,4 +1469,95 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             }
         }
     }
+
+    #region Component Model Definition Configurations
+
+    private void ConfigureHotendModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<HotendModelDefinition>(b =>
+        {
+            _ = b.HasKey(h => h.Id);
+            _ = b.Property(h => h.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(h => h.Description).HasMaxLength(512);
+            _ = b.Property(h => h.MaxTemp).HasDefaultValue(300);
+            _ = b.Property(h => h.IsHighFlow).HasDefaultValue(false);
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(h => h.Manufacturer)
+             .WithMany()
+             .HasForeignKey(h => h.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(h => h.ManufacturerId);
+            _ = b.HasIndex(h => h.Name);
+        });
+    }
+
+    private void ConfigureExtruderModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<ExtruderModelDefinition>(b =>
+        {
+            _ = b.HasKey(e => e.Id);
+            _ = b.Property(e => e.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(e => e.Description).HasMaxLength(512);
+            _ = b.Property(e => e.GearRatio).HasMaxLength(32);
+            _ = b.Property(e => e.IsDirectDrive).HasDefaultValue(true);
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(e => e.Manufacturer)
+             .WithMany()
+             .HasForeignKey(e => e.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(e => e.ManufacturerId);
+            _ = b.HasIndex(e => e.Name);
+        });
+    }
+
+    private void ConfigureToolheadModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<ToolheadModelDefinition>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(t => t.Description).HasMaxLength(512);
+
+            // Foreign Key to Manufacturer (nullable - community designs may not have a manufacturer)
+            _ = b.HasOne(t => t.Manufacturer)
+             .WithMany()
+             .HasForeignKey(t => t.ManufacturerId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Index for lookups
+            _ = b.HasIndex(t => t.ManufacturerId);
+            _ = b.HasIndex(t => t.Name);
+        });
+    }
+
+    private void ConfigureNozzleModelDefinition(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<NozzleModelDefinition>(b =>
+        {
+            _ = b.HasKey(n => n.Id);
+            _ = b.Property(n => n.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(n => n.Description).HasMaxLength(512);
+            _ = b.Property(n => n.MaxTemp).HasDefaultValue(500);
+
+            // IsHardened is a computed property marked [NotMapped] - do not configure it here
+
+            // Foreign Key to Manufacturer
+            _ = b.HasOne(n => n.Manufacturer)
+             .WithMany()
+             .HasForeignKey(n => n.ManufacturerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Index for lookups
+            _ = b.HasIndex(n => n.ManufacturerId);
+            _ = b.HasIndex(n => n.Name);
+        });
+    }
+
+    #endregion
 }

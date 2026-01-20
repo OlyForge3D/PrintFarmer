@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -16,16 +17,10 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// Integration tests for slicer worker registration with the central registry
 /// </summary>
 [Trait("Category", "Integration")]
-public class WorkerRegistrationIntegrationTests : IAsyncLifetime
+public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly ITestOutputHelper _output;
-
-    public WorkerRegistrationIntegrationTests(ITestOutputHelper output)
-    {
-        _factory = new CustomWebApplicationFactory();
-        _output = output ?? throw new ArgumentNullException(nameof(output));
-    }
+    private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
+    private readonly ITestOutputHelper _output = output ?? throw new ArgumentNullException(nameof(output));
 
     public async Task InitializeAsync()
     {
@@ -67,7 +62,7 @@ public class WorkerRegistrationIntegrationTests : IAsyncLifetime
         HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", content);
 
         // Assert - Registration succeeded
-        _ = registerResponse.Should().BeSuccessful();
+        _ = registerResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         string registerResult = await registerResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Registration result: {registerResult}");
 
@@ -86,7 +81,7 @@ public class WorkerRegistrationIntegrationTests : IAsyncLifetime
         HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
 
         // Assert - Worker appears in list
-        _ = listResponse.Should().BeSuccessful();
+        _ = listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         string listJson = await listResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Workers list: {listJson}");
 
@@ -143,12 +138,12 @@ public class WorkerRegistrationIntegrationTests : IAsyncLifetime
         HttpResponseMessage heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
 
         // Assert - Heartbeat succeeded
-        _ = heartbeatResponse.Should().BeSuccessful();
+        _ = heartbeatResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _output.WriteLine("Heartbeat sent successfully");
 
         // Verify worker status was updated
         HttpResponseMessage getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
-        _ = getResponse.Should().BeSuccessful();
+        _ = getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string workerJson = await getResponse.Content.ReadAsStringAsync();
         SlicerServiceDto? worker = JsonSerializer.Deserialize<SlicerServiceDto>(workerJson, new JsonSerializerOptions
@@ -194,7 +189,7 @@ public class WorkerRegistrationIntegrationTests : IAsyncLifetime
         HttpResponseMessage deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
 
         // Assert - Deregistration succeeded
-        _ = deregisterResponse.Should().BeSuccessful();
+        _ = deregisterResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _output.WriteLine("Worker deregistered successfully");
 
         // Verify worker no longer appears in list

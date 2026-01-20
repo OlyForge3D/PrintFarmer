@@ -8,6 +8,8 @@ export interface QueueOverview {
   currentJobId?: string;
   currentJobName?: string;
   estimatedCompletionTime?: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
 }
 
 export interface PrintJob {

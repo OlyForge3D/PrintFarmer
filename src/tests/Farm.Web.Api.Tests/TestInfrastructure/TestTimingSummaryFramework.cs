@@ -41,11 +41,9 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
 
     protected override ITestFrameworkExecutor CreateExecutor(AssemblyName assemblyName)
     {
-        if (!_auto)
-        {
-            return base.CreateExecutor(assemblyName);
-        }
-        return new AutoTimingFrameworkExecutor(assemblyName, SourceInformationProvider, DiagnosticMessageSink);
+        return !_auto
+            ? base.CreateExecutor(assemblyName)
+            : new AutoTimingFrameworkExecutor(assemblyName, SourceInformationProvider, DiagnosticMessageSink);
     }
 
     private void GenerateSummary()
@@ -116,7 +114,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 {
                     return sorted[0].DurationMs;
                 }
-                double rank = (p / 100d) * (sorted.Count - 1);
+                double rank = p / 100d * (sorted.Count - 1);
                 int lowIdx = (int)Math.Floor(rank);
                 int highIdx = (int)Math.Ceiling(rank);
                 if (lowIdx == highIdx)
@@ -124,7 +122,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                     return sorted[lowIdx].DurationMs;
                 }
                 double frac = rank - lowIdx;
-                return sorted[lowIdx].DurationMs + (sorted[highIdx].DurationMs - sorted[lowIdx].DurationMs) * frac;
+                return sorted[lowIdx].DurationMs + ((sorted[highIdx].DurationMs - sorted[lowIdx].DurationMs) * frac);
             }
             double p50 = Percentile(50);
             double p90 = Percentile(90);
@@ -158,7 +156,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 {
                     return arr[0];
                 }
-                double rank = (p / 100d) * (arr.Count - 1);
+                double rank = p / 100d * (arr.Count - 1);
                 int low = (int)Math.Floor(rank);
                 int high = (int)Math.Ceiling(rank);
                 if (low == high)
@@ -166,7 +164,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                     return arr[low];
                 }
                 double frac = rank - low;
-                return arr[low] + (arr[high] - arr[low]) * frac;
+                return arr[low] + ((arr[high] - arr[low]) * frac);
             }
             List<string> summaryLines = new List<string>
             {
@@ -200,23 +198,14 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
 
     private static string Truncate(string value, int max)
     {
-        if (string.IsNullOrEmpty(value) || value.Length <= max)
-        {
-            return value;
-        }
-        return value[..(max - 3)] + "...";
+        return string.IsNullOrEmpty(value) || value.Length <= max ? value : value[..(max - 3)] + "...";
     }
 
     private sealed record TimingEntry(string Category, string Class, string Method, double DurationMs);
 }
 
-internal sealed class AutoTimingFrameworkExecutor : XunitTestFrameworkExecutor
+internal sealed class AutoTimingFrameworkExecutor(AssemblyName assemblyName, ISourceInformationProvider sourceInformationProvider, IMessageSink diagnosticMessageSink) : XunitTestFrameworkExecutor(assemblyName, sourceInformationProvider, diagnosticMessageSink)
 {
-    public AutoTimingFrameworkExecutor(AssemblyName assemblyName, ISourceInformationProvider sourceInformationProvider, IMessageSink diagnosticMessageSink)
-        : base(assemblyName, sourceInformationProvider, diagnosticMessageSink)
-    {
-    }
-
     protected override void RunTestCases(IEnumerable<IXunitTestCase> testCases, IMessageSink executionMessageSink, ITestFrameworkExecutionOptions executionOptions)
     {
         AutoTimingMessageSink timingSink = new AutoTimingMessageSink(executionMessageSink);
@@ -224,12 +213,10 @@ internal sealed class AutoTimingFrameworkExecutor : XunitTestFrameworkExecutor
     }
 }
 
-internal sealed class AutoTimingMessageSink : LongLivedMarshalByRefObject, IMessageSink
+internal sealed class AutoTimingMessageSink(IMessageSink inner) : LongLivedMarshalByRefObject, IMessageSink
 {
-    private readonly IMessageSink _inner;
+    private readonly IMessageSink _inner = inner;
     private readonly ConcurrentDictionary<string, Stopwatch> _sw = new();
-
-    public AutoTimingMessageSink(IMessageSink inner) => _inner = inner;
 
     public bool OnMessage(IMessageSinkMessage message)
     {

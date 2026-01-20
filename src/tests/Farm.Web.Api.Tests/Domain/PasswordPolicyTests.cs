@@ -69,9 +69,9 @@ public class PasswordPolicyTests
     [Fact]
     public void UpdatedAt_DefaultsToNow()
     {
-        var before = DateTime.UtcNow;
+        DateTime before = DateTime.UtcNow;
         var policy = new PasswordPolicy();
-        var after = DateTime.UtcNow;
+        DateTime after = DateTime.UtcNow;
 
         policy.UpdatedAt.Should().BeOnOrAfter(before);
         policy.UpdatedAt.Should().BeOnOrBefore(after.AddSeconds(1));

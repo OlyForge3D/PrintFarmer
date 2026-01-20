@@ -1,9 +1,8 @@
 ﻿using System;
 
-namespace Farm.Infrastructure.Contracts.Slicing
+namespace Farm.Infrastructure.Contracts.Slicing;
+
+public class RenewLeaseRequest
 {
-    public class RenewLeaseRequest
-    {
-        public int LeaseDurationSeconds { get; set; } = 300;
-    }
+    public int LeaseDurationSeconds { get; set; } = 300;
 }

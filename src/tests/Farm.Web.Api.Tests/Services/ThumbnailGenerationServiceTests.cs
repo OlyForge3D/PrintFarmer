@@ -91,7 +91,7 @@ namespace Farm.Web.Api.Tests.Services
         public void Constructor_CreatesThumbnailDirectory_IfNotExists()
         {
             // Arrange
-            var testDir = Path.Combine(Path.GetTempPath(), $"test-dir-{Guid.NewGuid()}");
+            string testDir = Path.Combine(Path.GetTempPath(), $"test-dir-{Guid.NewGuid()}");
             _configurationMock
                 .Setup(c => c["ThumbnailGeneration:ThumbnailsPath"])
                 .Returns(testDir);
@@ -117,7 +117,7 @@ namespace Farm.Web.Api.Tests.Services
         public void ThumbnailFileExtension_ReturnsPngExtension()
         {
             // Act
-            var extension = _service.ThumbnailFileExtension;
+            string extension = _service.ThumbnailFileExtension;
 
             // Assert
             Assert.Equal(".png", extension);
@@ -132,7 +132,7 @@ namespace Farm.Web.Api.Tests.Services
         public void IsFormatSupported_ReturnsCorrectValue(ModelFileFormat format, bool expected)
         {
             // Act
-            var result = _service.IsFormatSupported(format);
+            bool result = _service.IsFormatSupported(format);
 
             // Assert
             Assert.Equal(expected, result);
@@ -142,11 +142,11 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithNonexistentFile_ReturnsFalse()
         {
             // Arrange
-            var modelPath = "/nonexistent/path/model.stl";
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = "/nonexistent/path/model.stl";
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
 
             // Act
-            var result = await _service.GenerateThumbnailAsync(
+            bool result = await _service.GenerateThumbnailAsync(
                 modelPath,
                 ModelFileFormat.STL,
                 outputPath);
@@ -161,9 +161,9 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithValidFile_CreatesOutputDirectory()
         {
             // Arrange
-            var modelPath = CreateDummyModelFile();
-            var outputDir = Path.Combine(_testThumbnailsDir, "nested", "output");
-            var outputPath = Path.Combine(outputDir, "output.png");
+            string modelPath = CreateDummyModelFile();
+            string outputDir = Path.Combine(_testThumbnailsDir, "nested", "output");
+            string outputPath = Path.Combine(outputDir, "output.png");
 
             try
             {
@@ -186,8 +186,8 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithCustomDimensions_UsesProvidedDimensions()
         {
             // Arrange
-            var modelPath = CreateDummyModelFile();
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = CreateDummyModelFile();
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
             int width = 256;
             int height = 384;
 
@@ -214,8 +214,8 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithDefaultDimensions_Uses512x512()
         {
             // Arrange
-            var modelPath = CreateDummyModelFile();
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = CreateDummyModelFile();
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
 
             try
             {
@@ -238,11 +238,11 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithException_LogsErrorAndReturnsFalse()
         {
             // Arrange
-            var modelPath = "/invalid/path/model.stl";
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = "/invalid/path/model.stl";
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
 
             // Act
-            var result = await _service.GenerateThumbnailAsync(
+            bool result = await _service.GenerateThumbnailAsync(
                 modelPath,
                 ModelFileFormat.STL,
                 outputPath);
@@ -257,17 +257,17 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_Multiple_ProducesIndependentResults()
         {
             // Arrange
-            var model1 = CreateDummyModelFile();
-            var model2 = CreateDummyModelFile();
-            var output1 = Path.Combine(_testThumbnailsDir, "output1.png");
-            var output2 = Path.Combine(_testThumbnailsDir, "output2.png");
+            string model1 = CreateDummyModelFile();
+            string model2 = CreateDummyModelFile();
+            string output1 = Path.Combine(_testThumbnailsDir, "output1.png");
+            string output2 = Path.Combine(_testThumbnailsDir, "output2.png");
 
             try
             {
                 // Act
-                var result1 = await _service.GenerateThumbnailAsync(
+                bool result1 = await _service.GenerateThumbnailAsync(
                     model1, ModelFileFormat.STL, output1);
-                var result2 = await _service.GenerateThumbnailAsync(
+                bool result2 = await _service.GenerateThumbnailAsync(
                     model2, ModelFileFormat.STL, output2);
 
                 // Assert - Both should complete independently
@@ -295,8 +295,8 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_WithCancellation_HandlesGracefully()
         {
             // Arrange
-            var modelPath = CreateDummyModelFile();
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = CreateDummyModelFile();
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
             var cts = new CancellationTokenSource();
             cts.Cancel();
 
@@ -305,7 +305,7 @@ namespace Farm.Web.Api.Tests.Services
                 // Act & Assert - Should handle cancellation without throwing
                 try
                 {
-                    var result = await _service.GenerateThumbnailAsync(
+                    bool result = await _service.GenerateThumbnailAsync(
                         modelPath,
                         ModelFileFormat.STL,
                         outputPath,
@@ -329,8 +329,8 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GenerateThumbnailAsync_CallsLoggerOnCompletion()
         {
             // Arrange
-            var modelPath = CreateDummyModelFile();
-            var outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+            string modelPath = CreateDummyModelFile();
+            string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
 
             try
             {
@@ -351,11 +351,11 @@ namespace Farm.Web.Api.Tests.Services
 
         private string CreateDummyModelFile()
         {
-            var filePath = Path.Combine(_testThumbnailsDir, $"test_{Guid.NewGuid()}.stl");
+            string filePath = Path.Combine(_testThumbnailsDir, $"test_{Guid.NewGuid()}.stl");
             Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
             // Create a minimal valid STL file (ASCII format)
-            var stlContent = "solid test\n" +
+            string stlContent = "solid test\n" +
                            "  facet normal 0.0 0.0 1.0\n" +
                            "    outer loop\n" +
                            "      vertex 0.0 0.0 0.0\n" +

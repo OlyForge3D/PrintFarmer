@@ -15,12 +15,9 @@ public static class UrlNormalizer
     /// <exception cref="ArgumentException">Thrown when baseUrl is null, empty, or whitespace</exception>
     public static string NormalizeBaseUrl(string baseUrl)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl));
-        }
-
-        return baseUrl.TrimEnd('/');
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl))
+            : baseUrl.TrimEnd('/');
     }
 
     /// <summary>
@@ -31,12 +28,7 @@ public static class UrlNormalizer
     /// <returns>Normalized URL without trailing slash, or null if input was null/whitespace</returns>
     public static string? NormalizeBaseUrlNullable(string? baseUrl)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            return null;
-        }
-
-        return baseUrl.TrimEnd('/');
+        return string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.TrimEnd('/');
     }
 
     /// <summary>
@@ -110,11 +102,6 @@ public static class UrlNormalizer
         }
 
         // If relative path is absolute URL, return as-is
-        if (relativePath.StartsWith("http://") || relativePath.StartsWith("https://"))
-        {
-            return relativePath;
-        }
-
-        return CombineUrl(baseUrl, relativePath);
+        return relativePath.StartsWith("http://") || relativePath.StartsWith("https://") ? relativePath : CombineUrl(baseUrl, relativePath);
     }
 }

@@ -13,7 +13,7 @@ public class ProfileParsingServiceTests
     public void ParseAndPrepare_WithNullJson_ThrowsArgumentException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare(null!));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare(null!));
         Assert.Contains("Raw JSON is required", ex.Message);
     }
 
@@ -21,7 +21,7 @@ public class ProfileParsingServiceTests
     public void ParseAndPrepare_WithEmptyJson_ThrowsArgumentException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare(""));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare(""));
         Assert.Contains("Raw JSON is required", ex.Message);
     }
 
@@ -29,7 +29,7 @@ public class ProfileParsingServiceTests
     public void ParseAndPrepare_WithWhitespaceOnlyJson_ThrowsArgumentException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare("   \n\t  "));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => _service.ParseAndPrepare("   \n\t  "));
         Assert.Contains("Raw JSON is required", ex.Message);
     }
 
@@ -44,7 +44,7 @@ public class ProfileParsingServiceTests
         string invalidJson = "{ this is not valid json }";
 
         // Act
-        var result = _service.ParseAndPrepare(invalidJson);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(invalidJson);
 
         // Assert
         Assert.Equal(invalidJson, result.SanitizedRawJson);
@@ -60,7 +60,7 @@ public class ProfileParsingServiceTests
         string malformedJson = "{ \"key\": \"value\""; // Missing closing brace
 
         // Act
-        var result = _service.ParseAndPrepare(malformedJson);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(malformedJson);
 
         // Assert
         Assert.Equal(malformedJson, result.SanitizedRawJson);
@@ -79,7 +79,7 @@ public class ProfileParsingServiceTests
         string arrayJson = "[1, 2, 3]";
 
         // Act
-        var result = _service.ParseAndPrepare(arrayJson);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(arrayJson);
 
         // Assert
         Assert.Equal(arrayJson, result.SanitizedRawJson);
@@ -94,7 +94,7 @@ public class ProfileParsingServiceTests
         string stringJson = "\"just a string\"";
 
         // Act
-        var result = _service.ParseAndPrepare(stringJson);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(stringJson);
 
         // Assert
         Assert.Equal(stringJson, result.SanitizedRawJson);
@@ -109,7 +109,7 @@ public class ProfileParsingServiceTests
         string numberJson = "42";
 
         // Act
-        var result = _service.ParseAndPrepare(numberJson);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(numberJson);
 
         // Assert
         Assert.Equal(numberJson, result.SanitizedRawJson);
@@ -128,7 +128,7 @@ public class ProfileParsingServiceTests
         string json = "{}";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.Equal("{}", result.SanitizedRawJson);
@@ -143,7 +143,7 @@ public class ProfileParsingServiceTests
         string json = """{"name": "test", "value": 42}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.NotEmpty(result.SanitizedRawJson);
@@ -151,7 +151,7 @@ public class ProfileParsingServiceTests
         Assert.Contains("name", result.SettingsJson);
         Assert.Contains("value", result.SettingsJson);
         // Hash should be deterministic
-        var result2 = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result2 = _service.ParseAndPrepare(json);
         Assert.Equal(result.Hash, result2.Hash);
     }
 
@@ -166,7 +166,7 @@ public class ProfileParsingServiceTests
         string json = """{"name": "test", "lastModified": "2025-12-09"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - lastModified should be excluded from sanitized
         Assert.DoesNotContain("lastModified", result.SanitizedRawJson);
@@ -180,7 +180,7 @@ public class ProfileParsingServiceTests
         string json = """{"name": "test", "uuid": "550e8400-e29b-41d4-a716-446655440000"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.DoesNotContain("uuid", result.SanitizedRawJson);
@@ -194,7 +194,7 @@ public class ProfileParsingServiceTests
         string json = """{"name": "test", "creation_date": "2025-01-01", "modified": "2025-12-09"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.DoesNotContain("creation_date", result.SanitizedRawJson);
@@ -209,7 +209,7 @@ public class ProfileParsingServiceTests
         string json = """{"lastModified": "2025-12-09", "uuid": "test", "timestamp": "2025-12-09T10:00:00Z"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.Equal("{}", result.SanitizedRawJson);
@@ -227,7 +227,7 @@ public class ProfileParsingServiceTests
         string json = """{"layer_height": 0.2, "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "layer_height" not canonical "layerHeight"
         Assert.Contains("\"layer_height\":0.2", result.SettingsJson);
@@ -240,7 +240,7 @@ public class ProfileParsingServiceTests
         string json = """{"nozzle_diameter": 0.4, "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "nozzle_diameter" not canonical "nozzleDiameter"
         Assert.Contains("\"nozzle_diameter\":0.4", result.SettingsJson);
@@ -253,7 +253,7 @@ public class ProfileParsingServiceTests
         string json = """{"filament_type": "PLA", "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "filament_type" not canonical "filamentMaterial"
         Assert.Contains("\"filament_type\":\"PLA\"", result.SettingsJson);
@@ -266,7 +266,7 @@ public class ProfileParsingServiceTests
         string json = """{"infill_density": 20, "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "infill_density" not canonical "infillPercentage"
         Assert.Contains("\"infill_density\":20", result.SettingsJson);
@@ -279,7 +279,7 @@ public class ProfileParsingServiceTests
         string json = """{"slicer_version": "3.16.0", "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "slicer_version" not canonical "slicerVersion"
         Assert.Contains("\"slicer_version\":\"3.16.0\"", result.SettingsJson);
@@ -292,7 +292,7 @@ public class ProfileParsingServiceTests
         string json = """{"profile_type": "print", "other": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key name "profile_type" not canonical "profileType"
         Assert.Contains("\"profile_type\":\"print\"", result.SettingsJson);
@@ -305,7 +305,7 @@ public class ProfileParsingServiceTests
         string json = """{"layer_height": 0.2, "nozzle_diameter": 0.4, "filament_type": "PETG", "slicer_version": "3.16.0"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.Contains("layer_height", result.SettingsJson);
@@ -321,7 +321,7 @@ public class ProfileParsingServiceTests
         string json = """{"slicer_version": "3.16.0", "layer_height": 0.2, "filament_type": "PLA"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - metadata keys should be in alphabetical order
         // filamentMaterial comes before layerHeight comes before slicerVersion
@@ -340,7 +340,7 @@ public class ProfileParsingServiceTests
         string json = """{"layer_height": [0.2, 0.3], "nozzle_diameter": 0.4, "nested": {"key": "value"}}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - all properties including arrays and nested objects should be in settings
         Assert.Contains("nozzle_diameter", result.SettingsJson);
@@ -357,7 +357,7 @@ public class ProfileParsingServiceTests
         string json = """{"layer_height": 0.2, "custom_setting": "value", "other": 123}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - all non-volatile keys should be in sanitized
         Assert.Contains("custom_setting", result.SanitizedRawJson);
@@ -376,7 +376,7 @@ public class ProfileParsingServiceTests
         string json = """{"z_key": 1, "a_key": 2, "m_key": 3}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - keys should be in alphabetical order in result
         int aPos = result.SanitizedRawJson.IndexOf("a_key");
@@ -394,9 +394,9 @@ public class ProfileParsingServiceTests
         string json = """{"b_key": 2, "a_key": 1, "c_key": 3}""";
 
         // Act
-        var result1 = _service.ParseAndPrepare(json);
-        var result2 = _service.ParseAndPrepare("""{"a_key": 1, "b_key": 2, "c_key": 3}""");
-        var result3 = _service.ParseAndPrepare("""{"c_key": 3, "a_key": 1, "b_key": 2}""");
+        (string SanitizedRawJson, string SettingsJson, string Hash) result1 = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result2 = _service.ParseAndPrepare("""{"a_key": 1, "b_key": 2, "c_key": 3}""");
+        (string SanitizedRawJson, string SettingsJson, string Hash) result3 = _service.ParseAndPrepare("""{"c_key": 3, "a_key": 1, "b_key": 2}""");
 
         // Assert - same logical content should produce same hash regardless of order
         Assert.Equal(result1.Hash, result2.Hash);
@@ -428,7 +428,7 @@ public class ProfileParsingServiceTests
         """;
 
         // Act
-        var result = _service.ParseAndPrepare(complexProfile);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(complexProfile);
 
         // Assert - metadata should contain recognized keys
         Assert.Contains("layer_height", result.SettingsJson);
@@ -467,9 +467,9 @@ public class ProfileParsingServiceTests
         string minified = """{"layer_height":0.2,"custom":"value"}""";
 
         // Act
-        var result1 = _service.ParseAndPrepare(formatted);
-        var result2 = _service.ParseAndPrepare(compact);
-        var result3 = _service.ParseAndPrepare(minified);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result1 = _service.ParseAndPrepare(formatted);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result2 = _service.ParseAndPrepare(compact);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result3 = _service.ParseAndPrepare(minified);
 
         // Assert - all should produce same hash (deterministic output)
         Assert.Equal(result1.Hash, result2.Hash);
@@ -487,7 +487,7 @@ public class ProfileParsingServiceTests
         string json = "   {invalid json}";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.Equal("{invalid json}", result.SanitizedRawJson);
@@ -500,7 +500,7 @@ public class ProfileParsingServiceTests
         string json = "{invalid json}   ";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.Equal("{invalid json}", result.SanitizedRawJson);
@@ -517,7 +517,7 @@ public class ProfileParsingServiceTests
         string json = """{"key": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert
         Assert.NotEmpty(result.Hash);
@@ -531,7 +531,7 @@ public class ProfileParsingServiceTests
         string json = """{"key": "value"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - SHA256 hash is always 64 hex characters
         Assert.Equal(64, result.Hash.Length);
@@ -545,8 +545,8 @@ public class ProfileParsingServiceTests
         string json2 = """{"key": "value2"}""";
 
         // Act
-        var result1 = _service.ParseAndPrepare(json1);
-        var result2 = _service.ParseAndPrepare(json2);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result1 = _service.ParseAndPrepare(json1);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result2 = _service.ParseAndPrepare(json2);
 
         // Assert
         Assert.NotEqual(result1.Hash, result2.Hash);
@@ -563,7 +563,7 @@ public class ProfileParsingServiceTests
         string json = """{"filament_type": "PLA", "slicer_version": "3.16.0"}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key names
         Assert.Contains("\"filament_type\":\"PLA\"", result.SettingsJson);
@@ -577,7 +577,7 @@ public class ProfileParsingServiceTests
         string json = """{"layer_height": 0.2, "nozzle_diameter": 0.4, "infill_density": 20}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - expects original key names
         Assert.Contains("\"layer_height\":0.2", result.SettingsJson);
@@ -592,7 +592,7 @@ public class ProfileParsingServiceTests
         string json = """{"supports_enabled": true}""";
 
         // Act
-        var result = _service.ParseAndPrepare(json);
+        (string SanitizedRawJson, string SettingsJson, string Hash) result = _service.ParseAndPrepare(json);
 
         // Assert - boolean should be preserved as non-metadata since it's not in metadata map
         Assert.Contains("supports_enabled", result.SanitizedRawJson);

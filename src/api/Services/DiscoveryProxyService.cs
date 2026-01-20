@@ -1,6 +1,7 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -95,15 +96,14 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                 DiscoveryProgressDto initialProgress = new(
                     SessionId: sessionId,
                     CurrentNetwork: "Starting...",
-                    CurrentIp: "",
+                    CurrentIp: string.Empty,
                     TotalIps: 0,
                     ScannedIps: 0,
                     PrintersFound: 0,
                     PrintersExcluded: 0,
                     ProgressPercentage: 0,
                     Status: DiscoveryStatus.Starting,
-                    Message: "Discovery starting..."
-                );
+                    Message: "Discovery starting...");
                 _progressCache.Set(sessionId, initialProgress);
 
                 return new DiscoveryStreamResponse(sessionId, message);
@@ -163,15 +163,14 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         DiscoveryProgressDto cancelledProgress = new(
             SessionId: sessionId,
             CurrentNetwork: "Cancelled",
-            CurrentIp: "",
+            CurrentIp: string.Empty,
             TotalIps: 0,
             ScannedIps: 0,
             PrintersFound: 0,
             PrintersExcluded: 0,
             ProgressPercentage: 0,
             Status: DiscoveryStatus.Cancelled,
-            Message: "Discovery cancelled by user"
-        );
+            Message: "Discovery cancelled by user");
 
         _progressCache.Set(sessionId, cancelledProgress);
 
@@ -184,8 +183,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                 TotalPrintersFound: 0,
                 TotalPrintersExcluded: 0,
                 Duration: TimeSpan.Zero,
-                WasCancelled: true
-            ), cancellationToken);
+                WasCancelled: true), cancellationToken);
 
         return new DiscoveryCancelResponse("Discovery session cancelled");
     }

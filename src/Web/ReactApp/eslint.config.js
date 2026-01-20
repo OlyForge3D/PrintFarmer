@@ -26,6 +26,21 @@ export default tseslint.config([
     rules: {
       'local/pf-no-unguarded-console': 'warn',
       'local/pf-no-raw-html-controls': 'warn',
+      'local/pf-require-apiclient': 'error',
+    },
+  },
+  // Exclude api.ts from apiClient rule (it defines apiClient)
+  {
+    files: ['src/services/api.ts'],
+    rules: {
+      'local/pf-require-apiclient': 'off',
+    },
+  },
+  // Disable raw HTML controls rule in test files (tests often need raw elements for testing)
+  {
+    files: ['src/test/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    rules: {
+      'local/pf-no-raw-html-controls': 'off',
     },
   },
 ])

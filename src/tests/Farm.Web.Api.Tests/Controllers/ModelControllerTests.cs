@@ -33,11 +33,6 @@ namespace Farm.Web.Api.Tests.Controllers
             return mock;
         }
 
-        private Mock<Api.Services.Tags.ITagService> CreateMockTagService()
-        {
-            return new Mock<Api.Services.Tags.ITagService>(MockBehavior.Loose);
-        }
-
         private Mock<IUnitOfWork> CreateMockUnitOfWork()
         {
             var mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
@@ -63,12 +58,31 @@ namespace Farm.Web.Api.Tests.Controllers
                     : null);
             mock.Setup(x => x.GenerateThumbnailFileName(It.IsAny<Guid>(), It.IsAny<string>()))
                 .Returns<Guid, string>((id, ext) => $"{id}_thumb{ext}");
-            mock.Setup(x => x.BuildThumbnailUrl(It.IsAny<StoredFile>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<StoredFile, string, string>((f, endpoint, storageDir) => !string.IsNullOrEmpty(f.ThumbnailFileName)
-                    ? $"{endpoint}?path={f.Id}/thumbnail"
-                    : null);
+            mock.Setup(x => x.BuildModel3DThumbnailUrl(It.IsAny<Guid>()))
+                .Returns<Guid>(modelId => $"/api/3d-models/thumbnail/{modelId}");
             mock.Setup(x => x.ExtractFileNameForStorage(It.IsAny<string>()))
                 .Returns<string>(path => Path.GetFileName(path));
+            // Mock FileExistsAndIsSafe to return true (allow file to be returned)
+            mock.Setup(x => x.FileExistsAndIsSafe(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns(true);
+            // Mock ResolveStoragePath to resolve relative paths
+            mock.Setup(x => x.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns<string, string>((relativePath, basePath) =>
+                    string.IsNullOrEmpty(relativePath)
+                        ? basePath
+                        : Path.Combine(basePath, relativePath));
+            // Mock GetContentTypeForFile to return appropriate MIME types
+            mock.Setup(x => x.GetContentTypeForFile(It.IsAny<string>()))
+                .Returns<string>(ext => ext switch
+                {
+                    ".stl" => "application/vnd.ms-pki.stl",
+                    ".3mf" => "model/3mf",
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    _ => "application/octet-stream"
+                });
             return mock;
         }
 
@@ -93,9 +107,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.ListModelsAsync();
 
@@ -118,9 +130,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3DDto?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelAsync(Guid.NewGuid());
 
@@ -141,9 +151,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
 
@@ -168,9 +176,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -190,9 +196,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ThrowsAsync(new KeyNotFoundException());
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -212,9 +216,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelFilePathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -234,9 +236,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
@@ -262,12 +262,10 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Model3DDto { Id = Guid.NewGuid(), FileName = fileName });
 
             // Create test file system that contains the file
-            var testFs = TestFileSystemFactory.WithFile(filePath, Encoding.UTF8.GetBytes("test stl content"));
+            TestFileSystem testFs = TestFileSystemFactory.WithFile(filePath, Encoding.UTF8.GetBytes("test stl content"));
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, testFs, mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -292,9 +290,7 @@ namespace Farm.Web.Api.Tests.Controllers
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
-            Mock<IStoragePathService> mockStoragePath = new Mock<IStoragePathService>();
-            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns("/storage/models");
-            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, mockStoragePath.Object, CreateMock3MFConversionService().Object);
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, mockUoW.Object, CreateMockFolderService().Object, CreateStoredFileOperationsServiceMock().Object, CreateMock3MFConversionService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 

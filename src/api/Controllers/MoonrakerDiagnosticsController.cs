@@ -21,6 +21,7 @@ public class MoonrakerDiagnosticsController(
     /// <summary>
     /// Test endpoint to invoke GetFileRootsAsync directly
     /// </summary>
+    /// <param name="url">The Moonraker server URL to query.</param>
     [HttpGet("roots")]
     [ProducesResponseType(typeof(FileRoot[]), 200)]
     [ProducesResponseType(400)]
@@ -32,6 +33,7 @@ public class MoonrakerDiagnosticsController(
         {
             return BadRequest("url is required");
         }
+
         _logger.LogInformation($"MoonrakerDiagnostics: GetFileRoots called for {url}", null, null);
 
         try
@@ -61,6 +63,8 @@ public class MoonrakerDiagnosticsController(
     /// <summary>
     /// Test endpoint to invoke GetDirectoryAsync directly
     /// </summary>
+    /// <param name="url">The Moonraker server URL to query.</param>
+    /// <param name="path">The directory path to retrieve (defaults to "gcodes").</param>
     [HttpGet("directory")]
     [ProducesResponseType(typeof(MoonrakerDirectoryInfo), 200)]
     [ProducesResponseType(400)]
@@ -71,6 +75,7 @@ public class MoonrakerDiagnosticsController(
         {
             return BadRequest("url is required");
         }
+
         _logger.LogInformation($"MoonrakerDiagnostics: GetDirectory called for {url}, path {path}", null, null);
 
         try
@@ -95,6 +100,9 @@ public class MoonrakerDiagnosticsController(
     /// <summary>
     /// Test endpoint to invoke GetDetailedFileListAsync directly
     /// </summary>
+    /// <param name="url">The Moonraker server URL to query.</param>
+    /// <param name="root">The root directory (defaults to "gcodes").</param>
+    /// <param name="path">Optional subdirectory path within the root.</param>
     [HttpGet("filelist")]
     [ProducesResponseType(typeof(MoonrakerFileInfo[]), 200)]
     [ProducesResponseType(400)]
@@ -106,7 +114,7 @@ public class MoonrakerDiagnosticsController(
             return BadRequest("url is required");
         }
 
-        _logger.LogInformation($"MoonrakerDiagnostics: GetDetailedFileList called for {url}, root {root}, path {(path ?? string.Empty)}", null, null);
+        _logger.LogInformation($"MoonrakerDiagnostics: GetDetailedFileList called for {url}, root {root}, path {path ?? string.Empty}", null, null);
 
         try
         {

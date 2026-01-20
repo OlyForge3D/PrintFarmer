@@ -17,7 +17,11 @@ export default function PrinterImportExportControls() {
     <div className="flex items-center gap-2">
       <Button onClick={() => setOpenImportExportModal(true)} variant="secondary">Import / Export</Button>
 
-      <ImportExportModal isOpen={openImportExportModal} onClose={() => setOpenImportExportModal(false)} onComplete={() => queryClient.invalidateQueries({ queryKey: ['printers'] })} />
+      <ImportExportModal 
+        isOpen={openImportExportModal} 
+        onClose={() => setOpenImportExportModal(false)} 
+        onComplete={() => queryClient.invalidateQueries({ queryKey: ['printers'] })}
+      />
     </div>
   );
 }

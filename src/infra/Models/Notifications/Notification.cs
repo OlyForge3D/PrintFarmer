@@ -11,12 +11,14 @@ public class Notification
     /// User receiving the notification
     /// </summary>
     public Guid UserId { get; set; }
+
     public virtual User? User { get; set; }
 
     /// <summary>
     /// Associated job (if notification is about a specific job)
     /// </summary>
     public Guid? JobId { get; set; }
+
     public virtual PrintJob? Job { get; set; }
 
     /// <summary>

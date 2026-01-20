@@ -25,7 +25,7 @@ public class SlicingSubmissionController(
 #pragma warning disable CA1823, S1144 // Unused field - intentional for initialization side effect
     private readonly object _tempDirInitializer = EnsureTempDirectoryExists(cfg, tempPathProvider);
 #pragma warning restore CA1823, S1144
-    
+
     private static object EnsureTempDirectoryExists(IConfiguration cfg, Infrastructure.Temp.ITempPathProvider tempPathProvider)
     {
         ArgumentNullException.ThrowIfNull(cfg);
@@ -50,17 +50,20 @@ public class SlicingSubmissionController(
         if (modelFile == null && Request.HasFormContentType)
         {
             IFormCollection form = await Request.ReadFormAsync();
+
             // Prefer bound files collection populated by the model binder (handles arbitrary field names)
             if (files != null && files.Count > 0)
             {
                 modelFile = files[0];
             }
+
             // Preserve other fields from form when not supplied via bound parameters
             slicerEngine ??= form["slicerEngine"].FirstOrDefault();
             printerId ??= form["printerId"].FirstOrDefault();
             profileRaw ??= form["profile"].FirstOrDefault() ?? form["slicerProfile"].FirstOrDefault();
             priorityRaw ??= form["priority"].FirstOrDefault();
         }
+
         if (modelFile == null || modelFile.Length == 0)
         {
             return BadRequest("Model file is required");
@@ -139,12 +142,7 @@ public class SlicingSubmissionController(
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
             modelFile, slicerEngine, printerGuid, profile!, userId, HttpContext.RequestAborted);
 
-        if (!result.Success)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
-        }
-
-        return Accepted(result.Result);
+        return !result.Success ? StatusCode(StatusCodes.Status500InternalServerError, result.Error) : Accepted(result.Result);
     }
 
     [HttpPost("slice-model/{modelId}")]
@@ -214,11 +212,9 @@ public class SlicingSubmissionController(
         if (!result.Success)
         {
             // Check if it's a not found error
-            if (result.Error != null && result.Error.Contains("not found"))
-            {
-                return NotFound(result.Error);
-            }
-            return StatusCode(StatusCodes.Status500InternalServerError, result.Error);
+            return result.Error != null && result.Error.Contains("not found")
+                ? NotFound(result.Error)
+                : StatusCode(StatusCodes.Status500InternalServerError, result.Error);
         }
 
         return Accepted(result.Result);

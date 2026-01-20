@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+
 // ClaimJobRequest now lives in shared contracts
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
@@ -49,6 +50,9 @@ public class SliceJobController(
     /// Validates capability JSON string. Ensures JSON array; size &lt;= 32; distinct; simple lowercase slugs.
     /// Returns sanitized canonical list (lower-case) or error message.
     /// </summary>
+    /// <param name="capabilitiesJson">JSON string containing the capabilities array to validate.</param>
+    /// <param name="capabilities">Output array of validated and normalized capability strings.</param>
+    /// <param name="error">Output error message if validation fails; null if successful.</param>
     public static bool TryValidateCapabilities(string? capabilitiesJson, out string[] capabilities, out string? error)
     {
         capabilities = Array.Empty<string>();
@@ -57,6 +61,7 @@ public class SliceJobController(
         {
             return true; // empty allowed
         }
+
         try
         {
             string[]? parsed = JsonSerializer.Deserialize<string[]>(capabilitiesJson);
@@ -65,11 +70,13 @@ public class SliceJobController(
                 error = "Capabilities must be a JSON string array.";
                 return false;
             }
+
             if (parsed.Length > 32)
             {
                 error = "Too many capabilities (max 32).";
                 return false;
             }
+
             string[] canonical = parsed
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .Select(c => c.Trim().ToLowerInvariant())
@@ -79,12 +86,14 @@ public class SliceJobController(
                 error = "Duplicate capabilities are not allowed.";
                 return false;
             }
+
             List<string> invalid = canonical.Where(c => !Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
             if (invalid.Count > 0)
             {
                 error = $"Invalid capability slug(s): {string.Join(", ", invalid)}";
                 return false;
             }
+
             capabilities = canonical;
             return true;
         }
@@ -204,9 +213,10 @@ public class SliceJobController(
 
         // Calculate queue position
         IReadOnlyList<SliceJob> queuedJobs = await _jobRepository.GetQueuedJobsAsync(1000);
-        int queuePosition = queuedJobs.Select((j, i) => new { j.Id, Index = i }).FirstOrDefault(x => x.Id == job.Id)?.Index + 1 ?? -1;
+        int queuePosition = (queuedJobs.Select((j, i) => new { j.Id, Index = i }).FirstOrDefault(x => x.Id == job.Id)?.Index + 1) ?? -1;
 
-        _logger.LogInformation("Job {JobId} submitted by user {UserId} for printer {PrinterId}",
+        _logger.LogInformation(
+            "Job {JobId} submitted by user {UserId} for printer {PrinterId}",
             job.Id, job.UserId, job.PrinterId ?? Guid.Empty);
 
         SubmitSliceJobResponse response = new()
@@ -263,8 +273,8 @@ public class SliceJobController(
     /// <summary>
     /// Update progress for a processing job (worker endpoint). Emits SignalR JobProgress event.
     /// </summary>
-    /// <param name="id">Job ID</param>
-    /// <param name="request">Progress payload</param>
+    /// <param name="id">The unique identifier of the job.</param>
+    /// <param name="request">The progress update payload containing percentage and message.</param>
     /// <returns>No content on success</returns>
     [HttpPost("{id}/progress")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -277,19 +287,23 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         if (request == null)
         {
             return BadRequest("Request body required");
         }
+
         if (request.ProgressPercent < 0 || request.ProgressPercent > 100)
         {
             return BadRequest("ProgressPercent must be between 0 and 100");
         }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
         if (job == null)
         {
             return NotFound($"Job {id} not found");
         }
+
         if (job.Status != SliceJobStatus.Processing)
         {
             return BadRequest($"Cannot update progress for job in status {job.Status}");
@@ -305,13 +319,14 @@ public class SliceJobController(
         {
             await _eventService.NotifyJobProgressAsync(updated, HttpContext.RequestAborted);
         }
+
         return NoContent();
     }
 
     /// <summary>
     /// Cancel a queued or processing slicing job
     /// </summary>
-    /// <param name="id">Job ID to cancel</param>
+    /// <param name="id">The unique identifier of the job to cancel.</param>
     /// <returns>No content on success</returns>
     [HttpPost("{id}/cancel")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -345,6 +360,8 @@ public class SliceJobController(
     /// <summary>
     /// Renew a job lease to extend LeaseExpiresAt while worker is actively processing
     /// </summary>
+    /// <param name="id">The unique identifier of the job.</param>
+    /// <param name="request">The lease renewal request containing duration.</param>
     [HttpPost("{id}/renew")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -463,7 +480,7 @@ public class SliceJobController(
     /// <summary>
     /// Claim the next available job from the queue (worker pull model)
     /// </summary>
-    /// <param name="request">Claim request with worker ID and capabilities</param>
+    /// <param name="request">The claim request containing worker ID, capabilities, and lease duration.</param>
     /// <returns>Claimed job details or 204 if no jobs available</returns>
     [HttpPost("claim")]
     [ProducesResponseType(typeof(SliceJobStatusResponse), StatusCodes.Status200OK)]
@@ -475,6 +492,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         try
         {
             if (request.LeaseDurationSeconds < 30 || request.LeaseDurationSeconds > 3600)
@@ -503,7 +521,8 @@ public class SliceJobController(
                 _logger.LogWarning(ex, "Claim succeeded but event broadcast failed for job {JobId}", job.Id);
             }
 
-            _logger.LogInformation("Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
+            _logger.LogInformation(
+                "Job {JobId} claimed by worker {WorkerId} with lease until {LeaseExpires}",
                 job.Id, request.WorkerId, job.LeaseExpiresAt);
 
             SliceJobStatusResponse response = new()
@@ -535,6 +554,7 @@ public class SliceJobController(
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, $"Claim failure: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             }
+
             _logger.LogError(ex, "Unhandled exception in ClaimJobAsync");
             return StatusCode(StatusCodes.Status500InternalServerError, "Claim failed");
         }
@@ -543,8 +563,8 @@ public class SliceJobController(
     /// <summary>
     /// Mark a processing slice job as completed and associate produced artifacts.
     /// </summary>
-    /// <param name="id">Slice job identifier</param>
-    /// <param name="request">Completion details (primary artifact + optional additional artifact IDs)</param>
+    /// <param name="id">The unique identifier of the slice job.</param>
+    /// <param name="request">The completion details including primary artifact and optional additional artifact IDs.</param>
     [HttpPost("{id}/complete")]
     [ProducesResponseType(typeof(CompleteSliceJobResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -555,6 +575,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         if (request == null)
         {
             return BadRequest("Request body required");
@@ -564,6 +585,7 @@ public class SliceJobController(
         {
             return Unauthorized("Worker API key missing or invalid");
         }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id);
         if (job == null)
         {
@@ -581,6 +603,7 @@ public class SliceJobController(
         {
             return BadRequest($"Primary artifact {request.PrimaryArtifactId} not found");
         }
+
         if (primary.JobId != job.Id)
         {
             return BadRequest("Primary artifact job mismatch");
@@ -598,10 +621,12 @@ public class SliceJobController(
                 {
                     return BadRequest($"Artifact {aid} not found");
                 }
+
                 if (extra.JobId != job.Id)
                 {
                     return BadRequest($"Artifact {aid} does not belong to job {job.Id}");
                 }
+
                 allArtifactIds.Add(aid);
             }
         }

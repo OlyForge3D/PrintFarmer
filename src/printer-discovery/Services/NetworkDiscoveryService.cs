@@ -16,16 +16,20 @@ public interface INetworkDiscoveryService
     /// <summary>
     /// Perform a single discovery scan (manual/pull mode)
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Register discovered printers with the central API
     /// </summary>
+    /// <param name="printers">List of discovered printers to register.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task RegisterPrintersAsync(IReadOnlyList<DiscoveredPrinterDto> printers, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Start periodic discovery (push mode - runs as background service)
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to stop periodic discovery.</param>
     Task StartPeriodicDiscoveryAsync(CancellationToken cancellationToken = default);
 }
 
@@ -56,6 +60,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// <summary>
     /// Manual discovery scan (pull mode)
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the scan.</param>
     public async Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -91,6 +96,8 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// <summary>
     /// Register discovered printers with central API
     /// </summary>
+    /// <param name="printers">List of discovered printers to register.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task RegisterPrintersAsync(IReadOnlyList<DiscoveredPrinterDto> printers, CancellationToken cancellationToken = default)
     {
         foreach (DiscoveredPrinterDto printer in printers)
@@ -113,6 +120,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// <summary>
     /// Start periodic discovery (push mode - runs as background service)
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to stop periodic discovery.</param>
     public async Task StartPeriodicDiscoveryAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting periodic discovery with {Interval}s interval", _scanIntervalSeconds);
@@ -138,6 +146,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in periodic discovery loop");
+
                 // Continue scanning despite errors
                 await Task.Delay(TimeSpan.FromSeconds(_scanIntervalSeconds), cancellationToken);
             }
@@ -147,6 +156,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// <summary>
     /// Generate all IP addresses from a list of CIDR subnets
     /// </summary>
+    /// <param name="subnets">List of CIDR subnet strings (e.g., "192.168.1.0/24").</param>
     private static List<string> GenerateIpAddresses(List<string> subnets)
     {
         List<string> ips = new List<string>();
@@ -162,6 +172,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
                 }
 
                 SubnetParser network = SubnetParser.Parse(subnet.Trim());
+
                 // Limit to first 254 addresses to avoid excessive scanning
                 int addressCount = (int)Math.Min(254, network.Total);
                 for (int i = 1; i < addressCount; i++)
@@ -190,25 +201,22 @@ public interface IApiClient
     /// Register a discovered printer with the central API.
     /// The API will deduplicate and persist the printer in the database.
     /// </summary>
+    /// <param name="printer">The discovered printer to register.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task RegisterDiscoveredPrinterAsync(DiscoveredPrinterDto printer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get the list of server URLs for printers already registered in the system.
     /// Used to filter out already-known printers during discovery.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<HashSet<string>> GetRegisteredPrinterUrlsAsync(CancellationToken cancellationToken = default);
 }
 
-public class ApiClient : IApiClient
+public class ApiClient(HttpClient httpClient, ILogger<ApiClient> logger) : IApiClient
 {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<ApiClient> _logger;
-
-    public ApiClient(HttpClient httpClient, ILogger<ApiClient> logger)
-    {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly ILogger<ApiClient> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task RegisterDiscoveredPrinterAsync(DiscoveredPrinterDto printer, CancellationToken cancellationToken = default)
     {

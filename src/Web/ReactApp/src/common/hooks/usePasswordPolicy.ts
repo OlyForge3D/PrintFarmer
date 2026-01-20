@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
+import type { AxiosResponse } from 'axios';
 
 export interface PasswordPolicy {
   minLength: number;
@@ -12,11 +13,9 @@ export interface PasswordPolicy {
 const QUERY_KEY = ['passwordPolicy'];
 
 async function fetchPolicy(): Promise<PasswordPolicy> {
-  const resp = await fetch(`${getApiBaseUrl()}/settings/security/password-policy`, { headers: getAuthHeaders() });
-  if (!resp.ok) {
-    throw new Error(`Failed to load password policy (HTTP ${resp.status})`);
-  }
-  const data = await resp.json();
+  // apiClient returns Axios response, not native fetch Response
+  const resp = await apiClient.getPasswordPolicy() as AxiosResponse;
+  const data = resp.data;
   return {
     minLength: data.minLength ?? 12,
     requireUppercase: !!data.requireUppercase,
@@ -27,15 +26,9 @@ async function fetchPolicy(): Promise<PasswordPolicy> {
 }
 
 async function updatePolicy(policy: PasswordPolicy): Promise<PasswordPolicy> {
-  const resp = await fetch(`${getApiBaseUrl()}/settings/security/password-policy`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify(policy)
-  });
-  if (!resp.ok) {
-    throw new Error(`Failed to save password policy (HTTP ${resp.status})`);
-  }
-  const data = await resp.json();
+  // apiClient returns Axios response, not native fetch Response
+  const resp = await apiClient.updatePasswordPolicy(policy as unknown as Record<string, unknown>) as AxiosResponse;
+  const data = resp.data;
   return {
     minLength: data.minLength,
     requireUppercase: data.requireUppercase,

@@ -295,6 +295,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             _logger?.LogError($"PrusaLink API returned {response.StatusCode} for {url}");
             throw new HttpRequestException($"PrusaLink API error: {response.StatusCode}", null, response.StatusCode);
         }
+
         string json = await response.Content.ReadAsStringAsync(ct);
 
         // Deserialize to appropriate type based on response content
@@ -310,6 +311,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 _ => JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!
             };
         }
+
         return JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!;
     }
 
@@ -334,7 +336,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
-        request.Content = new StringContent("");
+        request.Content = new StringContent(string.Empty);
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -446,12 +448,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        return await response.Content.ReadAsByteArrayAsync(ct);
+        return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
     }
 
     public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, string? apiKey = null, CancellationToken ct = default)
@@ -522,6 +519,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     /// Used as a fallback when /api/v1/files fails due to authentication issues.
     /// Reference: FDM-Monster implementation at https://github.com/fdm-monster/fdm-monster
     /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink printer.</param>
+    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="ct">The cancellation token.</param>
     public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/files").ToString();
@@ -548,6 +548,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 if (storageElement.TryGetProperty("path", out JsonElement pathElement))
                 {
                     string? storagePath = pathElement.GetString();
+
                     // Collect files from /usb or /local storage
                     if ((storagePath == "/usb" || storagePath == "/local") && storageElement.TryGetProperty("children", out JsonElement childrenArray))
                     {

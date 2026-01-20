@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 interface ModelUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onUploadSuccess?: () => Promise<void>;
 }
 
 interface UploadItem {
@@ -21,18 +22,26 @@ interface UploadItem {
 
 export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   isOpen,
-  onClose
+  onClose,
+  onUploadSuccess
 }) => {
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
 
-  // Upload mutation
+  // Upload mutation with progress tracking
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => slicerService.uploadModel(file),
+    mutationFn: (file: File) => {
+      return new Promise<{ id: string; url: string }>((resolve, reject) => {
+        slicerService.uploadModel(file, (progress) => {
+          setUploadQueue(prev => prev.map(item =>
+            item.file === file ? { ...item, progress } : item
+          ));
+        }).then(resolve).catch(reject);
+      });
+    },
     onSuccess: () => {
-      // Update upload item status to done
-      // Note: models-search will be invalidated on modal close
+      // Models query will be invalidated on modal close
     },
     onError: (error: unknown) => {
       console.error('Upload error:', error);
@@ -95,19 +104,8 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
           it.id === item.id ? { ...it, status: 'uploading', progress: 0 } : it
         ));
 
-        // Simulate progress
-        const progressInterval = setInterval(() => {
-          setUploadQueue(prev => prev.map(it => {
-            if (it.id === item.id && it.progress < 90) {
-              return { ...it, progress: it.progress + 10 };
-            }
-            return it;
-          }));
-        }, 200);
-
         await uploadMutation.mutateAsync(item.file);
 
-        clearInterval(progressInterval);
         setUploadQueue(prev => prev.map(it =>
           it.id === item.id ? { ...it, progress: 100, status: 'done' } : it
         ));
@@ -127,9 +125,19 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
     setUploadQueue(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     // Invalidate models-search query to refresh the models list
     queryClient.invalidateQueries({ queryKey: ['models-search'] });
+    
+    // Call onUploadSuccess callback if provided
+    if (onUploadSuccess) {
+      try {
+        await onUploadSuccess();
+      } catch (error) {
+        console.error('Error calling onUploadSuccess:', error);
+      }
+    }
+    
     onClose();
   };
 

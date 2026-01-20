@@ -525,7 +525,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
         DumpAuthAuditInfo(context, "GetUserAuditLog");
 
         // Assert
-        _ = auditLogs.Should().HaveCountGreaterOrEqualTo(2); // Register + Login
+        _ = auditLogs.Should().HaveCountGreaterThanOrEqualTo(2); // Register + Login
         _ = auditLogs.Should().Contain(log => log.EventType == AuthEventType.Register);
         _ = auditLogs.Should().Contain(log => log.EventType == AuthEventType.Login);
         _ = auditLogs.Should().OnlyContain(log => log.UserId == user.Id);

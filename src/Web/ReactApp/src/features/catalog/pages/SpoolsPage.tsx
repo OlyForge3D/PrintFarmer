@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition, useCallback } from 'react';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { 
   FilterIcon, 
   RefreshIcon, 
@@ -21,7 +22,7 @@ import { SpoolUsageBar } from '@/features/catalog/components/SpoolUsageBar';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import '@/features/catalog/components/spool-components.css';
 
 // Matches backend SpoolmanController (SpoolmanSpoolDto) serialized with camelCase
@@ -63,6 +64,7 @@ export function SpoolsPage() {
   const [loading, setLoading] = useState(true);
   const [spoolmanError, setSpoolmanError] = useState<string | null>(null);
   const [spoolmanBaseUrl, setSpoolmanBaseUrl] = useState('');
+  const [,startTransition] = useTransition();
   const [filters, setFilters] = useState<FilterState>({
     material: '',
     vendor: '',
@@ -172,16 +174,30 @@ export function SpoolsPage() {
   useEffect(() => {
     const run = async () => {
       try {
-        const r = await fetch(`${getApiBaseUrl()}/spoolman/health`, {
-          headers: getAuthHeaders()
-        });
-        if (!r.ok) return;
-        const data = await r.json();
-        setHealth(data);
+        const data = await apiClient.getSpoolmanHealth();
+        setHealth(data as { configured: boolean; success: boolean; message?: string });
       } catch { /* ignore */ }
     };
     run();
   }, []);
+
+  // Keyboard shortcuts for spools management
+  useKeyboardShortcuts([
+    {
+      key: 'f',
+      handler: () => {
+        // Scroll to filters panel (if visible in markup)
+        const filtersElement = document.querySelector('[data-testid="spool-filters"]');
+        filtersElement?.scrollIntoView({ behavior: 'smooth' });
+      },
+      description: 'Focus on filters'
+    },
+    {
+      key: 'v',
+      handler: () => setViewMode(viewMode === 'cards' ? 'table' : 'cards'),
+      description: 'Toggle view mode (cards/table)'
+    }
+  ]);
 
   // Persist visibility/order (order in array) excluding heavy render funcs (just id+visible)
   useEffect(() => {
@@ -247,48 +263,30 @@ export function SpoolsPage() {
   };
   // Removed gradient hack – replaced by custom ColorFamilySelect component.
 
-  const loadSpools = async () => {
-    try {
-      setLoading(true);
-      setSpoolmanError(null);
-
-  const response = await fetch(`${getApiBaseUrl()}/spoolman/spools`, { 
-    headers: { 
-      'Accept': 'application/json',
-      ...getAuthHeaders()
-    } 
-  });
-      if (!response.ok) {
-        if (response.status === 503) {
-          setSpoolmanError('Spoolman not configured or unavailable');
-        } else {
-          setSpoolmanError(`Backend error: HTTP ${response.status}`);
-        }
+  const loadSpools = useCallback(async () => {
+    // React 19: Use startTransition for async data loading
+    startTransition(async () => {
+      try {
+        setSpoolmanError(null);
+        const data = await apiClient.getSpools();
+        const list: SpoolmanSpoolDto[] = Array.isArray(data) ? (data as SpoolmanSpoolDto[]) : ((data as Record<string, unknown>).items as SpoolmanSpoolDto[] || []);
+        setSpools(list);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setSpoolmanError(`Failed to load spools: ${message}`);
         setSpools([]);
-        return;
+      } finally {
+        setLoading(false);
       }
-  const data = await response.json();
-  const list: SpoolmanSpoolDto[] = Array.isArray(data) ? data : (data.items || []);
-  setSpools(list);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setSpoolmanError(`Failed to load spools: ${message}`);
-      setSpools([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
+  }, [startTransition]);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const cfgResp = await fetch(`${getApiBaseUrl()}/spoolman/config`, {
-          headers: getAuthHeaders()
-        });
-        if (cfgResp.ok) {
-          const cfg = await cfgResp.json();
-          if (cfg?.baseUrl) setSpoolmanBaseUrl(cfg.baseUrl);
-        } else {
+        const cfg = await apiClient.getSpoolmanConfig();
+        if ((cfg as Record<string, unknown>)?.baseUrl) setSpoolmanBaseUrl((cfg as Record<string, unknown>).baseUrl as string);
+        else {
           const saved = localStorage.getItem('spoolman-base-url');
           if (saved) setSpoolmanBaseUrl(saved);
         }
@@ -299,7 +297,7 @@ export function SpoolsPage() {
       await loadSpools();
     };
     init();
-  }, []);
+  }, [loadSpools]);
 
   const getFilteredSpools = (): SpoolmanSpoolDto[] => spools.filter(spool => {
     if (filters.material && !spool.material?.toLowerCase().includes(filters.material.toLowerCase())) return false;

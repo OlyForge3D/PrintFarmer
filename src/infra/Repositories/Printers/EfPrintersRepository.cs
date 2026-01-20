@@ -5,22 +5,27 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 
-public class EfPrintersRepository : IPrintersRepository
+public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 {
-    private readonly AppDbContext _db;
-
-    public EfPrintersRepository(AppDbContext db) => _db = db;
+    private readonly AppDbContext _db = db;
 
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().ToListAsync(ct);
 
-    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).ToListAsync(ct);
+    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
+
+    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct) =>
+        await _db.Printers.Include(p => p.Toolheads).ToListAsync(ct);  // With tracking for updates
+
+    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct) =>
+        await _db.Printers.Include(p => p.Toolheads).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
 
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == id, ct);
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Toolheads).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
@@ -39,33 +44,22 @@ public class EfPrintersRepository : IPrintersRepository
         }
 
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
+        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk deletes without loading entities into memory
 
         // Remove GcodeFile records that reference this printer as source
-        List<GcodeFile> gcodeFilesReferencing = await _db.GcodeFiles
+        await _db.GcodeFiles
             .Where(gf => gf.SourcePrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (gcodeFilesReferencing.Any())
-        {
-            _db.GcodeFiles.RemoveRange(gcodeFilesReferencing);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // Remove PrintJob records assigned to this printer
-        List<PrintJob> jobsForPrinter = await _db.PrintJobs
+        await _db.PrintJobs
             .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (jobsForPrinter.Any())
-        {
-            _db.PrintJobs.RemoveRange(jobsForPrinter);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // Remove GcodeHarvestOperation records for this printer
-        List<GcodeHarvestOperation> harvestOpsForPrinter = await _db.GcodeHarvestOperations
+        await _db.GcodeHarvestOperations
             .Where(h => h.PrinterId == trackedPrinter.Id)
-            .ToListAsync(ct);
-        if (harvestOpsForPrinter.Any())
-        {
-            _db.GcodeHarvestOperations.RemoveRange(harvestOpsForPrinter);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
 
@@ -79,7 +73,7 @@ public class EfPrintersRepository : IPrintersRepository
     public void Detach(Printer p)
     {
         // Remove the entity from the tracker so it can be re-added without conflicts
-        var entry = _db.Entry(p);
+        EntityEntry<Printer> entry = _db.Entry(p);
         if (entry != null && entry.State != EntityState.Detached)
         {
             entry.State = EntityState.Detached;
@@ -92,11 +86,13 @@ public class EfPrintersRepository : IPrintersRepository
             .AsNoTracking()
             .Include(p => p.Manufacturer)
             .Include(p => p.Model)
-            .Include(p => p.Location);
+            .Include(p => p.Location)
+            .AsSplitQuery();
         if (ids != null && ids.Length > 0)
         {
             q = q.Where(p => ids.Contains(p.Id));
         }
+
         return await q.ToListAsync(ct);
     }
 
@@ -123,11 +119,13 @@ public class EfPrintersRepository : IPrintersRepository
     /// Extracts the IP from the ServerUrl and matches against the stored IpAddress field.
     /// This is much more efficient than loading all printers into memory.
     /// </summary>
+    /// <param name="serverUrl">The server URL containing the IP address to search for.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
     {
         // Extract IP address from ServerUrl (format: http://ip or http://hostname)
         // Strip http/https and port (if any) to get just the host
-        string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
+        string inputHost = serverUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).Split(':')[0];
 
         // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
         return await _db.Printers
@@ -142,7 +140,7 @@ public class EfPrintersRepository : IPrintersRepository
     /// </summary>
     public void DetachAllEntities()
     {
-        foreach (var entry in _db.ChangeTracker.Entries().ToList())
+        foreach (EntityEntry? entry in _db.ChangeTracker.Entries().ToList())
         {
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
         }

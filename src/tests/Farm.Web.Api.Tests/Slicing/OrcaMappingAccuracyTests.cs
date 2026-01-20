@@ -416,7 +416,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 256,
                 MaxY = 256,
                 MaxZ = 256,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -427,7 +426,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 256,
                 MaxY = 256,
                 MaxZ = 256,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
@@ -461,7 +459,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 250,
                 MaxY = 210,
                 MaxZ = 220,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -472,7 +469,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 250,
                 MaxY = 210,
                 MaxZ = 210,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
@@ -505,7 +501,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 180,
                 MaxY = 180,
                 MaxZ = 180,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -516,7 +511,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 250,
                 MaxY = 250,
                 MaxZ = 250,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             }
         };
@@ -549,7 +543,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 220,
                 MaxY = 220,
                 MaxZ = 250,
-                DefaultNozzleDiameter = 0.4,
                 IsActive = true
             },
             new PrinterModel
@@ -560,7 +553,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 220,
                 MaxY = 220,
                 MaxZ = 250,
-                DefaultNozzleDiameter = 0.6,
                 IsActive = true
             },
             new PrinterModel
@@ -571,7 +563,6 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
                 MaxX = 220,
                 MaxY = 220,
                 MaxZ = 250,
-                DefaultNozzleDiameter = 0.8,
                 IsActive = true
             }
         };

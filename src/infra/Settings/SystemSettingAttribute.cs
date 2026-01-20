@@ -6,8 +6,7 @@ namespace Farm.Infrastructure.Settings;
 /// Attribute to mark a class as a system setting (bootstrap, config-only).
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class SystemSettingAttribute : Attribute
+public sealed class SystemSettingAttribute(string key) : Attribute
 {
-    public string Key { get; }
-    public SystemSettingAttribute(string key) => Key = key;
+    public string Key { get; } = key;
 }

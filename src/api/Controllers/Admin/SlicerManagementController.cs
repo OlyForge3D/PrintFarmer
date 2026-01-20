@@ -32,32 +32,26 @@ public class SlicerManagementController(ISlicersService service, ILogger<SlicerM
     /// <summary>
     /// Admin endpoint to force rotate a service's API key (for security incidents)
     /// </summary>
+    /// <param name="id">The unique identifier of the slicer service.</param>
     [HttpPost("{id}/admin-rotate-key")]
     public async Task<IActionResult> AdminRotateApiKeyAsync(Guid id)
     {
         _logger.LogWarning("Admin forcing API key rotation for slicer service {ServiceId}", id);
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         string? newApiKey = await _service.RotateApiKeyAsync(id, ct, isAdminForced: true);
-        if (newApiKey == null)
-        {
-            return NotFound();
-        }
-        return Ok(new { id, apiKey = newApiKey, message = "API key forcibly rotated by administrator" });
+        return newApiKey == null ? NotFound() : Ok(new { id, apiKey = newApiKey, message = "API key forcibly rotated by administrator" });
     }
 
     /// <summary>
     /// Admin endpoint to forcibly deregister a service (for maintenance/security)
     /// </summary>
+    /// <param name="id">The unique identifier of the slicer service to deregister.</param>
     [HttpDelete("{id}")]
     public async Task<IActionResult> AdminDeregisterAsync(Guid id)
     {
         _logger.LogWarning("Admin forcibly deregistering slicer service {ServiceId}", id);
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         bool ok = await _service.DeregisterAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return NoContent();
+        return !ok ? NotFound() : NoContent();
     }
 }

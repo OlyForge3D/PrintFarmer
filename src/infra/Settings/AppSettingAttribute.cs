@@ -6,10 +6,7 @@ namespace Farm.Infrastructure.Settings;
 /// Attribute to mark a class as an application setting (runtime, persisted in DB).
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class AppSettingAttribute : Attribute
+public sealed class AppSettingAttribute(string key) : Attribute
 {
-    public string Key { get; }
-
-    public AppSettingAttribute(string key) => Key = key;
+    public string Key { get; } = key;
 }
-

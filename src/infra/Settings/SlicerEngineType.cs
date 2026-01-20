@@ -1,4 +1,8 @@
-﻿namespace Farm.Infrastructure.Settings
+﻿namespace Farm.Infrastructure.Settings;
+
+public enum SlicerEngineType
 {
-    public enum SlicerEngineType { OrcaSlicer, PrusaSlicer, SuperSlicer }
+    OrcaSlicer,
+    PrusaSlicer,
+    SuperSlicer
 }

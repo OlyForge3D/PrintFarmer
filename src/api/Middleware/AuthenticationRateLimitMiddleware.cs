@@ -8,16 +8,10 @@ namespace Farm.Web.Api.Middleware;
 /// Middleware that enforces rate limiting on authentication endpoints (login and register).
 /// Limits are applied per IP address to prevent brute force attacks.
 /// </summary>
-public class AuthenticationRateLimitMiddleware
+public class AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLoggingService logger)
 {
-    private readonly RequestDelegate _next;
-    private readonly IUnifiedLoggingService _logger;
-
-    public AuthenticationRateLimitMiddleware(RequestDelegate next, IUnifiedLoggingService logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
+    private readonly RequestDelegate _next = next;
+    private readonly IUnifiedLoggingService _logger = logger;
 
     public async Task InvokeAsync(HttpContext context, IRateLimitService rateLimitService)
     {
@@ -37,6 +31,7 @@ public class AuthenticationRateLimitMiddleware
         {
             // If anything goes wrong while checking env, fall back to normal behaviour
         }
+
         string path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
         string method = context.Request.Method.ToUpperInvariant();
 
@@ -82,8 +77,9 @@ public class AuthenticationRateLimitMiddleware
         {
             rateLimitResult = await rateLimitService.CheckLoginLimitAsync(ipAddress);
         }
-        else // isRegister
+        else
         {
+            // isRegister
             rateLimitResult = await rateLimitService.CheckRegisterLimitAsync(ipAddress);
         }
 

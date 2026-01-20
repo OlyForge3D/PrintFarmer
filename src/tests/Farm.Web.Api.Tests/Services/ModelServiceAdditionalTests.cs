@@ -49,9 +49,8 @@ namespace Farm.Web.Api.Tests.Services
         private static Mock<IStoredFileOperationsService> CreateStoredFileOperationsServiceMock()
         {
             var mock = new Mock<IStoredFileOperationsService>(MockBehavior.Loose);
-            mock.Setup(s => s.BuildThumbnailUrl(It.IsAny<StoredFile>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<StoredFile, string, string>((file, endpoint, storageDir) =>
-                    file.ThumbnailFileName != null ? $"{endpoint}?path={file.Id}/thumbnail" : null);
+            mock.Setup(s => s.BuildModel3DThumbnailUrl(It.IsAny<Guid>()))
+                .Returns<Guid>(modelId => $"/api/3d-models/thumbnail/{modelId}");
             mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
                 .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
             mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))

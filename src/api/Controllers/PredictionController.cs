@@ -31,7 +31,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var prediction = await predictionService.PredictCompletionTimeByJobIdAsync(jobId, cancellationToken);
+            CompletionPredictionDto prediction = await predictionService.PredictCompletionTimeByJobIdAsync(jobId, cancellationToken);
             return Ok(prediction);
         }
         catch (InvalidOperationException ex)
@@ -59,13 +59,8 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetJobStatisticsAsync(jobId, cancellationToken);
-            if (stats == null)
-            {
-                return NotFound($"Statistics for job {jobId} not found");
-            }
-
-            return Ok(stats);
+            PrintJobStatisticsDto? stats = await predictionService.GetJobStatisticsAsync(jobId, cancellationToken);
+            return stats == null ? NotFound($"Statistics for job {jobId} not found") : Ok(stats);
         }
         catch (Exception ex)
         {
@@ -91,7 +86,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetMaterialStatsAsync(printerId, cancellationToken);
+            Dictionary<string, PredictionDurationStatsDto> stats = await predictionService.GetMaterialStatsAsync(printerId, cancellationToken);
             return Ok(stats);
         }
         catch (Exception ex)
@@ -117,18 +112,13 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetDurationStatsAsync(
+            PredictionDurationStatsDto? stats = await predictionService.GetDurationStatsAsync(
                 modelId: modelId,
                 material: material,
                 minSampleSize: 3,
                 cancellationToken: cancellationToken);
 
-            if (stats == null)
-            {
-                return NotFound($"Insufficient data for model {modelId}");
-            }
-
-            return Ok(stats);
+            return stats == null ? NotFound($"Insufficient data for model {modelId}") : Ok(stats);
         }
         catch (Exception ex)
         {
@@ -185,10 +175,10 @@ public class PredictionController(PredictionService predictionService) : Control
 public class RecordCompletionRequest
 {
     /// <summary>Actual duration of the print in milliseconds</summary>
-    public long ActualDurationMs { get; set; }
+    public required long ActualDurationMs { get; set; }
 
     /// <summary>Whether the job completed successfully</summary>
-    public bool IsSuccess { get; set; } = true;
+    public bool IsSuccess { get; set; } = true;  // Has default value, not required
 
     /// <summary>Reason for failure if not successful</summary>
     public string? FailureReason { get; set; }

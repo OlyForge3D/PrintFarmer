@@ -1,8 +1,8 @@
-﻿namespace Farm.Backend.Plugin.Core;
-
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
+
+namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Extension methods for registering HTTP clients from plugin code.
@@ -33,7 +33,7 @@ public static class HttpClientRegistrationExtensions
         {
             // Get the AddHttpClient generic method that accepts an Action<HttpClient>
             // We need the overload: AddHttpClient<TInterface, TImplementation>(IServiceCollection, Action<HttpClient>)
-            var addHttpClientMethod = typeof(HttpClientFactoryServiceCollectionExtensions)
+            MethodInfo? addHttpClientMethod = typeof(HttpClientFactoryServiceCollectionExtensions)
                 .GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m =>
                 {
@@ -42,13 +42,14 @@ public static class HttpClientRegistrationExtensions
                         return false;
                     }
 
-                    var genericArgs = m.GetGenericArguments();
+                    Type[] genericArgs = m.GetGenericArguments();
                     if (genericArgs.Length != 2)
                     {
                         return false;
                     }
 
-                    var parameters = m.GetParameters();
+                    ParameterInfo[] parameters = m.GetParameters();
+
                     // We want the overload with (IServiceCollection, Action<HttpClient>) parameters
                     if (parameters.Length != 2)
                     {
@@ -62,14 +63,9 @@ public static class HttpClientRegistrationExtensions
                     }
 
                     // Check if second param is Action<HttpClient>
-                    var secondParamType = parameters[1].ParameterType;
-                    var expectedActionType = typeof(Action<System.Net.Http.HttpClient>);
-                    if (secondParamType != expectedActionType)
-                    {
-                        return false;
-                    }
-
-                    return true;
+                    Type secondParamType = parameters[1].ParameterType;
+                    Type expectedActionType = typeof(Action<System.Net.Http.HttpClient>);
+                    return secondParamType == expectedActionType;
                 });
 
             if (addHttpClientMethod == null)
@@ -78,7 +74,7 @@ public static class HttpClientRegistrationExtensions
             }
 
             // Make the generic method with our types
-            var genericMethod = addHttpClientMethod.MakeGenericMethod(interfaceType, implementationType);
+            MethodInfo genericMethod = addHttpClientMethod.MakeGenericMethod(interfaceType, implementationType);
 
             // Invoke it with the service collection and configuration action
             genericMethod.Invoke(null, new object?[] { services, configureClient });

@@ -13,23 +13,20 @@ namespace Farm.Web.Api.Services.Workers;
 /// Circuit breaker service that tracks worker failure patterns and temporarily disables
 /// workers that consistently fail jobs to prevent wasted dispatch cycles.
 /// </summary>
-public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
+public class WorkerCircuitBreakerService(
+    ILogger<WorkerCircuitBreakerService> logger,
+    IOptions<CircuitBreakerSettings> settings) : IWorkerCircuitBreakerService
 {
-    private readonly ILogger<WorkerCircuitBreakerService> _logger;
-    private readonly CircuitBreakerSettings _settings;
+    private readonly ILogger<WorkerCircuitBreakerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly CircuitBreakerSettings _settings = settings?.Value ?? new CircuitBreakerSettings();
     private readonly ConcurrentDictionary<Guid, WorkerCircuitState> _circuitStates = new();
-
-    public WorkerCircuitBreakerService(
-        ILogger<WorkerCircuitBreakerService> logger,
-        IOptions<CircuitBreakerSettings> settings)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _settings = settings?.Value ?? new CircuitBreakerSettings();
-    }
 
     /// <summary>
     /// Record a job failure for a worker. Opens circuit if failure threshold exceeded.
     /// </summary>
+    /// <param name="workerId">The unique identifier of the worker that failed.</param>
+    /// <param name="workerRepo">The worker repository for persistence operations.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task RecordJobFailureAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default)
     {
         if (workerId == Guid.Empty)
@@ -87,6 +84,9 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// <summary>
     /// Record a job success for a worker. May close circuit if in half-open state.
     /// </summary>
+    /// <param name="workerId">The unique identifier of the worker that succeeded.</param>
+    /// <param name="workerRepo">The worker repository for persistence operations.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task RecordJobSuccessAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default)
     {
         if (workerId == Guid.Empty)
@@ -170,6 +170,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// <summary>
     /// Get current circuit state for a worker.
     /// </summary>
+    /// <param name="workerId">The unique identifier of the worker.</param>
     public CircuitState GetCircuitState(Guid workerId)
     {
         if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitState? state))
@@ -186,6 +187,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// <summary>
     /// Reset circuit for a worker (for administrative override).
     /// </summary>
+    /// <param name="workerId">The unique identifier of the worker to reset.</param>
     public void ResetCircuit(Guid workerId)
     {
         if (_circuitStates.TryRemove(workerId, out WorkerCircuitState? state))
@@ -197,48 +199,13 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     private sealed class WorkerCircuitState
     {
         public CircuitState State { get; set; } = CircuitState.Closed;
+
         public List<DateTime> RecentFailures { get; } = new();
+
         public int RecentSuccesses { get; set; }
+
         public DateTime OpenedAt { get; set; }
-        public object Lock { get; } = new();
+
+        public Lock Lock { get; } = new();
     }
-}
-
-public interface IWorkerCircuitBreakerService
-{
-    Task RecordJobFailureAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default);
-    Task RecordJobSuccessAsync(Guid workerId, IWorkerRepository workerRepo, CancellationToken ct = default);
-    void CheckCircuits();
-    CircuitState GetCircuitState(Guid workerId);
-    void ResetCircuit(Guid workerId);
-}
-
-public enum CircuitState
-{
-    Closed,   // Normal operation
-    Open,     // Circuit tripped, worker disabled
-    HalfOpen  // Testing if worker recovered
-}
-
-public class CircuitBreakerSettings
-{
-    /// <summary>
-    /// Number of failures within WindowSeconds to open circuit
-    /// </summary>
-    public int FailureThreshold { get; set; } = 3;
-
-    /// <summary>
-    /// Time window in seconds to count failures
-    /// </summary>
-    public int WindowSeconds { get; set; } = 300; // 5 minutes
-
-    /// <summary>
-    /// Cooldown period in seconds before transitioning to half-open
-    /// </summary>
-    public int CooldownSeconds { get; set; } = 60; // 1 minute
-
-    /// <summary>
-    /// Number of consecutive successes needed to close circuit from half-open
-    /// </summary>
-    public int SuccessThresholdToClose { get; set; } = 2;
 }

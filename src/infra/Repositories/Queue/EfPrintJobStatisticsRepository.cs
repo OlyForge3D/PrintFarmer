@@ -44,7 +44,7 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
         int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        var query = context.PrintJobStatistics
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
             .AsNoTracking()
             .AsQueryable();
 
@@ -75,7 +75,7 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
         int limit = 1000,
         CancellationToken cancellationToken = default)
     {
-        var query = context.PrintJobStatistics
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
             .AsNoTracking()
             .Where(s => s.IsSuccess)
             .AsQueryable();
@@ -102,7 +102,7 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
         DateTime? fromDate = null,
         CancellationToken cancellationToken = default)
     {
-        var query = context.PrintJobStatistics
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
             .AsNoTracking()
             .Where(s => s.PrinterModelId == modelId)
             .AsQueryable();
@@ -128,7 +128,7 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
         DateTime? fromDate = null,
         CancellationToken cancellationToken = default)
     {
-        var query = context.PrintJobStatistics
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
             .AsNoTracking()
             .Where(s => s.Material == material)
             .AsQueryable();
@@ -163,7 +163,7 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
         DateTime? fromDate = null,
         CancellationToken cancellationToken = default)
     {
-        var query = context.PrintJobStatistics.AsQueryable();
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics.AsQueryable();
 
         if (modelId.HasValue)
         {

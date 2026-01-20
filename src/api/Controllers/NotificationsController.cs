@@ -33,8 +33,8 @@ public class NotificationsController(INotificationService notificationService) :
     {
         try
         {
-            var userId = GetUserIdFromClaims();
-            var notifications = await notificationService.GetUserNotificationsAsync(userId, limit, cancellationToken);
+            Guid userId = GetUserIdFromClaims();
+            IEnumerable<Notification> notifications = await notificationService.GetUserNotificationsAsync(userId, limit, cancellationToken);
             return Ok(notifications);
         }
         catch (InvalidOperationException)
@@ -59,8 +59,8 @@ public class NotificationsController(INotificationService notificationService) :
     {
         try
         {
-            var userId = GetUserIdFromClaims();
-            var notifications = await notificationService.GetUserUnreadNotificationsAsync(userId, cancellationToken);
+            Guid userId = GetUserIdFromClaims();
+            IEnumerable<Notification> notifications = await notificationService.GetUserUnreadNotificationsAsync(userId, cancellationToken);
             return Ok(notifications);
         }
         catch (InvalidOperationException)
@@ -85,8 +85,8 @@ public class NotificationsController(INotificationService notificationService) :
     {
         try
         {
-            var userId = GetUserIdFromClaims();
-            var count = await notificationService.GetUnreadCountAsync(userId, cancellationToken);
+            Guid userId = GetUserIdFromClaims();
+            int count = await notificationService.GetUnreadCountAsync(userId, cancellationToken);
             return Ok(new UnreadCountResponse { UnreadCount = count });
         }
         catch (InvalidOperationException)
@@ -188,27 +188,24 @@ public class NotificationsController(INotificationService notificationService) :
     {
         try
         {
-            var userId = GetUserIdFromClaims();
+            Guid userId = GetUserIdFromClaims();
 
-            var preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            if (preferences == null)
-            {
-                return NotFound(new { error = $"Preferences not found for user {userId}" });
-            }
-
-            return Ok(new NotificationPreferencesDto
-            {
-                UserId = preferences.UserId,
-                EnableEmailNotifications = preferences.EnableEmailNotifications,
-                EnablePushNotifications = preferences.EnablePushNotifications,
-                EnableInAppNotifications = preferences.EnableInAppNotifications,
-                NotifyOnCompletion = preferences.NotifyOnCompletion,
-                NotifyOnFailure = preferences.NotifyOnFailure,
-                NotifyOnStart = preferences.NotifyOnStart,
-                NotifyOnPause = preferences.NotifyOnPause,
-                Frequency = preferences.Frequency,
-                RetentionDays = preferences.RetentionDays
-            });
+            NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
+            return preferences == null
+                ? NotFound(new { error = $"Preferences not found for user {userId}" })
+                : Ok(new NotificationPreferencesDto
+                {
+                    UserId = preferences.UserId,
+                    EnableEmailNotifications = preferences.EnableEmailNotifications,
+                    EnablePushNotifications = preferences.EnablePushNotifications,
+                    EnableInAppNotifications = preferences.EnableInAppNotifications,
+                    NotifyOnCompletion = preferences.NotifyOnCompletion,
+                    NotifyOnFailure = preferences.NotifyOnFailure,
+                    NotifyOnStart = preferences.NotifyOnStart,
+                    NotifyOnPause = preferences.NotifyOnPause,
+                    Frequency = preferences.Frequency,
+                    RetentionDays = preferences.RetentionDays
+                });
         }
         catch (InvalidOperationException)
         {
@@ -221,11 +218,11 @@ public class NotificationsController(INotificationService notificationService) :
     }
 
     /// <summary>
-    /// Update notification preferences for the current user
+    /// Update notification preferences for the current user.
     /// </summary>
-    /// <param name="request">Updated preferences</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Updated preferences</returns>
+    /// <param name="request">The preferences to update.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated notification preferences.</returns>
     [HttpPut("preferences")]
     [ProducesResponseType(typeof(NotificationPreferencesDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -235,7 +232,7 @@ public class NotificationsController(INotificationService notificationService) :
     {
         try
         {
-            var userId = GetUserIdFromClaims();
+            Guid userId = GetUserIdFromClaims();
 
             if (request == null)
             {
@@ -287,16 +284,13 @@ public class NotificationsController(INotificationService notificationService) :
     /// </summary>
     private Guid GetUserIdFromClaims()
     {
-        var userIdString = User?.FindFirst("sub")?.Value ??
+        string? userIdString = User?.FindFirst("sub")?.Value ??
                User?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value ??
                User?.FindFirst("oid")?.Value;
 
-        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
-        {
-            throw new InvalidOperationException("User ID not found or invalid in claims");
-        }
-
-        return userId;
+        return string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId)
+            ? throw new InvalidOperationException("User ID not found or invalid in claims")
+            : userId;
     }
 }
 

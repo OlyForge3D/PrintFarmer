@@ -16,6 +16,19 @@ export interface GCodeFile {
 }
 
 /**
+ * File entry for file browser/explorer
+ */
+export interface FileEntry {
+  id: string;
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size?: number;
+  modifiedAt?: string;
+  thumbnailUrl?: string;
+}
+
+/**
  * Represents a discovered file during harvest operations with progress tracking
  */
 export interface FileWithProgress {
@@ -94,19 +107,6 @@ export interface HarvestWizardState {
   discoveredFiles: HarvestDiscoveredFile[];
   options: HarvestOptions;
   importStatus: FileImportStatus[];
-}
-
-/**
- * File entry for file browser/explorer
- */
-export interface FileEntry {
-  id: string;
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  size?: number;
-  modifiedAt?: string;
-  thumbnailUrl?: string;
 }
 
 /**

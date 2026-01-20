@@ -18,21 +18,14 @@ namespace Farm.Web.Api.Services.Artifacts;
 /// <summary>
 /// Local filesystem implementation of artifact persistence. Files are stored under a configured root path.
 /// </summary>
-public class ArtifactsService : IArtifactsService
+public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository artifactsRepo, IOptions<ArtifactStorageSettings> opts, ArtifactsMetrics metrics) : IArtifactsService
 {
-    private readonly IWebHostEnvironment _env;
-    private readonly IArtifactsRepository _artifactsRepo;
-    private readonly ArtifactStorageSettings _settings;
+    private readonly IWebHostEnvironment _env = env ?? throw new ArgumentNullException(nameof(env));
+    private readonly IArtifactsRepository _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
+    private readonly ArtifactStorageSettings _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
     private static readonly Regex FileNameSafeRegex = new("[^a-zA-Z0-9._-]+", RegexOptions.Compiled);
 
-    private readonly ArtifactsMetrics _metrics;
-    public ArtifactsService(IWebHostEnvironment env, IArtifactsRepository artifactsRepo, IOptions<ArtifactStorageSettings> opts, ArtifactsMetrics metrics)
-    {
-        _env = env ?? throw new ArgumentNullException(nameof(env));
-        _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
-        _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
-        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
-    }
+    private readonly ArtifactsMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
     public async Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
     {
@@ -187,7 +180,7 @@ public class ArtifactsService : IArtifactsService
         return await _artifactsRepo.GetByJobIdAsync(jobId, ct);
     }
 
-    public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
+    public async Task<(Artifact Artifact, string FullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
         Artifact? artifact = await _artifactsRepo.GetByIdAsync(id, ct);
         if (artifact == null)
@@ -207,6 +200,7 @@ public class ArtifactsService : IArtifactsService
         {
             root = Path.Combine(_env.ContentRootPath, root);
         }
+
         return root;
     }
 
@@ -241,6 +235,7 @@ public class ArtifactsService : IArtifactsService
             await target.WriteAsync(buffer.AsMemory(0, read), ct);
             _ = hasher.TransformBlock(buffer, 0, read, null, 0);
         }
+
         _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(hasher.Hash!);
     }

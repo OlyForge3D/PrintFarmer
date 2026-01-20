@@ -13,17 +13,11 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// Submit (POST /api/slice) -> Claim (POST /api/slice/claim) -> Get Status (GET /api/slice/{id}).
 /// This validates the new worker bridging path (BLOCKER 1) independent of repository shortcuts.
 /// </summary>
-public class SliceJobHttpFlowTests : IAsyncLifetime
+public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+    private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
+    private readonly Xunit.Abstractions.ITestOutputHelper _output = output;
     private HttpClient _client;
-
-    public SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output)
-    {
-        _factory = new CustomWebApplicationFactory();
-        _output = output;
-    }
 
     public async Task InitializeAsync()
     {

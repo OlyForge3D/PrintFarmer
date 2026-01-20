@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
@@ -40,11 +41,17 @@ public sealed class PrusaLinkPollingService(
     private sealed class PrinterPollingState
     {
         public Guid PrinterId { get; set; }
+
         public string? LastKnownState { get; set; }
+
         public double? LastKnownProgress { get; set; }
+
         public string? LastKnownJobName { get; set; }
+
         public bool LastKnownIsOnline { get; set; }
+
         public DateTime LastPollTime { get; set; }
+
         public int ConsecutiveFailures { get; set; }
     }
 
@@ -103,11 +110,11 @@ public sealed class PrusaLinkPollingService(
                 try
                 {
                     // Get list of PrusaLink printers from database
-                    var printerIds = await GetPrusaLinkPrinterIdsAsync(ct);
+                    List<Guid> printerIds = await GetPrusaLinkPrinterIdsAsync(ct);
                     _logger.LogDebug($"PrusaLinkPollingService: Found {printerIds.Count} PrusaLink printers");
 
                     // Ensure polling loops exist for all PrusaLink printers
-                    foreach (var id in printerIds)
+                    foreach (Guid id in printerIds)
                     {
                         if (!_pollingLoops.ContainsKey(id))
                         {
@@ -121,7 +128,7 @@ public sealed class PrusaLinkPollingService(
 
                     // Remove polling loops for printers that are no longer PrusaLink
                     var inactiveIds = _pollingLoops.Keys.Except(printerIds).ToList();
-                    foreach (var printerId in inactiveIds)
+                    foreach (Guid printerId in inactiveIds)
                     {
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
@@ -154,7 +161,7 @@ public sealed class PrusaLinkPollingService(
     private async Task PollPrinterAsync(Guid printerId, CancellationToken ct)
     {
 #pragma warning disable S6612 // Capturing printerId in lambda is intentional and safe
-        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState { PrinterId = printerId, LastKnownIsOnline = false });
+        PrinterPollingState state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState { PrinterId = printerId, LastKnownIsOnline = false });
 #pragma warning restore S6612
 
         while (!ct.IsCancellationRequested)
@@ -176,8 +183,8 @@ public sealed class PrusaLinkPollingService(
                 {
                     // Get the PrusaLink client from a scoped context
                     // (scoped services cannot be injected directly into singletons)
-                    using var scope = _scopeFactory.CreateScope();
-                    var prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+                    using IServiceScope scope = _scopeFactory.CreateScope();
+                    IPrusaLinkClient prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
 
                     PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
@@ -221,8 +228,7 @@ public sealed class PrusaLinkPollingService(
                         BedTemp: null,
                         HotendTarget: null,
                         BedTarget: null,
-                        SpoolInfo: null
-                    );
+                        SpoolInfo: null);
 
                     // Update cache before broadcasting to clients
                     _statusCacheWriter.UpdateStatus(update);
@@ -257,8 +263,7 @@ public sealed class PrusaLinkPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null
-                        );
+                            SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(offlineUpdate);
@@ -287,9 +292,9 @@ public sealed class PrusaLinkPollingService(
     /// </summary>
     private async Task<List<Guid>> GetPrusaLinkPrinterIdsAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
-        var printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
         return printers.Select(p => p.Id).ToList();
     }
 
@@ -298,8 +303,8 @@ public sealed class PrusaLinkPollingService(
     /// </summary>
     private async Task<Printer?> GetPrinterAsync(Guid printerId, CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
         return await unitOfWork.Printers.FindByIdAsync(printerId, ct);
     }
 }
