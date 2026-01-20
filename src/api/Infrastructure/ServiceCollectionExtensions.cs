@@ -180,6 +180,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<DatabaseInitializer>();
         _ = services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
+        // YAML seed data services
+        _ = services.AddScoped<IYamlSeedDataReader, YamlSeedDataReader>();
+        _ = services.AddScoped<IDataSeedService, DataSeedService>();
+
         // Network URL rewriting (stateless, safe as Singleton)
         _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
 
