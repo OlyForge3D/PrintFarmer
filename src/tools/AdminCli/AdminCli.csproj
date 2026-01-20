@@ -16,5 +16,6 @@
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
     <ProjectReference Include="../../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="../../orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj" />
   </ItemGroup>
 </Project>

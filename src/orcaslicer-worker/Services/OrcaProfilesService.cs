@@ -44,21 +44,41 @@ public class OrcaProfilesService : ISlicerProfilesService
     private List<ProcessProfileDto>? _allProcessProfilesCache;
     private readonly Lock _profilesCacheLock = new();
 
+    /// <summary>
+    /// Creates an OrcaProfilesService with the default profile path (from ORCA_PROFILES_PATH env var or /opt/orcaslicer/resources/profiles).
+    /// </summary>
     public OrcaProfilesService(IUnifiedLoggingService logger)
+        : this(logger, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates an OrcaProfilesService with an explicit profile path.
+    /// </summary>
+    /// <param name="logger">Logging service for diagnostics.</param>
+    /// <param name="profilesPath">Custom path to profiles directory. If null, uses ORCA_PROFILES_PATH env var or default.</param>
+    public OrcaProfilesService(IUnifiedLoggingService logger, string? profilesPath)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        // Check for environment variable override (useful for testing with sample profiles)
-        string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
-        if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
+        if (!string.IsNullOrWhiteSpace(profilesPath) && Directory.Exists(profilesPath))
         {
-            _orcaProfilesPath = envPath;
+            _orcaProfilesPath = profilesPath;
         }
         else
         {
-            // In container environment, use the system installation profiles directly
-            // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
-            _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+            // Check for environment variable override (useful for testing with sample profiles)
+            string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
+            if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
+            {
+                _orcaProfilesPath = envPath;
+            }
+            else
+            {
+                // In container environment, use the system installation profiles directly
+                // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
+                _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+            }
         }
     }
 
