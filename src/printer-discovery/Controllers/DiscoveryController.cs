@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 
@@ -34,7 +35,8 @@ public class DiscoveryController(
         try
         {
             string sessionId = Guid.NewGuid().ToString("N");
-            _logger.LogInformation("Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
+            _logger.LogInformation(
+                "Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
                 sessionId,
                 request?.Subnets != null ? string.Join(", ", request.Subnets) : "default",
                 request?.Backends != null ? string.Join(", ", request.Backends) : "all",
@@ -200,10 +202,15 @@ public class DiscoveryController(
 public class DiscoveryResult
 {
     public string Hostname { get; set; } = string.Empty;
+
     public string IpAddress { get; set; } = string.Empty;
+
     public int Port { get; set; }
+
     public string PrinterBackend { get; set; } = string.Empty;
+
     public DateTime DiscoveredAt { get; set; }
+
     public bool Registered { get; set; }
 }
 
@@ -213,10 +220,15 @@ public class DiscoveryResult
 public class ServiceInfo
 {
     public string ServiceName { get; set; } = string.Empty;
+
     public string Version { get; set; } = string.Empty;
+
     public int ScanIntervalSeconds { get; set; }
+
     public bool PeriodicDiscoveryEnabled { get; set; }
+
     public string ApiBaseUrl { get; set; } = string.Empty;
+
     public DateTime Timestamp { get; set; }
 }
 
@@ -257,5 +269,6 @@ public class StreamingDiscoveryRequest
 public class StreamingDiscoveryResponse
 {
     public string SessionId { get; set; } = string.Empty;
+
     public string Message { get; set; } = string.Empty;
 }

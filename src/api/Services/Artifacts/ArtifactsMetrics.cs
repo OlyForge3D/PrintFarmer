@@ -17,15 +17,18 @@ public sealed class ArtifactsMetrics : IDisposable
     private static readonly Counter<long> s_uploadedCount = s_meter.CreateCounter<long>(
         "printfarmer.artifacts.uploaded_total",
         description: "Total number of artifacts uploaded");
+
     private static readonly Histogram<long> s_uploadBytes = s_meter.CreateHistogram<long>(
         "printfarmer.artifacts.upload_bytes",
         unit: "bytes",
         description: "Size of individual artifact uploads");
+
     private static readonly ObservableGauge<long> s_storageTotalBytes = s_meter.CreateObservableGauge(
         "printfarmer.artifacts.storage_total_bytes",
         ObserveStorageBytes,
         unit: "bytes",
         description: "Approximate total size of stored artifacts (global)");
+
     private static readonly ObservableGauge<int> s_storageThresholdState = s_meter.CreateObservableGauge(
         "printfarmer.artifacts.storage_threshold_state",
         ObserveThresholdState,
@@ -38,8 +41,11 @@ public sealed class ArtifactsMetrics : IDisposable
     private static int s_currentState;
 
     public Counter<long> UploadedCount => s_uploadedCount;
+
     public Histogram<long> UploadBytes => s_uploadBytes;
+
     public ObservableGauge<long> StorageTotalBytes => s_storageTotalBytes;
+
     public ObservableGauge<int> StorageThresholdState => s_storageThresholdState;
 
     /// <summary>
@@ -62,11 +68,14 @@ public sealed class ArtifactsMetrics : IDisposable
     }
 
     private static Measurement<long> ObserveStorageBytes() => new(Interlocked.Read(ref s_storageBytes));
+
     private static Measurement<int> ObserveThresholdState() => new(Interlocked.CompareExchange(ref s_currentState, 0, 0));
 
     /// <summary>
     /// Configure storage alert thresholds.
     /// </summary>
+    /// <param name="warningBytes">The threshold in bytes at which a warning is triggered.</param>
+    /// <param name="criticalBytes">The threshold in bytes at which a critical alert is triggered.</param>
     public void SetThresholds(long warningBytes, long criticalBytes)
     {
         _ = Interlocked.Exchange(ref s_warningThreshold, warningBytes);
@@ -74,6 +83,7 @@ public sealed class ArtifactsMetrics : IDisposable
     }
 
     /// <summary>Record artifact upload metrics (increment counters and update gauge baseline).</summary>
+    /// <param name="sizeBytes">The size of the uploaded artifact in bytes.</param>
     public void RecordUpload(long sizeBytes)
     {
         s_uploadedCount.Add(1);
@@ -133,25 +143,4 @@ public sealed class ArtifactsMetrics : IDisposable
         // be used by other consumers/tests. Keep Dispose a no-op to make it
         // safe to create short-lived instances in unit tests.
     }
-}
-
-/// <summary>
-/// Storage threshold severity levels.
-/// </summary>
-public enum StorageThresholdLevel
-{
-    Normal = 0,
-    Warning = 1,
-    Critical = 2
-}
-
-/// <summary>
-/// Event arguments for storage threshold exceeded events.
-/// </summary>
-public sealed class StorageThresholdEventArgs(StorageThresholdLevel level, long currentBytes, long warningThreshold, long criticalThreshold) : EventArgs
-{
-    public StorageThresholdLevel Level { get; } = level;
-    public long CurrentBytes { get; } = currentBytes;
-    public long WarningThreshold { get; } = warningThreshold;
-    public long CriticalThreshold { get; } = criticalThreshold;
 }

@@ -1,6 +1,6 @@
-﻿namespace Farm.Backend.Plugin.Core;
+﻿using Microsoft.Extensions.DependencyInjection;
 
-using Microsoft.Extensions.DependencyInjection;
+namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Base interface for all backend client plugins.

@@ -22,7 +22,8 @@ public class SettingsInitializationService(
     /// <summary>
     /// Initializes settings from environment variables if they don't exist in database.
     /// </summary>
-    public void InitializeFromEnvironment<T>() where T : class, IAppSetting, new()
+    public void InitializeFromEnvironment<T>()
+        where T : class, IAppSetting, new()
     {
         string settingKey = T.SectionKey;
 
@@ -70,7 +71,8 @@ public class SettingsInitializationService(
     /// <summary>
     /// Checks if a settings object contains only default/empty values.
     /// </summary>
-    private static bool IsEmpty<T>(T settings) where T : class
+    private static bool IsEmpty<T>(T settings)
+        where T : class
     {
         if (settings == null)
         {

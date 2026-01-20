@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
@@ -14,6 +13,7 @@ namespace Farm.Infrastructure.Settings;
 public class DatabaseSettings : ISystemSetting, IValidatableSetting
 {
     public const string SectionName = "Db";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Database Provider", Description = "Type of database provider.", InputType = SettingInputType.Select)]
@@ -46,6 +46,7 @@ public class DatabaseSettings : ISystemSetting, IValidatableSetting
         {
             throw new ValidationException("Provider is required.");
         }
+
         if (CommandTimeoutSeconds is < 1 or > 300)
         {
             throw new ValidationException("CommandTimeoutSeconds must be between 1 and 300.");

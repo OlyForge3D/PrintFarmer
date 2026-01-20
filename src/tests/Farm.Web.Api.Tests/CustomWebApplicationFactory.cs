@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
@@ -31,11 +32,11 @@ namespace Farm.Web.Api.Tests
         {
             // Create a unique in-memory database per factory instance
             // Using auto-increment ID ensures complete isolation between tests
-            var dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
+            int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
             _connectionString = $"Data Source=:memory:?mode=memory&cache=shared";
 
             // Create temp directories for file storage (isolated per test)
-            var tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
+            string tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
             _modelStoragePath = Path.Combine(tempDir, "models");
             _gcodeStoragePath = Path.Combine(tempDir, "gcode");
 
@@ -60,7 +61,7 @@ namespace Farm.Web.Api.Tests
             builder.ConfigureServices(services =>
             {
                 // Remove only the DbContext configuration, not the whole service
-                var dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+                ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
                 if (dbContextDescriptor != null)
                 {
                     services.Remove(dbContextDescriptor);
@@ -73,10 +74,10 @@ namespace Farm.Web.Api.Tests
                 });
 
                 // Ensure database is created after all services are registered
-                var sp = services.BuildServiceProvider();
-                using (var scope = sp.CreateScope())
+                ServiceProvider sp = services.BuildServiceProvider();
+                using (IServiceScope scope = sp.CreateScope())
                 {
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     db.Database.EnsureCreated();
                 }
             });
@@ -96,7 +97,7 @@ namespace Farm.Web.Api.Tests
             // Clean up temporary storage directories
             try
             {
-                var tempDir = Path.GetDirectoryName(_modelStoragePath);
+                string? tempDir = Path.GetDirectoryName(_modelStoragePath);
                 if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
                 {
                     Directory.Delete(tempDir, recursive: true);
@@ -120,12 +121,12 @@ namespace Farm.Web.Api.Tests
             string password = "TestPassword123!")
         {
             // Create test user
-            using (var scope = Services.CreateAsyncScope())
+            using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-                var existingUser = await context.Users.FirstOrDefaultAsync(u => u.Username == username);
+                User? existingUser = await context.Users.FirstOrDefaultAsync(u => u.Username == username);
                 if (existingUser == null)
                 {
                     var user = new User
@@ -147,12 +148,12 @@ namespace Farm.Web.Api.Tests
             }
 
             // Get token from authentication service
-            using (var scope = Services.CreateAsyncScope())
+            using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-                var result = await authService.AuthenticateAsync(username, password);
+                IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+                AuthenticationResult result = await authService.AuthenticateAsync(username, password);
 
-                var client = CreateClient();
+                HttpClient client = CreateClient();
                 if (result.Success && !string.IsNullOrEmpty(result.Token))
                 {
                     client.DefaultRequestHeaders.Add("Authorization", $"Bearer {result.Token}");
@@ -168,10 +169,10 @@ namespace Farm.Web.Api.Tests
         /// </summary>
         public async Task ResetDatabaseAsync()
         {
-            var scope = Services.CreateAsyncScope();
+            AsyncServiceScope scope = Services.CreateAsyncScope();
             try
             {
-                var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await context.Database.EnsureDeletedAsync();
                 await context.Database.EnsureCreatedAsync();
 
@@ -189,7 +190,7 @@ namespace Farm.Web.Api.Tests
             try
             {
                 // Ensure root "/" folder exists for "gcode" category
-                var existingGcodeRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+                FolderNode? existingGcodeRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
                 if (existingGcodeRoot == null)
                 {
                     context.Folders.Add(new FolderNode
@@ -202,7 +203,7 @@ namespace Farm.Web.Api.Tests
                 }
 
                 // Ensure root "/" folder exists for "models" category
-                var existingModelsRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
+                FolderNode? existingModelsRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
                 if (existingModelsRoot == null)
                 {
                     context.Folders.Add(new FolderNode
@@ -291,12 +292,12 @@ namespace Farm.Web.Api.Tests
             string password = "TestPassword123!")
         {
             // Create admin user with farm_admin role
-            using (var scope = Services.CreateAsyncScope())
+            using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-                var existingUser = await context.Users.FirstOrDefaultAsync(u => u.Username == username);
+                User? existingUser = await context.Users.FirstOrDefaultAsync(u => u.Username == username);
                 if (existingUser == null)
                 {
                     var user = new User
@@ -316,7 +317,7 @@ namespace Farm.Web.Api.Tests
                     await context.SaveChangesAsync();
 
                     // Assign farm_admin role
-                    var adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
+                    Role? adminRole = await context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
                     if (adminRole == null)
                     {
                         // Create the farm_admin role if it doesn't exist
@@ -344,12 +345,12 @@ namespace Farm.Web.Api.Tests
             }
 
             // Get token and create authenticated client
-            using (var scope = Services.CreateAsyncScope())
+            using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-                var result = await authService.AuthenticateAsync(username, password);
+                IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+                AuthenticationResult result = await authService.AuthenticateAsync(username, password);
 
-                var client = CreateClient();
+                HttpClient client = CreateClient();
                 if (result.Success && !string.IsNullOrEmpty(result.Token))
                 {
                     client.DefaultRequestHeaders.Add("Authorization", $"Bearer {result.Token}");
@@ -373,7 +374,7 @@ namespace Farm.Web.Api.Tests
             await RegisterWorkerAsync(workerKey, workerName);
 
             // Get authenticated client and add worker key header
-            var client = await CreateAuthenticatedClientAsync(username, email, password);
+            HttpClient client = await CreateAuthenticatedClientAsync(username, email, password);
             client.DefaultRequestHeaders.Add("X-Worker-Key", workerKey);
             return client;
         }
@@ -386,11 +387,11 @@ namespace Farm.Web.Api.Tests
             string workerKey = "test-worker-key",
             string workerName = "Test Worker")
         {
-            using (var scope = Services.CreateAsyncScope())
+            using (AsyncServiceScope scope = Services.CreateAsyncScope())
             {
-                var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                var existingWorker = await context.Workers.FirstOrDefaultAsync(w => w.ApiKey == workerKey);
+                Worker? existingWorker = await context.Workers.FirstOrDefaultAsync(w => w.ApiKey == workerKey);
                 if (existingWorker == null)
                 {
                     var worker = new Worker

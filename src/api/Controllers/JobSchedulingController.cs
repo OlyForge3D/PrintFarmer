@@ -24,6 +24,9 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <summary>
     /// Schedule a print job for a specific date and time
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to schedule.</param>
+    /// <param name="request">The scheduling request containing start time and recurrence options.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/schedule")]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(400)]
@@ -35,7 +38,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     {
         try
         {
-            var result = await _schedulingService.ScheduleJobAsync(
+            ScheduledJobDto result = await _schedulingService.ScheduleJobAsync(
                 jobId,
                 request.ScheduledStartTime,
                 request.TimeZone ?? "UTC",
@@ -60,6 +63,9 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <summary>
     /// Reschedule an existing scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to reschedule.</param>
+    /// <param name="request">The reschedule request containing the new scheduled time.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPut("{jobId:guid}/reschedule")]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(400)]
@@ -71,7 +77,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     {
         try
         {
-            var result = await _schedulingService.RescheduleJobAsync(
+            ScheduledJobDto result = await _schedulingService.RescheduleJobAsync(
                 jobId,
                 request.NewScheduledTime,
                 request.TimeZone ?? "UTC",
@@ -94,6 +100,8 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <summary>
     /// Cancel scheduling for a job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to cancel scheduling for.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpDelete("{jobId:guid}/schedule")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -114,6 +122,9 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <summary>
     /// Get all scheduled jobs
     /// </summary>
+    /// <param name="dateFrom">Optional start date to filter scheduled jobs.</param>
+    /// <param name="dateTo">Optional end date to filter scheduled jobs.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("scheduled")]
     [ProducesResponseType(typeof(IEnumerable<ScheduledJobDto>), 200)]
     public async Task<ActionResult<IEnumerable<ScheduledJobDto>>> GetScheduledJobsAsync(
@@ -121,32 +132,36 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
         [FromQuery] DateTime? dateTo,
         CancellationToken cancellationToken)
     {
-        var result = await _schedulingService.GetScheduledJobsAsync(dateFrom, dateTo, cancellationToken);
+        IEnumerable<ScheduledJobDto> result = await _schedulingService.GetScheduledJobsAsync(dateFrom, dateTo, cancellationToken);
         return Ok(result);
     }
 
     /// <summary>
     /// Get scheduling information for a specific job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("{jobId:guid}")]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ScheduledJobDto>> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        var result = await _schedulingService.GetScheduledJobAsync(jobId, cancellationToken);
+        ScheduledJobDto? result = await _schedulingService.GetScheduledJobAsync(jobId, cancellationToken);
         return result == null ? NotFound(new { error = $"No scheduling found for job '{jobId}'" }) : Ok(result);
     }
 
     /// <summary>
     /// Get execution history for a scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("{jobId:guid}/executions")]
     [ProducesResponseType(typeof(IEnumerable<JobExecutionDto>), 200)]
     public async Task<ActionResult<IEnumerable<JobExecutionDto>>> GetExecutionHistoryAsync(
         Guid jobId,
         CancellationToken cancellationToken)
     {
-        var result = await _schedulingService.GetExecutionHistoryAsync(jobId, cancellationToken);
+        IEnumerable<JobExecutionDto> result = await _schedulingService.GetExecutionHistoryAsync(jobId, cancellationToken);
         return Ok(result);
     }
 
@@ -158,13 +173,15 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     [ProducesResponseType(typeof(IEnumerable<TimeZoneDto>), 200)]
     public ActionResult<IEnumerable<TimeZoneDto>> GetAvailableTimeZones()
     {
-        var result = _schedulingService.GetAvailableTimeZones();
+        IEnumerable<TimeZoneDto> result = _schedulingService.GetAvailableTimeZones();
         return Ok(result);
     }
 
     /// <summary>
     /// Pause a scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to pause.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/pause")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -185,6 +202,8 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <summary>
     /// Resume a paused scheduled job
     /// </summary>
+    /// <param name="jobId">The unique identifier of the job to resume.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/resume")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -209,8 +228,11 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
 public class ScheduleJobRequest
 {
     public required DateTime ScheduledStartTime { get; set; }
+
     public string? TimeZone { get; set; }
+
     public string? RecurrencePattern { get; set; }
+
     public DateTime? RecurrenceEndDate { get; set; }
 }
 
@@ -220,5 +242,6 @@ public class ScheduleJobRequest
 public class RescheduleJobRequest
 {
     public required DateTime NewScheduledTime { get; set; }
+
     public string? TimeZone { get; set; }
 }

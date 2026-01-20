@@ -5,17 +5,23 @@ namespace Farm.Infrastructure.Contracts.Admin;
 public class DryRunRequest
 {
     public string? Template { get; set; }
+
     public SlicerEngineType Engine { get; set; } = Farm.Infrastructure.SlicerEngineType.OrcaSlicer;
 }
 
 public class DryRunResult
 {
     public bool IsValid { get; set; }
+
     private readonly List<string> _issues = new();
     private readonly List<string> _warnings = new();
+
     public IReadOnlyList<string> Issues => _issues;
+
     public IReadOnlyList<string> Warnings => _warnings;
+
     public string? Rendered { get; set; }
+
     public Dictionary<string, string> SamplePlaceholders { get; set; } = new();
 
     public void AddIssue(string issue)

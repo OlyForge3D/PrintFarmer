@@ -1,53 +1,87 @@
-# Copilot Processing: Printer Model Alias Management UI
+# Copilot Processing: Toolhead Component Auto-Population
 
-**Session Start**: Adding UI support for managing printer model aliases  
-**Phase**: ✅ Backend Complete | ✅ UI Implementation Complete | 🎉 Ready for Testing
+**Session Start**: Implementing toolhead component auto-population and nozzle interface types
+**Phase**: 🔄 In Progress
 
-## 🔄 PRINTER MODEL ALIAS MANAGEMENT UI - IMPLEMENTATION COMPLETE ✅
+## 🔄 TOOLHEAD COMPONENT AUTO-POPULATION
 
-**Objective**: Add UI support for managing printer model aliases (OrcaSlicer and PrusaSlicer name mappings)  
-**Status**: ✅ COMPLETE
+**Objective**: 
+1. Reorder catalog tabs: Printers | Toolheads | Extruders | Hotends | Nozzles
+2. Auto-populate Extruder/Hotend/Nozzle when Toolhead is selected in printer model modal
+3. Seed Generic Brass nozzles for V6 and Volcano interfaces
+4. Add NozzleInterfaceType to nozzle seeding
 
-### Implementation Details
+### Implementation Progress
 
-**1. TypeScript Types Added** (`src/Web/ReactApp/src/types/api.ts`)
-- ✅ `SlicerModelAliasDto` - Alias data structure with id, printerModelId, slicerModelName, slicerType
-- ✅ `UpdateModelAliasesRequest` - Request payload with orcaSlicerNames and prusaSlicerNames arrays
+**Completed**:
+- ✅ Added DefaultHotendId, DefaultExtruderId, DefaultNozzleId to ToolheadModelDefinition domain model
+- ✅ Updated TypeScript ToolheadModelDefinition interface with new fields
+- ✅ Updated ToolheadModelDto to include default component IDs
+- ✅ Updated ICatalogRepository.GetToolheadModelsAsync return type
+- ✅ Updated EfCatalogRepository.GetToolheadModelsAsync to include default component IDs
+- ✅ Updated CatalogService to map new fields to DTO
+- ✅ Reordered CatalogPage tabs to: Printers | Toolheads | Extruders | Hotends | Nozzles
+- ✅ Added `handleToolheadModelSelect` handler in EditModelModal for auto-population
+- ✅ Updated toolhead model select to use new handler
+- ✅ Added NozzleInterfaceType to nozzle seed data (all 46 nozzle entries updated)
+- ✅ Added Generic Volcano Brass/Hardened Steel nozzles for high-flow hotends
 
-**2. API Client Methods** (`src/Web/ReactApp/src/services/api.ts`)
-- ✅ `getModelAliases(modelId)` - Fetch all aliases for a printer model
-- ✅ `updateModelAliases(modelId, request)` - Update aliases with new lists
-- ✅ Added imports for new types
+**Files Modified**:
+1. `/src/infra/Domain/ComponentModels.cs` - Added DefaultHotendId, DefaultExtruderId, DefaultNozzleId to ToolheadModelDefinition
+2. `/src/Web/ReactApp/src/types/api.ts` - Updated ToolheadModelDefinition interface
+3. `/src/infra/ToolheadModelDto.cs` - Added default component IDs
+4. `/src/infra/Repositories/Catalog/ICatalogRepository.cs` - Updated GetToolheadModelsAsync signature
+5. `/src/infra/Repositories/Catalog/EfCatalogRepository.cs` - Updated implementation
+6. `/src/infra/Services/Catalog/CatalogService.cs` - Updated mapping
+7. `/src/infra/ComponentModelDtos.cs` - Added to Create/Update DTOs
+8. `/src/Web/ReactApp/src/features/catalog/pages/CatalogPage.tsx` - Reordered tabs
+9. `/src/Web/ReactApp/src/features/models3d/components/EditModelModal.tsx` - Added auto-populate logic
+10. `/src/api/Services/DatabaseInitializer.cs` - Updated nozzle seeding with NozzleInterfaceType
 
-**3. ModelAliasEditor Component** (NEW FILE)
-- ✅ Path: `src/features/catalog/components/ModelAliasEditor.tsx`
-- ✅ Features:
-  - Separate sections for OrcaSlicer and PrusaSlicer aliases
-  - Add new aliases with input fields and validation
-  - Delete existing aliases with optimistic removal
-  - Loading state with spinner icon
-  - Error handling with user-friendly messages
-  - Keyboard support (Enter to add aliases)
-  - Responsive design with Tailwind CSS
+### Build Status
+✅ **API Build**: Passed (47s)
+✅ **React Build**: Passed (10.23s)
 
-**4. EditModelModal Integration** 
-- ✅ Added ModelAliasEditor section to printer model editor
-- ✅ Section only shows when editing existing models (not during creation)
-- ✅ Descriptive help text explaining alias purpose
-- ✅ Auto-refresh model data on successful alias update
-- ✅ Maintains modal styling and layout consistency
+### Remaining Tasks
+- [ ] Run tests to verify changes
+- [ ] Update DatabaseInitializer to set default components on toolhead seeds
+- [ ] Test auto-populate functionality in UI
 
-### Code Quality Metrics
+---
 
-✅ **Build Status**: All systems passing
-- React production build: ✓ 9.87s
-- .NET API build: ✓ 0 errors, 2 pre-existing warnings
-- TypeScript compilation: ✓ 0 errors
+## Previous Session Summary
 
-✅ **Test Results**: All passing
-- Test Files: 39/39 passed
-- Tests: 400/400 passed
-- Duration: 8.65s
+### User Experience
+
+The new CatalogPage provides:
+- **Printers Tab**: Original master-detail layout with manufacturers on left, printer models on right
+- **Hotends Tab**: Grid of hotend models with filtering, inline add/edit/delete
+- **Extruders Tab**: Grid of extruder models with gear ratio and direct drive indicators
+- **Toolheads Tab**: Grid of toolhead models with manufacturer badges
+- **Nozzles Tab**: Grid of nozzle models with temperature and hardened indicators
+
+Each component catalog supports:
+- Create new models with manufacturer selection
+- Edit existing models (including manufacturer change)
+- Delete models with confirmation
+- View all models or filter by manufacturer
+
+---
+
+# Previous Session: HardwareModel Base Class & UI Integration
+```typescript
+import { useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
+
+// Example usage:
+const { data: hotends, isLoading } = useHotendModels();
+const { data: extruders } = useExtruderModels();
+const { data: toolheads } = useToolheadModels();
+const { data: nozzles } = useNozzleModels();
+```
+
+---
+
+# Previous Session: Edit Printer Toolheads UI
 
 ✅ **Linting**: 
 - ModelAliasEditor.tsx: 0 errors, 0 warnings

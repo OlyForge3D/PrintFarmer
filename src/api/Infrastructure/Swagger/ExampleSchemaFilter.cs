@@ -20,7 +20,6 @@ public static class ExampleSchemaFilter
     {
         // TODO: Update to use ASP.NET Core 10 OpenAPI types
         // object schema = new object();
-
         if (t == typeof(CreatePrinterDto))
         {
             // TODO: Update to use new API
@@ -142,6 +141,7 @@ public static class ExampleSchemaFilter
             };
             */
         }
+
         // ---- Response DTO examples (select high-value read models) ----
         else if (t == typeof(PrinterDto))
         {

@@ -85,8 +85,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "Missing"
-                );
+                    FailureReason: "Missing");
             }
 
             // Check 2: File size
@@ -98,8 +97,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "SizeMismatch"
-                );
+                    FailureReason: "SizeMismatch");
             }
 
             // Check 3: File hash
@@ -111,15 +109,13 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
                 return new FileIntegrityCheckResult(
                     IsValid: false,
                     ErrorMessage: msg,
-                    FailureReason: "HashMismatch"
-                );
+                    FailureReason: "HashMismatch");
             }
 
             return new FileIntegrityCheckResult(
                 IsValid: true,
                 ErrorMessage: null,
-                FailureReason: null
-            );
+                FailureReason: null);
         }
         catch (UnauthorizedAccessException)
         {
@@ -128,8 +124,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
-                FailureReason: "PermissionDenied"
-            );
+                FailureReason: "PermissionDenied");
         }
         catch (Exception ex)
         {
@@ -138,8 +133,7 @@ public class FileIntegrityService(IFileManagementService fileManagementService, 
             return new FileIntegrityCheckResult(
                 IsValid: false,
                 ErrorMessage: msg,
-                FailureReason: "Unknown"
-            );
+                FailureReason: "Unknown");
         }
     }
 

@@ -11,16 +11,16 @@ public class CatalogCacheAdapter(ICatalogCache cache) : ICatalogCacheProvider
 {
     private readonly ICatalogCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
 
-    public async Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
+    public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
-        var result = await _cache.GetManufacturersAsync(ct);
-        return (result.list, result.etag);
+        (IReadOnlyList<ManufacturerDto> List, string Etag) result = await _cache.GetManufacturersAsync(ct);
+        return (result.List, result.Etag);
     }
 
-    public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
-        var result = await _cache.GetModelsAsync(manufacturerId, ct);
-        return (result.list, result.etag);
+        (IReadOnlyList<PrinterModelDto> List, string Etag) result = await _cache.GetModelsAsync(manufacturerId, ct);
+        return (result.List, result.Etag);
     }
 
     public void InvalidateManufacturers()

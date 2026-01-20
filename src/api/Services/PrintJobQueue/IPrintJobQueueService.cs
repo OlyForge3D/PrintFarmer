@@ -8,8 +8,11 @@ namespace Farm.Web.Api.Services.PrintJobQueue;
 public interface IPrintJobQueueService
 {
     Task<IEnumerable<PrintJobDto>> GetAllAsync(CancellationToken cancellationToken = default);
+
     Task<PrintJobDto?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task<PrintJobDto?> EnqueueAsync(EnqueuePrintJobRequest req, CancellationToken cancellationToken = default);
+
     Task<bool> RemoveAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
@@ -19,8 +22,7 @@ public record EnqueuePrintJobRequest
     Guid? assignedPrinterId,
     string? priority,
     double? requiredNozzleDiameter,
-    string? requiredMaterialType
-);
+    string? requiredMaterialType);
 
 public record PrintJobDto
 (
@@ -33,5 +35,4 @@ public record PrintJobDto
     int QueuePosition,
     double? RequiredNozzleDiameter,
     string? RequiredMaterialType,
-    DateTime CreatedAt
-);
+    DateTime CreatedAt);

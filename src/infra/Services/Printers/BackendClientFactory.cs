@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +15,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Maps PrinterBackend enum values to backend client interface types discovered from plugins.
 /// This factory discovers available clients at initialization and resolves them on-demand
 /// from the current DI scope (must be called from within a scoped context).
-/// 
+///
 /// CRITICAL: Backend clients are registered as SCOPED services. This factory MUST be registered
 /// as SCOPED and called from within a scoped context (e.g., from a scoped service like PrintersService).
 /// </summary>
@@ -48,15 +50,15 @@ public class BackendClientFactory : IBackendClientFactory
     {
         try
         {
-            var plugins = pluginRegistry.GetAllExtendedPlugins();
-            var discoveredCount = 0;
+            IEnumerable<IExtendedBackendPlugin> plugins = pluginRegistry.GetAllExtendedPlugins();
+            int discoveredCount = 0;
             var duplicateIds = new HashSet<int>();
 
-            foreach (var plugin in plugins)
+            foreach (IExtendedBackendPlugin plugin in plugins)
             {
                 // Use ClientInterfaceType for DI resolution since plugins register interfaces, not implementations
                 // Fall back to ClientType if ClientInterfaceType is not available
-                var typeForDi = plugin.ClientInterfaceType ?? plugin.ClientType;
+                Type typeForDi = plugin.ClientInterfaceType ?? plugin.ClientType;
 
                 if (typeForDi == null)
                 {
@@ -67,7 +69,7 @@ public class BackendClientFactory : IBackendClientFactory
                 try
                 {
                     // Read BackendId from the BackendPluginAttribute on the plugin's assembly
-                    var pluginAssembly = plugin.GetType().Assembly;
+                    Assembly pluginAssembly = plugin.GetType().Assembly;
                     var backendAttr = pluginAssembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
                         .FirstOrDefault() as BackendPluginAttribute;
 
@@ -122,7 +124,7 @@ public class BackendClientFactory : IBackendClientFactory
 
     public IBackendClient GetClient(PrinterBackend backend)
     {
-        if (!_clientTypeMap.TryGetValue(backend, out var clientType))
+        if (!_clientTypeMap.TryGetValue(backend, out Type? clientType))
         {
             _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available backends: {string.Join(", ", _clientTypeMap.Keys)}");
             throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
@@ -132,7 +134,7 @@ public class BackendClientFactory : IBackendClientFactory
         {
             // Resolve the backend client from the current scope
             // Caller MUST be in a scoped context for this to work
-            var rawService = _serviceProvider.GetService(clientType);
+            object? rawService = _serviceProvider.GetService(clientType);
 
             var client = rawService as IBackendClient;
 

@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,14 +19,13 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> ListApiKeysAsync([FromRoute] Guid userId)
         {
             // TODO: verify caller is same user or admin
-            var keys = await _repo.GetByUserIdAsync(userId);
-            var result = keys.Select(k => new ApiKeyDto(
+            IEnumerable<ApiKey> keys = await _repo.GetByUserIdAsync(userId);
+            IEnumerable<ApiKeyDto> result = keys.Select(k => new ApiKeyDto(
                 k.Id,
                 k.Name,
                 k.IsActive,
                 k.CreatedAt,
-                k.ExpiresAt
-            ));
+                k.ExpiresAt));
             return Ok(result);
         }
 
@@ -55,7 +55,7 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> ToggleApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
             // TODO: verify caller is same user or admin
-            var key = await _repo.GetByIdAsync(keyId);
+            ApiKey? key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
             {
                 return NotFound();
@@ -72,7 +72,7 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> DeleteApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
             // TODO: verify caller is same user or admin
-            var key = await _repo.GetByIdAsync(keyId);
+            ApiKey? key = await _repo.GetByIdAsync(keyId);
             if (key == null || key.UserId != userId)
             {
                 return NotFound();
@@ -87,7 +87,7 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> RotateApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
         {
             // TODO: verify caller is same user or admin
-            var oldKey = await _repo.GetByIdAsync(keyId);
+            ApiKey? oldKey = await _repo.GetByIdAsync(keyId);
             if (oldKey == null || oldKey.UserId != userId)
             {
                 return NotFound();
@@ -127,6 +127,5 @@ namespace Farm.Web.Api.Controllers
         string Name,
         bool IsActive,
         DateTime CreatedAt,
-        DateTime? ExpiresAt
-    );
+        DateTime? ExpiresAt);
 }

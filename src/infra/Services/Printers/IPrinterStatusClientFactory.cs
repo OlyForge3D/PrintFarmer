@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Factory interface for creating printer status clients.

@@ -9,13 +9,21 @@ namespace Farm.Infrastructure.Telemetry;
 public interface IUnifiedLoggingService
 {
     void LogDebug(string message, string? correlationId = null, object? metadata = null);
+
     void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null);
+
     void LogInformation(string message, string? correlationId = null, object? metadata = null);
+
     void LogWarning(string message, string? correlationId = null, object? metadata = null);
+
     void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null);
+
     void LogError(string message, string? correlationId = null, object? metadata = null);
+
     void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null);
+
     void LogCritical(string message, string? correlationId = null, object? metadata = null);
+
     void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
     // Context-aware logging
@@ -86,14 +94,17 @@ public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger)
             {
                 _ = activity.SetTag("log.correlationId", correlationId);
             }
+
             if (metadata != null)
             {
                 _ = activity.SetTag("log.metadata", JsonSerializer.Serialize(metadata));
             }
+
             if (context != null)
             {
                 _ = activity.SetTag("log.context", JsonSerializer.Serialize(context));
             }
+
             if (exception != null)
             {
                 _ = activity.SetTag("error", true);
@@ -131,6 +142,7 @@ public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger)
             {
                 _ = activity.SetTag("log.correlationId", correlationId);
             }
+
             if (metadata != null)
             {
                 _ = activity.SetTag("log.metadata", JsonSerializer.Serialize(metadata));
@@ -153,17 +165,15 @@ public sealed class UnifiedLoggingService(ILogger<UnifiedLoggingService> logger)
         }
         else
         {
-            _logger.Log(level,
+            _logger.Log(
+                level,
                 "[{Category}] {Message} CorrelationId: {CorrelationId} Metadata: {Metadata}",
                 loggerArgs);
         }
     }
-
 
     public void Dispose()
     {
         _activitySource?.Dispose();
     }
 }
-
-

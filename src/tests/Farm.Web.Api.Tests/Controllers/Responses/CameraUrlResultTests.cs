@@ -85,7 +85,7 @@ public class CameraUrlResultTests
     {
         var result = new CameraUrlResult("http://stream", "http://snapshot");
 
-        var (streamUrl, snapshotUrl) = result;
+        (string? streamUrl, string? snapshotUrl) = result;
 
         streamUrl.Should().Be("http://stream");
         snapshotUrl.Should().Be("http://snapshot");
@@ -148,8 +148,8 @@ public class CameraUrlResultTests
     [Fact]
     public void CameraUrlResult_WithComplexUrls()
     {
-        var streamUrl = "http://camera.local:8080/stream?quality=high&format=mjpeg";
-        var snapshotUrl = "http://camera.local:8080/snapshot?quality=high";
+        string streamUrl = "http://camera.local:8080/stream?quality=high&format=mjpeg";
+        string snapshotUrl = "http://camera.local:8080/snapshot?quality=high";
 
         var result = new CameraUrlResult(streamUrl, snapshotUrl);
 

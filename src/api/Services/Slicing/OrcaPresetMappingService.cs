@@ -17,20 +17,16 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
         OrcaBundleMappingResult result = new OrcaBundleMappingResult();
 
         // Load catalog data for matching
-        var modelDtos = await _catalogRepo.GetModelsCachedAsync(null, ct);
-        List<PrinterModel> printerModels = modelDtos
-            .Select(m => new PrinterModel { Id = m.Id, Name = m.Name, ManufacturerId = m.ManufacturerId })
-            .ToList();
+        IReadOnlyList<PrinterModelDto> printerModels = await _catalogRepo.GetModelsCachedAsync(null, ct);
 
-        var manufacturerTuples = await _catalogRepo.GetManufacturersAsync(ct);
-        List<Manufacturer> manufacturers = manufacturerTuples
-            .Select(m => new Manufacturer { Id = m.Id, Name = m.Name })
-            .ToList();
+        IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)> manufacturerTuples = await _catalogRepo.GetManufacturersAsync(ct);
+        Dictionary<Guid, string> manufacturerLookup = manufacturerTuples
+            .ToDictionary(m => m.Id, m => m.Name);
 
         // Map printer presets
         foreach (OrcaPrinterPresetDto printer in preview.Printers)
         {
-            PrinterPresetMatch match = MapPrinterPreset(printer, printerModels);
+            PrinterPresetMatch match = MapPrinterPreset(printer, printerModels, manufacturerLookup);
             result.PrinterMatches.Add(match);
         }
 
@@ -64,7 +60,8 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
 
     private PrinterPresetMatch MapPrinterPreset(
         OrcaPrinterPresetDto preset,
-        List<PrinterModel> catalogModels)
+        IReadOnlyList<PrinterModelDto> catalogModels,
+        Dictionary<Guid, string> manufacturerLookup)
     {
         PrinterPresetMatch match = new PrinterPresetMatch
         {
@@ -72,11 +69,11 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
             ConfidenceScore = 0.0
         };
 
-        PrinterModel? bestMatch = null;
+        PrinterModelDto? bestMatch = null;
         double bestScore = 0.0;
         List<string> reasons = [];
 
-        foreach (PrinterModel model in catalogModels)
+        foreach (PrinterModelDto model in catalogModels)
         {
             double score = 0.0;
             List<string> matchReasons = [];
@@ -90,13 +87,14 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
             }
 
             // Manufacturer match (30% weight)
-            if (model.Manufacturer != null && !string.IsNullOrWhiteSpace(preset.Manufacturer))
+            string? manufacturerName = manufacturerLookup.TryGetValue(model.ManufacturerId, out string? mfgName) ? mfgName : null;
+            if (manufacturerName != null && !string.IsNullOrWhiteSpace(preset.Manufacturer))
             {
-                double mfgScore = CalculateStringSimilarity(preset.Manufacturer, model.Manufacturer.Name);
+                double mfgScore = CalculateStringSimilarity(preset.Manufacturer, manufacturerName);
                 score += mfgScore * 0.3;
                 if (mfgScore > 0.7)
                 {
-                    matchReasons.Add($"Manufacturer match: {model.Manufacturer.Name}");
+                    matchReasons.Add($"Manufacturer match: {manufacturerName}");
                 }
             }
 
@@ -105,7 +103,7 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
             {
                 double volumeScore = CalculateVolumeSimilarity(
                     preset.BedWidth, preset.BedDepth, preset.MaxZHeight,
-                    (double)model.MaxX, (double)model.MaxY, (double)model.MaxZ);
+                    (double)model.MaxX!, (double)model.MaxY!, (double)model.MaxZ!);
                 score += volumeScore * 0.2;
                 if (volumeScore > 0.8)
                 {
@@ -113,11 +111,13 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
                 }
             }
 
-            // Nozzle diameter match (10% weight)
-            if (model.DefaultNozzleDiameter > 0 && Math.Abs(preset.NozzleDiameter - (double)model.DefaultNozzleDiameter) < 0.05)
+            // Nozzle diameter match (10% weight) - get from primary toolhead
+            PrinterModelToolheadDto? primaryToolhead = model.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? model.Toolheads?.FirstOrDefault();
+            double? modelNozzleDiameter = primaryToolhead?.NozzleDiameter;
+            if (modelNozzleDiameter > 0 && Math.Abs(preset.NozzleDiameter - (double)modelNozzleDiameter) < 0.05)
             {
                 score += 0.1;
-                matchReasons.Add($"Nozzle diameter: {model.DefaultNozzleDiameter}mm");
+                matchReasons.Add($"Nozzle diameter: {modelNozzleDiameter}mm");
             }
 
             if (score > bestScore)
@@ -132,7 +132,7 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
         {
             match.MatchedPrinterModelId = bestMatch.Id;
             match.MatchedPrinterModelName = bestMatch.Name;
-            match.MatchedManufacturerName = bestMatch.Manufacturer?.Name;
+            match.MatchedManufacturerName = manufacturerLookup.TryGetValue(bestMatch.ManufacturerId, out string? matchedMfgName) ? matchedMfgName : null;
             match.ConfidenceScore = bestScore;
             match.MatchReasons = reasons;
         }

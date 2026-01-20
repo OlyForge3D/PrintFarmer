@@ -15,8 +15,9 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
 {
     private sealed class Counter(int count, DateTime windowStartUtc)
     {
-        public int Count = count;
-        public DateTime WindowStartUtc = windowStartUtc;
+        public int Count { get; set; } = count;
+
+        public DateTime WindowStartUtc { get; set; } = windowStartUtc;
     }
 
     private readonly IUnifiedLoggingService _logger = logger;
@@ -30,9 +31,11 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
         {
             return;
         }
+
         string key = entityType + "|" + normalized;
         DateTime now = DateTime.UtcNow;
-        Counter counter = _counters.AddOrUpdate(key,
+        Counter counter = _counters.AddOrUpdate(
+            key,
             _ => new Counter(1, now),
             (_, existing) =>
             {
@@ -45,6 +48,7 @@ public sealed class NormalizationEventLogger(IUnifiedLoggingService logger) : IN
                 {
                     existing.Count++;
                 }
+
                 return existing;
             });
 

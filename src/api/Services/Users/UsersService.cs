@@ -101,7 +101,7 @@ namespace Farm.Web.Api.Services.Users
         /// - FirstName and LastName: User's display name information
         /// - IsActive: Account activation status
         /// - RoleIds: User's assigned roles and associated permissions
-        /// 
+        ///
         /// The update timestamp is automatically set to current UTC time. Role updates trigger a reload of the
         /// user's complete profile including permissions. Returns null if the specified user ID does not exist.
         /// </remarks>
@@ -117,14 +117,17 @@ namespace Farm.Web.Api.Services.Users
             {
                 user.FirstName = request.FirstName;
             }
+
             if (!string.IsNullOrWhiteSpace(request.LastName))
             {
                 user.LastName = request.LastName;
             }
+
             if (request.IsActive.HasValue)
             {
                 user.IsActive = request.IsActive.Value;
             }
+
             user.UpdatedAt = DateTime.UtcNow;
 
             if (request.RoleIds != null)
@@ -197,10 +200,12 @@ namespace Farm.Web.Api.Services.Users
             {
                 usernameExists = await _users.UsernameExistsAsync(username.Trim(), ct);
             }
+
             if (!string.IsNullOrWhiteSpace(email))
             {
                 emailExists = await _users.EmailExistsAsync(email.Trim(), ct);
             }
+
             return new UserAvailabilityDto(usernameExists, emailExists);
         }
     }

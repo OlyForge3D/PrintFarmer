@@ -15,16 +15,22 @@ public interface IPrintJobStatisticsRepository
     /// <summary>
     /// Records new statistics for a completed job
     /// </summary>
+    /// <param name="statistics">The print job statistics to add.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task AddAsync(PrintJobStatistics statistics, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Updates existing job statistics
     /// </summary>
+    /// <param name="statistics">The print job statistics to update.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task UpdateAsync(PrintJobStatistics statistics, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves statistics for a specific job by its ID
     /// </summary>
+    /// <param name="jobId">The job ID to search for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<PrintJobStatistics?> GetByJobIdAsync(Guid jobId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -61,6 +67,10 @@ public interface IPrintJobStatisticsRepository
     /// Gets statistics for a specific printer model
     /// Used for model-specific analytics
     /// </summary>
+    /// <param name="modelId">The printer model ID to filter by.</param>
+    /// <param name="successfulOnly">Only include successful jobs.</param>
+    /// <param name="fromDate">Start date for filtering (UTC, optional).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PrintJobStatistics>> GetByPrinterModelAsync(
         Guid modelId,
         bool successfulOnly = true,
@@ -71,6 +81,10 @@ public interface IPrintJobStatisticsRepository
     /// Gets statistics grouped by material type
     /// Used for material analysis and reporting
     /// </summary>
+    /// <param name="material">The material type to filter by.</param>
+    /// <param name="successfulOnly">Only include successful jobs.</param>
+    /// <param name="fromDate">Start date for filtering (UTC, optional).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PrintJobStatistics>> GetByMaterialAsync(
         string material,
         bool successfulOnly = true,
@@ -80,11 +94,17 @@ public interface IPrintJobStatisticsRepository
     /// <summary>
     /// Gets all statistics records (careful with large datasets)
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<PrintJobStatistics>> GetAllAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the count of statistics records matching criteria
     /// </summary>
+    /// <param name="modelId">Printer model ID to filter by (optional).</param>
+    /// <param name="material">Material type to filter by (optional).</param>
+    /// <param name="successOnly">Filter by success status (optional).</param>
+    /// <param name="fromDate">Start date for filtering (UTC, optional).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<int> CountAsync(
         Guid? modelId = null,
         string? material = null,
@@ -95,5 +115,6 @@ public interface IPrintJobStatisticsRepository
     /// <summary>
     /// Persists all pending changes to the database
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -42,7 +42,7 @@ namespace Farm.Web.Api.Data.Repositories
 
         public async Task DeleteAsync(Guid id)
         {
-            var key = await GetByIdAsync(id);
+            ApiKey? key = await GetByIdAsync(id);
             if (key != null)
             {
                 _db.Set<ApiKey>().Remove(key);

@@ -96,17 +96,20 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new InvalidOperationException("Filament type with this name already exists");
             }
+
             FilamentType filamentType = new()
             {
                 Id = Guid.NewGuid(),
                 Name = trimmed,
                 DefaultHotendTemp = req.DefaultTemperatures.Hotend,
                 DefaultBedTemp = req.DefaultTemperatures.Bed,
+                IsAbrasive = req.IsAbrasive,
+                NeedsEnclosure = req.NeedsEnclosure,
                 CreatedAt = DateTime.UtcNow
             };
             await _repo.AddFilamentTypeAsync(filamentType, ct);
             await _repo.SaveChangesAsync(ct);
-            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp));
+            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp), filamentType.IsAbrasive, filamentType.NeedsEnclosure);
         }
 
         /// <summary>
@@ -133,17 +136,22 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             FilamentType? entity = await _repo.GetEntityByIdAsync(id, ct);
             if (entity is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             if (!string.IsNullOrWhiteSpace(req.Name))
             {
                 entity.Name = req.Name.Trim();
             }
+
             entity.DefaultHotendTemp = req.DefaultTemperatures.Hotend;
             entity.DefaultBedTemp = req.DefaultTemperatures.Bed;
+            entity.IsAbrasive = req.IsAbrasive;
+            entity.NeedsEnclosure = req.NeedsEnclosure;
             await _repo.UpdateFilamentTypeAsync(entity, ct);
             await _repo.SaveChangesAsync(ct);
         }
@@ -161,6 +169,7 @@ namespace Farm.Web.Api.Services.Filament
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
+
             await _repo.DeleteFilamentTypeAsync(id, ct);
             await _repo.SaveChangesAsync(ct);
         }
@@ -185,6 +194,7 @@ namespace Farm.Web.Api.Services.Filament
             {
                 string name = kvp.Key.Trim();
                 TempTargets tempTargets = kvp.Value;
+
                 // use repository to load or create
                 FilamentType? filamentType = await _repo.GetByNameAsync(name, ct);
                 if (filamentType == null)
@@ -206,6 +216,7 @@ namespace Farm.Web.Api.Services.Filament
                     await _repo.UpdateFilamentTypeAsync(filamentType, ct);
                 }
             }
+
             await _repo.SaveChangesAsync(ct);
         }
 
@@ -282,8 +293,7 @@ namespace Farm.Web.Api.Services.Filament
                 ImportedCount: importedCount,
                 SkippedCount: skippedCount,
                 TotalSpoolmanMaterials: uniqueMaterials.Count,
-                ImportedNames: importedNames.ToArray()
-            );
+                ImportedNames: importedNames.ToArray());
         }
 
         #region Helper Methods
@@ -306,23 +316,50 @@ namespace Farm.Web.Api.Services.Filament
         private static int GetDefaultHotendTemp(string material)
         {
             if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
-            { return 205; }
+            {
+                return 205;
+            }
+
             if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
-            { return 230; }
+            {
+                return 230;
+            }
+
             if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
-            { return 240; }
+            {
+                return 240;
+            }
+
             if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
-            { return 245; }
+            {
+                return 245;
+            }
+
             if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
-            { return 260; }
+            {
+                return 260;
+            }
+
             if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
-            { return 235; }
+            {
+                return 235;
+            }
+
             if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
-            { return 220; }
+            {
+                return 220;
+            }
+
             if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
-            { return 210; }
+            {
+                return 210;
+            }
+
             if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
-            { return 250; }
+            {
+                return 250;
+            }
+
             return material.Contains("CARBON", StringComparison.OrdinalIgnoreCase) ? 260 : 210;
         }
 
@@ -344,23 +381,50 @@ namespace Farm.Web.Api.Services.Filament
         private static int GetDefaultBedTemp(string material)
         {
             if (material.Contains("PLA", StringComparison.OrdinalIgnoreCase))
-            { return 60; }
+            {
+                return 60;
+            }
+
             if (material.Contains("ABS", StringComparison.OrdinalIgnoreCase))
-            { return 100; }
+            {
+                return 100;
+            }
+
             if (material.Contains("PETG", StringComparison.OrdinalIgnoreCase))
-            { return 85; }
+            {
+                return 85;
+            }
+
             if (material.Contains("ASA", StringComparison.OrdinalIgnoreCase))
-            { return 100; }
+            {
+                return 100;
+            }
+
             if (material.Contains("PC", StringComparison.OrdinalIgnoreCase) || material.Contains("POLYCARBONATE", StringComparison.OrdinalIgnoreCase))
-            { return 110; }
+            {
+                return 110;
+            }
+
             if (material.Contains("PCTG", StringComparison.OrdinalIgnoreCase))
-            { return 80; }
+            {
+                return 80;
+            }
+
             if (material.Contains("TPU", StringComparison.OrdinalIgnoreCase) || material.Contains("FLEX", StringComparison.OrdinalIgnoreCase))
-            { return 60; }
+            {
+                return 60;
+            }
+
             if (material.Contains("WOOD", StringComparison.OrdinalIgnoreCase))
-            { return 65; }
+            {
+                return 65;
+            }
+
             if (material.Contains("NYLON", StringComparison.OrdinalIgnoreCase))
-            { return 80; }
+            {
+                return 80;
+            }
+
             return material.Contains("CARBON", StringComparison.OrdinalIgnoreCase) ? 100 : 70;
         }
 

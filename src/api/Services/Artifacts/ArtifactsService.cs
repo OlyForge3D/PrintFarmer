@@ -180,7 +180,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         return await _artifactsRepo.GetByJobIdAsync(jobId, ct);
     }
 
-    public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
+    public async Task<(Artifact Artifact, string FullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
         Artifact? artifact = await _artifactsRepo.GetByIdAsync(id, ct);
         if (artifact == null)
@@ -200,6 +200,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         {
             root = Path.Combine(_env.ContentRootPath, root);
         }
+
         return root;
     }
 
@@ -234,6 +235,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             await target.WriteAsync(buffer.AsMemory(0, read), ct);
             _ = hasher.TransformBlock(buffer, 0, read, null, 0);
         }
+
         _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(hasher.Hash!);
     }

@@ -19,6 +19,7 @@ public sealed class WorkerAuthService(IConfiguration configuration, IHostEnviron
 {
     private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
                      ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+
     private readonly IHostEnvironment _env = env;
 
     public const string HeaderName = "X-Worker-Key";
@@ -29,20 +30,24 @@ public sealed class WorkerAuthService(IConfiguration configuration, IHostEnviron
         {
             return false;
         }
+
         // Allow bypass when no key configured and environment is Testing to keep integration tests simple until explicit key set.
         if (string.IsNullOrWhiteSpace(_sharedKey))
         {
             return _env.IsEnvironment("Testing");
         }
+
         if (!httpContext.Request.Headers.TryGetValue(HeaderName, out StringValues values))
         {
             return false;
         }
+
         string presented = values.ToString();
         if (string.IsNullOrWhiteSpace(presented))
         {
             return false;
         }
+
         // Constant time compare minimal implementation (length + equality) – adequate for single shared key.
         if (presented.Length != _sharedKey.Length)
         {
@@ -54,6 +59,7 @@ public sealed class WorkerAuthService(IConfiguration configuration, IHostEnviron
         {
             equal &= presented[i] == _sharedKey[i];
         }
+
         return equal;
     }
 }

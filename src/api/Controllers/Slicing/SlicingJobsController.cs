@@ -28,7 +28,7 @@ public class SlicingJobsController(
 
     private static object EnsureTempDirectoryExists(Infrastructure.Temp.ITempPathProvider provider)
     {
-        var tempRoot = Path.GetFullPath(provider.GetTempRoot());
+        string tempRoot = Path.GetFullPath(provider.GetTempRoot());
         _ = Directory.CreateDirectory(tempRoot);
         return new object(); // Return dummy value since we only care about side effect
     }
@@ -52,7 +52,9 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         SlicingJobDto j = job;
+
         // Extract profile information from composite SlicerProfileDto
         string profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
         string profileMaterial = j.Profile?.FilamentProfile?.Material ?? "Unknown";
@@ -60,6 +62,7 @@ public class SlicingJobsController(
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,
+
             // Prefer plural form in emitted URLs
             GcodeUrl = j.Status == SlicingJobStatus.Completed ? _fileOperations.BuildSlicerJobGcodeUrl(Guid.Parse(j.JobId)) : string.Empty,
             PrintTime = j.EstimatedPrintTime ?? 0,
@@ -110,11 +113,13 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         // Add deprecation signalling headers (RFC 8594) before issuing redirect
         DateTime deprecationDate = new(2025, 9, 8, 0, 0, 0, DateTimeKind.Utc);
         DateTime sunsetDate = new(2026, 3, 8, 0, 0, 0, DateTimeKind.Utc); // planned removal 6 months later
         _ = Response.Headers.TryAdd("Deprecation", deprecationDate.ToString("r")); // HTTP-date format
         _ = Response.Headers.TryAdd("Sunset", sunsetDate.ToString("r"));
+
         // Issue 302 redirect to canonical plural endpoint
         return Redirect($"/api/slicer/jobs/{jobId}");
     }
@@ -132,6 +137,7 @@ public class SlicingJobsController(
         {
             return NotFound();
         }
+
         if (!SlicingJobStore.TryGet(jobId, out SlicingJobDto? job) || job == null || job.Status != SlicingJobStatus.Completed || string.IsNullOrEmpty(job.GcodeFilePath))
         {
             return NotFound();
@@ -139,26 +145,31 @@ public class SlicingJobsController(
 
         string originalPath = job.GcodeFilePath!;
         string tempRoot = Path.GetFullPath(_tempPathProvider.GetTempRoot());
+
         // Rebuild path from trusted root to mitigate stored path tampering
         string fileName = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return NotFound();
         }
+
         if (!fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
         {
             return NotFound();
         }
+
         if (fileName.Contains("..", StringComparison.Ordinal) || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             return NotFound();
         }
+
         string rebuiltPath = Path.Combine(tempRoot, fileName);
         string path = rebuiltPath;
         if (!_fileManagementService.IsSafePath(path, tempRoot))
         {
             return NotFound();
         }
+
         // At this point 'path' is reconstructed from a trusted root + sanitized filename (.gcode enforced, traversal rejected).
         // Suppress analyzer warning: path cannot be influenced directly by user input beyond GUID lookup.
         return !System.IO.File.Exists(path) ? NotFound() : PhysicalFile(path, "text/plain; charset=utf-8", $"output_{jobId}.gcode");

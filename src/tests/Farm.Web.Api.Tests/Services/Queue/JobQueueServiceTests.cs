@@ -72,7 +72,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer>());
 
         // Act
-        var result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
 
         // Assert
         result.Should().BeEmpty();
@@ -82,7 +82,7 @@ public class JobQueueServiceTests
     public async Task GetQueueOverviewAsync_WithAvailablePrinter_ReturnsOverview()
     {
         // Arrange
-        var printer = new PrinterBuilder()
+        Printer printer = new PrinterBuilder()
             .WithName("Test Printer")
             .AsOnlineAndReady()
             .Build();
@@ -95,7 +95,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);
@@ -109,8 +109,8 @@ public class JobQueueServiceTests
     public async Task GetQueueOverviewAsync_WithQueuedJobs_CalculatesEstimatedCompletion()
     {
         // Arrange
-        var printer = new PrinterBuilder().AsOnlineAndReady().Build();
-        var queuedJob = new PrintJobBuilder()
+        Printer printer = new PrinterBuilder().AsOnlineAndReady().Build();
+        PrintJob queuedJob = new PrintJobBuilder()
             .WithAssignedPrinterId(printer.Id)
             .WithEstimatedPrintTime(TimeSpan.FromHours(2))
             .AsQueued()
@@ -124,7 +124,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);
@@ -137,7 +137,7 @@ public class JobQueueServiceTests
     public async Task GetQueueOverviewAsync_WithCurrentJobAndQueuedJobs_UsesElapsedTimeForEstimate()
     {
         // Arrange
-        var printer = new PrinterBuilder().AsOnlineAndReady().Build();
+        Printer printer = new PrinterBuilder().AsOnlineAndReady().Build();
         var currentJob = new PrintJob
         {
             Id = Guid.NewGuid(),
@@ -161,11 +161,11 @@ public class JobQueueServiceTests
             .ReturnsAsync(currentJob);
 
         // Act
-        var result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);
-        var estimate = result.First().EstimatedCompletionTime;
+        DateTime? estimate = result.First().EstimatedCompletionTime;
         estimate.Should().NotBeNull();
         estimate.Should().BeCloseTo(DateTime.UtcNow.AddMinutes(90), TimeSpan.FromMinutes(2));
     }
@@ -183,7 +183,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<PrintJob>());
 
         // Act
-        var result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
+        IReadOnlyList<JobQueuePrintJobDto> result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
 
         // Assert
         result.Should().BeEmpty();
@@ -194,14 +194,14 @@ public class JobQueueServiceTests
     {
         // Arrange
         var printerId = Guid.NewGuid();
-        var job1 = new PrintJobBuilder().WithQueuePosition(1).AsQueued().Build();
-        var job2 = new PrintJobBuilder().WithQueuePosition(2).AsQueued().Build();
+        PrintJob job1 = new PrintJobBuilder().WithQueuePosition(1).AsQueued().Build();
+        PrintJob job2 = new PrintJobBuilder().WithQueuePosition(2).AsQueued().Build();
 
         _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob> { job2, job1 }); // Intentionally out of order
 
         // Act
-        var result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
+        IReadOnlyList<JobQueuePrintJobDto> result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(2);
@@ -214,15 +214,15 @@ public class JobQueueServiceTests
     {
         // Arrange
         var printerId = Guid.NewGuid();
-        var queuedJob = new PrintJobBuilder().AsQueued().Build();
-        var assignedJob = new PrintJobBuilder().AsAssigned().Build();
-        var printingJob = new PrintJobBuilder().AsPrinting().Build();
+        PrintJob queuedJob = new PrintJobBuilder().AsQueued().Build();
+        PrintJob assignedJob = new PrintJobBuilder().AsAssigned().Build();
+        PrintJob printingJob = new PrintJobBuilder().AsPrinting().Build();
 
         _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrintJob> { queuedJob, assignedJob, printingJob });
 
         // Act
-        var result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
+        IReadOnlyList<JobQueuePrintJobDto> result = await _sut.GetPrinterQueueAsync(printerId, CancellationToken.None);
 
         // Assert
         var queuedResults = result.Where(r => r.Status == PrintJobStatus.Queued || r.Status == PrintJobStatus.Assigned).ToList();
@@ -257,7 +257,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((GcodeFile?)null);
 
         // Act
-        var result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -281,7 +281,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer>());
 
         // Act
-        var result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -299,7 +299,7 @@ public class JobQueueServiceTests
             EstimatedPrintTimeMinutes = 120,
             EstimatedFilamentWeightG = 25.5
         };
-        var printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -319,7 +319,7 @@ public class JobQueueServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -347,7 +347,7 @@ public class JobQueueServiceTests
         // Arrange
         var printerId = Guid.NewGuid();
         var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), FileName = "urgent.gcode" };
-        var printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -363,7 +363,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer> { printer });
 
         // Act
-        var result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.AddJobToQueueAsync(request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -383,7 +383,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.GetJobAsync(jobId, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(jobId, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -393,7 +393,7 @@ public class JobQueueServiceTests
     public async Task GetJobAsync_WithExistingJob_ReturnsDto()
     {
         // Arrange
-        var job = new PrintJobBuilder()
+        PrintJob job = new PrintJobBuilder()
             .WithName("Test Job")
             .AsQueued()
             .Build();
@@ -402,7 +402,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -423,7 +423,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.RemoveJobAsync(jobId, CancellationToken.None);
+        bool result = await _sut.RemoveJobAsync(jobId, CancellationToken.None);
 
         // Assert
         result.Should().BeFalse();
@@ -433,12 +433,12 @@ public class JobQueueServiceTests
     public async Task RemoveJobAsync_WithPrintingJob_ReturnsFalse()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsPrinting().Build();
+        PrintJob job = new PrintJobBuilder().AsPrinting().Build();
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
+        bool result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeFalse();
@@ -449,12 +449,12 @@ public class JobQueueServiceTests
     public async Task RemoveJobAsync_WithCompletedJob_ReturnsFalse()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsCompleted().Build();
+        PrintJob job = new PrintJobBuilder().AsCompleted().Build();
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
+        bool result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeFalse();
@@ -464,7 +464,7 @@ public class JobQueueServiceTests
     public async Task RemoveJobAsync_WithQueuedJob_RemovesAndReturnsTrue()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsQueued().Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
         _mockRepo.Setup(x => x.RemoveAsync(job, It.IsAny<CancellationToken>()))
@@ -473,7 +473,7 @@ public class JobQueueServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
+        bool result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeTrue();
@@ -485,12 +485,12 @@ public class JobQueueServiceTests
     public async Task RemoveJobAsync_WithAssignedJob_RemovesAndReturnsTrue()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsAssigned().Build();
+        PrintJob job = new PrintJobBuilder().AsAssigned().Build();
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
+        bool result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeTrue();
@@ -510,7 +510,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.UpdateJobPriorityAsync(jobId, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobPriorityAsync(jobId, request, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -520,7 +520,7 @@ public class JobQueueServiceTests
     public async Task UpdateJobPriorityAsync_WithValidRequest_UpdatesPriorityAndReturnsDto()
     {
         // Arrange
-        var job = new PrintJobBuilder()
+        PrintJob job = new PrintJobBuilder()
             .WithPriority(0)
             .AsQueued()
             .Build();
@@ -532,7 +532,7 @@ public class JobQueueServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var result = await _sut.UpdateJobPriorityAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobPriorityAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -564,7 +564,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        var result = await _sut.UpdateJobAsync(jobId, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(jobId, request, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -574,14 +574,14 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithStatusUpdate_UpdatesStatusAndReturnsDto()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsQueued().Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto { Status = PrintJobStatus.Printing };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -593,14 +593,14 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithPriorityUpdate_UpdatesPriority()
     {
         // Arrange
-        var job = new PrintJobBuilder().WithPriority(0).AsQueued().Build();
+        PrintJob job = new PrintJobBuilder().WithPriority(0).AsQueued().Build();
         var request = new UpdatePrintJobStatusDto { Priority = (PrintJobPriority)10 };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -612,7 +612,7 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithInvalidPrinterAssignment_ReturnsNull()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsQueued().Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var invalidPrinterId = Guid.NewGuid();
         var request = new UpdatePrintJobStatusDto { AssignedPrinterId = invalidPrinterId };
 
@@ -622,7 +622,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer>()); // No printers available
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -633,8 +633,8 @@ public class JobQueueServiceTests
     {
         // Arrange
         var newPrinterId = Guid.NewGuid();
-        var printer = new PrinterBuilder().WithId(newPrinterId).Build();
-        var job = new PrintJobBuilder().AsQueued().Build();
+        Printer printer = new PrinterBuilder().WithId(newPrinterId).Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto { AssignedPrinterId = newPrinterId };
 
         _mockDataService.SetupSequence(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
@@ -644,7 +644,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer> { printer });
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -656,7 +656,7 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithFailureReason_SetsFailureReason()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsQueued().Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto
         {
             Status = PrintJobStatus.Failed,
@@ -667,7 +667,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -680,7 +680,7 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithActualFilamentUsage_UpdatesFilamentUsage()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsPrinting().Build();
+        PrintJob job = new PrintJobBuilder().AsPrinting().Build();
         var request = new UpdatePrintJobStatusDto
         {
             Status = PrintJobStatus.Completed,
@@ -691,7 +691,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(job);
 
         // Act
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -703,8 +703,8 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_AlwaysUpdatesUpdatedAtTimestamp()
     {
         // Arrange
-        var job = new PrintJobBuilder().AsQueued().Build();
-        var oldUpdatedAt = job.UpdatedAt;
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        DateTime oldUpdatedAt = job.UpdatedAt;
         var request = new UpdatePrintJobStatusDto { Priority = (PrintJobPriority)5 };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
@@ -712,7 +712,7 @@ public class JobQueueServiceTests
 
         // Act - Wait a moment to ensure timestamp difference
         await Task.Delay(10);
-        var result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
+        JobQueuePrintJobDto? result = await _sut.UpdateJobAsync(job.Id, request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();

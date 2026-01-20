@@ -132,23 +132,12 @@ export function FilamentTypeSelector({
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex gap-4 items-stretch">
           {/* Available Materials */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
-                Available Materials
-              </h6>
-              <Button
-                variant="subtle"
-                size="sm"
-                onClick={handleMoveAllToSelected}
-                disabled={available.length === 0}
-                title="Add all materials"
-              >
-                Add All
-              </Button>
-            </div>
+          <div className="flex-1 space-y-2">
+            <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
+              Available Materials
+            </h6>
             <div className="border border-pf-border rounded-lg bg-pf-panel h-48 overflow-y-auto">
               {available.length === 0 ? (
                 <div className="p-4 text-center text-pf-text-tertiary text-sm">
@@ -175,43 +164,30 @@ export function FilamentTypeSelector({
           </div>
 
           {/* Transfer Controls */}
-          <div className="flex flex-col justify-center items-center space-y-4">
+          <div className="flex flex-col justify-center items-center space-y-2 px-2">
             <Button
               onClick={handleMoveAllToSelected}
               disabled={available.length === 0}
               size="sm"
               title="Add all materials"
-              iconLeft={<ChevronsRightIcon className="w-5 h-5" />}
+              iconCenter={<ChevronsRightIcon className="w-4 h-4" />}
             >
-              Add All
             </Button>
             <Button
               onClick={handleMoveAllToAvailable}
               disabled={selected.length === 0}
               size="sm"
               title="Remove all materials"
-              iconLeft={<ChevronsLeftIcon className="w-5 h-5" />}
+              iconCenter={<ChevronsLeftIcon className="w-4 h-4" />}
             >
-              Remove All
             </Button>
           </div>
 
           {/* Selected Materials */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
-                Supported Materials
-              </h6>
-              <Button
-                variant="subtle"
-                size="sm"
-                onClick={handleMoveAllToAvailable}
-                disabled={selected.length === 0}
-                title="Remove all materials"
-              >
-                Remove All
-              </Button>
-            </div>
+          <div className="flex-1 space-y-2">
+            <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
+              Supported Materials
+            </h6>
             <div className="border border-pf-border rounded-lg bg-pf-panel h-48 overflow-y-auto">
               {selected.length === 0 ? (
                 <div className="p-4 text-center text-pf-text-tertiary text-sm">

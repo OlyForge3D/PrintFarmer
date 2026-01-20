@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Reflection;
 using Assimp;
+using Lib3MF;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
@@ -23,7 +25,7 @@ public abstract class BasePreviewRenderer
         options ??= new RenderOptions();
 
         // Capture all user-provided property values BEFORE ApplyStyleDefaults overwrites them
-        var userProperties = CaptureRenderOptions(options);
+        Dictionary<string, object?> userProperties = CaptureRenderOptions(options);
 
         // Create default options for comparison
         var defaultOptions = new RenderOptions();
@@ -48,7 +50,8 @@ public abstract class BasePreviewRenderer
         {
             mesh = CreateFallbackMesh();
         }
-        var normalized = NormalizeMesh(mesh);
+
+        NormalizedMesh normalized = NormalizeMesh(mesh);
 
         // Calculate and store mesh bounds for dynamic camera targeting
         UpdateMeshBounds(normalized, options);
@@ -66,20 +69,19 @@ public abstract class BasePreviewRenderer
         // Compute smoothed vertex normals in model space with angle threshold
         ComputeVertexNormals(normalized, options);
 
-        var (view, proj) = BuildCameraMatrices(options);
+        (Matrix4x4 view, Matrix4x4 proj) = BuildCameraMatrices(options);
 
         // Transform light direction to view space for correct shading
         options.ViewSpaceLightDirection = Vector3.Normalize(
-            Vector3.TransformNormal(options.LightDirection, view)
-        );
+            Vector3.TransformNormal(options.LightDirection, view));
 
-        var tris = BuildTriangleList(normalized, view, proj);
+        List<Triangle> tris = BuildTriangleList(normalized, view, proj);
 
         var img = new Image<Rgba32>(options.Width, options.Height);
 
         DrawBackground(img, options);
 
-        var depth01 = RasterizeTriangles(img, tris, options);
+        float[,] depth01 = RasterizeTriangles(img, tris, options);
 
         if (options.EnableGroundShadow)
         {
@@ -90,7 +92,6 @@ public abstract class BasePreviewRenderer
         {
             DrawSilhouetteEdges(img, tris, depth01, options);
         }
-
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(outputPath)) ?? ".");
         img.Save(outputPath);
@@ -132,10 +133,10 @@ public abstract class BasePreviewRenderer
     protected void DrawGroundShadow(Image<Rgba32> img, float[,] depth01, RenderOptions opt)
     {
         int w = img.Width, h = img.Height;
-        var frame = img.Frames.RootFrame;
+        ImageFrame<Rgba32> frame = img.Frames.RootFrame;
 
         // 1) Presence mask
-        var mask = new float[w, h];
+        float[,] mask = new float[w, h];
         for (int y = 0; y < h; y++)
         {
             for (int x = 0; x < w; x++)
@@ -145,7 +146,7 @@ public abstract class BasePreviewRenderer
         }
 
         // 2) Drop shadow offset
-        var dropped = new float[w, h];
+        float[,] dropped = new float[w, h];
         int ox = opt.GroundShadowOffsetXPx;
         int oy = opt.GroundShadowOffsetYPx;
 
@@ -171,7 +172,7 @@ public abstract class BasePreviewRenderer
 
         // 3) Blur
         int r = Math.Max(1, opt.GroundShadowBlurRadiusPx);
-        var blurred = BoxBlurSeparable(dropped, w, h, r);
+        float[,] blurred = BoxBlurSeparable(dropped, w, h, r);
 
         // 4) Composite across entire image
         float opacity = Math.Clamp(opt.GroundShadowOpacity, 0f, 1f);
@@ -186,13 +187,12 @@ public abstract class BasePreviewRenderer
                     continue;
                 }
 
-                var c = frame[x, y];
+                Rgba32 c = frame[x, y];
                 frame[x, y] = new Rgba32(
                     (byte)(c.R * (1f - a)),
                     (byte)(c.G * (1f - a)),
                     (byte)(c.B * (1f - a)),
-                    255
-                );
+                    255);
             }
         }
     }
@@ -200,8 +200,8 @@ public abstract class BasePreviewRenderer
     protected float[,] BoxBlurSeparable(float[,] src, int w, int h, int r)
 #pragma warning restore S2368
     {
-        var tmp = new float[w, h];
-        var dst = new float[w, h];
+        float[,] tmp = new float[w, h];
+        float[,] dst = new float[w, h];
 
         // Horizontal
         for (int y = 0; y < h; y++)
@@ -259,7 +259,7 @@ public abstract class BasePreviewRenderer
     protected static float SmoothStep(float edge0, float edge1, float x)
     {
         x = Math.Clamp((x - edge0) / (edge1 - edge0), 0f, 1f);
-        return x * x * (3f - 2f * x);
+        return x * x * (3f - (2f * x));
     }
 
     // ---------------------------------------------------------------------
@@ -278,11 +278,13 @@ public abstract class BasePreviewRenderer
 
         var ctx = new AssimpContext();
 
-        var scene = ctx.ImportFile(inputPath,
+        const PostProcessSteps postProcess =
             PostProcessSteps.Triangulate |
             PostProcessSteps.GenerateNormals |
             PostProcessSteps.JoinIdenticalVertices |
-            PostProcessSteps.FlipUVs);
+            PostProcessSteps.FlipUVs;
+
+        Scene scene = ctx.ImportFile(inputPath, postProcess);
 
         if (scene == null || !scene.HasMeshes)
         {
@@ -303,19 +305,19 @@ public abstract class BasePreviewRenderer
 
         for (int meshIndex = 0; meshIndex < scene.Meshes.Count; meshIndex++)
         {
-            var aMesh = scene.Meshes[meshIndex];
+            Assimp.Mesh aMesh = scene.Meshes[meshIndex];
 
             Numerics.Matrix4x4 nodeTransform = Numerics.Matrix4x4.Identity;
             if (scene.RootNode != null)
             {
-                var node = FindNodeForMesh(scene.RootNode, meshIndex);
+                Node? node = FindNodeForMesh(scene.RootNode, meshIndex);
                 if (node != null)
                 {
                     nodeTransform = ToNumerics(node);
                 }
             }
 
-            foreach (var v in aMesh.Vertices)
+            foreach (Vector3 v in aMesh.Vertices)
             {
                 Vector3 p = new Vector3(v.X, v.Y, v.Z);
 
@@ -329,7 +331,7 @@ public abstract class BasePreviewRenderer
             }
 
             // Faces
-            foreach (var f in aMesh.Faces)
+            foreach (Assimp.Face? f in aMesh.Faces)
             {
                 if (f.IndexCount != 3)
                 {
@@ -376,11 +378,8 @@ public abstract class BasePreviewRenderer
             try
             {
                 var ctx = new AssimpContext();
-                var scene = ctx.ImportFile(inputPath,
-                    PostProcessSteps.Triangulate |
-                    PostProcessSteps.GenerateNormals |
-                    PostProcessSteps.JoinIdenticalVertices |
-                    PostProcessSteps.FlipUVs);
+                const PostProcessSteps postProcess = PostProcessSteps.Triangulate | PostProcessSteps.GenerateNormals | PostProcessSteps.JoinIdenticalVertices | PostProcessSteps.FlipUVs;
+                Scene scene = ctx.ImportFile(inputPath, postProcess);
 
                 if (scene == null || !scene.HasMeshes)
                 {
@@ -390,14 +389,14 @@ public abstract class BasePreviewRenderer
                 var mesh = new Mesh();
                 int vertexOffset = 0;
 
-                foreach (var aMesh in scene.Meshes)
+                foreach (Assimp.Mesh? aMesh in scene.Meshes)
                 {
-                    foreach (var v in aMesh.Vertices)
+                    foreach (Vector3 v in aMesh.Vertices)
                     {
                         mesh.Vertices.Add(new Vector3(v.X, v.Y, v.Z));
                     }
 
-                    foreach (var face in aMesh.Faces)
+                    foreach (Assimp.Face? face in aMesh.Faces)
                     {
                         if (face.IndexCount >= 3)
                         {
@@ -439,40 +438,41 @@ public abstract class BasePreviewRenderer
         try
         {
             // Create a model
-            var model = Lib3MF.Wrapper.CreateModel();
+            CModel model = Lib3MF.Wrapper.CreateModel();
 
             // Get a reader and load the file
-            var reader = model.QueryReader("3mf");
+            CReader reader = model.QueryReader("3mf");
             reader.ReadFromFile(inputPath);
 
             // Get mesh objects from the model using iterator
-            var meshObjectIterator = model.GetMeshObjects();
+            CMeshObjectIterator meshObjectIterator = model.GetMeshObjects();
 
             int meshCount = 0;
             while (meshObjectIterator.MoveNext())
             {
-                var meshObject = meshObjectIterator.GetCurrentMeshObject();
+                CMeshObject meshObject = meshObjectIterator.GetCurrentMeshObject();
                 meshCount++;
 
                 // Get vertices
-                var vertexCount = meshObject.GetVertexCount();
-                for (UInt32 v = 0; v < vertexCount; v++)
+                uint vertexCount = meshObject.GetVertexCount();
+                for (uint v = 0; v < vertexCount; v++)
                 {
-                    var vertex = meshObject.GetVertex(v);
+                    sPosition vertex = meshObject.GetVertex(v);
+
                     // sPosition uses Coordinates array [0]=X, [1]=Y, [2]=Z
                     // Apply Z-up conversion to match Assimp's coordinate system
                     mesh.Vertices.Add(new Vector3(
                         vertex.Coordinates[0],
                         vertex.Coordinates[2],
-                        -vertex.Coordinates[1]
-                    ));
+                        -vertex.Coordinates[1]));
                 }
 
                 // Get triangles
-                var triangleCount = meshObject.GetTriangleCount();
-                for (UInt32 t = 0; t < triangleCount; t++)
+                uint triangleCount = meshObject.GetTriangleCount();
+                for (uint t = 0; t < triangleCount; t++)
                 {
-                    var triangle = meshObject.GetTriangle(t);
+                    sTriangle triangle = meshObject.GetTriangle(t);
+
                     // sTriangle uses Indices array [0]=Index1, [1]=Index2, [2]=Index3
                     mesh.Faces.Add(new Face
                     {
@@ -509,9 +509,9 @@ public abstract class BasePreviewRenderer
             return node;
         }
 
-        foreach (var child in node.Children)
+        foreach (Node? child in node.Children)
         {
-            var found = FindNodeForMesh(child, meshIndex);
+            Node? found = FindNodeForMesh(child, meshIndex);
             if (found != null)
             {
                 return found;
@@ -537,7 +537,7 @@ public abstract class BasePreviewRenderer
     {
         var properties = new Dictionary<string, object?>();
 
-        foreach (var prop in typeof(RenderOptions).GetProperties(
+        foreach (PropertyInfo prop in typeof(RenderOptions).GetProperties(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
         {
             if (prop.CanRead)
@@ -554,17 +554,21 @@ public abstract class BasePreviewRenderer
     /// Uses reflection to automatically handle all RenderOptions properties,
     /// so new properties don't require code changes.
     /// </summary>
+    /// <param name="options">The render options to restore user settings to.</param>
+    /// <param name="userProperties">Dictionary of user-provided property values.</param>
+    /// <param name="defaultOptions">Default render options for comparison.</param>
     protected virtual void RestoreUserSettings(
         RenderOptions options,
         Dictionary<string, object?> userProperties,
         RenderOptions defaultOptions)
     {
-        var optionsType = typeof(RenderOptions);
+        Type optionsType = typeof(RenderOptions);
 
         // Only restore properties that differ from the preset defaults
-        foreach (var kvp in userProperties)
+        foreach (KeyValuePair<string, object?> kvp in userProperties)
         {
-            var prop = optionsType.GetProperty(kvp.Key,
+            PropertyInfo? prop = optionsType.GetProperty(
+                kvp.Key,
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 
             if (prop == null || !prop.CanWrite)
@@ -572,8 +576,8 @@ public abstract class BasePreviewRenderer
                 continue;
             }
 
-            var userValue = kvp.Value;
-            var defaultValue = prop.GetValue(defaultOptions);
+            object? userValue = kvp.Value;
+            object? defaultValue = prop.GetValue(defaultOptions);
 
             // Only restore if values differ
             if (!PropertyValuesEqual(userValue, defaultValue))
@@ -627,18 +631,18 @@ public abstract class BasePreviewRenderer
     }
 
     protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
+
     protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
 
     // --------------------------------------------------------
     // CAMERA
     // --------------------------------------------------------
-    protected (Numerics.Matrix4x4 view, Numerics.Matrix4x4 proj) BuildCameraMatrices(RenderOptions options)
+    protected (Numerics.Matrix4x4 View, Numerics.Matrix4x4 Proj) BuildCameraMatrices(RenderOptions options)
     {
         var view = Numerics.Matrix4x4.CreateLookAt(
             options.CameraPosition,
             options.CameraTarget,
-            options.CameraUp
-        );
+            options.CameraUp);
 
         Numerics.Matrix4x4 proj;
         if (options.UseOrthographic)
@@ -647,8 +651,7 @@ public abstract class BasePreviewRenderer
             proj = Numerics.Matrix4x4.CreateOrthographicOffCenter(
                 -s, s, -s, s,
                 0.1f,   // TEMP: push near plane forward
-                10f
-            );
+                10f);
         }
         else
         {
@@ -656,8 +659,7 @@ public abstract class BasePreviewRenderer
                 MathF.PI / 4f,
                 (float)options.Width / options.Height,
                 0.1f,
-                10f
-            );
+                10f);
         }
 
         return (view, proj);
@@ -676,7 +678,7 @@ public abstract class BasePreviewRenderer
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
 
-        foreach (var v in mesh.Vertices)
+        foreach (Vector3 v in mesh.Vertices)
         {
             min = Vector3.Min(min, v);
             max = Vector3.Max(max, v);
@@ -688,7 +690,7 @@ public abstract class BasePreviewRenderer
         // 2. Compute TRUE centroid in XY (fixes backward tilt)
         // ------------------------------------------------------------
         Vector2 centroid = Vector2.Zero;
-        foreach (var v in mesh.Vertices)
+        foreach (Vector3 v in mesh.Vertices)
         {
             centroid += new Vector2(v.X, v.Y);
         }
@@ -700,15 +702,14 @@ public abstract class BasePreviewRenderer
         // ------------------------------------------------------------
         float scale = 1f / Math.Max(
             max.X - min.X,
-            Math.Max(max.Y - min.Y, max.Z - min.Z)
-        );
+            Math.Max(max.Y - min.Y, max.Z - min.Z));
 
         // ------------------------------------------------------------
         // 4. Apply normalization
         // ------------------------------------------------------------
-        foreach (var v in mesh.Vertices)
+        foreach (Vector3 v in mesh.Vertices)
         {
-            var p = v;
+            Vector3 p = v;
 
             // Center using centroid (NOT bounding box midpoint)
             p.X -= centroid.X;
@@ -729,7 +730,7 @@ public abstract class BasePreviewRenderer
         // ------------------------------------------------------------
         // 5. Copy faces
         // ------------------------------------------------------------
-        foreach (var f in mesh.Faces)
+        foreach (Face f in mesh.Faces)
         {
             if (f.IndexCount == 3)
             {
@@ -738,7 +739,7 @@ public abstract class BasePreviewRenderer
         }
 
         // ------------------------------------------------------------
-        // 6. prepare normals list (one per vertex) 
+        // 6. prepare normals list (one per vertex)
         // ------------------------------------------------------------
         for (int i = 0; i < result.Vertices.Count; i++)
         {
@@ -752,6 +753,8 @@ public abstract class BasePreviewRenderer
     /// Computes the bounding box of a normalized mesh and stores it in RenderOptions
     /// for dynamic camera target Z calculation.
     /// </summary>
+    /// <param name="mesh">The normalized mesh to compute bounds for.</param>
+    /// <param name="options">The render options to store the computed bounds in.</param>
     protected void UpdateMeshBounds(NormalizedMesh mesh, RenderOptions options)
     {
         if (mesh.Vertices.Count == 0)
@@ -764,7 +767,7 @@ public abstract class BasePreviewRenderer
         float minZ = mesh.Vertices[0].Z;
         float maxZ = mesh.Vertices[0].Z;
 
-        foreach (var v in mesh.Vertices)
+        foreach (Vector3 v in mesh.Vertices)
         {
             minZ = Math.Min(minZ, v.Z);
             maxZ = Math.Max(maxZ, v.Z);
@@ -778,7 +781,7 @@ public abstract class BasePreviewRenderer
         // Apply pending camera view now that bounds are known
         if (!string.IsNullOrWhiteSpace(options.PendingCameraView))
         {
-            var viewName = options.PendingCameraView;
+            string viewName = options.PendingCameraView;
             options.PendingCameraView = null;
             options.SetCameraView(viewName);
         }
@@ -791,10 +794,10 @@ public abstract class BasePreviewRenderer
         var faceNormals = new Vector3[mesh.Faces.Count];
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
-            var f = mesh.Faces[fi];
-            var p0 = mesh.Vertices[f.Indices[0]];
-            var p1 = mesh.Vertices[f.Indices[1]];
-            var p2 = mesh.Vertices[f.Indices[2]];
+            Face f = mesh.Faces[fi];
+            Vector3 p0 = mesh.Vertices[f.Indices[0]];
+            Vector3 p1 = mesh.Vertices[f.Indices[1]];
+            Vector3 p2 = mesh.Vertices[f.Indices[2]];
 
             var fn = Vector3.Cross(p1 - p0, p2 - p0);
             faceNormals[fi] = fn.LengthSquared() < 1e-12f ? Vector3.UnitZ : Vector3.Normalize(fn);
@@ -809,7 +812,7 @@ public abstract class BasePreviewRenderer
 
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
-            var f = mesh.Faces[fi];
+            Face f = mesh.Faces[fi];
             vertexFaces[f.Indices[0]].Add(fi);
             vertexFaces[f.Indices[1]].Add(fi);
             vertexFaces[f.Indices[2]].Add(fi);
@@ -819,7 +822,7 @@ public abstract class BasePreviewRenderer
 
         for (int v = 0; v < mesh.Vertices.Count; v++)
         {
-            var faces = vertexFaces[v];
+            List<int> faces = vertexFaces[v];
             if (faces.Count == 0)
             {
                 mesh.Normals[v] = Vector3.UnitZ;
@@ -829,7 +832,7 @@ public abstract class BasePreviewRenderer
             Vector3 sum = Vector3.Zero;
             foreach (int fi in faces)
             {
-                var fn = faceNormals[fi];
+                Vector3 fn = faceNormals[fi];
 
                 if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
                 {
@@ -849,22 +852,21 @@ public abstract class BasePreviewRenderer
     // --------------------------------------------------------
     // TRIANGLE PIPELINE
     // --------------------------------------------------------
-
     protected List<Triangle> BuildTriangleList(NormalizedMesh mesh, Numerics.Matrix4x4 view, Numerics.Matrix4x4 proj)
     {
         var tris = new List<Triangle>(mesh.Faces.Count);
 
         for (int i = 0; i < mesh.Faces.Count; i++)
         {
-            var f = mesh.Faces[i];
+            Face f = mesh.Faces[i];
 
             int i0 = f.Indices[0];
             int i1 = f.Indices[1];
             int i2 = f.Indices[2];
 
-            var p0 = mesh.Vertices[i0];
-            var p1 = mesh.Vertices[i1];
-            var p2 = mesh.Vertices[i2];
+            Vector3 p0 = mesh.Vertices[i0];
+            Vector3 p1 = mesh.Vertices[i1];
+            Vector3 p2 = mesh.Vertices[i2];
 
             // View-space positions
             Vector3 v0 = Vector3.Transform(p0, view);
@@ -889,11 +891,10 @@ public abstract class BasePreviewRenderer
             float ao1 = mesh.Ao.Length > i1 ? mesh.Ao[i1] : 1f;
             float ao2 = mesh.Ao.Length > i2 ? mesh.Ao[i2] : 1f;
 
-            var clipped = ClipToNearPlane(
+            List<ClipVertex> clipped = ClipToNearPlane(
                 new ClipVertex { C = c0, N = n0v, Ao = ao0 },
                 new ClipVertex { C = c1, N = n1v, Ao = ao1 },
-                new ClipVertex { C = c2, N = n2v, Ao = ao2 }
-            );
+                new ClipVertex { C = c2, N = n2v, Ao = ao2 });
 
             if (clipped.Count < 3)
             {
@@ -903,9 +904,9 @@ public abstract class BasePreviewRenderer
             // Triangulate fan (max 2 triangles)
             for (int k = 1; k + 1 < clipped.Count; k++)
             {
-                var vA = clipped[0];
-                var vB = clipped[k];
-                var vC = clipped[k + 1];
+                ClipVertex vA = clipped[0];
+                ClipVertex vB = clipped[k];
+                ClipVertex vC = clipped[k + 1];
 
                 Vector4 ndcA = vA.C / vA.C.W;
                 Vector4 ndcB = vB.C / vB.C.W;
@@ -918,8 +919,7 @@ public abstract class BasePreviewRenderer
                 // Compute face normal in NDC space for screen-space operations
                 var ndcFaceNormal = Vector3.Cross(
                     ndcB.XYZ() - ndcA.XYZ(),
-                    ndcC.XYZ() - ndcA.XYZ()
-                );
+                    ndcC.XYZ() - ndcA.XYZ());
                 if (ndcFaceNormal.LengthSquared() > 1e-12f)
                 {
                     ndcFaceNormal = Vector3.Normalize(ndcFaceNormal);
@@ -973,12 +973,14 @@ public abstract class BasePreviewRenderer
         var output = new List<ClipVertex>(4);
 
         static float Lerp(float a, float b, float t)
-        { return a + (b - a) * t; }
+        {
+            return a + ((b - a) * t);
+        }
 
         for (int i = 0; i < 3; i++)
         {
-            var v0 = input[i];
-            var v1 = input[(i + 1) % 3];
+            ClipVertex v0 = input[i];
+            ClipVertex v1 = input[(i + 1) % 3];
 
             // Clip against Near Plane (Z >= 0 in Clip Space [0, W])
             // Previously was clipping against Far Plane (W - Z >= 0) which is wrong for Near Plane clipping
@@ -1012,24 +1014,22 @@ public abstract class BasePreviewRenderer
     // ---------------------------------------------------------------------
     //  NDC → SCREEN
     // ---------------------------------------------------------------------
-
     protected Vector2 NdcToScreen(Vector4 ndc, int w, int h)
     {
-        float x = (ndc.X * 0.5f + 0.5f) * (w - 1);
-        float y = (1f - (ndc.Y * 0.5f + 0.5f)) * (h - 1);
+        float x = ((ndc.X * 0.5f) + 0.5f) * (w - 1);
+        float y = (1f - ((ndc.Y * 0.5f) + 0.5f)) * (h - 1);
         return new Vector2(x, y);
     }
 
     // ---------------------------------------------------------------------
     //  TRIANGLE RASTERIZATION
     // ---------------------------------------------------------------------
-
     protected float[,] RasterizeTriangles(Image<Rgba32> img, List<Triangle> tris, RenderOptions options)
     {
         int w = img.Width;
         int h = img.Height;
 
-        var depth01 = new float[w, h];
+        float[,] depth01 = new float[w, h];
         for (int y = 0; y < h; y++)
         {
             for (int x = 0; x < w; x++)
@@ -1040,16 +1040,16 @@ public abstract class BasePreviewRenderer
 
         static float Edge(Vector2 a, Vector2 b, Vector2 c)
         {
-            return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+            return ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
         }
 
-        var frame = img.Frames.RootFrame;
+        ImageFrame<Rgba32> frame = img.Frames.RootFrame;
 
-        foreach (var tri in tris)
+        foreach (Triangle tri in tris)
         {
-            var s0 = NdcToScreen(tri.V0, w, h);
-            var s1 = NdcToScreen(tri.V1, w, h);
-            var s2 = NdcToScreen(tri.V2, w, h);
+            Vector2 s0 = NdcToScreen(tri.V0, w, h);
+            Vector2 s1 = NdcToScreen(tri.V1, w, h);
+            Vector2 s2 = NdcToScreen(tri.V2, w, h);
 
             float area = Edge(s0, s1, s2);
 
@@ -1111,13 +1111,13 @@ public abstract class BasePreviewRenderer
                     w1 *= invArea;
                     w2 *= invArea;
 
-                    float invW = w0 * invW0 + w1 * invW1 + w2 * invW2;
+                    float invW = (w0 * invW0) + (w1 * invW1) + (w2 * invW2);
                     if (invW <= 0f)
                     {
                         continue;
                     }
 
-                    float zOverW = w0 * zOverW0 + w1 * zOverW1 + w2 * zOverW2;
+                    float zOverW = (w0 * zOverW0) + (w1 * zOverW1) + (w2 * zOverW2);
                     float zNdc = zOverW / invW;
 
                     float d01 = zNdc; // System.Numerics uses [0, 1] depth range
@@ -1129,8 +1129,8 @@ public abstract class BasePreviewRenderer
                     depth01[x, y] = d01;
 
                     // Per-pixel normal + AO (screen-space barycentric; good enough for normals)
-                    Vector3 n = Vector3.Normalize(w0 * tri.N0 + w1 * tri.N1 + w2 * tri.N2);
-                    float ao = w0 * tri.Ao0 + w1 * tri.Ao1 + w2 * tri.Ao2;
+                    Vector3 n = Vector3.Normalize((w0 * tri.N0) + (w1 * tri.N1) + (w2 * tri.N2));
+                    float ao = (w0 * tri.Ao0) + (w1 * tri.Ao1) + (w2 * tri.Ao2);
 
                     frame[x, y] = ShadeTriangle(n, ao, options);
                 }
@@ -1143,7 +1143,6 @@ public abstract class BasePreviewRenderer
     // ---------------------------------------------------------------------
     //  TRUE SILHOUETTE EDGE DETECTION (A1 subtle)
     // ---------------------------------------------------------------------
-
 #pragma warning disable S2368 // Multidimensional arrays required for efficient image processing
     protected void DrawSilhouetteEdges(Image<Rgba32> img, List<Triangle> tris, float[,] depth01, RenderOptions options)
 #pragma warning restore S2368
@@ -1153,7 +1152,7 @@ public abstract class BasePreviewRenderer
 
         static float Cross2D(Vector2 a, Vector2 b, Vector2 c)
         {
-            return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+            return ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
         }
 
         static (PointF, PointF) MakeEdgeKey(PointF a, PointF b)
@@ -1171,17 +1170,17 @@ public abstract class BasePreviewRenderer
         Vector3 viewSpaceViewDir = new Vector3(0f, 0f, -1f);
 
         // edge -> list of triangle contributions
-        var edgeMap = new Dictionary<(PointF, PointF), List<(Vector3 faceNormal, bool frontFacing, Vector2 s0, Vector2 s1, Vector2 s2, float d0, float d1, float d2)>>();
+        var edgeMap = new Dictionary<(PointF, PointF), List<(Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2)>>();
 
         float ndcEpsilon = 1e-4f;
 
         for (int i = 0; i < tris.Count; i++)
         {
-            var tri = tris[i];
+            Triangle tri = tris[i];
 
-            var s0 = NdcToScreen(tri.V0, w, h);
-            var s1 = NdcToScreen(tri.V1, w, h);
-            var s2 = NdcToScreen(tri.V2, w, h);
+            Vector2 s0 = NdcToScreen(tri.V0, w, h);
+            Vector2 s1 = NdcToScreen(tri.V1, w, h);
+            Vector2 s2 = NdcToScreen(tri.V2, w, h);
 
             if ((s0 - s1).LengthSquared() < ndcEpsilon ||
                 (s1 - s2).LengthSquared() < ndcEpsilon ||
@@ -1211,7 +1210,7 @@ public abstract class BasePreviewRenderer
 
             void RegisterEdge((PointF, PointF) edgeKey)
             {
-                if (!edgeMap.TryGetValue(edgeKey, out var list))
+                if (!edgeMap.TryGetValue(edgeKey, out List<(Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2)>? list))
                 {
                     list = new List<(Vector3, bool, Vector2, Vector2, Vector2, float, float, float)>(2);
                     edgeMap[edgeKey] = list;
@@ -1228,13 +1227,13 @@ public abstract class BasePreviewRenderer
 
         img.Mutate(ctx =>
         {
-            var color = options.SilhouetteColor;
+            Rgba32 color = options.SilhouetteColor;
             float width = options.SilhouetteEdgeWidth <= 0f ? 1.0f : options.SilhouetteEdgeWidth;
 
-            foreach (var kvp in edgeMap)
+            foreach (KeyValuePair<(PointF, PointF), List<(Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2)>> kvp in edgeMap)
             {
-                var edgeKey = kvp.Key;
-                var list = kvp.Value;
+                (PointF, PointF) edgeKey = kvp.Key;
+                List<(Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2)> list = kvp.Value;
 
                 bool isSilhouette = false;
 
@@ -1242,7 +1241,7 @@ public abstract class BasePreviewRenderer
                 {
                     // Boundary edges: only if face is near perpendicular to view (contour-like)
                     // Use view-space normal with view-space view direction
-                    var n = Vector3.Normalize(list[0].faceNormal);
+                    var n = Vector3.Normalize(list[0].FaceNormal);
                     float ndotvAbs = MathF.Abs(Vector3.Dot(n, viewSpaceViewDir));
                     if (ndotvAbs < 0.25f)
                     {
@@ -1251,13 +1250,13 @@ public abstract class BasePreviewRenderer
                 }
                 else if (list.Count == 2)
                 {
-                    bool f0 = list[0].frontFacing;
-                    bool f1 = list[1].frontFacing;
+                    bool f0 = list[0].FrontFacing;
+                    bool f1 = list[1].FrontFacing;
 
                     if (f0 != f1)
                     {
-                        var n0 = Vector3.Normalize(list[0].faceNormal);
-                        var n1 = Vector3.Normalize(list[1].faceNormal);
+                        var n0 = Vector3.Normalize(list[0].FaceNormal);
+                        var n1 = Vector3.Normalize(list[1].FaceNormal);
                         float ndot = Vector3.Dot(n0, n1);
 
                         if (ndot < 0.5f)
@@ -1273,7 +1272,7 @@ public abstract class BasePreviewRenderer
                 }
 
                 // Depth-aware: test midpoint against z-buffer
-                var (a, b) = edgeKey;
+                (PointF a, PointF b) = edgeKey;
                 var mid = new Vector2((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
 
                 int mx = (int)MathF.Floor(mid.X);
@@ -1284,8 +1283,8 @@ public abstract class BasePreviewRenderer
                 }
 
                 // Choose a front-facing entry if possible (more likely to be visible surface)
-                var entry = list.Count == 2
-                    ? (list[0].frontFacing ? list[0] : list[1])
+                (Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2) entry = list.Count == 2
+                    ? (list[0].FrontFacing ? list[0] : list[1])
                     : list[0];
 
                 float zbuf = depth01[mx, my];

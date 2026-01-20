@@ -17,10 +17,11 @@ namespace Farm.Web.Api.Services.PrintJobs
 
         public Task<bool> ApproveAsync(Guid approvalId, string? approvedBy)
         {
-            if (!_pending.TryRemove(approvalId, out var entry))
+            if (!_pending.TryRemove(approvalId, out (Guid PrintJobId, Guid? PrinterId, string? RequestedBy) entry))
             {
                 return Task.FromResult(false);
             }
+
             // TODO: enqueue the print job to the actual queue; this is just a scaffold
             return Task.FromResult(true);
         }

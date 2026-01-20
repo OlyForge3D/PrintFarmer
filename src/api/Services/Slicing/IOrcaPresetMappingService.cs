@@ -8,10 +8,15 @@ namespace Farm.Web.Api.Services.Slicing;
 public class PrinterPresetMatch
 {
     public OrcaPrinterPresetDto Preset { get; set; } = new();
+
     public Guid? MatchedPrinterModelId { get; set; }
+
     public string? MatchedPrinterModelName { get; set; }
+
     public string? MatchedManufacturerName { get; set; }
+
     public double ConfidenceScore { get; set; } // 0.0 to 1.0
+
     public List<string> MatchReasons { get; set; } = new();
 }
 
@@ -21,8 +26,11 @@ public class PrinterPresetMatch
 public class FilamentPresetMatch
 {
     public OrcaFilamentPresetDto Preset { get; set; } = new();
+
     public string? MatchedMaterialType { get; set; }
+
     public double ConfidenceScore { get; set; }
+
     public List<string> MatchReasons { get; set; } = new();
 }
 
@@ -32,8 +40,11 @@ public class FilamentPresetMatch
 public class ProcessPresetMatch
 {
     public OrcaProcessPresetDto Preset { get; set; } = new();
+
     public string DerivedQuality { get; set; } = "Standard";
+
     public double ConfidenceScore { get; set; }
+
     public List<string> MatchReasons { get; set; } = new();
 }
 
@@ -43,11 +54,17 @@ public class ProcessPresetMatch
 public class OrcaBundleMappingResult
 {
     public List<PrinterPresetMatch> PrinterMatches { get; set; } = new();
+
     public List<FilamentPresetMatch> FilamentMatches { get; set; } = new();
+
     public List<ProcessPresetMatch> ProcessMatches { get; set; } = new();
+
     public int TotalPresets { get; set; }
+
     public int HighConfidenceMatches { get; set; } // Confidence >= 0.7
+
     public int MediumConfidenceMatches { get; set; } // 0.4 <= Confidence < 0.7
+
     public int LowConfidenceMatches { get; set; } // Confidence < 0.4
 }
 

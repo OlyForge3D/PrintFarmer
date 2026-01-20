@@ -31,7 +31,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var prediction = await predictionService.PredictCompletionTimeByJobIdAsync(jobId, cancellationToken);
+            CompletionPredictionDto prediction = await predictionService.PredictCompletionTimeByJobIdAsync(jobId, cancellationToken);
             return Ok(prediction);
         }
         catch (InvalidOperationException ex)
@@ -59,7 +59,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetJobStatisticsAsync(jobId, cancellationToken);
+            PrintJobStatisticsDto? stats = await predictionService.GetJobStatisticsAsync(jobId, cancellationToken);
             return stats == null ? NotFound($"Statistics for job {jobId} not found") : Ok(stats);
         }
         catch (Exception ex)
@@ -86,7 +86,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetMaterialStatsAsync(printerId, cancellationToken);
+            Dictionary<string, PredictionDurationStatsDto> stats = await predictionService.GetMaterialStatsAsync(printerId, cancellationToken);
             return Ok(stats);
         }
         catch (Exception ex)
@@ -112,7 +112,7 @@ public class PredictionController(PredictionService predictionService) : Control
     {
         try
         {
-            var stats = await predictionService.GetDurationStatsAsync(
+            PredictionDurationStatsDto? stats = await predictionService.GetDurationStatsAsync(
                 modelId: modelId,
                 material: material,
                 minSampleSize: 3,

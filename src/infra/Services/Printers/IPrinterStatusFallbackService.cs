@@ -114,6 +114,8 @@ public interface IPrinterStatusFallbackService
 public class CircuitBreakerState
 {
     public bool IsOpen { get; set; }
+
     public int FailureCount { get; set; }
+
     public DateTime? LastFailureTime { get; set; }
 }

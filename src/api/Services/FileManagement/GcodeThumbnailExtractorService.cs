@@ -17,6 +17,8 @@ public class GcodeThumbnailExtractorService(
     /// <summary>
     /// Extract and save a thumbnail from a G-code file stream.
     /// </summary>
+    /// <param name="gcodeStream">The G-code file stream to extract thumbnail from.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<string?> ExtractAndSaveThumbnailAsync(Stream gcodeStream, CancellationToken ct = default)
     {
         if (gcodeStream == null)
@@ -43,6 +45,8 @@ public class GcodeThumbnailExtractorService(
     /// <summary>
     /// Extract and save a thumbnail from G-code text content.
     /// </summary>
+    /// <param name="gcodeContent">The G-code text content to extract thumbnail from.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<string?> ExtractAndSaveThumbnailFromTextAsync(string gcodeContent, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(gcodeContent))
@@ -53,7 +57,7 @@ public class GcodeThumbnailExtractorService(
         try
         {
             // Extract metadata which includes thumbnail
-            var extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+            GcodeMetadataExtracted extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
 
             if (extractedMetadata?.ThumbnailData == null || extractedMetadata.ThumbnailData.Length == 0)
             {

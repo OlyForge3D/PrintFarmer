@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -60,13 +61,13 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
         if (_pluginRegistry != null)
         {
-            var registeredPlugins = _pluginRegistry.GetAllPlugins().Count();
+            int registeredPlugins = _pluginRegistry.GetAllPlugins().Count();
             _logger.LogInformation($"Plugin registry integrated: {registeredPlugins} backend client plugins registered");
         }
     }
 
     /// <summary>
-    /// Discovers backend capabilities by checking the plugin registry and/or 
+    /// Discovers backend capabilities by checking the plugin registry and/or
     /// using reflection to detect capability marker interfaces on client implementations.
     /// </summary>
     private Dictionary<PrinterBackend, BackendCapabilities> DiscoverBackendCapabilities()
@@ -78,9 +79,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         {
             try
             {
-                var backendType = GetBackendTypeName(backend);
-                var capabilities = BackendCapabilities.None;
-                var capabilitySource = "reflection";
+                string backendType = GetBackendTypeName(backend);
+                BackendCapabilities capabilities = BackendCapabilities.None;
+                string capabilitySource = "reflection";
 
                 // First, try to get capabilities from plugin registry
                 if (_pluginRegistry?.IsRegistered(backendType) == true)
@@ -91,14 +92,14 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 else
                 {
                     // Fall back to reflection-based detection
-                    var client = _clientFactory.GetClient(backend);
-                    var clientType = client.GetType();
+                    IBackendClient client = _clientFactory.GetClient(backend);
+                    Type clientType = client.GetType();
                     capabilities = DetectCapabilitiesFromInterfaces(clientType);
                 }
 
                 discovered.Add(backend, capabilities);
 
-                var implementedCapabilities = GetCapabilityNames(capabilities);
+                List<string> implementedCapabilities = GetCapabilityNames(capabilities);
                 _logger.LogDebug($"Backend {backend} ({backendType}) detected capabilities from {capabilitySource}: {string.Join(", ", implementedCapabilities)}");
             }
             catch (Exception ex)
@@ -128,16 +129,16 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     /// </summary>
     private BackendCapabilities GetCapabilitiesFromPlugin(string backendType)
     {
-        var plugin = _pluginRegistry?.GetPlugin(backendType);
+        IBackendClientPlugin? plugin = _pluginRegistry?.GetPlugin(backendType);
         if (plugin == null)
         {
             return BackendCapabilities.None;
         }
 
-        var capabilities = BackendCapabilities.None;
-        var pluginCapabilities = plugin.GetCapabilities();
+        BackendCapabilities capabilities = BackendCapabilities.None;
+        IEnumerable<Type> pluginCapabilities = plugin.GetCapabilities();
 
-        foreach (var (interfaceType, capabilityFlag) in CapabilityInterfaceMap)
+        foreach ((Type? interfaceType, BackendCapabilities capabilityFlag) in CapabilityInterfaceMap)
         {
             if (pluginCapabilities.Contains(interfaceType))
             {
@@ -154,9 +155,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     /// </summary>
     private static BackendCapabilities DetectCapabilitiesFromInterfaces(Type clientType)
     {
-        var capabilities = BackendCapabilities.None;
+        BackendCapabilities capabilities = BackendCapabilities.None;
 
-        foreach (var (interfaceType, capabilityFlag) in CapabilityInterfaceMap)
+        foreach ((Type? interfaceType, BackendCapabilities capabilityFlag) in CapabilityInterfaceMap)
         {
             // Check if the client type implements this capability interface
             if (clientType.GetInterfaces().Contains(interfaceType))
@@ -175,7 +176,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         var names = new List<string>();
 
-        foreach (var (_, capabilityFlag) in CapabilityInterfaceMap)
+        foreach ((Type _, BackendCapabilities capabilityFlag) in CapabilityInterfaceMap)
         {
             if ((capabilities & capabilityFlag) == capabilityFlag && capabilityFlag != BackendCapabilities.None)
             {
@@ -194,7 +195,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     public bool TryGetFileListClient(PrinterBackend backend, out IBackendClient? client)
     {
         _logger.LogWarning($"[DIAGNOSTIC] TryGetFileListClient called for backend {backend}. Cache contains {_capabilitiesCache.Count} entries. Cache has key: {_capabilitiesCache.ContainsKey(backend)}");
-        if (_capabilitiesCache.TryGetValue(backend, out var caps))
+        if (_capabilitiesCache.TryGetValue(backend, out BackendCapabilities caps))
         {
             _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} capabilities from cache: {caps}. Has FileList: {caps.HasFlag(BackendCapabilities.FileList)}");
         }
@@ -202,6 +203,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         {
             _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} NOT FOUND in capabilities cache!");
         }
+
         return TryGetClientWithCapability(backend, BackendCapabilities.FileList, out client);
     }
 
@@ -281,94 +283,102 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     public bool TryGetCameraClientTyped(PrinterBackend backend, out ISupportsCamera? client)
     {
         client = null;
-        if (TryGetCameraClient(backend, out var baseClient) && baseClient is ISupportsCamera cameraClient)
+        if (TryGetCameraClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsCamera cameraClient)
         {
             client = cameraClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetConfiguredCameraDetectionClient(PrinterBackend backend, out ISupportsConfiguredCameraDetection? client)
     {
         client = null;
-        if (TryGetCameraClient(backend, out var baseClient) && baseClient is ISupportsConfiguredCameraDetection detectionClient)
+        if (TryGetCameraClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsConfiguredCameraDetection detectionClient)
         {
             client = detectionClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetHistoryClientTyped(PrinterBackend backend, out ISupportsHistory? client)
     {
         client = null;
-        if (TryGetHistoryClient(backend, out var baseClient) && baseClient is ISupportsHistory historyClient)
+        if (TryGetHistoryClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsHistory historyClient)
         {
             client = historyClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetMovementClientTyped(PrinterBackend backend, out ISupportsMovement? client)
     {
         client = null;
-        if (TryGetMovementClient(backend, out var baseClient) && baseClient is ISupportsMovement movementClient)
+        if (TryGetMovementClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsMovement movementClient)
         {
             client = movementClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetTemperatureControlClientTyped(PrinterBackend backend, out ISupportsTemperatureControl? client)
     {
         client = null;
-        if (TryGetTemperatureControlClient(backend, out var baseClient) && baseClient is ISupportsTemperatureControl tempClient)
+        if (TryGetTemperatureControlClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsTemperatureControl tempClient)
         {
             client = tempClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetControlOperationsClientTyped(PrinterBackend backend, out ISupportsControlOperations? client)
     {
         client = null;
-        if (TryGetControlOperationsClient(backend, out var baseClient) && baseClient is ISupportsControlOperations controlClient)
+        if (TryGetControlOperationsClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsControlOperations controlClient)
         {
             client = controlClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetFileUploadClientTyped(PrinterBackend backend, out ISupportsFileUpload? client)
     {
         client = null;
-        if (TryGetFileUploadClient(backend, out var baseClient) && baseClient is ISupportsFileUpload uploadClient)
+        if (TryGetFileUploadClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsFileUpload uploadClient)
         {
             client = uploadClient;
             return true;
         }
+
         return false;
     }
 
     public bool TryGetStartPrintClientTyped(PrinterBackend backend, out ISupportsStartPrint? client)
     {
         client = null;
-        if (TryGetStartPrintClient(backend, out var baseClient) && baseClient is ISupportsStartPrint startPrintClient)
+        if (TryGetStartPrintClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsStartPrint startPrintClient)
         {
             client = startPrintClient;
             return true;
         }
+
         return false;
     }
 
     public BackendCapabilities GetSupportedCapabilities(PrinterBackend backend)
     {
-        if (_capabilitiesCache.TryGetValue(backend, out var capabilities))
+        if (_capabilitiesCache.TryGetValue(backend, out BackendCapabilities capabilities))
         {
             return capabilities;
         }
@@ -390,7 +400,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         client = null;
 
         // Check if this backend supports the requested capability
-        if (!_capabilitiesCache.TryGetValue(backend, out var capabilities))
+        if (!_capabilitiesCache.TryGetValue(backend, out BackendCapabilities capabilities))
         {
             _logger.LogWarning($"Unknown backend type: {backend}");
             return false;
@@ -411,10 +421,10 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             // DIAGNOSTIC: Log the actual client type returned and its interfaces
             if (client != null)
             {
-                var clientType = client.GetType();
-                var clientFullName = clientType.FullName;
+                Type clientType = client.GetType();
+                string? clientFullName = clientType.FullName;
                 var interfaces = clientType.GetInterfaces().Select(i => i.Name).ToList();
-                var implementsRequiredInterface = false;
+                bool implementsRequiredInterface = false;
 
                 // Check if client implements the specific interface for this capability
                 switch (requiredCapability)

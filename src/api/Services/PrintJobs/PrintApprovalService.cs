@@ -37,7 +37,7 @@ namespace Farm.Web.Api.Services.PrintJobs
 
         public async Task<bool> ApproveAsync(Guid approvalId, string? approvedBy)
         {
-            var approval = await _dbContext.Set<PrintApproval>().FindAsync(approvalId);
+            PrintApproval? approval = await _dbContext.Set<PrintApproval>().FindAsync(approvalId);
 
             if (approval == null)
             {

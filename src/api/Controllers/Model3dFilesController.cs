@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
+using Farm.Web.Api.Services.IO;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Mvc;
@@ -50,6 +51,7 @@ public class Model3DFilesController(
     {
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
+
         // Ensure path is absolute - if relative, combine with current directory first
         string modelsPath = Path.IsPathRooted(configPath)
             ? configPath
@@ -76,6 +78,7 @@ public class Model3DFilesController(
     /// <summary>
     /// Upload a 3D model file
     /// </summary>
+    /// <param name="modelFile">The 3D model file to upload.</param>
     /// <returns>Model upload result with ID and URL</returns>
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
@@ -144,6 +147,7 @@ public class Model3DFilesController(
     /// <summary>
     /// Lists all 3D model folders recursively for building a folder tree structure.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     /// <returns>Flat list of all folders in the models directory hierarchy</returns>
     [HttpGet("folders")]
     [ProducesResponseType(typeof(List<Model3DEntryDto>), StatusCodes.Status200OK)]
@@ -151,7 +155,7 @@ public class Model3DFilesController(
     {
         try
         {
-            var folders = await _modelService.ListAllFoldersAsync(ct);
+            List<Model3DEntryDto> folders = await _modelService.ListAllFoldersAsync(ct);
             return Ok(folders);
         }
         catch (Exception ex)
@@ -345,7 +349,7 @@ public class Model3DFilesController(
             }
 
             string contentType = "image/png";
-            var fileInfo = _fileSystem.GetFileInfo(absolutePath);
+            FileInfoData fileInfo = _fileSystem.GetFileInfo(absolutePath);
             _logger.LogInformation($"[Thumbnail] File size: {fileInfo.Length} bytes");
             _logger.LogInformation($"[Thumbnail] Serving thumbnail from {absolutePath}");
             return PhysicalFile(absolutePath, contentType);
@@ -381,24 +385,24 @@ public class Model3DFilesController(
         try
         {
             // Get file bytes (validates path internally)
-            (byte[] bytes, string fileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
+            (byte[] Bytes, string FileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
             if (result == null)
             {
                 return NotFound();
             }
 
-            var (fileBytes, safeFileName) = result.Value;
+            (byte[]? fileBytes, string? safeFileName) = result.Value;
 
             // Check if this is a 3MF file that needs conversion
             if (forceStl && safeFileName.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation($"Converting 3MF file {safeFileName} to STL for viewer");
 
-                var stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
+                byte[]? stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
                 if (stlBytes != null)
                 {
                     // Return as STL file
-                    var stlFileName = Path.ChangeExtension(safeFileName, ".stl");
+                    string stlFileName = Path.ChangeExtension(safeFileName, ".stl");
                     return File(stlBytes, "application/octet-stream", stlFileName);
                 }
                 else
@@ -465,7 +469,7 @@ public class Model3DFilesController(
         try
         {
             int deletedCount = 0;
-            foreach (var id in request.ModelIds)
+            foreach (Guid id in request.ModelIds)
             {
                 try
                 {
@@ -475,6 +479,7 @@ public class Model3DFilesController(
                 catch (KeyNotFoundException)
                 {
                     _logger.LogWarning($"Model {id} not found during bulk delete");
+
                     // Continue deleting other files
                 }
             }
@@ -548,8 +553,6 @@ public class Model3DFilesController(
             return BadRequest(ae.Message);
         }
     }
-
-
 
     /// <summary>
     /// Search and filter models with pagination (query endpoint for consistency with GCode API)
@@ -654,12 +657,13 @@ public class Model3DFilesController(
                 return BadRequest(new FolderOperationResultDto(false, "Folder path cannot be empty. Please provide a folder name."));
             }
 
-            foreach (var part in pathParts)
+            foreach (string part in pathParts)
             {
                 if (string.IsNullOrWhiteSpace(part))
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Folder path contains empty segments. Path: '{relativePath}'"));
                 }
+
                 if (part.Contains("..") || part.Contains("\\") || part == ".")
                 {
                     return BadRequest(new FolderOperationResultDto(false, $"Invalid folder name: '{part}' in path '{relativePath}'. Cannot use '.', '..', or backslashes."));
@@ -704,6 +708,7 @@ public class Model3DFilesController(
             catch (Exception dbEx)
             {
                 _logger.LogError($"[CreateFolder] Failed to record folder in database: {dbEx.Message}. Physical folder was created but not tracked.");
+
                 // Don't fail the request - the physical folder exists, just not tracked yet
             }
 
@@ -764,10 +769,10 @@ public class Model3DFilesController(
 
             int movedCount = 0;
             int failedCount = 0;
-            List<(string id, string reason)> failedFiles = [];
+            List<(string Id, string Reason)> failedFiles = [];
 
             // Move each file - this is a virtual move (just update database)
-            foreach (var modelIdStr in request.ModelIds)
+            foreach (string modelIdStr in request.ModelIds)
             {
                 try
                 {
@@ -832,7 +837,7 @@ public class Model3DFilesController(
 
             if (failedFiles.Count > 0)
             {
-                var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
+                var failureDetails = failedFiles.Take(3).Select(f => $"{f.Id} ({f.Reason})").ToList();
                 message += $" - Failed: {string.Join(", ", failureDetails)}";
                 if (failedFiles.Count > 3)
                 {
@@ -864,18 +869,3 @@ public class Model3DFilesController(
         }
     }
 }
-
-/// <summary>
-/// Request DTO for creating a new folder
-/// </summary>
-public record CreateFolderRequest(string Path);
-
-/// <summary>
-/// Request DTO for deleting multiple models
-/// </summary>
-public sealed class DeleteModelsRequest
-{
-    [JsonPropertyName("modelIds")]
-    public IList<Guid> ModelIds { get; init; } = [];
-}
-

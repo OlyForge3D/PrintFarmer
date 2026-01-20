@@ -6,6 +6,8 @@ using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +38,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void Moonraker_ClientShouldImplementISupportsFileList()
         {
             // Arrange - Get the Moonraker client
-            var client = _clientFactory.GetClient(PrinterBackend.Moonraker);
+            IBackendClient client = _clientFactory.GetClient(PrinterBackend.Moonraker);
 
             // Act & Assert
             Assert.NotNull(client);
@@ -50,7 +52,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void PrusaLink_ClientShouldImplementISupportsFileList()
         {
             // Arrange
-            var client = _clientFactory.GetClient(PrinterBackend.PrusaLink);
+            IBackendClient client = _clientFactory.GetClient(PrinterBackend.PrusaLink);
 
             // Act & Assert
             Assert.NotNull(client);
@@ -63,7 +65,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void OctoPrint_ClientShouldImplementISupportsFileList()
         {
             // Arrange
-            var client = _clientFactory.GetClient(PrinterBackend.OctoPrint);
+            IBackendClient client = _clientFactory.GetClient(PrinterBackend.OctoPrint);
 
             // Act & Assert
             Assert.NotNull(client);
@@ -76,7 +78,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         public void SDCP_ClientShouldImplementISupportsFileList()
         {
             // Arrange
-            var client = _clientFactory.GetClient(PrinterBackend.SDCP);
+            IBackendClient client = _clientFactory.GetClient(PrinterBackend.SDCP);
 
             // Act & Assert
             Assert.NotNull(client);
@@ -92,10 +94,10 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var registry = new Mock<IBackendPluginRegistry>();
 
             // Create mock plugins
-            var moonrakerPlugin = CreateMockPlugin("moonraker", PrinterBackend.Moonraker);
-            var prusaLinkPlugin = CreateMockPlugin("prusalink", PrinterBackend.PrusaLink);
-            var octoPrintPlugin = CreateMockPlugin("octoprint", PrinterBackend.OctoPrint);
-            var sdcpPlugin = CreateMockPlugin("sdcp", PrinterBackend.SDCP);
+            IBackendClientPlugin moonrakerPlugin = CreateMockPlugin("moonraker", PrinterBackend.Moonraker);
+            IBackendClientPlugin prusaLinkPlugin = CreateMockPlugin("prusalink", PrinterBackend.PrusaLink);
+            IBackendClientPlugin octoPrintPlugin = CreateMockPlugin("octoprint", PrinterBackend.OctoPrint);
+            IBackendClientPlugin sdcpPlugin = CreateMockPlugin("sdcp", PrinterBackend.SDCP);
 
             registry.Setup(r => r.IsRegistered("moonraker")).Returns(true);
             registry.Setup(r => r.GetPlugin("moonraker")).Returns(moonrakerPlugin);
@@ -110,19 +112,19 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var factory = new BackendCapabilityFactory(_clientFactory, _mockLogger.Object, registry.Object);
 
             // Assert - Verify the factory can get file list clients for all backends
-            Assert.True(factory.TryGetFileListClient(PrinterBackend.Moonraker, out var mr));
+            Assert.True(factory.TryGetFileListClient(PrinterBackend.Moonraker, out IBackendClient? mr));
             Assert.NotNull(mr);
             Assert.True(mr is ISupportsFileList);
 
-            Assert.True(factory.TryGetFileListClient(PrinterBackend.PrusaLink, out var prusa));
+            Assert.True(factory.TryGetFileListClient(PrinterBackend.PrusaLink, out IBackendClient? prusa));
             Assert.NotNull(prusa);
             Assert.True(prusa is ISupportsFileList);
 
-            Assert.True(factory.TryGetFileListClient(PrinterBackend.OctoPrint, out var octo));
+            Assert.True(factory.TryGetFileListClient(PrinterBackend.OctoPrint, out IBackendClient? octo));
             Assert.NotNull(octo);
             Assert.True(octo is ISupportsFileList);
 
-            Assert.True(factory.TryGetFileListClient(PrinterBackend.SDCP, out var sdcp));
+            Assert.True(factory.TryGetFileListClient(PrinterBackend.SDCP, out IBackendClient? sdcp));
             Assert.NotNull(sdcp);
             Assert.True(sdcp is ISupportsFileList);
         }
@@ -183,7 +185,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             plugin.Setup(p => p.Description).Returns($"{backendType} plugin");
 
             // Return the correct capabilities based on backend type
-            var capabilities = GetCapabilitiesForBackend(backend);
+            IEnumerable<Type> capabilities = GetCapabilitiesForBackend(backend);
             plugin.Setup(p => p.GetCapabilities()).Returns(capabilities);
 
             return plugin.Object;

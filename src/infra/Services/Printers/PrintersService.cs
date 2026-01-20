@@ -94,7 +94,6 @@ public class PrintersService(
         return _backendFactory.GetClient(backend);
     }
 
-    // History helpers moved from controller: delegate to appropriate backend client
     /// <summary>
     /// Retrieves print job history for a printer from its backend API.
     /// </summary>
@@ -122,7 +121,7 @@ public class PrintersService(
             var backend = (PrinterBackend)printer.Backend;
 
             // Use factory to get strongly-typed history client
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
+            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
                 HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, printer.ApiKey, ct).ConfigureAwait(false);
                 if (response == null)
@@ -132,11 +131,13 @@ public class PrintersService(
                 }
 
                 _logger.LogInformation($"[History] Got {response.Count} jobs from {backend}");
+
                 // Set ThumbnailUrl for each job
-                foreach (var job in response.Jobs)
+                foreach (HistoryJob job in response.Jobs)
                 {
                     job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
                 }
+
                 return response;
             }
             else
@@ -174,12 +175,12 @@ public class PrintersService(
         {
             var backend = (PrinterBackend)printer.Backend;
 
-            if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
+            if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
                 throw new InvalidOperationException("History is only available for backends that support it");
             }
 
-            var job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
 
             // Set ThumbnailUrl
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
@@ -217,7 +218,7 @@ public class PrintersService(
         {
             var backend = (PrinterBackend)printer.Backend;
 
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
+            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
                 HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.ApiKey, ct).ConfigureAwait(false);
                 if (totals != null)
@@ -262,7 +263,7 @@ public class PrintersService(
 
         var backend = (PrinterBackend)printer.Backend;
 
-        return !_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient)
+        return !_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient)
             ? throw new InvalidOperationException("History deletion is only available for backends that support it")
             : await historyClient!.DeleteHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false);
     }
@@ -293,6 +294,27 @@ public class PrintersService(
     public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
     {
         return await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
+    }
+
+    /// <summary>
+    /// Retrieves all printers with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
+    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
+    {
+        return await _unitOfWork.Printers.GetAllForTemplateUpdateAsync(ct);
+    }
+
+    /// <summary>
+    /// Retrieves a single printer with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="id">The printer ID (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Printer entity with Toolheads if found; otherwise null</returns>
+    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct)
+    {
+        return await _unitOfWork.Printers.FindByIdForTemplateUpdateAsync(id, ct);
     }
 
     /// <summary>
@@ -418,7 +440,7 @@ public class PrintersService(
             // - Handling circuit breaker and timeouts
             // - Building the complete PrinterDto
             // - Backend-specific integrations (e.g., Moonraker spoolman)
-            var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
+            IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
             return await statusClient.GetPrinterDtoAsync(p, ct);
         }
         catch (ArgumentException)
@@ -435,11 +457,11 @@ public class PrintersService(
     }
 #pragma warning restore CS8603
 
-#pragma warning disable CS8603 
+#pragma warning disable CS8603
     /// <summary>
     /// Retrieves real-time status for a printer including temperatures, position, and job progress.
     /// </summary>
-    /// <param name="id">Unique printer identifier (GUID)</param>
+    /// <param name="id">Unique printer identifier (GUID).</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Comprehensive status DTO with real-time printer state</returns>
     /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
@@ -462,9 +484,9 @@ public class PrintersService(
             // Delegate to the appropriate backend status client
             // Each backend client is responsible for creating the PrinterStatusDto
             _logger.LogDebug($"GetStatusDtoAsync: Getting status for printer {p.Id} ({p.Name}) with backend {p.Backend}");
-            var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
+            IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
             _logger.LogDebug($"GetStatusDtoAsync: Obtained status client {statusClient.GetType().Name} for printer {p.Id}");
-            var result = await statusClient.GetPrinterStatusAsync(p, ct);
+            PrinterStatusDto result = await statusClient.GetPrinterStatusAsync(p, ct);
             _logger.LogDebug($"GetStatusDtoAsync: Got status for printer {p.Id}: IsOnline={result.IsOnline}, State={result.State}");
             return result;
         }
@@ -502,7 +524,7 @@ public class PrintersService(
         // and building the complete PrinterDto
         try
         {
-            var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
+            IPrinterStatusClient statusClient = _statusClientFactory.GetStatusClient(p.Backend);
             return await statusClient.GetPrinterDtoAsync(p, ct);
         }
         catch (Exception ex)
@@ -535,7 +557,7 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
 
             // Check if this backend supports camera operations
-            var backendCapabilities = _capabilityFactory.GetSupportedCapabilities(backend);
+            BackendCapabilities backendCapabilities = _capabilityFactory.GetSupportedCapabilities(backend);
             if ((backendCapabilities & BackendCapabilities.Camera) == BackendCapabilities.Camera)
             {
                 try
@@ -543,7 +565,7 @@ public class PrintersService(
                     // Use capability factory for polymorphic camera URL retrieval
                     // Note: We return URLs as-is without validation. The presence of a URL
                     // indicates camera support. Frontend can validate accessibility.
-                    if (_capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient))
+                    if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
                     {
                         streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
                         snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
@@ -554,6 +576,7 @@ public class PrintersService(
                     _logger.LogDebug($"Failed to get camera URLs for printer {p.Id}: {ex.Message}");
                 }
             }
+
             return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
         }));
         return dtos;
@@ -623,7 +646,7 @@ public class PrintersService(
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
         List<PrinterFastDto> dtos = [];
 
-        foreach (var p in items)
+        foreach (Printer p in items)
         {
             try
             {
@@ -647,6 +670,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+
                     // Camera URLs from database (discovered at registration)
                     CameraStreamUrl: p.CameraStreamUrl,
                     CameraSnapshotUrl: p.CameraSnapshotUrl));
@@ -654,6 +678,7 @@ public class PrintersService(
             catch (Exception ex)
             {
                 _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
+
                 // Fallback to offline status if retrieval fails
                 dtos.Add(new PrinterFastDto(
                     Id: p.Id,
@@ -673,6 +698,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+
                     // Camera URLs from database (discovered at registration)
                     CameraStreamUrl: p.CameraStreamUrl,
                     CameraSnapshotUrl: p.CameraSnapshotUrl));
@@ -688,7 +714,7 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Array of complete DTOs with all printer and status information</returns>
     /// <remarks>
-    /// Returns comprehensive printer details including real-time status, hardware specs, 
+    /// Returns comprehensive printer details including real-time status, hardware specs,
     /// build volume, capabilities, and live temperature/position data.
     /// Uses cached status from SignalR updates for performance when available.
     /// Falls back to placeholder "Loading" status if not cached yet.
@@ -700,15 +726,15 @@ public class PrintersService(
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
         List<CompletePrinterDto> dtos = [];
-        var cachedStatuses = _statusCache.GetAllStatuses();
+        IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
 
-        foreach (var p in items)
+        foreach (Printer p in items)
         {
             try
             {
                 // Try to get cached status first (from SignalR updates)
                 // If not cached, create an offline placeholder
-                PrinterStatusDto status = cachedStatuses.TryGetValue(p.Id, out var cachedStatus)
+                PrinterStatusDto status = cachedStatuses.TryGetValue(p.Id, out PrinterStatusDto? cachedStatus)
                     ? cachedStatus
                     : new PrinterStatusDto(
                         Id: p.Id,
@@ -727,8 +753,8 @@ public class PrintersService(
                     ? p.CameraStreamUrl
                     : status.CameraStreamUrl;
 
+                // Static configuration from database
                 dtos.Add(new CompletePrinterDto(
-                    // Static configuration from database
                     Id: p.Id,
                     Name: p.Name,
                     Notes: p.Notes,
@@ -749,6 +775,7 @@ public class PrintersService(
                     Progress: status.Progress,
                     JobName: status.JobName,
                     ThumbnailUrl: status.ThumbnailUrl,
+
                     // Camera URL from database (correct frontend port) or fallback to status
                     CameraStreamUrl: cameraStreamUrl,
                     X: status.X,
@@ -762,12 +789,12 @@ public class PrintersService(
                     SpoolInfo: status.SpoolInfo,
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
-                ));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning($"Failed to build complete DTO for printer {p.Id}: {ex.Message}. Using offline status.");
+
                 // Fallback to offline status if DTO building fails
                 dtos.Add(new CompletePrinterDto(
                     Id: p.Id,
@@ -802,8 +829,7 @@ public class PrintersService(
                     SpoolInfo: null,
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: p.FrontendUrl,
-                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
-                ));
+                    Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)));
             }
         }
 
@@ -852,12 +878,12 @@ public class PrintersService(
             string backendName = backend.ToString();
 
             string backendPort = p.BackendPort.ToString();
-            string frontendPort = p.FrontendPort?.ToString() ?? "";
-            string apiKey = p.ApiKey ?? "";
-            string cameraStreamUrl = p.CameraStreamUrl ?? "";
-            string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
-            string dateAcquired = p.DateAcquired?.ToString("O") ?? "";
-            string locationName = p.Location?.Name ?? "";
+            string frontendPort = p.FrontendPort?.ToString() ?? string.Empty;
+            string apiKey = p.ApiKey ?? string.Empty;
+            string cameraStreamUrl = p.CameraStreamUrl ?? string.Empty;
+            string cameraSnapshotUrl = p.CameraSnapshotUrl ?? string.Empty;
+            string dateAcquired = p.DateAcquired?.ToString("O") ?? string.Empty;
+            string locationName = p.Location?.Name ?? string.Empty;
             string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
             await writer.WriteLineAsync(csvLine);
         }
@@ -887,6 +913,7 @@ public class PrintersService(
 
         await writer.WriteLineAsync("[");
         bool first = true;
+
         // Process each printer and include toolheads data
         foreach (Printer? p in printers)
         {
@@ -898,11 +925,13 @@ public class PrintersService(
             first = false;
             Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p);
             string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
+
             // Indent each printer object by 2 spaces
             string indentedJson = string.Join(Environment.NewLine, json.Split(Environment.NewLine).Select(line => "  " + line));
             await writer.WriteAsync(indentedJson);
             await writer.FlushAsync();
         }
+
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("]");
         await writer.FlushAsync();
@@ -936,17 +965,19 @@ public class PrintersService(
                 ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
                 Backend = MapBackendEnum(p.Backend),
                 IpAddress = p.IpAddress,
+
                 // Add import-friendly fields for re-importing
                 ServerUrl = p.ServerUrl,
                 BackendPort = p.BackendPort,
                 FrontendPort = p.FrontendPort,
                 ApiKey = p.ApiKey,
                 Notes = p.Notes,
+
                 // Export hardware specs from Printer instance (populated at creation time from PrinterModel)
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
-                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter,
+                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleModel?.Diameter ?? 0.4,
                     SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                     MaxBuildVolumeX = p.MaxBuildVolumeX,
                     MaxBuildVolumeY = p.MaxBuildVolumeY,
@@ -976,7 +1007,7 @@ public class PrintersService(
             return string.Empty;
         }
 
-        string raw = value.Replace("\r", "").Replace("\n", " ");
+        string raw = value.Replace("\r", string.Empty).Replace("\n", " ");
         return raw.Contains(',') || raw.Contains('"') || raw.Contains('\n') ? '"' + raw.Replace("\"", "\"\"") + '"' : raw;
     }
 
@@ -1022,8 +1053,23 @@ public class PrintersService(
                 ["id"] = t.Id,
                 ["name"] = t.Name,
                 ["index"] = t.Index,
-                ["nozzleDiameter"] = t.NozzleDiameter,
+                ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
                 ["maxHotendTemp"] = t.MaxHotendTemp,
+                ["maxFlowRate"] = t.MaxFlowRate,
+                ["toolheadType"] = t.ToolheadType,
+
+                // Component model references - nozzle type comes from NozzleModel.NozzleType
+                ["hotendModelId"] = t.HotendModelId,
+                ["hotendModelName"] = t.HotendModel?.Name,
+                ["extruderModelId"] = t.ExtruderModelId,
+                ["extruderModelName"] = t.ExtruderModel?.Name,
+                ["toolheadModelDefId"] = t.ToolheadModelDefId,
+                ["toolheadModelDefName"] = t.ToolheadModelDef?.Name,
+                ["nozzleModelId"] = t.NozzleModelId,
+                ["nozzleModelName"] = t.NozzleModel?.Name,
+
+                // Include nozzle type from the nozzle model for API compatibility
+                ["nozzleType"] = t.NozzleModel?.NozzleType,
                 ["supportedMaterials"] = t.SupportedMaterials,
                 ["isPrimary"] = t.IsPrimary
             }).ToList() ?? new List<Dictionary<string, object?>>()
@@ -1063,8 +1109,7 @@ public class PrintersService(
             SpoolInfo: null,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
-        );
+            Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description));
     }
 
     /// <summary>
@@ -1106,6 +1151,7 @@ public class PrintersService(
         if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
         {
             string name = dto.NewManufacturerName!.Trim();
+
             // Try to find existing manufacturer from catalog service (with caching), but don't create - use Unknown if not found
             ManufacturerDto? existingMfg = await _catalogService.FindManufacturerByNameAsync(name, ct);
             if (existingMfg != null)
@@ -1116,6 +1162,7 @@ public class PrintersService(
             else
             {
                 _logger.LogInformation($"[Import] Manufacturer '{name}' not found - will use Unknown manufacturer");
+
                 // Fall through to default catalog logic below
             }
         }
@@ -1124,6 +1171,7 @@ public class PrintersService(
         if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
+
             // Try to find existing model from catalog service (with caching), but don't create - use Unknown if not found
             PrinterModelDto? existingModel = await _catalogService.FindModelByNameAsync(mname, manufacturerId, ct);
             if (existingModel != null)
@@ -1134,6 +1182,7 @@ public class PrintersService(
             else
             {
                 _logger.LogInformation($"[Import] Model '{mname}' not found - will use Unknown model");
+
                 // Fall through to default catalog logic below
             }
         }
@@ -1141,7 +1190,7 @@ public class PrintersService(
         // Use Unknown manufacturer/model as fallback
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
-            var (unknownMfgId, unknownModelId) = await _catalogService.GetDefaultCatalogIdsAsync(ct);
+            (Guid unknownMfgId, Guid unknownModelId) = await _catalogService.GetDefaultCatalogIdsAsync(ct);
 
             if (manufacturerId == Guid.Empty)
             {
@@ -1180,11 +1229,17 @@ public class PrintersService(
                 resolvedIp = uri.Host;
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         // Port is managed separately via BackendPort field
         string serverUrlForStorage = resolvedBase;
         string originalUrlForStorage = inputUrl;
+
+        // Load the PrinterModel template to copy default values from
+        PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(modelId, ct);
+        _logger.LogDebug($"[CreatePrinterFromDto] Loaded PrinterModel template: {modelTemplate?.Name ?? "null"} for model ID {modelId}");
 
         Printer p = new()
         {
@@ -1205,20 +1260,36 @@ public class PrintersService(
             },
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey,
+
             // BackendPort MUST be set by discovery probes (always includes actual port, even if standard)
             BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
             FrontendPort = dto.FrontendPort,
+
             // Use provided camera URLs from discovery, or leave null
             CameraStreamUrl = dto.CameraStreamUrl,
             CameraSnapshotUrl = dto.CameraSnapshotUrl,
-            IsEnabled = dto.IsEnabled
+            IsEnabled = dto.IsEnabled,
+
+            // Copy hardware specifications from PrinterModel template
+            MaxBuildVolumeX = modelTemplate?.MaxX,
+            MaxBuildVolumeY = modelTemplate?.MaxY,
+            MaxBuildVolumeZ = modelTemplate?.MaxZ,
+            HasHeatedBed = modelTemplate?.HasHeatedBed ?? true,
+            HasEnclosure = modelTemplate?.HasEnclosure ?? false,
+            MultiMaterial = modelTemplate?.MultiMaterial ?? false,
+            SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+            MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
+            MaxBedTemp = modelTemplate?.MaxBedTemp
         };
 
-        // Create toolheads from import data or use defaults
+        // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
+        PrinterModelToolheadDto? primaryModelToolhead = modelTemplate?.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelTemplate?.Toolheads?.FirstOrDefault();
+
+        // Create toolheads from import data or use defaults from template
         if (dto.Toolheads != null && dto.Toolheads.Count > 0)
         {
             // Import toolheads from JSON export
-            foreach (var toolheadDto in dto.Toolheads.OrderBy(t => t.Index))
+            foreach (CreateToolheadDto? toolheadDto in dto.Toolheads.OrderBy(t => t.Index))
             {
                 Toolhead toolhead = new()
                 {
@@ -1226,28 +1297,54 @@ public class PrintersService(
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    NozzleDiameter = toolheadDto.NozzleDiameter ?? 0.4,
-                    MaxHotendTemp = toolheadDto.MaxHotendTemp,
-                    SupportedMaterials = toolheadDto.SupportedMaterials,
+                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
+                    MaxFlowRate = toolheadDto.MaxFlowRate ?? primaryModelToolhead?.MaxFlowRate,
+                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : primaryModelToolhead?.ToolheadType.HasValue == true ? (int)primaryModelToolhead.ToolheadType!.Value : null,
+
+                    // Component model references - nozzle type is derived from NozzleModelId
+                    HotendModelId = toolheadDto.HotendModelId ?? primaryModelToolhead?.HotendModelId,
+                    ExtruderModelId = toolheadDto.ExtruderModelId ?? primaryModelToolhead?.ExtruderModelId,
+                    ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? primaryModelToolhead?.ToolheadModelDefId,
+                    NozzleModelId = toolheadDto.NozzleModelId ?? primaryModelToolhead?.NozzleModelId,
+                    SupportedMaterials = toolheadDto.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes,
                     IsPrimary = toolheadDto.IsPrimary
                 };
                 p.Toolheads.Add(toolhead);
             }
+
             _logger.LogInformation($"[CreatePrinterFromDto] Imported {dto.Toolheads.Count} toolhead(s) for printer {p.Name}");
         }
         else
         {
-            // Create a default single Toolhead for single-toolhead printers
-            Toolhead defaultToolhead = new()
+            // Create toolheads based on model template or defaults
+            int numExtruders = modelTemplate?.NumberOfExtruders ?? 1;
+            for (int i = 0; i < numExtruders; i++)
             {
-                Id = Guid.NewGuid(),
-                PrinterId = p.Id,
-                Name = "Extruder 1",
-                Index = 0,
-                IsPrimary = true,
-                NozzleDiameter = 0.4 // Standard default nozzle size
-            };
-            p.Toolheads.Add(defaultToolhead);
+                // Try to find a matching toolhead template by index, otherwise use primary
+                PrinterModelToolheadDto? templateToolhead = modelTemplate?.Toolheads?.FirstOrDefault(t => t.Index == i) ?? primaryModelToolhead;
+
+                Toolhead toolhead = new()
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = p.Id,
+                    Name = templateToolhead?.Name ?? $"Extruder {i + 1}",
+                    Index = i,
+                    IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
+                    MaxHotendTemp = templateToolhead?.MaxHotendTemp,
+                    MaxFlowRate = templateToolhead?.MaxFlowRate,
+                    ToolheadType = templateToolhead?.ToolheadType.HasValue == true ? (int)templateToolhead.ToolheadType!.Value : null,
+
+                    // Component model references - nozzle type is derived from NozzleModelId
+                    HotendModelId = templateToolhead?.HotendModelId,
+                    ExtruderModelId = templateToolhead?.ExtruderModelId,
+                    ToolheadModelDefId = templateToolhead?.ToolheadModelDefId,
+                    NozzleModelId = templateToolhead?.NozzleModelId,
+                    SupportedMaterials = templateToolhead?.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes
+                };
+                p.Toolheads.Add(toolhead);
+            }
+
+            _logger.LogInformation($"[CreatePrinterFromDto] Created {numExtruders} toolhead(s) from template for printer {p.Name}");
         }
 
         // Assign location if provided
@@ -1269,6 +1366,136 @@ public class PrintersService(
 
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
+    }
+
+    /// <summary>
+    /// Applies template defaults from the PrinterModel to an existing printer.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the associated PrinterModel to the printer.
+    /// </summary>
+    /// <param name="printer">The printer entity to update (must include Toolheads if updating toolhead properties)</param>
+    /// <param name="forceOverwrite">If true, overwrites all values from template. If false, only fills in null/unset values.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if any values were updated, false if no changes were made</returns>
+    public async Task<bool> ApplyModelTemplateAsync(Printer printer, bool forceOverwrite, CancellationToken ct)
+    {
+        if (printer.ModelId == Guid.Empty)
+        {
+            _logger.LogDebug($"[ApplyModelTemplate] Printer {printer.Name} has no model assigned - skipping template application");
+            return false;
+        }
+
+        PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
+        if (modelTemplate == null)
+        {
+            _logger.LogWarning($"[ApplyModelTemplate] PrinterModel {printer.ModelId} not found for printer {printer.Name}");
+            return false;
+        }
+
+        bool updated = false;
+
+        // Apply hardware specifications from template
+        if (modelTemplate.MaxX != null && (forceOverwrite || printer.MaxBuildVolumeX == null))
+        {
+            printer.MaxBuildVolumeX = modelTemplate.MaxX;
+            updated = true;
+        }
+
+        if (modelTemplate.MaxY != null && (forceOverwrite || printer.MaxBuildVolumeY == null))
+        {
+            printer.MaxBuildVolumeY = modelTemplate.MaxY;
+            updated = true;
+        }
+
+        if (modelTemplate.MaxZ != null && (forceOverwrite || printer.MaxBuildVolumeZ == null))
+        {
+            printer.MaxBuildVolumeZ = modelTemplate.MaxZ;
+            updated = true;
+        }
+
+        if (modelTemplate.MaxPrintSpeed != null && (forceOverwrite || printer.MaxPrintSpeed == null))
+        {
+            printer.MaxPrintSpeed = modelTemplate.MaxPrintSpeed;
+            updated = true;
+        }
+
+        if (modelTemplate.MaxBedTemp != null && (forceOverwrite || printer.MaxBedTemp == null))
+        {
+            printer.MaxBedTemp = modelTemplate.MaxBedTemp;
+            updated = true;
+        }
+
+        // Apply boolean capabilities
+        if (forceOverwrite || (!printer.HasEnclosure && modelTemplate.HasEnclosure))
+        {
+            printer.HasEnclosure = modelTemplate.HasEnclosure;
+            updated = true;
+        }
+
+        if (forceOverwrite || (!printer.MultiMaterial && modelTemplate.MultiMaterial))
+        {
+            printer.MultiMaterial = modelTemplate.MultiMaterial;
+            updated = true;
+        }
+
+        if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
+        {
+            printer.SupportsAutoLeveling = modelTemplate.SupportsAutoLeveling;
+            updated = true;
+        }
+
+        if (forceOverwrite || (!printer.HasHeatedBed && modelTemplate.HasHeatedBed))
+        {
+            printer.HasHeatedBed = modelTemplate.HasHeatedBed;
+            updated = true;
+        }
+
+        // Get default toolhead values from model's toolhead templates
+        PrinterModelToolheadDto? defaultModelToolhead = modelTemplate.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelTemplate.Toolheads?.FirstOrDefault();
+
+        // Apply toolhead defaults from model template
+        if (printer.Toolheads?.Count > 0)
+        {
+            foreach (Toolhead toolhead in printer.Toolheads)
+            {
+                // Find matching toolhead template by index, otherwise use default
+                PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
+
+                // Apply NozzleModelId from template (nozzle diameter is derived from the nozzle model)
+                if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
+                {
+                    toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+
+                if (matchingTemplate?.MaxHotendTemp != null && (forceOverwrite || toolhead.MaxHotendTemp == null))
+                {
+                    toolhead.MaxHotendTemp = matchingTemplate.MaxHotendTemp;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+
+                if (modelTemplate.SupportedFilamentTypes?.Length > 0 && (forceOverwrite || toolhead.SupportedMaterials == null || toolhead.SupportedMaterials.Length == 0))
+                {
+                    toolhead.SupportedMaterials = modelTemplate.SupportedFilamentTypes;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+            }
+        }
+
+        if (updated)
+        {
+            printer.LastCapabilityUpdate = DateTime.UtcNow;
+            _logger.LogInformation($"[ApplyModelTemplate] Applied template defaults from model '{modelTemplate.Name}' to printer '{printer.Name}'");
+        }
+        else
+        {
+            _logger.LogDebug($"[ApplyModelTemplate] Printer '{printer.Name}' already has all values set - no changes needed");
+        }
+
+        return updated;
     }
 
     /// <summary>
@@ -1298,7 +1525,7 @@ public class PrintersService(
         {
             // Use capability factory for polymorphic camera snapshot retrieval
             var backendEnum = (PrinterBackend)p.Backend;
-            if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out var cameraClient) && cameraClient != null)
+            if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out ISupportsCamera? cameraClient) && cameraClient != null)
             {
                 // Try to get camera snapshot URL from the client
                 string snapUrl = backendEnum == PrinterBackend.Moonraker
@@ -1344,7 +1571,7 @@ public class PrintersService(
         }
     }
 
-    public async Task<(string? streamUrl, string? snapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct)
+    public async Task<(string? StreamUrl, string? SnapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
@@ -1356,7 +1583,7 @@ public class PrintersService(
         {
             // Use capability factory for polymorphic camera URL retrieval
             var backend = (PrinterBackend)p.Backend;
-            if (_capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient))
+            if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
             {
                 string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
                 string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
@@ -1396,7 +1623,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is not ISupportsMovement movement)
             {
@@ -1442,7 +1669,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsMovement movement)
             {
@@ -1482,7 +1709,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsMovement movement)
             {
@@ -1525,7 +1752,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (backend == PrinterBackend.OctoPrint)
             {
@@ -1597,7 +1824,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsMovement movement)
             {
@@ -1642,7 +1869,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsMovement movement)
             {
@@ -1685,7 +1912,7 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
 
             // Try print job control capability
-            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient)
+            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
                 ? await controlClient!.PauseAsync(p!.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
                 : false;
         }
@@ -1721,7 +1948,7 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
 
             // Try print job control capability
-            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient)
+            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
                 ? await controlClient!.ResumeAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
                 : false;
         }
@@ -1758,7 +1985,7 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
 
             // Try print job control capability
-            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient)
+            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
                 ? await controlClient!.CancelAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
                 : false;
         }
@@ -1793,7 +2020,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsControlRestart controlRestart)
             {
@@ -1833,7 +2060,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is ISupportsGcodeExecution gcodeClient)
             {
@@ -1877,7 +2104,7 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
 
             // Try start print capability
-            return _capabilityFactory.TryGetStartPrintClientTyped(backend, out var startPrintClient)
+            return _capabilityFactory.TryGetStartPrintClientTyped(backend, out ISupportsStartPrint? startPrintClient)
                 ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.ApiKey, ct).ConfigureAwait(false)
                 : false;
         }
@@ -1887,8 +2114,6 @@ public class PrintersService(
             return false;
         }
     }
-
-
 
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
@@ -1984,7 +2209,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            return _capabilityFactory.TryGetFileUploadClientTyped(backend, out var uploadClient)
+            return _capabilityFactory.TryGetFileUploadClientTyped(backend, out ISupportsFileUpload? uploadClient)
                 ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.ApiKey, ct).ConfigureAwait(false)
                 : false;
         }
@@ -2019,7 +2244,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             // Check if backend supports file list
             if (client is not ISupportsFileList fileListClient)
@@ -2077,7 +2302,7 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             // Check if backend supports file download
             if (client is not ISupportsFileDownload downloadClient)
@@ -2143,7 +2368,9 @@ public class PrintersService(
                 resolvedIp = uri.Host;
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         // Port is managed separately via BackendPort field
         return new ResolveHostnameResponse(normalizedInputUrl, resolvedIp, resolvedBase);
@@ -2222,8 +2449,6 @@ public class PrintersService(
         return null;
     }
 
-
-
     private static string EnsureLocalSuffix(string host)
     {
         return string.IsNullOrWhiteSpace(host)
@@ -2287,6 +2512,7 @@ public class PrintersService(
                         _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (IP: {existingByIp.IpAddress})");
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
+
                         // Load a fresh copy of the CSV printer data (not the one we're removing)
                         // This avoids EF Core tracking conflicts when creating the new printer
                         createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
@@ -2397,6 +2623,8 @@ public class PrintersService(
     /// Supports multiple printer backends: Moonraker, PrusaLink (OctoPrint), and SDCP.
     /// Returns null if no active job or if status cannot be retrieved.
     /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
     {
         try
@@ -2412,7 +2640,7 @@ public class PrintersService(
             _logger.LogInformation($"[PrintJobStatus] Getting print job status for printer {printer.Name} (Backend: {printer.Backend})");
 
             var backend = (PrinterBackend)printer.Backend;
-            var client = GetBackendClient(backend);
+            IBackendClient client = GetBackendClient(backend);
 
             if (client is not ISupportsJobControl jobClient)
             {
@@ -2490,8 +2718,9 @@ public class PrintersService(
             {
                 printers = await ParseCsvStreamAsync(stream, ct);
             }
-            else // JSON
+            else
             {
+                // JSON format
                 printers = await ParseJsonStreamAsync(stream, ct);
             }
 
@@ -2513,7 +2742,6 @@ public class PrintersService(
             throw;
         }
     }
-
 
     /// <summary>
     /// Parses a CSV stream into printer DTOs.
@@ -2587,8 +2815,9 @@ public class PrintersService(
                             continue;
                         }
 
-                        // Build ServerUrl from IpAddress 
+                        // Build ServerUrl from IpAddress
                         string ipAddress = values[ipAddressIdx];
+
                         // Get BackendPort from CSV - use default if not provided
                         int backendPort;
                         if (backendPortIdx >= 0 && backendPortIdx < values.Length && !string.IsNullOrWhiteSpace(values[backendPortIdx]) && int.TryParse(values[backendPortIdx], out int providedPort))
@@ -2600,6 +2829,7 @@ public class PrintersService(
                             // Use default port based on backend type
                             backendPort = backendEnum == PrinterBackend.Moonraker ? 7125 : 80;
                         }
+
                         string serverUrl = $"http://{ipAddress}";
 
                         CreatePrinterDto printer = new()
@@ -2709,6 +2939,7 @@ public class PrintersService(
         try
         {
             Uri baseUri = new(serverUrl);
+
             // Use frontend port (default 80 for HTTP, 443 for HTTPS)
             // User can specify custom frontend port (e.g., 8080, 8808 for Phrozen Arco)
             int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
@@ -2725,7 +2956,6 @@ public class PrintersService(
             return serverUrl;
         }
     }
-
 
     /// <summary>
     /// Calculates aggregate statistics from OctoPrint history jobs.
@@ -2758,6 +2988,8 @@ public class PrintersService(
     /// For Moonraker: queries /server/webcams/list API for actual configured cameras
     /// For other backends: generates static URLs based on frontend port
     /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
     {
         _logger.LogInformation($"RefreshCameraUrlsAsync: Starting refresh for printer {id}");
@@ -2778,7 +3010,7 @@ public class PrintersService(
         try
         {
             // Try to use the configured camera detection interface which queries actual cameras
-            if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out var detectionClient) && detectionClient != null)
+            if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out ISupportsConfiguredCameraDetection? detectionClient) && detectionClient != null)
             {
                 _logger.LogInformation($"RefreshCameraUrlsAsync: Using configured camera detection for backend {backend}");
 
@@ -2803,7 +3035,7 @@ public class PrintersService(
                 // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
                 _logger.LogWarning($"RefreshCameraUrlsAsync: Configured camera detection not available for backend {backend}, falling back to standard interface");
 
-                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient);
+                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient);
                 if (gotCameraClient && cameraClient != null)
                 {
                     string baseUrlForCamera = backend == PrinterBackend.Moonraker

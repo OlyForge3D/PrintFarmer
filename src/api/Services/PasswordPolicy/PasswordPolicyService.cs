@@ -30,22 +30,27 @@ public class PasswordPolicyService(IPasswordPolicyRepository repo) : IPasswordPo
         {
             entity.MinLength = request.MinLength.Value;
         }
+
         if (request.RequireUppercase.HasValue)
         {
             entity.RequireUppercase = request.RequireUppercase.Value;
         }
+
         if (request.RequireLowercase.HasValue)
         {
             entity.RequireLowercase = request.RequireLowercase.Value;
         }
+
         if (request.RequireDigit.HasValue)
         {
             entity.RequireDigit = request.RequireDigit.Value;
         }
+
         if (request.RequireSymbol.HasValue)
         {
             entity.RequireSymbol = request.RequireSymbol.Value;
         }
+
         entity.UpdatedAt = DateTime.UtcNow;
         await _repo.SaveAsync(entity, ct);
 

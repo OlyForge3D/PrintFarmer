@@ -55,7 +55,7 @@ public class JobDispatcherRetryTests
         public Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
         {
             DateTime now = DateTime.UtcNow;
-            List<SliceJob> stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && (j.LeaseExpiresAt != null && j.LeaseExpiresAt < now));
+            List<SliceJob> stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now);
             if (limit.HasValue)
             {
                 stuck = stuck.GetRange(0, Math.Min(limit.Value, stuck.Count));

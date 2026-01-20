@@ -125,7 +125,7 @@ public class GcodeFilesServiceTests
         chunkedUpload.Setup(c => c.ExtractMetadataFromFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
-        var mockFolderService = CreateFolderServiceMock("prints/models");
+        Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock("prints/models");
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
 

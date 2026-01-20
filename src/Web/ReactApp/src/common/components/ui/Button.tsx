@@ -2,7 +2,7 @@
 import React from 'react';
 import clsx from 'clsx';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle' | 'link';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,6 +12,8 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
   iconCenter?: React.ReactNode;
+  /** For tab variant: whether this tab is currently active/selected */
+  active?: boolean;
   children?: React.ReactNode;
 }
 
@@ -21,8 +23,9 @@ const variantClasses: Record<ButtonVariant, string> = {
   danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
   success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
-  tab: 'bg-transparent text-pf-text-muted border-b-2 border-transparent hover:text-pf-text-primary focus:ring-0',
-  toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent'
+  tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
+  toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent',
+  link: 'bg-transparent text-pf-primary hover:underline border-transparent px-0 py-0 shadow-none'
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -41,18 +44,30 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     iconLeft,
     iconRight,
     iconCenter,
+    active,
     children,
     ...rest
   },
   ref
 ) {
+  // For tab variant, apply active styles
+  const tabActiveClasses = variant === 'tab' && active
+    ? 'border-pf-primary text-pf-text-primary'
+    : variant === 'tab'
+    ? 'text-pf-text-muted hover:text-pf-text-primary'
+    : '';
+
+  // Link variant should not apply size padding classes
+  const applySizeClasses = variant !== 'link';
+
   return (
     <button
       ref={ref}
       className={clsx(
         'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
         variantClasses[variant],
-        sizeClasses[size],
+        applySizeClasses && sizeClasses[size],
+        tabActiveClasses,
         // center icon style when iconCenter provided
         iconCenter && 'justify-center',
         className

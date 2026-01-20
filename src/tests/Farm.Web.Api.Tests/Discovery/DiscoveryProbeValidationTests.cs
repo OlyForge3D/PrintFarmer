@@ -7,6 +7,7 @@ using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Discovery;
@@ -164,7 +165,7 @@ public class DiscoveryProbeValidationTests
             new MoonrakerDiscoveryProbe(),
         };
 
-        foreach (var probe in probes)
+        foreach (INetworkDiscoveryProbe probe in probes)
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {

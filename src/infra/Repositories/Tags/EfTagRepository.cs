@@ -66,9 +66,12 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// Check if an object has a specific tag (object-agnostic).
     /// Searches both GcodeFile and Model3D collections.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to check.</param>
+    /// <param name="tagId">The unique identifier of the tag to look for.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<bool> HasTagAsync(Guid objectId, Guid tagId, CancellationToken ct)
     {
-        var hasInGcodeFile = await _dbContext.GcodeFiles
+        bool hasInGcodeFile = await _dbContext.GcodeFiles
             .Where(g => g.Id == objectId)
             .AnyAsync(g => g.Tags.Any(t => t.Id == tagId), ct);
 
@@ -77,7 +80,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             return true;
         }
 
-        var hasInModel3D = await _dbContext.Models3D
+        bool hasInModel3D = await _dbContext.Models3D
             .Where(m => m.Id == objectId)
             .AnyAsync(m => m.Tags.Any(t => t.Id == tagId), ct);
 
@@ -88,12 +91,15 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// Assign a tag to an object (object-agnostic).
     /// Searches both GcodeFile and Model3D to find the object.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to tag.</param>
+    /// <param name="tagId">The unique identifier of the tag to assign.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task AssignTagAsync(Guid objectId, Guid tagId, CancellationToken ct)
     {
-        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
+        Tag tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
 
         // Try GcodeFile first
-        var gcodeFile = await _dbContext.GcodeFiles
+        GcodeFile? gcodeFile = await _dbContext.GcodeFiles
             .Include(g => g.Tags)
             .FirstOrDefaultAsync(g => g.Id == objectId, ct);
 
@@ -103,11 +109,12 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             {
                 gcodeFile.Tags.Add(tag);
             }
+
             return;
         }
 
         // Try Model3D
-        var model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Models3D
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -124,16 +131,19 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// Remove a tag from an object (object-agnostic).
     /// Searches both GcodeFile and Model3D to find the object.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to remove the tag from.</param>
+    /// <param name="tagId">The unique identifier of the tag to remove.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveTagAsync(Guid objectId, Guid tagId, CancellationToken ct)
     {
-        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
         }
 
         // Try GcodeFile first
-        var gcodeFile = await _dbContext.GcodeFiles
+        GcodeFile? gcodeFile = await _dbContext.GcodeFiles
             .Include(g => g.Tags)
             .FirstOrDefaultAsync(g => g.Id == objectId, ct);
 
@@ -144,7 +154,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Try Model3D
-        var model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Models3D
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -158,9 +168,11 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// Get all tags for an object (object-agnostic).
     /// Searches both GcodeFile and Model3D to find the object.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to retrieve tags for.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Tag>> GetTagsByObjectAsync(Guid objectId, CancellationToken ct)
     {
-        var gcodeFileTags = await _dbContext.GcodeFiles
+        List<Tag> gcodeFileTags = await _dbContext.GcodeFiles
             .Where(g => g.Id == objectId)
             .SelectMany(g => g.Tags)
             .ToListAsync(ct);
@@ -170,7 +182,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
             return gcodeFileTags;
         }
 
-        var model3dTags = await _dbContext.Models3D
+        List<Tag> model3dTags = await _dbContext.Models3D
             .Where(m => m.Id == objectId)
             .SelectMany(m => m.Tags)
             .ToListAsync(ct);
@@ -182,10 +194,12 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// Remove all tags from an object (object-agnostic).
     /// Searches both GcodeFile and Model3D to find the object.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to remove all tags from.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveAllTagsFromObjectAsync(Guid objectId, CancellationToken ct)
     {
         // Try GcodeFile first
-        var gcodeFile = await _dbContext.GcodeFiles
+        GcodeFile? gcodeFile = await _dbContext.GcodeFiles
             .Include(g => g.Tags)
             .FirstOrDefaultAsync(g => g.Id == objectId, ct);
 
@@ -196,7 +210,7 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Try Model3D
-        var model3d = await _dbContext.Models3D
+        Model3D? model3d = await _dbContext.Models3D
             .Include(m => m.Tags)
             .FirstOrDefaultAsync(m => m.Id == objectId, ct);
 
@@ -213,6 +227,9 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get all objects of a specific type that have a specific tag using skip-navigation.
     /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to filter by.</param>
+    /// <param name="objectType">The type of object to search (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Guid>> GetObjectsByTagAsync(Guid tagId, string objectType, CancellationToken ct)
     {
         return objectType switch
@@ -232,6 +249,9 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get objects that have ALL of the specified tags (intersection).
     /// </summary>
+    /// <param name="tagIds">The collection of tag identifiers that objects must have all of.</param>
+    /// <param name="objectType">The type of object to search (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Guid>> GetObjectsWithAllTagsAsync(IEnumerable<Guid> tagIds, string objectType, CancellationToken ct)
     {
         var tagIdList = tagIds.ToList();
@@ -254,6 +274,9 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get objects that have ANY of the specified tags (union).
     /// </summary>
+    /// <param name="tagIds">The collection of tag identifiers to match against.</param>
+    /// <param name="objectType">The type of object to search (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Guid>> GetObjectsWithAnyTagsAsync(IEnumerable<Guid> tagIds, string objectType, CancellationToken ct)
     {
         var tagIdList = tagIds.ToList();
@@ -276,6 +299,10 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Check if an object has a specific tag using skip-navigation.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to check.</param>
+    /// <param name="tagId">The unique identifier of the tag to look for.</param>
+    /// <param name="objectType">The type of object to search (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<bool> HasTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
     {
         return objectType switch
@@ -293,30 +320,36 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Assign a tag to an object by adding it to the skip-navigation collection.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to tag.</param>
+    /// <param name="tagId">The unique identifier of the tag to assign.</param>
+    /// <param name="objectType">The type of object to tag (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task AssignTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
     {
-        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
+        Tag tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct) ?? throw new InvalidOperationException($"Tag with ID {tagId} not found.");
 
         switch (objectType)
         {
             case "GcodeFile":
-                var gcodeFile = await _dbContext.GcodeFiles
+                GcodeFile? gcodeFile = await _dbContext.GcodeFiles
                     .Include(g => g.Tags)
                     .FirstOrDefaultAsync(g => g.Id == objectId, ct);
                 if (gcodeFile != null && !gcodeFile.Tags.Any(t => t.Id == tagId))
                 {
                     gcodeFile.Tags.Add(tag);
                 }
+
                 break;
 
             case "Model3D":
-                var model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Models3D
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null && !model3d.Tags.Any(t => t.Id == tagId))
                 {
                     model3d.Tags.Add(tag);
                 }
+
                 break;
         }
     }
@@ -324,9 +357,13 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Remove a tag from an object using skip-navigation.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to remove the tag from.</param>
+    /// <param name="tagId">The unique identifier of the tag to remove.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct)
     {
-        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
@@ -335,23 +372,25 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         switch (objectType)
         {
             case "GcodeFile":
-                var gcodeFile = await _dbContext.GcodeFiles
+                GcodeFile? gcodeFile = await _dbContext.GcodeFiles
                     .Include(g => g.Tags)
                     .FirstOrDefaultAsync(g => g.Id == objectId, ct);
                 if (gcodeFile != null)
                 {
                     gcodeFile.Tags.Remove(tag);
                 }
+
                 break;
 
             case "Model3D":
-                var model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Models3D
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null)
                 {
                     model3d.Tags.Remove(tag);
                 }
+
                 break;
         }
     }
@@ -359,28 +398,33 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Remove all tags from a specific object using skip-navigation.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to remove all tags from.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveAllTagsFromObjectAsync(Guid objectId, string objectType, CancellationToken ct)
     {
         switch (objectType)
         {
             case "GcodeFile":
-                var gcodeFile = await _dbContext.GcodeFiles
+                GcodeFile? gcodeFile = await _dbContext.GcodeFiles
                     .Include(g => g.Tags)
                     .FirstOrDefaultAsync(g => g.Id == objectId, ct);
                 if (gcodeFile != null)
                 {
                     gcodeFile.Tags.Clear();
                 }
+
                 break;
 
             case "Model3D":
-                var model3d = await _dbContext.Models3D
+                Model3D? model3d = await _dbContext.Models3D
                     .Include(m => m.Tags)
                     .FirstOrDefaultAsync(m => m.Id == objectId, ct);
                 if (model3d != null)
                 {
                     model3d.Tags.Clear();
                 }
+
                 break;
         }
     }
@@ -388,23 +432,25 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Remove a tag from all objects that have it using skip-navigation.
     /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to remove from all objects.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task RemoveAllObjectsFromTagAsync(Guid tagId, CancellationToken ct)
     {
-        var tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
+        Tag? tag = await _dbContext.Tags.FirstOrDefaultAsync(t => t.Id == tagId, ct);
         if (tag == null)
         {
             return;
         }
 
         // Remove from all GcodeFiles
-        var gcodeFilesWithTag = await _dbContext.GcodeFiles
+        List<GcodeFile> gcodeFilesWithTag = await _dbContext.GcodeFiles
             .Include(g => g.Tags)
             .Where(g => g.Tags.Any(t => t.Id == tagId))
             .ToListAsync(ct);
 
-        foreach (var gcodeFile in gcodeFilesWithTag)
+        foreach (GcodeFile? gcodeFile in gcodeFilesWithTag)
         {
-            var tagToRemove = gcodeFile.Tags.FirstOrDefault(t => t.Id == tagId);
+            Tag? tagToRemove = gcodeFile.Tags.FirstOrDefault(t => t.Id == tagId);
             if (tagToRemove != null)
             {
                 gcodeFile.Tags.Remove(tagToRemove);
@@ -412,14 +458,14 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
         }
 
         // Remove from all Model3Ds
-        var models3dWithTag = await _dbContext.Models3D
+        List<Model3D> models3dWithTag = await _dbContext.Models3D
             .Include(m => m.Tags)
             .Where(m => m.Tags.Any(t => t.Id == tagId))
             .ToListAsync(ct);
 
-        foreach (var model3d in models3dWithTag)
+        foreach (Model3D? model3d in models3dWithTag)
         {
-            var tagToRemove = model3d.Tags.FirstOrDefault(t => t.Id == tagId);
+            Tag? tagToRemove = model3d.Tags.FirstOrDefault(t => t.Id == tagId);
             if (tagToRemove != null)
             {
                 model3d.Tags.Remove(tagToRemove);
@@ -430,6 +476,9 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get all tags assigned to an object using skip-navigation.
     /// </summary>
+    /// <param name="objectId">The unique identifier of the object to retrieve tags for.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Tag>> GetTagsByObjectAsync(Guid objectId, string objectType, CancellationToken ct)
     {
         return objectType switch
@@ -449,6 +498,8 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get the total count of objects using a specific tag (across both GcodeFile and Model3D).
     /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to count usage for.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<int> GetTagUsageCountAsync(Guid tagId, CancellationToken ct)
     {
         int gcodeCount = await _dbContext.GcodeFiles
@@ -465,13 +516,15 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get the last time a tag was used (last tagged object's UpdatedAt).
     /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to check.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<DateTime?> GetTagLastUsedAtAsync(Guid tagId, CancellationToken ct)
     {
-        var gcodeLastUsed = await _dbContext.GcodeFiles
+        DateTime? gcodeLastUsed = await _dbContext.GcodeFiles
             .Where(g => g.Tags.Any(t => t.Id == tagId))
             .MaxAsync(g => (DateTime?)g.UpdatedAt, ct);
 
-        var model3dLastUsed = await _dbContext.Models3D
+        DateTime? model3dLastUsed = await _dbContext.Models3D
             .Where(m => m.Tags.Any(t => t.Id == tagId))
             .MaxAsync(m => (DateTime?)m.UpdatedAt, ct);
 
@@ -484,6 +537,8 @@ public class EfTagRepository(AppDbContext dbContext) : ITagRepository
     /// <summary>
     /// Get all objects of a specific type (for polymorphic filtering).
     /// </summary>
+    /// <param name="objectType">The type of object to retrieve (e.g., "GcodeFile" or "Model3D").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<IReadOnlyList<Guid>> GetAllObjectsOfTypeAsync(string objectType, CancellationToken ct)
     {
         return objectType switch

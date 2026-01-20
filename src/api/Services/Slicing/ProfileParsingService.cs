@@ -104,7 +104,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         }
 
         JsonObject settingsOrdered = new();
-        foreach (var kvp in settings.OrderBy(k => k.Key, StringComparer.Ordinal))
+        foreach (KeyValuePair<string, object?> kvp in settings.OrderBy(k => k.Key, StringComparer.Ordinal))
         {
             // Create new JsonValue for each settings entry to avoid parent conflicts
             settingsOrdered[kvp.Key] = kvp.Value switch
@@ -114,7 +114,7 @@ public sealed class ProfileParsingService : IProfileParsingService
                 double d => JsonValue.Create(d),
                 float f => JsonValue.Create((double)f),
                 bool b => JsonValue.Create(b),
-                _ => JsonValue.Create(kvp.Value?.ToString() ?? "")
+                _ => JsonValue.Create(kvp.Value?.ToString() ?? string.Empty)
             };
         }
 
@@ -145,6 +145,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         {
             _ = sb.Append(b.ToString("x2")); // lower-case hex for consistency
         }
+
         return sb.ToString();
     }
 

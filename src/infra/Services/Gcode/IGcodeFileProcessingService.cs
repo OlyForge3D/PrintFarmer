@@ -8,7 +8,7 @@ namespace Farm.Infrastructure.Services.Gcode;
 /// <summary>
 /// Service for processing and storing G-code files from any source (upload, harvest, etc).
 /// Handles file storage, metadata extraction, thumbnail processing, and entity persistence.
-/// 
+///
 /// This interface enables the GcodeHarvestService (in Infrastructure) to coordinate with
 /// file processing logic without creating a circular dependency on the API layer.
 /// </summary>
@@ -17,7 +17,7 @@ public interface IGcodeFileProcessingService
     /// <summary>
     /// Unified method for processing and storing G-code files from any source
     /// (upload, single harvest, bulk harvest, or future sources).
-    /// 
+    ///
     /// Handles all file processing: storage, hash calculation, duplicate detection,
     /// metadata extraction, thumbnail processing, entity creation, and database persistence.
     /// </summary>
@@ -39,7 +39,7 @@ public interface IGcodeFileProcessingService
     /// 4. Processes and extracts thumbnail image
     /// 5. Creates GcodeFile entity with complete metadata
     /// 6. Saves to database
-    /// 
+    ///
     /// If a duplicate file is detected (same hash), an exception is thrown allowing
     /// the caller to decide whether to skip, replace, or re-import.
     /// </remarks>

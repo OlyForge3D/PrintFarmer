@@ -46,6 +46,21 @@ public interface IPrintersService
     Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves all printers with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
+    Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Retrieves a single printer with Toolheads included, with tracking enabled for template updates.
+    /// </summary>
+    /// <param name="id">The printer ID (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Printer entity with Toolheads if found; otherwise null</returns>
+    Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Adds a new printer to the database.
     /// </summary>
     /// <param name="p">The printer entity to add</param>
@@ -90,6 +105,7 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>The printer with matching IP, or null if not found</returns>
     Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+
     /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
     /// </summary>
@@ -169,6 +185,17 @@ public interface IPrintersService
     Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct);
 
     /// <summary>
+    /// Applies template defaults from the PrinterModel to an existing printer.
+    /// Copies hardware specifications (build volume, max temps, supported materials, etc.)
+    /// from the associated PrinterModel to the printer.
+    /// </summary>
+    /// <param name="printer">The printer entity to update (must include Toolheads if updating toolhead properties)</param>
+    /// <param name="forceOverwrite">If true, overwrites all values from template. If false, only fills in null/unset values.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if any values were updated, false if no changes were made</returns>
+    Task<bool> ApplyModelTemplateAsync(Printer printer, bool forceOverwrite, CancellationToken ct);
+
+    /// <summary>
     /// Resolves a printer hostname to its base URL and IP address.
     /// </summary>
     /// <param name="serverUrl">The server URL or hostname to resolve</param>
@@ -199,7 +226,8 @@ public interface IPrintersService
     /// <param name="id">The printer ID</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Tuple of (streamUrl, snapshotUrl), either or both may be null</returns>
-    Task<(string? streamUrl, string? snapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
+    Task<(string? StreamUrl, string? SnapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
+
     /// <summary>
     /// Retrieves the history of print jobs for a printer.
     /// </summary>
@@ -361,6 +389,7 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if print started successfully, false if backend unavailable or file not found</returns>
     Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct);
+
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>

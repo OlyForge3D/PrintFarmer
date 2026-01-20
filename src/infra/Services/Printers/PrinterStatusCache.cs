@@ -37,7 +37,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            _cache.TryGetValue(printerId, out var status);
+            _cache.TryGetValue(printerId, out PrinterStatusDto? status);
             return status;
         }
     }
@@ -67,7 +67,7 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
 
         lock (_lockObj)
         {
-            foreach (var status in statuses)
+            foreach (PrinterStatusDto status in statuses)
             {
                 _cache[status.Id] = status;
             }

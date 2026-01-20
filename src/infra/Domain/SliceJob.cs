@@ -51,6 +51,7 @@ public class SliceJob
     /// to ensure immutability if the profile later changes.
     /// </summary>
     public Guid? SlicerProfileId { get; set; }
+
     public ProcessProfile? SlicerProfile { get; set; }
 
     /// <summary>

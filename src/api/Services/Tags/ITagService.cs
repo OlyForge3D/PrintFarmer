@@ -11,21 +11,32 @@ namespace Farm.Web.Api.Services.Tags
         /// <summary>
         /// Get all available tags
         /// </summary>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>List of all available tags.</returns>
         Task<IReadOnlyList<TagDto>> GetAllTagsAsync(CancellationToken ct);
 
         /// <summary>
         /// Get a tag by ID
         /// </summary>
+        /// <param name="tagId">The unique identifier of the tag.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The tag if found; otherwise, null.</returns>
         Task<TagDto?> GetTagByIdAsync(Guid tagId, CancellationToken ct);
 
         /// <summary>
         /// Create a new tag
         /// </summary>
+        /// <param name="dto">The tag creation data transfer object.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>The created tag.</returns>
         Task<TagDto> CreateTagAsync(CreateTagDto dto, CancellationToken ct);
 
         /// <summary>
         /// Delete a tag
         /// </summary>
+        /// <param name="tagId">The unique identifier of the tag to delete.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>A task representing the asynchronous delete operation.</returns>
         Task DeleteTagAsync(Guid tagId, CancellationToken ct);
 
         /// <summary>

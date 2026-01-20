@@ -10,11 +10,17 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 public interface IFilamentProfileRepository
 {
     Task<FilamentProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<IReadOnlyList<FilamentProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default);
+
     Task<FilamentProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
+
     Task AddAsync(FilamentProfile profile, CancellationToken ct = default);
+
     Task UpdateAsync(FilamentProfile profile, CancellationToken ct = default);
+
     Task DeleteAsync(FilamentProfile profile, CancellationToken ct = default);
+
     Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
 }
 

@@ -46,6 +46,7 @@ public class SpoolmanController(
     }
 
     // Note: Exception categorization was moved into the SpoolmanService Probe implementation.
+
     /// <summary>
     /// Gets the current Spoolman integration configuration.
     /// </summary>
@@ -80,10 +81,12 @@ public class SpoolmanController(
             string? name = user.Identity != null ? user.Identity.Name : "(null)";
             _logger.LogInformation("[SpoolmanController] SetConfig: Authenticated user: {Name}. Claims: {Claims}", name, string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
         }
+
         if (config is null)
         {
             return BadRequest("Config body is required.");
         }
+
         spoolman.SetConfig(config);
         return NoContent();
     }
@@ -116,6 +119,7 @@ public class SpoolmanController(
         {
             return Ok(new { configured = true, success = false, message = probe.Message });
         }
+
         return Ok(new { configured = true, success = true, endpoint = probe.EndpointTried, statusCode = probe.StatusCode });
     }
 
@@ -164,7 +168,7 @@ public class SpoolmanController(
             return StatusCode(StatusCodes.Status500InternalServerError, new[]
             {
                 new SpoolmanDiscoveryResult(
-                    Url: "",
+                    Url: string.Empty,
                     IsAvailable: false,
                     Error: $"Network scan failed: {ex.Message}")
             });

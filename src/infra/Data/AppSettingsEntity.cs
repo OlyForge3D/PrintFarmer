@@ -7,8 +7,10 @@ public class AppSettingsEntity
 {
     [Key]
     public int Id { get; set; }
+
     public string Key { get; set; } = string.Empty;
-    public string SettingsJson { get; set; } = "";
+
+    public string SettingsJson { get; set; } = string.Empty;
+
     public DateTime UpdatedAt { get; set; }
 }
-

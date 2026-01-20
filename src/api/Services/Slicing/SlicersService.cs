@@ -34,7 +34,7 @@ namespace Farm.Web.Api.Services.Slicing
     /// - SignalR broadcast notifications for worker state changes
     /// - Metrics collection for capacity and worker utilization tracking
     /// - Integration with process profile repository for worker capability validation
-    /// 
+    ///
     /// The service maintains a registry of active slicer workers and their current state,
     /// enabling the job queue system to intelligently distribute slicing jobs across available
     /// workers based on their capacity and health status.
@@ -178,11 +178,11 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Stores the worker configuration in the repository
         /// - Broadcasts the new worker registration to all connected clients via SignalR
         /// - Updates capacity metrics to reflect the new worker's available capacity
-        /// 
+        ///
         /// The returned API key must be securely transmitted to the worker and used for all subsequent API calls.
         /// </remarks>
         /// <exception cref="InvalidOperationException">Thrown if worker registration fails or worker is unreachable</exception>
-        public async Task<(Guid id, string apiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct)
+        public async Task<(Guid Id, string ApiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct)
         {
             SlicerService svc = new SlicerService
             {
@@ -201,7 +201,7 @@ namespace Farm.Web.Api.Services.Slicing
                 Tags = dto.Tags
             };
 
-            svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
+            svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
 
             await _repo.AddAsync(svc, ct);
             await _repo.SaveChangesAsync(ct);
@@ -241,7 +241,8 @@ namespace Farm.Web.Api.Services.Slicing
             }
 
             // Seed profiles from the worker (OrcaSlicer only)
-            if (svc.SlicerType == 1) // OrcaSlicer
+            // OrcaSlicer
+            if (svc.SlicerType == 1)
             {
                 try
                 {
@@ -324,7 +325,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Records heartbeat metrics for monitoring and analysis
         /// - Broadcasts heartbeat events to connected clients via SignalR
         /// - Calculates and records latency metrics for performance monitoring
-        /// 
+        ///
         /// Heartbeats are critical for health monitoring and worker availability tracking.
         /// Missing heartbeats indicate worker connectivity issues or failure.
         /// </remarks>
@@ -343,11 +344,13 @@ namespace Farm.Web.Api.Services.Slicing
             {
                 svc.Tags = dto.FreeSlots.Value.ToString();
             }
+
             svc.UpdatedAt = DateTime.UtcNow;
 
             await _repo.SaveChangesAsync(ct);
 
             int? totalSlots = null;
+
             // Synchronize to Worker table for dispatcher
             try
             {
@@ -433,7 +436,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Records metrics for service deregistration
         /// - Broadcasts deregistration events to all connected clients via SignalR
         /// - Preserves worker history for audit trails
-        /// 
+        ///
         /// Deregistered workers are no longer available for job assignment. The system
         /// automatically fails over any pending jobs from deregistered workers.
         /// </remarks>
@@ -497,7 +500,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// - Persists the new key to the database
         /// - Broadcasts key rotation notification to connected clients
         /// - Records metrics for API key rotation events
-        /// 
+        ///
         /// API key rotation is recommended for security maintenance. The new key must be
         /// communicated securely to the worker and updated in its configuration.
         /// The isAdminForced parameter indicates whether this rotation is mandatory
@@ -514,7 +517,7 @@ namespace Farm.Web.Api.Services.Slicing
             string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
 
             // Generate new API key
-            string newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
+            string newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
             svc.ApiKey = newApiKey;
             svc.ApiKeyRotatedAt = DateTime.UtcNow;
             svc.UpdatedAt = DateTime.UtcNow;
@@ -579,6 +582,7 @@ namespace Farm.Web.Api.Services.Slicing
                     _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already seeded or seeding in progress, skipping");
                     return;
                 }
+
                 _logger.LogInformation("[SeedProfilesFromWorker] Acquired distributed lock for profile seeding");
 
                 // Early exit: Verify no system profiles exist (double-check after acquiring lock)
@@ -599,6 +603,7 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     string errorContent = await response.Content.ReadAsStringAsync(ct);
                     _logger.LogWarning($"[SeedProfilesFromWorker] Worker /api/profiles returned {response.StatusCode}: {errorContent}");
+
                     // Clear lock on error so retry can happen
                     await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
                     return;
@@ -611,6 +616,7 @@ namespace Farm.Web.Api.Services.Slicing
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
                     _logger.LogWarning($"[SeedProfilesFromWorker] No profiles available from worker (parsed null: {allProfiles == null}, process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0})");
+
                     // Clear lock on empty response so retry can happen
                     await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
                     return;
@@ -631,7 +637,7 @@ namespace Farm.Web.Api.Services.Slicing
                 if (allProfiles?.ByHierarchy != null && allProfiles.ByHierarchy.Count > 0)
                 {
                     _logger.LogInformation($"[SeedProfilesFromWorker] Processing {allProfiles.ByHierarchy.Count} manufacturers from worker hierarchy");
-                    foreach (var manufacturerEntry in allProfiles.ByHierarchy)
+                    foreach (KeyValuePair<string, ManufacturerProfilesDto> manufacturerEntry in allProfiles.ByHierarchy)
                     {
                         string manufacturerName = manufacturerEntry.Key;
                         ManufacturerProfilesDto manufacturerProfiles = manufacturerEntry.Value;
@@ -652,7 +658,7 @@ namespace Farm.Web.Api.Services.Slicing
                             continue;
                         }
 
-                        foreach (var modelEntry in manufacturerProfiles.Models)
+                        foreach (KeyValuePair<string, PrinterModelProfilesDto> modelEntry in manufacturerProfiles.Models)
                         {
                             string modelId = modelEntry.Key;
                             PrinterModelProfilesDto modelProfiles = modelEntry.Value;
@@ -672,7 +678,7 @@ namespace Farm.Web.Api.Services.Slicing
                                 var instantiableMachineProfiles = modelProfiles.MachineProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableMachineProfiles.Count} instantiable machine profiles (out of {modelProfiles.MachineProfiles.Count} total) for {displayName}");
 
-                                foreach (var machineProfile in instantiableMachineProfiles)
+                                foreach (MachineProfileDto? machineProfile in instantiableMachineProfiles)
                                 {
                                     try
                                     {
@@ -690,7 +696,7 @@ namespace Farm.Web.Api.Services.Slicing
                                             Id = Guid.NewGuid(),
                                             Name = !string.IsNullOrEmpty(machineProfile.Name) ? machineProfile.Name : displayName,
                                             Manufacturer = manufacturerName,
-                                            Description = $"OrcaSlicer machine profile for {displayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : ""),
+                                            Description = $"OrcaSlicer machine profile for {displayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : string.Empty),
                                             SlicerType = SlicerType.OrcaSlicer,
                                             IsSystem = true,
                                             IsPublic = true,
@@ -718,7 +724,7 @@ namespace Farm.Web.Api.Services.Slicing
                                 var instantiableFilamentProfiles = modelProfiles.FilamentProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableFilamentProfiles.Count} instantiable filament profiles (out of {modelProfiles.FilamentProfiles.Count} total) for {displayName}");
 
-                                foreach (var filamentProfile in instantiableFilamentProfiles)
+                                foreach (FilamentProfileDto? filamentProfile in instantiableFilamentProfiles)
                                 {
                                     try
                                     {
@@ -769,7 +775,7 @@ namespace Farm.Web.Api.Services.Slicing
                                 var instantiableProcessProfiles = modelProfiles.ProcessProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableProcessProfiles.Count} instantiable process profiles (out of {modelProfiles.ProcessProfiles.Count} total) for {displayName}");
 
-                                foreach (var processProfile in instantiableProcessProfiles)
+                                foreach (ProcessProfileDto? processProfile in instantiableProcessProfiles)
                                 {
                                     try
                                     {
@@ -843,6 +849,7 @@ namespace Farm.Web.Api.Services.Slicing
                 }
 
                 _logger.LogError($"[SeedProfilesFromWorker] Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+
                 // Don't throw - profile seeding is best-effort
             }
         }

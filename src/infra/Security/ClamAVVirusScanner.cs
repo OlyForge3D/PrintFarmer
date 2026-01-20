@@ -68,10 +68,12 @@ public class ClamAVVirusScanner : IVirusScanner
                 {
                     // Swallow secondary kill exceptions
                 }
+
                 return VirusScanResult.Unknown;
             }
 
             int exit = proc.ExitCode;
+
             // clamscan/clamdscan: 0 = clean, 1 = infected, >1 = error
             return exit switch
             {
@@ -98,6 +100,7 @@ public class ClamAVVirusScanner : IVirusScanner
                 return path;
             }
         }
+
         return null;
 
         static string? Which(string name)
@@ -114,7 +117,10 @@ public class ClamAVVirusScanner : IVirusScanner
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
+
             return null;
         }
     }

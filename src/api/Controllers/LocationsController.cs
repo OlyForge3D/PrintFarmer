@@ -45,7 +45,7 @@ public class LocationsController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            var locations = await _locationService.GetAllLocationDtosAsync(ct);
+            LocationDto[] locations = await _locationService.GetAllLocationDtosAsync(ct);
             return Ok(locations);
         }
         catch (InvalidOperationException)
@@ -81,7 +81,7 @@ public class LocationsController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            var location = await _locationService.GetLocationDetailsAsync(id, ct);
+            LocationDetailsDto? location = await _locationService.GetLocationDetailsAsync(id, ct);
             return location == null ? NotFound(new { message = "Location not found" }) : Ok(location);
         }
         catch (InvalidOperationException)
@@ -127,7 +127,7 @@ public class LocationsController(
                 return BadRequest(new { message = "Location name is required" });
             }
 
-            var location = await _locationService.CreateLocationAsync(request, ct);
+            LocationDto location = await _locationService.CreateLocationAsync(request, ct);
             return StatusCode(201, location);
         }
         catch (InvalidOperationException)
@@ -169,7 +169,7 @@ public class LocationsController(
                 return BadRequest(new { message = "Request body cannot be null" });
             }
 
-            var location = await _locationService.UpdateLocationAsync(id, request, ct);
+            LocationDto? location = await _locationService.UpdateLocationAsync(id, request, ct);
             return location == null ? NotFound(new { message = "Location not found" }) : Ok(location);
         }
         catch (InvalidOperationException)
@@ -205,7 +205,7 @@ public class LocationsController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            var success = await _locationService.DeleteLocationAsync(id, ct);
+            bool success = await _locationService.DeleteLocationAsync(id, ct);
             return !success ? NotFound(new { message = "Location not found" }) : NoContent();
         }
         catch (InvalidOperationException)

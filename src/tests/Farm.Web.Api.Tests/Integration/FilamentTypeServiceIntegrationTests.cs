@@ -47,7 +47,7 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<T> RunInScopeAsync<T>(Func<IServiceScope, Task<T>> work)
     {
-        var scope = _factory.Services.CreateAsyncScope();
+        AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         try
         {
             return await work(scope);
@@ -63,13 +63,13 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         int hotendTemp = 200,
         int bedTemp = 60)
     {
-        var scope = _factory.Services.CreateAsyncScope();
+        AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         try
         {
-            var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+            IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
             // Generate unique name if not provided
-            var uniqueName = name ?? $"test-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            string uniqueName = name ?? $"test-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
             var request = new CreateFilamentTypeRequest(
                 uniqueName,
@@ -90,12 +90,12 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task GetFilamentTypesAsync_WhenReady_ReturnsFilamentTypes()
     {
         // Arrange
-        var result = await RunInScopeAsync(async scope =>
+        IReadOnlyList<FilamentTypeDto> result = await RunInScopeAsync(async scope =>
         {
-            var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+            IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-            var name1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
-            var name2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            string name1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            string name2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
             await CreateTestFilamentAsync(name1);
             await CreateTestFilamentAsync(name2);
@@ -113,18 +113,18 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task GetFilamentTypesAsync_IncludesTemperatureData()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var absName = $"abs-{Guid.NewGuid().ToString().Substring(0, 8)}";
-        var created = await CreateTestFilamentAsync(absName, 240, 100);
+        string absName = $"abs-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        FilamentTypeDto created = await CreateTestFilamentAsync(absName, 240, 100);
 
         // Act
-        var result = await service.GetFilamentTypesAsync(CancellationToken.None);
+        IReadOnlyList<FilamentTypeDto> result = await service.GetFilamentTypesAsync(CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
-        var abs = result.FirstOrDefault(f => f.Id == created.Id);
+        FilamentTypeDto? abs = result.FirstOrDefault(f => f.Id == created.Id);
         abs.Should().NotBeNull();
         abs!.DefaultTemperatures.Hotend.Should().Be(240);
         abs.DefaultTemperatures.Bed.Should().Be(100);
@@ -138,11 +138,11 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task GetFilamentPresetsAsync_WhenReady_ReturnsPresets()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         // Act
-        var result = await service.GetFilamentPresetsAsync(CancellationToken.None);
+        FilamentPresetsDto result = await service.GetFilamentPresetsAsync(CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -153,11 +153,11 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task GetFilamentPresetsAsync_ReturnsPresetsAsReadOnlyDictionary()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         // Act
-        var result = await service.GetFilamentPresetsAsync(CancellationToken.None);
+        FilamentPresetsDto result = await service.GetFilamentPresetsAsync(CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -173,17 +173,17 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_WithValidRequest_CreatesFilament()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var uniqueName = $"new-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName = $"new-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
         var request = new CreateFilamentTypeRequest(
             uniqueName,
             new TempTargets(210, 65)
         );
 
         // Act
-        var result = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
+        FilamentTypeDto result = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -197,17 +197,17 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_WithDifferentTemperatures_StoresTemperatures()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var uniqueName = $"nylon-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName = $"nylon-{Guid.NewGuid().ToString().Substring(0, 8)}";
         var request = new CreateFilamentTypeRequest(
             uniqueName,
             new TempTargets(260, 80)
         );
 
         // Act
-        var result = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
+        FilamentTypeDto result = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
 
         // Assert
         result.DefaultTemperatures.Hotend.Should().Be(260);
@@ -218,8 +218,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_WithNullRequest_ThrowsArgumentException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
@@ -230,8 +230,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_WithEmptyName_ThrowsArgumentException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         var request = new CreateFilamentTypeRequest(
             "   ",
@@ -247,10 +247,10 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_WithDuplicateName_ThrowsInvalidOperationException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var uniqueName = $"duplicate-test-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName = $"duplicate-test-{Guid.NewGuid().ToString().Substring(0, 8)}";
         var request = new CreateFilamentTypeRequest(
             uniqueName,
             new TempTargets(200, 60)
@@ -268,8 +268,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateFilamentTypeAsync_GeneratesUniqueIds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         var request1 = new CreateFilamentTypeRequest(
             $"filament-1-{Guid.NewGuid().ToString().Substring(0, 8)}",
@@ -282,8 +282,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         );
 
         // Act
-        var result1 = await service.CreateFilamentTypeAsync(request1, CancellationToken.None);
-        var result2 = await service.CreateFilamentTypeAsync(request2, CancellationToken.None);
+        FilamentTypeDto result1 = await service.CreateFilamentTypeAsync(request1, CancellationToken.None);
+        FilamentTypeDto result2 = await service.CreateFilamentTypeAsync(request2, CancellationToken.None);
 
         // Assert
         result1.Id.Should().NotBe(result2.Id);
@@ -297,10 +297,10 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task UpdateFilamentTypeAsync_WithValidId_UpdatesFilament()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var created = await CreateTestFilamentAsync("to-update", 200, 60);
+        FilamentTypeDto created = await CreateTestFilamentAsync("to-update", 200, 60);
 
         var updateRequest = new UpdateFilamentTypeRequest(
             "updated-name",
@@ -311,8 +311,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         await service.UpdateFilamentTypeAsync(created.Id, updateRequest, CancellationToken.None);
 
         // Assert - Verify update by fetching
-        var types = await service.GetFilamentTypesAsync(CancellationToken.None);
-        var updated = types.FirstOrDefault(f => f.Id == created.Id);
+        IReadOnlyList<FilamentTypeDto> types = await service.GetFilamentTypesAsync(CancellationToken.None);
+        FilamentTypeDto? updated = types.FirstOrDefault(f => f.Id == created.Id);
         updated.Should().NotBeNull();
         updated!.Name.Should().Be("updated-name");
         updated.DefaultTemperatures.Hotend.Should().Be(220);
@@ -323,8 +323,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task UpdateFilamentTypeAsync_WithNonExistentId_ThrowsKeyNotFoundException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         var nonExistentId = Guid.NewGuid();
         var updateRequest = new UpdateFilamentTypeRequest(
@@ -341,10 +341,10 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task UpdateFilamentTypeAsync_WithNullRequest_ThrowsArgumentException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var created = await CreateTestFilamentAsync("test", 200, 60);
+        FilamentTypeDto created = await CreateTestFilamentAsync("test", 200, 60);
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
@@ -355,10 +355,10 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task UpdateFilamentTypeAsync_PartialUpdate_UpdatesOnlyProvidedFields()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var created = await CreateTestFilamentAsync("partial-update", 200, 60);
+        FilamentTypeDto created = await CreateTestFilamentAsync("partial-update", 200, 60);
 
         // Update only temperatures
         var updateRequest = new UpdateFilamentTypeRequest(
@@ -370,8 +370,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         await service.UpdateFilamentTypeAsync(created.Id, updateRequest, CancellationToken.None);
 
         // Assert
-        var types = await service.GetFilamentTypesAsync(CancellationToken.None);
-        var updated = types.FirstOrDefault(f => f.Id == created.Id);
+        IReadOnlyList<FilamentTypeDto> types = await service.GetFilamentTypesAsync(CancellationToken.None);
+        FilamentTypeDto? updated = types.FirstOrDefault(f => f.Id == created.Id);
         updated.Should().NotBeNull();
         updated!.DefaultTemperatures.Hotend.Should().Be(230);
         updated.DefaultTemperatures.Bed.Should().Be(80);
@@ -385,17 +385,17 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteFilamentTypeAsync_WithValidId_DeletesFilament()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var created = await CreateTestFilamentAsync("to-delete", 200, 60);
+        FilamentTypeDto created = await CreateTestFilamentAsync("to-delete", 200, 60);
 
         // Act
         await service.DeleteFilamentTypeAsync(created.Id, CancellationToken.None);
 
         // Assert - Verify deletion by attempting to fetch
-        var types = await service.GetFilamentTypesAsync(CancellationToken.None);
-        var deleted = types.FirstOrDefault(f => f.Id == created.Id);
+        IReadOnlyList<FilamentTypeDto> types = await service.GetFilamentTypesAsync(CancellationToken.None);
+        FilamentTypeDto? deleted = types.FirstOrDefault(f => f.Id == created.Id);
         deleted.Should().BeNull();
     }
 
@@ -403,8 +403,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteFilamentTypeAsync_WithNonExistentId_ThrowsKeyNotFoundException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         var nonExistentId = Guid.NewGuid();
 
@@ -421,11 +421,11 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task SaveFilamentPresetsAsync_WithValidPresets_SavesPresets()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var uniqueName1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
-        var uniqueName2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
         var presets = new FilamentPresetsDto(
             new Dictionary<string, TempTargets>
@@ -439,7 +439,7 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         await service.SaveFilamentPresetsAsync(presets, CancellationToken.None);
 
         // Assert - Verify by fetching
-        var saved = await service.GetFilamentPresetsAsync(CancellationToken.None);
+        FilamentPresetsDto saved = await service.GetFilamentPresetsAsync(CancellationToken.None);
         saved.Presets.Should().ContainKey(uniqueName1);
         saved.Presets.Should().ContainKey(uniqueName2);
     }
@@ -448,8 +448,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task SaveFilamentPresetsAsync_WithNullPresets_ThrowsArgumentException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
@@ -460,8 +460,8 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task SaveFilamentPresetsAsync_WithEmptyPresets_ThrowsArgumentException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
         var presets = new FilamentPresetsDto(null!);
 
@@ -474,10 +474,10 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task SaveFilamentPresetsAsync_UpdatesExistingPresets()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var uniqueName = $"tpu-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string uniqueName = $"tpu-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
         // Save initial presets
         var initialPresets = new FilamentPresetsDto(
@@ -500,7 +500,7 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         await service.SaveFilamentPresetsAsync(updatedPresets, CancellationToken.None);
 
         // Assert
-        var saved = await service.GetFilamentPresetsAsync(CancellationToken.None);
+        FilamentPresetsDto saved = await service.GetFilamentPresetsAsync(CancellationToken.None);
         saved.Presets[uniqueName].Hotend.Should().Be(230);
         saved.Presets[uniqueName].Bed.Should().Be(65);
     }
@@ -513,29 +513,29 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task CreateMultipleFilaments_ThenListAll()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IFilamentTypeService service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var filaments = new[] { "pla", "petg", "abs", "tpu" };
+        string[] filaments = new[] { "pla", "petg", "abs", "tpu" };
         var createdIds = new List<Guid>();
 
         // Create multiple with unique names
-        foreach (var name in filaments)
+        foreach (string? name in filaments)
         {
-            var uniqueName = $"{name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            string uniqueName = $"{name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
             var request = new CreateFilamentTypeRequest(
                 uniqueName,
                 new TempTargets(200 + (filaments.Length / 4), 60)
             );
-            var created = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
+            FilamentTypeDto created = await service.CreateFilamentTypeAsync(request, CancellationToken.None);
             createdIds.Add(created.Id);
         }
 
         // Act
-        var all = await service.GetFilamentTypesAsync(CancellationToken.None);
+        IReadOnlyList<FilamentTypeDto> all = await service.GetFilamentTypesAsync(CancellationToken.None);
 
         // Assert
-        foreach (var id in createdIds)
+        foreach (Guid id in createdIds)
         {
             all.FirstOrDefault(f => f.Id == id).Should().NotBeNull();
         }

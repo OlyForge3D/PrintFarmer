@@ -1,5 +1,6 @@
 import { ReactNode, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
 import { ArrowLeftIcon, ArrowRightIcon, DeleteIcon, FolderOpenIcon, FolderIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 
@@ -173,11 +174,16 @@ const FolderTreeItem = ({
     }
   };
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   const handleDeleteFolder = () => {
     setShowContextMenu(false);
-    if (window.confirm(`Delete folder "${displayName}"?`)) {
-      onDeleteFolder?.(node.path);
-    }
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteFolder = () => {
+    setShowDeleteConfirm(false);
+    onDeleteFolder?.(node.path);
   };
 
   return (
@@ -267,6 +273,18 @@ const FolderTreeItem = ({
           ))}
         </ul>
       )}
+
+      {/* Delete folder confirmation */}
+      <ConfirmationModal
+        isOpen={showDeleteConfirm}
+        title="Delete Folder?"
+        message={`Delete folder "${displayName}"? This action cannot be undone.`}
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={confirmDeleteFolder}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </li>
   );
 };

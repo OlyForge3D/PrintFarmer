@@ -46,7 +46,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
     {
-        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        FolderNode? folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
         if (folder == null)
         {
             folder = new FolderNode
@@ -82,12 +82,12 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
 
     private async Task<Model3D> CreateTestModelAsync(string fileName = "test-model.stl")
     {
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var folder = await GetOrCreateModelFolderAsync(context);
+        FolderNode folder = await GetOrCreateModelFolderAsync(context);
 
-        var filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
+        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
 
         // Create the actual file
         File.WriteAllText(filePath, "mock stl content");
@@ -119,10 +119,10 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithValidFile_SucceedsAndReturnsJobId()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile("valid-model.stl");
+        IFormFile formFile = CreateMockFormFile("valid-model.stl");
         var profile = new SlicerProfileDto
         {
             ProcessProfile = new ProcessProfileDto { Quality = "high" },
@@ -133,7 +133,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var printerId = Guid.NewGuid();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             printerId,
@@ -153,10 +153,10 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithOrcaSlicer_SetCorrectSlicerVersion()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto
         {
             ProcessProfile = new ProcessProfileDto { Quality = "normal" },
@@ -164,7 +164,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -181,10 +181,10 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithPrusaSlicer_SetCorrectSlicerVersion()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto
         {
             ProcessProfile = new ProcessProfileDto { Quality = "draft" },
@@ -192,7 +192,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "prusaslicer",
             Guid.NewGuid(),
@@ -209,10 +209,10 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_IncludesProfileMetadata()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto
         {
             ProcessProfile = new ProcessProfileDto { Quality = "ultra" },
@@ -220,7 +220,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -238,13 +238,13 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithNullProfile_HandlesGracefully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -261,14 +261,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_SetsInitialProgressToZero()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -285,13 +285,13 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_GeneratesUniqueJobId()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
         var profile = new SlicerProfileDto();
 
         // Act
-        var result1 = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result1 = await service.SubmitSlicingJobAsync(
             CreateMockFormFile("model1.stl"),
             "orcaslicer",
             Guid.NewGuid(),
@@ -299,7 +299,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
             Guid.NewGuid(),
             CancellationToken.None);
 
-        var result2 = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result2 = await service.SubmitSlicingJobAsync(
             CreateMockFormFile("model2.stl"),
             "orcaslicer",
             Guid.NewGuid(),
@@ -321,10 +321,10 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobFromModelAsync_WithValidModel_SucceedsAndReturnsJobId()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var model = await CreateTestModelAsync("valid-model.stl");
+        Model3D model = await CreateTestModelAsync("valid-model.stl");
         var profile = new SlicerProfileDto
         {
             ProcessProfile = new ProcessProfileDto { Quality = "high" },
@@ -332,7 +332,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        var result = await service.SubmitSlicingJobFromModelAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobFromModelAsync(
             model.Id,
             "orcaslicer",
             Guid.NewGuid(),
@@ -351,14 +351,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobFromModelAsync_WithNonExistentModel_ReturnsFalseWithError()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
         var nonExistentModelId = Guid.NewGuid();
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobFromModelAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobFromModelAsync(
             nonExistentModelId,
             "orcaslicer",
             Guid.NewGuid(),
@@ -376,14 +376,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobFromModelAsync_WithMissingFile_ReturnsFalseWithError()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var folder = await GetOrCreateModelFolderAsync(context);
+        FolderNode folder = await GetOrCreateModelFolderAsync(context);
 
         // Create model but don't create the actual file
-        var nonExistentPath = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid() + ".stl");
+        string nonExistentPath = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid() + ".stl");
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
@@ -405,7 +405,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobFromModelAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobFromModelAsync(
             model.Id,
             "orcaslicer",
             Guid.NewGuid(),
@@ -422,15 +422,15 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobFromModelAsync_PreservesOriginalFileName()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var expectedFileName = "my-custom-model-name.stl";
-        var model = await CreateTestModelAsync(expectedFileName);
+        string expectedFileName = "my-custom-model-name.stl";
+        Model3D model = await CreateTestModelAsync(expectedFileName);
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobFromModelAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobFromModelAsync(
             model.Id,
             "orcaslicer",
             Guid.NewGuid(),
@@ -447,14 +447,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobFromModelAsync_WithDifferentSlicer_SubmitsCorrectly()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var model = await CreateTestModelAsync();
+        Model3D model = await CreateTestModelAsync();
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobFromModelAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobFromModelAsync(
             model.Id,
             "prusaslicer",
             Guid.NewGuid(),
@@ -475,14 +475,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithInvalidSlicerEngine_HandlesGracefully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto();
 
         // Act - Invalid slicer engine should be handled
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "invalidslicer",
             Guid.NewGuid(),
@@ -499,16 +499,16 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithLargeFile_HandlesCorrectly()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
         // Create a larger mock file (5MB)
-        var largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
-        var formFile = CreateMockFormFile("large-model.stl", largeContent);
+        string largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
+        IFormFile formFile = CreateMockFormFile("large-model.stl", largeContent);
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -529,15 +529,15 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_AssociatesPrinterId()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto();
         var expectedPrinterId = Guid.NewGuid();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             expectedPrinterId,
@@ -554,15 +554,15 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_AssociatesUserId()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile();
+        IFormFile formFile = CreateMockFormFile();
         var profile = new SlicerProfileDto();
         var expectedUserId = Guid.NewGuid();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -583,14 +583,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithSTLFile_SubmitsSuccessfully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile("model.stl");
+        IFormFile formFile = CreateMockFormFile("model.stl");
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -606,14 +606,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_WithOBJFile_SubmitsSuccessfully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile("model.obj");
+        IFormFile formFile = CreateMockFormFile("model.obj");
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),
@@ -629,14 +629,14 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
     public async Task SubmitSlicingJobAsync_With3MFFile_SubmitsSuccessfully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicingSubmissionService service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
-        var formFile = CreateMockFormFile("model.3mf");
+        IFormFile formFile = CreateMockFormFile("model.3mf");
         var profile = new SlicerProfileDto();
 
         // Act
-        var result = await service.SubmitSlicingJobAsync(
+        SlicingSubmissionResult result = await service.SubmitSlicingJobAsync(
             formFile,
             "orcaslicer",
             Guid.NewGuid(),

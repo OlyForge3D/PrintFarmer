@@ -14,10 +14,12 @@ public interface ISystemSettingsProvider
     /// named "SectionName" on the settings type. If not present, callers can pass
     /// a sectionName into the other overload.
     /// </summary>
-    T Get<T>() where T : class, new();
+    T Get<T>()
+        where T : class, new();
 
     /// <summary>
     /// Get a settings instance bound from the specified configuration section name.
     /// </summary>
-    T Get<T>(string sectionName) where T : class, new();
+    T Get<T>(string sectionName)
+        where T : class, new();
 }

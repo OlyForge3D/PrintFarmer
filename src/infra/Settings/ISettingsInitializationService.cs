@@ -7,5 +7,6 @@ namespace Farm.Infrastructure.Settings;
 /// </summary>
 public interface ISettingsInitializationService
 {
-    void InitializeFromEnvironment<T>() where T : class, IAppSetting, new();
+    void InitializeFromEnvironment<T>()
+        where T : class, IAppSetting, new();
 }

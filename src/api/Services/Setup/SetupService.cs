@@ -61,8 +61,7 @@ public class SetupService(
                         Success: true,
                         Token: tokenExisting,
                         ExpiresAt: DateTime.UtcNow.AddDays(7),
-                        User: userDtoExisting
-                    );
+                        User: userDtoExisting);
                 }
             }
 
@@ -167,8 +166,7 @@ public class SetupService(
             Success: true,
             Token: token,
             ExpiresAt: DateTime.UtcNow.AddDays(7),
-            User: userDto
-        );
+            User: userDto);
     }
 
     public SetupConfigurationOptions GetConfigurationOptions()
@@ -181,7 +179,6 @@ public class SetupService(
                 ["Moonraker"] = 7125,
                 ["PrusaLink"] = 8080,
                 ["SDCP"] = 3000
-            }
-        );
+            });
     }
 }

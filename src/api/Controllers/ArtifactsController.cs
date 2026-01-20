@@ -42,18 +42,18 @@ public class ArtifactsController(
     /// <remarks>
     /// Uploads multiple artifacts atomically. Each file's kind is inferred from its Content-Type or filename extension.
     /// If any file fails validation or upload, the entire operation is rolled back.
-    /// 
+    ///
     /// Kind inference rules:
     /// - .gcode, .g, .nc → "gcode"
     /// - .png, .jpg, .jpeg, .webp → "thumbnail"
     /// - .log, .txt → "log"
     /// - application/x-gcode → "gcode"
     /// - image/* → "thumbnail"
-    /// 
+    ///
     /// Example request:
     /// POST /api/artifacts/bulk
     /// Content-Type: multipart/form-data
-    /// 
+    ///
     /// - jobId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
     /// - workerId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
     /// - files: [file1.gcode, file2.png, file3.log]
@@ -104,36 +104,6 @@ public class ArtifactsController(
         }
     }
 
-    private static string InferKind(IFormFile file)
-    {
-        // Try content type first
-        if (!string.IsNullOrWhiteSpace(file.ContentType))
-        {
-            if (file.ContentType.Equals("application/x-gcode", StringComparison.OrdinalIgnoreCase))
-            {
-                return "gcode";
-            }
-            if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-            {
-                return "thumbnail";
-            }
-            if (file.ContentType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
-            {
-                return "log";
-            }
-        }
-
-        // Fallback to file extension
-        string ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        return ext switch
-        {
-            ".gcode" or ".g" or ".nc" => "gcode",
-            ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" => "thumbnail",
-            ".log" or ".txt" => "log",
-            _ => string.Empty
-        };
-    }
-
     /// <summary>
     /// Upload a new artifact file for a slice job.
     /// </summary>
@@ -149,11 +119,11 @@ public class ArtifactsController(
     /// <remarks>
     /// The uploaded file is stored in the configured artifact storage directory with SHA-256 hash verification.
     /// Maximum file size is limited by request size limits (default: ~100MB).
-    /// 
+    ///
     /// Example request:
     /// POST /api/artifacts
     /// Content-Type: multipart/form-data
-    /// 
+    ///
     /// - jobId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
     /// - kind: gcode
     /// - workerId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
@@ -175,6 +145,7 @@ public class ArtifactsController(
         {
             return BadRequest(new { error = "unsupported artifact kind", allowedKinds = allowed });
         }
+
         try
         {
             Artifact artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);
@@ -252,7 +223,7 @@ public class ArtifactsController(
     /// Returns the raw file bytes with appropriate Content-Type and Content-Disposition headers.
     /// This endpoint is used by workers, clients, and the slice job completion flow to retrieve
     /// generated artifacts such as G-code files, preview thumbnails, or logs.
-    /// 
+    ///
     /// The response includes:
     /// - Content-Type: MIME type from artifact metadata (e.g., 'application/x-gcode', 'image/png')
     /// - Content-Disposition: attachment with original filename
@@ -264,7 +235,7 @@ public class ArtifactsController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> DownloadAsync(Guid id, CancellationToken ct)
     {
-        (Artifact artifact, string fullPath)? result = await _service.GetWithPathAsync(id, ct);
+        (Artifact Artifact, string FullPath)? result = await _service.GetWithPathAsync(id, ct);
         if (result == null)
         {
             return NotFound();
@@ -310,9 +281,42 @@ public class ArtifactsController(
         return job != null && job.UserId == userId;
     }
 
+    private static string InferKind(IFormFile file)
+    {
+        // Try content type first
+        if (!string.IsNullOrWhiteSpace(file.ContentType))
+        {
+            if (file.ContentType.Equals("application/x-gcode", StringComparison.OrdinalIgnoreCase))
+            {
+                return "gcode";
+            }
+
+            if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return "thumbnail";
+            }
+
+            if (file.ContentType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
+            {
+                return "log";
+            }
+        }
+
+        // Fallback to file extension
+        string ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".gcode" or ".g" or ".nc" => "gcode",
+            ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" => "thumbnail",
+            ".log" or ".txt" => "log",
+            _ => string.Empty
+        };
+    }
+
     private ArtifactDto Map(Farm.Infrastructure.Domain.Artifact a)
     {
         string download = $"/api/artifacts/{a.Id}/download";
+
         // Public URL only if static serving is enabled
         string? publicUrl = _settings.Value.EnableStaticServing
             ? $"/artifacts/{a.RelativePath}"

@@ -5,10 +5,16 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  CatalogContext,
   CommandResult,
+  CreateExtruderModelDto,
   CreateFilamentTypeRequest,
+  CreateHotendModelDto,
+  CreateNozzleModelDto,
   CreatePrinterDto,
+  CreateToolheadModelDto,
   DiscoveredPrinterDto,
+  ExtruderModelDefinition,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -19,10 +25,13 @@ import {
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
+  HotendModelDefinition,
   JobQueuePrintJob,
   LoginRequest,
   ManufacturerDto,
+  ManufacturersByContext,
   MoveRequest,
+  NozzleModelDefinition,
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
@@ -39,16 +48,23 @@ import {
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
   TempTargets,
+  TestConnectionRequest,
+  TestConnectionResponse,
+  ToolheadModelDefinition,
+  UpdateExtruderModelDto,
   UpdateFilamentTypeRequest,
+  UpdateHotendModelDto,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
+  UpdateNozzleModelDto,
   UpdatePrinterDto,
+  UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto,
   BulkImportResponse,
 } from "@/types/api";
-import type { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
+import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 
 export class ApiClient {
@@ -420,6 +436,15 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Test connectivity to a printer backend before adding the printer.
+   * Returns success/failure with a human-readable message.
+   */
+  async testConnection(request: TestConnectionRequest): Promise<TestConnectionResponse> {
+    const response = await this.client.post<TestConnectionResponse>("/printers/test-connection", request);
+    return response.data;
+  }
+
   async bulkCreatePrinters(
     printers: CreatePrinterDto[],
     options?: { duplicateHandling?: string }
@@ -720,6 +745,180 @@ export class ApiClient {
       }
       throw error;
     }
+  }
+
+  // ============ Component Model API methods ============
+
+  async getHotendModels(): Promise<HotendModelDefinition[]> {
+    const response = await this.client.get<HotendModelDefinition[]>(
+      "/catalog/hotends"
+    );
+    return response.data;
+  }
+
+  async getExtruderModels(): Promise<ExtruderModelDefinition[]> {
+    const response = await this.client.get<ExtruderModelDefinition[]>(
+      "/catalog/extruders"
+    );
+    return response.data;
+  }
+
+  async getToolheadModels(): Promise<ToolheadModelDefinition[]> {
+    const response = await this.client.get<ToolheadModelDefinition[]>(
+      "/catalog/toolheads"
+    );
+    return response.data;
+  }
+
+  async getNozzleModels(): Promise<NozzleModelDefinition[]> {
+    const response = await this.client.get<NozzleModelDefinition[]>(
+      "/catalog/nozzles"
+    );
+    return response.data;
+  }
+
+  // ============ Component Model CRUD methods ============
+
+  // Hotend CRUD
+  async createHotendModel(
+    dto: CreateHotendModelDto
+  ): Promise<HotendModelDefinition> {
+    const response = await this.client.post<HotendModelDefinition>(
+      "/catalog/hotends",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateHotendModel(
+    id: string,
+    dto: UpdateHotendModelDto
+  ): Promise<HotendModelDefinition | null> {
+    try {
+      const response = await this.client.put<HotendModelDefinition>(
+        `/catalog/hotends/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteHotendModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/hotends/${id}`);
+  }
+
+  // Extruder CRUD
+  async createExtruderModel(
+    dto: CreateExtruderModelDto
+  ): Promise<ExtruderModelDefinition> {
+    const response = await this.client.post<ExtruderModelDefinition>(
+      "/catalog/extruders",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateExtruderModel(
+    id: string,
+    dto: UpdateExtruderModelDto
+  ): Promise<ExtruderModelDefinition | null> {
+    try {
+      const response = await this.client.put<ExtruderModelDefinition>(
+        `/catalog/extruders/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteExtruderModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/extruders/${id}`);
+  }
+
+  // Toolhead CRUD
+  async createToolheadModel(
+    dto: CreateToolheadModelDto
+  ): Promise<ToolheadModelDefinition> {
+    const response = await this.client.post<ToolheadModelDefinition>(
+      "/catalog/toolheads",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateToolheadModel(
+    id: string,
+    dto: UpdateToolheadModelDefDto
+  ): Promise<ToolheadModelDefinition | null> {
+    try {
+      const response = await this.client.put<ToolheadModelDefinition>(
+        `/catalog/toolheads/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteToolheadModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/toolheads/${id}`);
+  }
+
+  // Nozzle CRUD
+  async createNozzleModel(
+    dto: CreateNozzleModelDto
+  ): Promise<NozzleModelDefinition> {
+    const response = await this.client.post<NozzleModelDefinition>(
+      "/catalog/nozzles",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateNozzleModel(
+    id: string,
+    dto: UpdateNozzleModelDto
+  ): Promise<NozzleModelDefinition | null> {
+    try {
+      const response = await this.client.put<NozzleModelDefinition>(
+        `/catalog/nozzles/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteNozzleModel(id: string): Promise<void> {
+    await this.client.delete(`/catalog/nozzles/${id}`);
+  }
+
+  // Contextual Manufacturer Query
+  async getManufacturersByContext(
+    context: CatalogContext
+  ): Promise<ManufacturersByContext> {
+    const response = await this.client.get<ManufacturersByContext>(
+      `/catalog/manufacturers/by-context/${context}`
+    );
+    return response.data;
   }
 
   // ============ File type API methods ============
@@ -2012,7 +2211,7 @@ export class ApiClient {
   /**
    * Get password policy settings
    */
-  async getPasswordPolicy(): Promise<Response> {
+  async getPasswordPolicy(): Promise<AxiosResponse> {
     return this.client.get('/settings/security/password-policy');
   }
 
@@ -2221,7 +2420,7 @@ export class ApiClient {
   /**
    * Update password policy settings
    */
-  async updatePasswordPolicy(policy: Record<string, unknown>): Promise<Response> {
+  async updatePasswordPolicy(policy: Record<string, unknown>): Promise<AxiosResponse> {
     return this.client.put('/settings/security/password-policy', policy);
   }
 

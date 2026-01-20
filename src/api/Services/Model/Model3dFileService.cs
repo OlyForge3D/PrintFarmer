@@ -69,6 +69,7 @@ namespace Farm.Web.Api.Services.Model
             _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
             _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
             ArgumentNullException.ThrowIfNull(configuration);
+
             // Use storage path service for consistent path handling (like GcodeFilesService)
             _modelsPath = storagePathService.GetModelUploadDirectory();
             if (!_fileSystem.DirectoryExists(_modelsPath))
@@ -95,10 +96,12 @@ namespace Farm.Web.Api.Services.Model
         /// <summary>
         /// Lists all 3D model folders recursively for building a folder tree structure.
         /// </summary>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        /// <returns>List of folder entries for building a folder tree.</returns>
         public async Task<List<Model3DEntryDto>> ListAllFoldersAsync(CancellationToken ct)
         {
             // Get all folders from the folder management service
-            var allFolderPaths = await _folderManagementService.GetAllFolderPathsRecursiveAsync("models", "/", ct);
+            List<string> allFolderPaths = await _folderManagementService.GetAllFolderPathsRecursiveAsync("models", "/", ct);
 
             List<Model3DEntryDto> folderEntries = [];
 
@@ -109,21 +112,19 @@ namespace Farm.Web.Api.Services.Model
                 FileSize: 0,
                 UploadedAt: DateTime.UtcNow,
                 IsDirectory: true,
-                DirectoryId: "/"
-            ));
+                DirectoryId: "/"));
 
             // Add all subfolders
-            foreach (var folderPath in allFolderPaths.OrderBy(p => p))
+            foreach (string? folderPath in allFolderPaths.OrderBy(p => p))
             {
-                var folderName = folderPath.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? folderPath;
+                string folderName = folderPath.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? folderPath;
                 folderEntries.Add(new Model3DEntryDto(
                     Path: folderPath,
                     FileName: folderName,
                     FileSize: 0,
                     UploadedAt: DateTime.UtcNow,
                     IsDirectory: true,
-                    DirectoryId: folderPath
-                ));
+                    DirectoryId: folderPath));
             }
 
             return folderEntries;
@@ -133,6 +134,15 @@ namespace Farm.Web.Api.Services.Model
         /// Queries models with comprehensive filtering, sorting, and pagination.
         /// All operations are performed at the database level for maximum efficiency.
         /// </summary>
+        /// <param name="path">Virtual folder path to filter by.</param>
+        /// <param name="sortBy">Field to sort by (e.g., "name", "date", "size").</param>
+        /// <param name="sortOrder">Sort direction ("asc" or "desc").</param>
+        /// <param name="search">Search term for filtering by name.</param>
+        /// <param name="page">Page number for pagination (1-based).</param>
+        /// <param name="pageSize">Number of items per page.</param>
+        /// <param name="tagIds">Optional array of tag IDs to filter by.</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        /// <returns>Paginated response containing model entries and metadata.</returns>
         public async Task<Model3DListResponse> QueryAsync(
             string? path,
             string? sortBy,
@@ -160,7 +170,7 @@ namespace Farm.Web.Api.Services.Model
             }
 
             // Call the efficient repository method that does everything at the database level
-            var (models, totalCount) = await _unitOfWork.Model3dFiles.QueryModelsAsync(
+            (List<Model3D>? models, int totalCount) = await _unitOfWork.Model3dFiles.QueryModelsAsync(
                 path,
                 search,
                 tagIds,
@@ -174,7 +184,7 @@ namespace Farm.Web.Api.Services.Model
             List<Model3DEntryDto> entries = [];
             long totalSize = 0;
 
-            foreach (var model in models)
+            foreach (Model3D model in models)
             {
                 // Use existing MapToEntryDto helper for consistency
                 entries.Add(MapToEntryDto(model, model.FileName));
@@ -221,9 +231,10 @@ namespace Farm.Web.Api.Services.Model
             {
                 return null;
             }
+
             // Return relative path by combining FilePath (directory) with FileName (GUID filename)
             // FilePath is the storage directory, FileName is the GUID-based filename
-            return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, "").TrimStart(Path.DirectorySeparatorChar, '/');
+            return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, string.Empty).TrimStart(Path.DirectorySeparatorChar, '/');
         }
 
         /// <summary>
@@ -291,8 +302,8 @@ namespace Farm.Web.Api.Services.Model
         /// <summary>
         /// Validates a 3D model file upload before processing.
         /// </summary>
-        /// <param name="modelFile">HTTP form file containing the model</param>
-        /// <returns>Validation result indicating success/failure and error messages</returns>
+        /// <param name="modelFile">HTTP form file containing the model.</param>
+        /// <returns>Validation result indicating success/failure and error messages.</returns>
         /// <remarks>
         /// Validates:
         /// - File is not null or empty
@@ -378,6 +389,7 @@ namespace Farm.Web.Api.Services.Model
                 catch (Exception ex)
                 {
                     _logger.LogError($"Failed to write model file to temp location: {ex.Message}");
+
                     // Cleanup temp file if write failed
                     try
                     {
@@ -386,7 +398,10 @@ namespace Farm.Web.Api.Services.Model
                             _fileSystem.DeleteFile(tempFilePath);
                         }
                     }
-                    catch { /* ignore cleanup errors */ }
+                    catch
+                    { /* ignore cleanup errors */
+                    }
+
                     throw;
                 }
 
@@ -395,7 +410,9 @@ namespace Farm.Web.Api.Services.Model
                 {
                     // Resolve a scanner service via DI would be better; for now skip
                 }
-                catch { }
+                catch
+                {
+                }
 
                 // Step 2: Analyze model metadata (best-effort)
                 ModelAnalysisResult? analysis = null;
@@ -407,7 +424,9 @@ namespace Farm.Web.Api.Services.Model
                         analysis = await _analysisService.AnalyzeModelAsync(tempFilePath, fileExtension, ct);
                     }
                 }
-                catch { }
+                catch
+                {
+                }
 
                 // Step 3: Check for duplicates
                 Model3D? existingModel = await _unitOfWork.Model3dFiles.GetByHashAsync(fileHash, ct);
@@ -457,6 +476,7 @@ namespace Farm.Web.Api.Services.Model
                         {
                             _fileSystem.DeleteFile(finalFilePath);
                         }
+
                         // Move temp to final location
                         _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
 
@@ -480,7 +500,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 // Step 5: Create folder and database record AFTER file is confirmed on disk
-                var rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
+                FolderNode rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
 
                 Model3D model = new()
                 {
@@ -536,6 +556,7 @@ namespace Farm.Web.Api.Services.Model
                 catch (Exception thumbnailEx)
                 {
                     _logger.LogWarning($"Failed to generate thumbnail for model {modelId}: {thumbnailEx.Message}. Continuing without thumbnail.");
+
                     // Don't rethrow - upload should succeed even if thumbnail generation fails
                 }
 
@@ -559,28 +580,28 @@ namespace Farm.Web.Api.Services.Model
                     {
                         _fileSystem.DeleteFile(tempFilePath);
                     }
+
                     // Try to clean up final file if it was already moved
                     if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
                     {
                         _fileSystem.DeleteFile(finalFilePath);
                     }
                 }
-                catch { /* ignore cleanup errors */ }
+                catch
+                { /* ignore cleanup errors */
+                }
 
                 throw;
             }
         }
 
         /// <summary>
-        /// Gets or creates a Folder entity for the given directory path and type
-        /// </summary>
-        /// <summary>
         /// Gets an existing folder or creates a new one at the specified virtual path.
         /// </summary>
-        /// <param name="directoryPath">Virtual directory path (e.g., "/MyFolder/SubFolder")</param>
-        /// <param name="folderType">Folder type identifier (e.g., "model", "gcode")</param>
-        /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Existing or newly created folder entity</returns>
+        /// <param name="directoryPath">Virtual directory path (e.g., "/MyFolder/SubFolder").</param>
+        /// <param name="folderType">Folder type identifier (e.g., "model", "gcode").</param>
+        /// <param name="ct">Cancellation token for async operation.</param>
+        /// <returns>Existing or newly created folder entity.</returns>
         /// <remarks>
         /// Creates intermediate folders as needed (similar to mkdir -p).
         /// Folders are virtual entities existing only in database.
@@ -605,7 +626,7 @@ namespace Farm.Web.Api.Services.Model
         /// Path validation is performed internally to prevent directory traversal attacks.
         /// Paths are normalized and validated to ensure they stay within the model storage directory.
         /// </remarks>
-        public async Task<(byte[] bytes, string fileName)?> DownloadFileAsync(string path, CancellationToken ct)
+        public async Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(path))
             {
@@ -655,10 +676,10 @@ namespace Farm.Web.Api.Services.Model
         /// <summary>
         /// Moves a 3D model file to a different virtual folder by updating its database folder reference.
         /// </summary>
-        /// <param name="modelId">GUID of the model to move</param>
-        /// <param name="targetFolderPath">Virtual path of the destination folder</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>True if the model was successfully moved; false if model was not found</returns>
+        /// <param name="modelId">GUID of the model to move.</param>
+        /// <param name="targetFolderPath">Virtual path of the destination folder.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>True if the model was successfully moved; false if model was not found.</returns>
         /// <remarks>
         /// This is a virtual move operation that only updates the model's FolderId reference in the database.
         /// The physical file remains in its original location on disk with its GUID-based filename.
@@ -669,7 +690,7 @@ namespace Farm.Web.Api.Services.Model
             try
             {
                 // Get the model from database
-                var model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
+                Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
                     _logger.LogWarning($"[MoveToFolder] Model not found: {modelId}");
@@ -677,7 +698,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 // Get or create the target folder
-                var targetFolder = await _folderManagementService.GetOrCreateFolderAsync(targetFolderPath, "models", ct);
+                FolderNode targetFolder = await _folderManagementService.GetOrCreateFolderAsync(targetFolderPath, "models", ct);
 
                 // Update the folder reference (virtual move - physical file stays in place)
                 model.FolderId = targetFolder.Id;
@@ -720,7 +741,7 @@ namespace Farm.Web.Api.Services.Model
             string? thumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id);
 
             // Map tags from the eagerly-loaded Tags collection
-            var tags = model.Tags
+            TagDto[] tags = model.Tags
                 ?.Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
                 .ToArray() ?? Array.Empty<TagDto>();
 
@@ -761,8 +782,7 @@ namespace Farm.Web.Api.Services.Model
                 IsDirectory: false,
                 ThumbnailUrl: thumbnailUrl,
                 Id: file.Id.ToString(),
-                FileType: _fileManagementService.GetModelFileFormatString(file.FileFormat)
-            );
+                FileType: _fileManagementService.GetModelFileFormatString(file.FileFormat));
         }
 
         #endregion

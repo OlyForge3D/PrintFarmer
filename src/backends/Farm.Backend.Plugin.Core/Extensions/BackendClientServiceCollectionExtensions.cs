@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Core.Extensions;
 
@@ -29,8 +30,8 @@ public static class BackendClientServiceCollectionExtensions
 
         services.AddScoped<TInterface>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
             return clientFactory(httpClient);
         });
@@ -59,10 +60,10 @@ public static class BackendClientServiceCollectionExtensions
 
         services.AddScoped<TInterface>(provider =>
         {
-            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient();
+            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient = httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            var logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<TLogger>>();
+            ILogger<TLogger>? logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<TLogger>>();
             return clientFactory(httpClient, logger);
         });
     }

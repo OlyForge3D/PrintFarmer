@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -14,6 +15,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
 {
     public string DisplayName => "PrusaLink";
+
     public PrinterBackend Backend => PrinterBackend.PrusaLink;
 
     /// <summary>
@@ -21,6 +23,8 @@ public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
     /// Score 100: Has multiple Prusa-specific fields (2-3 fields)
     /// Score 85: Has some Prusa-specific fields (1 field)
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -93,7 +97,9 @@ public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
 
                 return new ProbeResult(dto, confidence, reason);
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         return null;

@@ -43,7 +43,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
     public async Task<string?> GetProfileJsonAsync(string profileId, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
-        return _profileJsonCache.TryGetValue(profileId, out var json) ? json : null;
+        return _profileJsonCache.TryGetValue(profileId, out string? json) ? json : null;
     }
 
     /// <summary>
@@ -75,28 +75,28 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             }
 
             // Load all manufacturer bundles (e.g., Prusa.json, Elegoo.json, etc.)
-            var bundleFiles = Directory.GetFiles(_profilesPath, "*.json")
+            IEnumerable<string> bundleFiles = Directory.GetFiles(_profilesPath, "*.json")
                 .Where(f => !Path.GetFileName(f).StartsWith("index", StringComparison.OrdinalIgnoreCase))
                 .Where(f => !Path.GetFileName(f).StartsWith("official", StringComparison.OrdinalIgnoreCase));
 
-            foreach (var bundleFile in bundleFiles)
+            foreach (string bundleFile in bundleFiles)
             {
                 try
                 {
-                    var bundleJson = await File.ReadAllTextAsync(bundleFile, ct);
+                    string bundleJson = await File.ReadAllTextAsync(bundleFile, ct);
                     using var bundleDoc = JsonDocument.Parse(bundleJson);
-                    var bundleRoot = bundleDoc.RootElement;
-                    var manufacturerName = Path.GetFileNameWithoutExtension(bundleFile);
+                    JsonElement bundleRoot = bundleDoc.RootElement;
+                    string manufacturerName = Path.GetFileNameWithoutExtension(bundleFile);
 
                     // Parse machine_model_list from the bundle
-                    if (bundleRoot.TryGetProperty("machine_model_list", out var machineModelsElement) &&
+                    if (bundleRoot.TryGetProperty("machine_model_list", out JsonElement machineModelsElement) &&
                         machineModelsElement.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (var machineEntry in machineModelsElement.EnumerateArray())
+                        foreach (JsonElement machineEntry in machineModelsElement.EnumerateArray())
                         {
                             // Bundle structure: { "name": "...", "sub_path": "..." }
-                            var name = machineEntry.GetProperty("name").GetString();
-                            var subPath = machineEntry.GetProperty("sub_path").GetString();
+                            string? name = machineEntry.GetProperty("name").GetString();
+                            string? subPath = machineEntry.GetProperty("sub_path").GetString();
 
                             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(subPath))
                             {
@@ -104,7 +104,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
                             }
 
                             // Use name as the ID (OrcaSlicer bundles don't have explicit IDs)
-                            var id = name;
+                            string id = name;
 
                             // Create metadata for the machine
                             var metadata = new SlicerProfileMetadata(
@@ -142,7 +142,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         try
         {
             // Load universal filaments from OrcaFilamentLibrary directory
-            var universalFilamentsDir = Path.Combine(_profilesPath, "OrcaFilamentLibrary");
+            string universalFilamentsDir = Path.Combine(_profilesPath, "OrcaFilamentLibrary");
 
             if (!Directory.Exists(universalFilamentsDir))
             {
@@ -150,20 +150,20 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             }
 
             // Collect all filament profiles from the OrcaFilamentLibrary directory
-            var filamentsDir = Path.Combine(universalFilamentsDir, "filament");
+            string filamentsDir = Path.Combine(universalFilamentsDir, "filament");
             if (!Directory.Exists(filamentsDir))
             {
                 return;
             }
 
-            var filamentFiles = Directory.GetFiles(filamentsDir, "*.json");
+            string[] filamentFiles = Directory.GetFiles(filamentsDir, "*.json");
             var filaments = new List<object>();
 
-            foreach (var filamentsFile in filamentFiles)
+            foreach (string filamentsFile in filamentFiles)
             {
                 try
                 {
-                    var filamentsJson = await File.ReadAllTextAsync(filamentsFile, ct);
+                    string filamentsJson = await File.ReadAllTextAsync(filamentsFile, ct);
                     using var filamentsDoc = JsonDocument.Parse(filamentsJson);
                     filaments.Add(filamentsDoc.RootElement.Clone());
                 }
@@ -191,7 +191,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         {
             // Construct the full path to the profile file
             // subPath is relative to the manufacturer directory, e.g., "machine/Prusa CORE One.json"
-            var profilePath = Path.Combine(_profilesPath, manufacturerName, subPath);
+            string profilePath = Path.Combine(_profilesPath, manufacturerName, subPath);
 
             if (!File.Exists(profilePath))
             {
@@ -199,7 +199,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             }
 
             // Load and cache the full profile JSON
-            var profileJson = await File.ReadAllTextAsync(profilePath, ct);
+            string profileJson = await File.ReadAllTextAsync(profilePath, ct);
             _profileJsonCache[profileId] = profileJson;
         }
         catch

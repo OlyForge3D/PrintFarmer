@@ -12,17 +12,29 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 public interface IProcessProfileRepository
 {
     Task<ProcessProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetByUserAsync(Guid userId, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetPublicAsync(CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem, Guid? userId = null, CancellationToken ct = default);
+
     Task<ProcessProfile?> GetDefaultAsync(SlicerType engine, Guid? userId = null, CancellationToken ct = default);
+
     Task<ProcessProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
+
     Task AddAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task UpdateAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task DeleteAsync(ProcessProfile profile, CancellationToken ct = default);
+
     Task SetDefaultAsync(ProcessProfile profile, Guid? userId, CancellationToken ct = default);
+
     Task<ProcessProfile> AddOrUpdateFromImportAsync(ProcessProfile imported, bool allowSystemOverride, CancellationToken ct = default);
+
     Task<IReadOnlyList<ProcessProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default);
+
     Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
 }
 
@@ -108,6 +120,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             existing.IsDefault = false;
             existing.UpdatedAt = DateTime.UtcNow;
         }
+
         profile.IsDefault = true;
         profile.UpdatedAt = DateTime.UtcNow;
         _ = await _db.SaveChangesAsync(ct);
@@ -116,6 +129,10 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <summary>
     /// Adds a profile if hash not found, otherwise updates existing metadata if permitted.
     /// </summary>
+    /// <param name="imported">The profile to import.</param>
+    /// <param name="allowSystemOverride">Whether to allow overriding system profiles.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The added or updated profile.</returns>
     public async Task<ProcessProfile> AddOrUpdateFromImportAsync(ProcessProfile imported, bool allowSystemOverride, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(imported.Hash))
@@ -132,11 +149,13 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
             _ = await _db.SaveChangesAsync(ct);
             return imported;
         }
+
         // If existing is system and override not allowed, just return existing
         if (existing.IsSystem && !allowSystemOverride)
         {
             return existing;
         }
+
         // Update mutable fields
         existing.Name = imported.Name;
         existing.Description = imported.Description;
@@ -155,6 +174,8 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// <summary>
     /// Get all system OrcaSlicer process profiles (ordered by Quality, LayerHeight).
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of system OrcaSlicer process profiles.</returns>
     public async Task<IReadOnlyList<ProcessProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default) =>
         await _db.ProcessProfiles
             .AsNoTracking()
@@ -167,6 +188,9 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// Delete all system profiles for a given slicer engine.
     /// Returns the count of profiles deleted.
     /// </summary>
+    /// <param name="engine">The slicer engine type to delete profiles for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The count of profiles deleted.</returns>
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
         List<ProcessProfile> profilesToDelete = await _db.ProcessProfiles

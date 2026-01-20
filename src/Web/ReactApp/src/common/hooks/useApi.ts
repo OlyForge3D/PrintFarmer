@@ -2,7 +2,14 @@ import { apiClient } from '@/services/api';
 import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
 import {
   ApiError,
+  CatalogContext,
+  CreateExtruderModelDto,
+  CreateFilamentTypeRequest,
+  CreateHotendModelDto,
+  CreateNozzleModelDto,
   CreatePrinterDto,
+  CreateToolheadModelDto,
+  ExtruderModelDefinition,
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
@@ -11,8 +18,11 @@ import {
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
+  HotendModelDefinition,
   JobQueuePrintJob,
   ManufacturerDto,
+  ManufacturersByContext,
+  NozzleModelDefinition,
   PrinterCapabilitiesDto,
   PrinterModelDto,
   Printer,
@@ -20,7 +30,12 @@ import {
   PrinterDetails,
   PrinterFast,
   StartDiscoveryRequest,
+  ToolheadModelDefinition,
+  UpdateExtruderModelDto,
+  UpdateHotendModelDto,
+  UpdateNozzleModelDto,
   UpdatePrinterDto,
+  UpdateToolheadModelDefDto,
   FileHealthSummaryDto,
   FileHealthAuditDto,
   FileIssuesSummaryDto,
@@ -30,6 +45,9 @@ import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
+
+// Type alias for query options that omit queryKey and queryFn (already provided by hooks)
+type QueryOptions<TData, TError = ApiError> = Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'>;
 
 // ============ Query Keys ============
 export const queryKeys = {
@@ -42,6 +60,10 @@ export const queryKeys = {
   printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
+  hotendModels: ['hotend-models'] as const,
+  extruderModels: ['extruder-models'] as const,
+  toolheadModels: ['toolhead-models'] as const,
+  nozzleModels: ['nozzle-models'] as const,
   filamentTypes: ['filament-types'] as const,
   filamentPresets: ['presets', 'filament'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
@@ -61,7 +83,7 @@ export const queryKeys = {
 
 // ============ Printer Hooks ============
 
-export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
+export function usePrinters(options?: QueryOptions<Printer[]>) {
   return useQuery({
     queryKey: queryKeys.printers,
     queryFn: () => apiClient.getPrinters(),
@@ -70,7 +92,7 @@ export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
   });
 }
 
-export function usePrintersFast(includeDisabled = false, options?: UseQueryOptions<PrinterFast[], ApiError>) {
+export function usePrintersFast(includeDisabled = false, options?: QueryOptions<PrinterFast[]>) {
   const queryKey = includeDisabled
     ? [...queryKeys.printers, 'fast', 'include-disabled']
     : [...queryKeys.printers, 'fast'];
@@ -82,7 +104,7 @@ export function usePrintersFast(includeDisabled = false, options?: UseQueryOptio
   });
 }
 
-export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls[], ApiError>) {
+export function usePrinterCameraUrls(options?: QueryOptions<PrinterCameraUrls[]>) {
   return useQuery({
     queryKey: [...queryKeys.printers, 'camera-urls'],
     queryFn: () => apiClient.getPrinterCameraUrls(),
@@ -91,7 +113,7 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
-export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterBackendCapabilitiesDto[], ApiError>) {
+export function usePrinterBackendCapabilities(options?: QueryOptions<PrinterBackendCapabilitiesDto[]>) {
   return useQuery({
     queryKey: [...queryKeys.printers, 'backend-capabilities'],
     queryFn: () => apiClient.getPrinterBackendCapabilities(),
@@ -100,7 +122,7 @@ export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterB
   });
 }
 
-export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: UseQueryOptions<PrinterBackendCapabilitiesDto, ApiError>) {
+export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: QueryOptions<PrinterBackendCapabilitiesDto>) {
   return useQuery({
     queryKey: [...queryKeys.printers, printerId, 'backend-capabilities'],
     queryFn: () => {
@@ -171,7 +193,7 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
   }, [printersQuery.data, printersQuery.refetch, printersQuery.isLoading, printersQuery.isError, printersQuery.error, printersQuery.isSuccess, printersQuery.isFetching]);
 }
 
-export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {
+export function usePrinter(id: string, options?: QueryOptions<Printer>) {
   return useQuery({
     queryKey: queryKeys.printer(id),
     queryFn: () => apiClient.getPrinter(id),
@@ -181,7 +203,7 @@ export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiErr
   });
 }
 
-export function usePrinterDetails(id: string, options?: UseQueryOptions<PrinterDetails, ApiError>) {
+export function usePrinterDetails(id: string, options?: QueryOptions<PrinterDetails>) {
   return useQuery({
     queryKey: queryKeys.printerDetails(id),
     queryFn: () => apiClient.getPrinterDetails(id),
@@ -346,7 +368,7 @@ export function useCancelDiscoveryStream() {
 
 // ============ Catalog Hooks ============
 
-export function useManufacturers(options?: UseQueryOptions<ManufacturerDto[], ApiError>) {
+export function useManufacturers(options?: QueryOptions<ManufacturerDto[]>) {
   return useQuery({
     queryKey: queryKeys.manufacturers,
     queryFn: () => apiClient.getManufacturers(),
@@ -388,7 +410,7 @@ export function useCreateManufacturer() {
   });
 }
 
-export function useModels(manufacturerId?: string, options?: UseQueryOptions<PrinterModelDto[], ApiError>) {
+export function useModels(manufacturerId?: string, options?: QueryOptions<PrinterModelDto[]>) {
   return useQuery({
     queryKey: queryKeys.models(manufacturerId),
     queryFn: () => apiClient.getModels(manufacturerId),
@@ -397,7 +419,7 @@ export function useModels(manufacturerId?: string, options?: UseQueryOptions<Pri
   });
 }
 
-export function useModelDefaultCapabilities(modelId?: string, options?: UseQueryOptions<PrinterCapabilitiesDto | null, ApiError>) {
+export function useModelDefaultCapabilities(modelId?: string, options?: QueryOptions<PrinterCapabilitiesDto | null>) {
   return useQuery({
     queryKey: ['model-default-capabilities', modelId],
     queryFn: () => modelId ? apiClient.getModelDefaultCapabilities(modelId) : Promise.resolve(null),
@@ -444,9 +466,238 @@ export function useCreateModel() {
   });
 }
 
+// ============ Component Model Hooks ============
+
+export function useHotendModels(options?: QueryOptions<HotendModelDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.hotendModels,
+    queryFn: () => apiClient.getHotendModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useExtruderModels(options?: QueryOptions<ExtruderModelDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.extruderModels,
+    queryFn: () => apiClient.getExtruderModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useToolheadModels(options?: QueryOptions<ToolheadModelDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.toolheadModels,
+    queryFn: () => apiClient.getToolheadModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+export function useNozzleModels(options?: QueryOptions<NozzleModelDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.nozzleModels,
+    queryFn: () => apiClient.getNozzleModels(),
+    staleTime: 300000, // 5 minutes - component models change rarely
+    ...options,
+  });
+}
+
+// ============ Component Model Mutation Hooks ============
+
+// Hotend mutations
+export function useCreateHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateHotendModelDto) => apiClient.createHotendModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create hotend model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateHotendModelDto }) =>
+      apiClient.updateHotendModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update hotend model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteHotendModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteHotendModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.hotendModels });
+      toast.success('Hotend model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete hotend model: ${error.message}`);
+    },
+  });
+}
+
+// Extruder mutations
+export function useCreateExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateExtruderModelDto) => apiClient.createExtruderModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create extruder model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateExtruderModelDto }) =>
+      apiClient.updateExtruderModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update extruder model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteExtruderModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteExtruderModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extruderModels });
+      toast.success('Extruder model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete extruder model: ${error.message}`);
+    },
+  });
+}
+
+// Toolhead mutations
+export function useCreateToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateToolheadModelDto) => apiClient.createToolheadModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create toolhead model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateToolheadModelDefDto }) =>
+      apiClient.updateToolheadModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update toolhead model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteToolheadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteToolheadModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.toolheadModels });
+      toast.success('Toolhead model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete toolhead model: ${error.message}`);
+    },
+  });
+}
+
+// Nozzle mutations
+export function useCreateNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateNozzleModelDto) => apiClient.createNozzleModel(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create nozzle model: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateNozzleModelDto }) =>
+      apiClient.updateNozzleModel(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update nozzle model: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteNozzleModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNozzleModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle model deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete nozzle model: ${error.message}`);
+    },
+  });
+}
+
+// Contextual Manufacturer query
+export function useManufacturersByContext(
+  context: CatalogContext,
+  options?: QueryOptions<ManufacturersByContext>
+) {
+  return useQuery({
+    queryKey: ['manufacturers', 'by-context', context],
+    queryFn: () => apiClient.getManufacturersByContext(context),
+    staleTime: 60000, // 1 minute
+    ...options,
+  });
+}
+
 // ============ Settings Hooks ============
 
-export function useFilamentTypes(options?: UseQueryOptions<FilamentTypeDto[], ApiError>) {
+export function useFilamentTypes(options?: QueryOptions<FilamentTypeDto[]>) {
   return useQuery({
     queryKey: queryKeys.filamentTypes,
     queryFn: () => apiClient.getFilamentTypes(),
@@ -455,7 +706,7 @@ export function useFilamentTypes(options?: UseQueryOptions<FilamentTypeDto[], Ap
   });
 }
 
-export function useFilamentPresets(options?: UseQueryOptions<FilamentPresets, ApiError>) {
+export function useFilamentPresets(options?: QueryOptions<FilamentPresets>) {
   return useQuery({
     queryKey: queryKeys.filamentPresets,
     queryFn: () => apiClient.getFilamentPresets(),
@@ -488,9 +739,43 @@ export function useImportFilamentTypesFromSpoolman() {
   });
 }
 
+export function useCreateFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (dto: CreateFilamentTypeRequest) => apiClient.createFilamentType(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+    },
+  });
+}
+
+export function useUpdateFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: CreateFilamentTypeRequest }) => 
+      apiClient.updateFilamentType(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+    },
+  });
+}
+
+export function useDeleteFilamentType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteFilamentType(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+    },
+  });
+}
+
 // ============ G-code Library Hooks ============
 
-export function useGcodeFiles(page = 1, pageSize = 50, options?: UseQueryOptions<GcodeFile[], ApiError>) {
+export function useGcodeFiles(page = 1, pageSize = 50, options?: QueryOptions<GcodeFile[]>) {
   return useQuery({
     queryKey: queryKeys.gcodeFiles(page, pageSize),
     queryFn: async () => {
@@ -502,7 +787,7 @@ export function useGcodeFiles(page = 1, pageSize = 50, options?: UseQueryOptions
   });
 }
 
-export function useGcodeFile(id: string, options?: UseQueryOptions<GcodeFile, ApiError>) {
+export function useGcodeFile(id: string, options?: QueryOptions<GcodeFile>) {
   return useQuery({
     queryKey: queryKeys.gcodeFile(id),
     queryFn: () => apiClient.getGcodeFile(id),
@@ -538,7 +823,7 @@ export function useDeleteGcodeFile() {
 
 // ============ Harvest Operations Hooks ============
 
-export function useHarvestOperations(printerId?: string, options?: UseQueryOptions<GcodeHarvestOperation[], ApiError>) {
+export function useHarvestOperations(printerId?: string, options?: QueryOptions<GcodeHarvestOperation[]>) {
   return useQuery({
     queryKey: queryKeys.harvestOperations(printerId),
     queryFn: () => apiClient.getHarvestOperations(printerId),
@@ -547,7 +832,7 @@ export function useHarvestOperations(printerId?: string, options?: UseQueryOptio
   });
 }
 
-export function useHarvestOperation(id: string, options?: UseQueryOptions<GcodeHarvestOperation, ApiError>) {
+export function useHarvestOperation(id: string, options?: QueryOptions<GcodeHarvestOperation>) {
   return useQuery({
     queryKey: queryKeys.harvestOperation(id),
     queryFn: () => apiClient.getHarvestOperation(id),
@@ -597,7 +882,7 @@ export function useRestartHarvestDiscovery() {
 
 // ============ Job Queue Hooks ============
 
-export function useJobQueue(printerId?: string, options?: UseQueryOptions<JobQueuePrintJob[], ApiError>) {
+export function useJobQueue(printerId?: string, options?: QueryOptions<JobQueuePrintJob[]>) {
   return useQuery({
     queryKey: queryKeys.jobQueue(printerId),
     queryFn: () => apiClient.getJobQueue(printerId),
@@ -742,7 +1027,7 @@ export function useStartPrintFromFile() {
 
 // ============ Health Check Hooks ============
 
-export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError>) {
+export function useHealthStatus(options?: QueryOptions<HealthStatus>) {
   return useQuery({
     queryKey: queryKeys.health,
     queryFn: async () => {
@@ -777,7 +1062,7 @@ export function useHealthStatus(options?: UseQueryOptions<HealthStatus, ApiError
   });
 }
 
-export function useBasicHealth(options?: UseQueryOptions<BasicHealthStatus, ApiError>) {
+export function useBasicHealth(options?: QueryOptions<BasicHealthStatus>) {
   return useQuery({
     queryKey: ['health', 'basic'],
     queryFn: async () => {
@@ -804,7 +1089,7 @@ export function usePrinterHistory(
     before?: Date;
     order?: string;
   },
-  queryOptions?: UseQueryOptions<HistoryListResponse, ApiError>
+  queryOptions?: QueryOptions<HistoryListResponse>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistory(printerId, options),
@@ -818,7 +1103,7 @@ export function usePrinterHistory(
 export function usePrinterHistoryJob(
   printerId: string, 
   jobId: string, 
-  queryOptions?: UseQueryOptions<HistoryJob, ApiError>
+  queryOptions?: QueryOptions<HistoryJob>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistoryJob(printerId, jobId),
@@ -831,7 +1116,7 @@ export function usePrinterHistoryJob(
 
 export function usePrinterHistoryTotals(
   printerId: string,
-  queryOptions?: UseQueryOptions<HistoryTotals, ApiError>
+  queryOptions?: QueryOptions<HistoryTotals>
 ) {
   return useQuery({
     queryKey: queryKeys.printerHistoryTotals(printerId),
@@ -844,7 +1129,7 @@ export function usePrinterHistoryTotals(
 
 // ============ File Consistency Hooks ============
 
-export function useFileHealthSummary(options?: UseQueryOptions<FileHealthSummaryDto, ApiError>) {
+export function useFileHealthSummary(options?: QueryOptions<FileHealthSummaryDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.health,
     queryFn: () => apiClient.getFileHealthSummary(),
@@ -855,7 +1140,7 @@ export function useFileHealthSummary(options?: UseQueryOptions<FileHealthSummary
 
 export function useFileAuditHistory(
   pageSize: number = 20,
-  options?: UseQueryOptions<FileHealthAuditDto[], ApiError>
+  options?: QueryOptions<FileHealthAuditDto[]>
 ) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.auditHistory(pageSize),
@@ -865,7 +1150,7 @@ export function useFileAuditHistory(
   });
 }
 
-export function useFilesWithIssues(options?: UseQueryOptions<FileIssuesSummaryDto, ApiError>) {
+export function useFilesWithIssues(options?: QueryOptions<FileIssuesSummaryDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.filesWithIssues,
     queryFn: () => apiClient.getFilesWithIssues(),
@@ -874,7 +1159,7 @@ export function useFilesWithIssues(options?: UseQueryOptions<FileIssuesSummaryDt
   });
 }
 
-export function useModel3DHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+export function useModel3DHealth(id: string, options?: QueryOptions<FileHealthDetailDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.model3DHealth(id),
     queryFn: () => apiClient.getModel3DHealth(id),
@@ -884,7 +1169,7 @@ export function useModel3DHealth(id: string, options?: UseQueryOptions<FileHealt
   });
 }
 
-export function useGcodeFileHealth(id: string, options?: UseQueryOptions<FileHealthDetailDto, ApiError>) {
+export function useGcodeFileHealth(id: string, options?: QueryOptions<FileHealthDetailDto>) {
   return useQuery({
     queryKey: queryKeys.fileConsistency.gcodeFileHealth(id),
     queryFn: () => apiClient.getGcodeFileHealth(id),

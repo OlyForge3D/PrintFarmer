@@ -174,8 +174,8 @@ const BedScene: React.FC<PrinterBedVisualizationProps> = ({
       {/* Bed visualization */}
       <group ref={bedGroupRef} />
 
-      {/* Nozzle indicator */}
-      <NozzleIndicator position={nozzlePos} isActive={isActive} nozzleDiameter={printerModel.defaultNozzleDiameter || 0.4} />
+      {/* Nozzle indicator - get nozzle diameter from primary toolhead */}
+      <NozzleIndicator position={nozzlePos} isActive={isActive} nozzleDiameter={printerModel.toolheads?.find(t => t.isPrimary)?.nozzleDiameter ?? printerModel.toolheads?.[0]?.nozzleDiameter ?? 0.4} />
 
       {/* Grid/Axes debug helpers */}
       {showAxes && <axesHelper args={[100]} />}

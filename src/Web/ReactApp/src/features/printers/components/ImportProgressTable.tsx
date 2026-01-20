@@ -129,7 +129,6 @@ const ImportProgressTable: React.FC<ImportProgressTableProps> = ({ items, fileNa
         <div className="flex justify-end gap-2">
           <Button
             onClick={onCancel}
-            size="sm"
             variant={isComplete ? 'primary' : 'secondary'}
           >
             {isComplete ? 'Close' : 'Cancel'}

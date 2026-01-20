@@ -8,6 +8,7 @@ namespace Farm.Infrastructure.Settings;
 public class SystemLogSettings : ISystemSetting, IValidatableSetting
 {
     public const string SectionName = "SystemLog";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Retention Days", MinValue = 1, MaxValue = 365, Description = "Number of days to retain logs.", InputType = SettingInputType.Number)]
@@ -18,6 +19,7 @@ public class SystemLogSettings : ISystemSetting, IValidatableSetting
     [SettingDisplay(Name = "Enable Export", Description = "Allow exporting logs.", InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enableExport")]
     public bool EnableExport { get; set; } = true;
+
     public void Validate()
     {
         if (RetentionDays is < 1 or > 365)

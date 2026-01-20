@@ -30,7 +30,7 @@ public class HarvestCompletionServiceTests
             .Returns(new MockServiceProvider(_unitOfWorkMock.Object));
         serviceScopeMock.Setup(s => s.Dispose());
 
-        var asyncDisposableMock = serviceScopeMock.As<IAsyncDisposable>();
+        Mock<IAsyncDisposable> asyncDisposableMock = serviceScopeMock.As<IAsyncDisposable>();
         asyncDisposableMock.Setup(s => s.DisposeAsync())
             .Returns(new ValueTask());
 
@@ -116,7 +116,7 @@ public class HarvestCompletionServiceTests
     {
         // Arrange
         var operationId = Guid.NewGuid();
-        var operation = CreateOperation(
+        GcodeHarvestOperation operation = CreateOperation(
             operationId,
             filesFound: 10,
             filesAdded: 8,
@@ -151,7 +151,7 @@ public class HarvestCompletionServiceTests
     {
         // Arrange
         var operationId = Guid.NewGuid();
-        var operation = CreateOperation(
+        GcodeHarvestOperation operation = CreateOperation(
             operationId,
             filesFound: 10,
             filesAdded: 5,
@@ -184,7 +184,7 @@ public class HarvestCompletionServiceTests
     {
         // Arrange
         var operationId = Guid.NewGuid();
-        var operation = CreateOperation(
+        GcodeHarvestOperation operation = CreateOperation(
             operationId,
             filesFound: 10,
             filesAdded: 7,
@@ -217,8 +217,8 @@ public class HarvestCompletionServiceTests
     public async Task ExecuteAsync_WithMultipleOperations_ProcessesMostRecent()
     {
         // Arrange
-        var op1 = CreateOperation(Guid.NewGuid(), 5, 5, 0, 0);
-        var op2 = CreateOperation(Guid.NewGuid(), 10, 5, 3, 1); // Incomplete: 5+3+1=9 < 10
+        GcodeHarvestOperation op1 = CreateOperation(Guid.NewGuid(), 5, 5, 0, 0);
+        GcodeHarvestOperation op2 = CreateOperation(Guid.NewGuid(), 10, 5, 3, 1); // Incomplete: 5+3+1=9 < 10
 
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation> { op1, op2 });

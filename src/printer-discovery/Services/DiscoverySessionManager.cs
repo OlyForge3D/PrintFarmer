@@ -9,16 +9,20 @@ public interface IDiscoverySessionManager
     /// <summary>
     /// Register a new session with its cancellation token source.
     /// </summary>
+    /// <param name="sessionId">The unique identifier for the discovery session.</param>
+    /// <param name="cts">The cancellation token source for the session.</param>
     void RegisterSession(string sessionId, CancellationTokenSource cts);
 
     /// <summary>
     /// Remove a session after it completes.
     /// </summary>
+    /// <param name="sessionId">The unique identifier for the session to remove.</param>
     void RemoveSession(string sessionId);
 
     /// <summary>
     /// Cancel an active session.
     /// </summary>
+    /// <param name="sessionId">The unique identifier for the session to cancel.</param>
     /// <returns>True if the session was found and cancelled</returns>
     bool CancelSession(string sessionId);
 }

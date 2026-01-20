@@ -1,7 +1,9 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Slicers.OrcaSlicer.v2_3_1;
 using FluentAssertions;
 using Xunit;
@@ -19,9 +21,9 @@ public class OrcaSlicerProfilesProviderTests
         // Use sample profiles from the repository (real OrcaSlicer structure)
         // Test binary location: src/tests/Farm.Web.Api.Tests/bin/Release/net9.0
         // Navigate back to pfarm root (6 levels), then into sample_profiles/orcaslicer
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         // DEBUG: Verify the path exists
         if (!Directory.Exists(sampleProfilesPath))
@@ -31,14 +33,14 @@ public class OrcaSlicerProfilesProviderTests
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
-        var profiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> profiles = await provider.ListOfficialProfilesAsync();
 
         // Should load profiles from sample manufacturers (Prusa, Elegoo, Voron, etc.)
         profiles.Should().NotBeEmpty();
         profiles.Should().OnlyContain(p => !string.IsNullOrWhiteSpace(p.Id) && !string.IsNullOrWhiteSpace(p.Name));
 
         // Should find known manufacturers from samples
-        var manufacturerNames = profiles.Select(p => p.Manufacturer).Distinct();
+        IEnumerable<string?> manufacturerNames = profiles.Select(p => p.Manufacturer).Distinct();
         manufacturerNames.Should().Contain(m =>
             m.Equals("Prusa", StringComparison.OrdinalIgnoreCase) ||
             m.Equals("Elegoo", StringComparison.OrdinalIgnoreCase) ||
@@ -51,7 +53,7 @@ public class OrcaSlicerProfilesProviderTests
     {
         var provider = new OrcaSlicerProfilesProvider();
 
-        var missingProfile = await provider.GetProfileJsonAsync("missing-id-that-does-not-exist");
+        string? missingProfile = await provider.GetProfileJsonAsync("missing-id-that-does-not-exist");
 
         missingProfile.Should().BeNull();
     }
@@ -61,7 +63,7 @@ public class OrcaSlicerProfilesProviderTests
     {
         var provider = new OrcaSlicerProfilesProvider();
 
-        var version = provider.GetProfilesVersion();
+        string version = provider.GetProfilesVersion();
 
         version.Should().Be("2.3.1");
     }
@@ -70,13 +72,13 @@ public class OrcaSlicerProfilesProviderTests
     public async Task ListOfficialProfiles_IncludesPrusaCoreOneProfiles()
     {
         // Use sample profiles from the repository (real OrcaSlicer structure)
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
-        var profiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> profiles = await provider.ListOfficialProfilesAsync();
 
         // Should have Prusa CORE One machine profiles (multiple nozzle sizes)
         var prusaCoreOneProfiles = profiles
@@ -87,7 +89,7 @@ public class OrcaSlicerProfilesProviderTests
         prusaCoreOneProfiles.Should().AllSatisfy(p => p.Manufacturer.Should().Be("Prusa"));
 
         // Should have multiple nozzle size variants (at least 2: base and HF)
-        var variants = prusaCoreOneProfiles.Select(p => p.Name).Distinct().Count();
+        int variants = prusaCoreOneProfiles.Select(p => p.Name).Distinct().Count();
         variants.Should().BeGreaterThanOrEqualTo(2, "Should have base and HF variants");
     }
 
@@ -95,17 +97,17 @@ public class OrcaSlicerProfilesProviderTests
     public async Task GetProfileJsonAsync_CanLoadPrusaCoreOneProfileJson()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load all profiles
-        var profiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> profiles = await provider.ListOfficialProfilesAsync();
 
         // Get a Prusa CORE One profile (try different variants)
-        var coreOneProfile = profiles
+        SlicerProfileMetadata? coreOneProfile = profiles
             .FirstOrDefault(p => p.Name != null && (
                 p.Name.Equals("Prusa CORE One", StringComparison.OrdinalIgnoreCase) ||
                 p.Name.StartsWith("Prusa CORE One ", StringComparison.OrdinalIgnoreCase)
@@ -114,7 +116,7 @@ public class OrcaSlicerProfilesProviderTests
         coreOneProfile.Should().NotBeNull("Should find a Prusa CORE One profile");
 
         // Load its JSON
-        var profileJson = await provider.GetProfileJsonAsync(coreOneProfile!.Id);
+        string? profileJson = await provider.GetProfileJsonAsync(coreOneProfile!.Id);
 
         profileJson.Should().NotBeNullOrWhiteSpace("Should load profile JSON");
         profileJson.Should().Contain("nozzle_diameter", "Profile JSON should contain nozzle_diameter");
@@ -124,13 +126,13 @@ public class OrcaSlicerProfilesProviderTests
     public async Task GetUniversalFilamentsAsync_ReturnsFilamentProfiles()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
-        var filamentsJson = await provider.GetUniversalFilamentsAsync();
+        string? filamentsJson = await provider.GetUniversalFilamentsAsync();
 
         filamentsJson.Should().NotBeNullOrWhiteSpace("Should have universal filaments JSON");
         filamentsJson.Should().StartWith("[", "Should be a JSON array");
@@ -141,14 +143,14 @@ public class OrcaSlicerProfilesProviderTests
     public async Task PrusaCoreOneProfiles_HaveCompleteHierarchy()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load machine profiles
-        var machineProfiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Verify Prusa CORE One exists
         var coreOneMachines = machineProfiles
@@ -163,12 +165,12 @@ public class OrcaSlicerProfilesProviderTests
         coreOneMachines.Should().AllSatisfy(p => p.Manufacturer.Should().Be("Prusa"));
 
         // Verify filament profiles exist
-        var filamentsJson = await provider.GetUniversalFilamentsAsync();
+        string? filamentsJson = await provider.GetUniversalFilamentsAsync();
         filamentsJson.Should().NotBeNullOrWhiteSpace("Should have filament profiles");
 
         // Verify we can load individual profile JSONs
-        var testProfile = coreOneMachines.First();
-        var profileJson = await provider.GetProfileJsonAsync(testProfile.Id);
+        SlicerProfileMetadata testProfile = coreOneMachines.First();
+        string? profileJson = await provider.GetProfileJsonAsync(testProfile.Id);
         profileJson.Should().NotBeNullOrWhiteSpace("Should be able to load profile JSON");
 
         // All three categories should be available
@@ -180,22 +182,22 @@ public class OrcaSlicerProfilesProviderTests
     public async Task PrusaProfiles_LoadExactCountOfFilamentProfiles()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load universal filaments (parsed from all manufacturers' filament directories)
-        var filamentsJson = await provider.GetUniversalFilamentsAsync();
+        string? filamentsJson = await provider.GetUniversalFilamentsAsync();
 
         filamentsJson.Should().NotBeNullOrWhiteSpace("Should load filament profiles");
         filamentsJson.Should().StartWith("[", "Should be a JSON array");
 
         // Parse the JSON to count filaments
-        var filaments = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(filamentsJson!);
+        JsonElement filaments = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(filamentsJson!);
 
-        var filamentCount = filaments.GetArrayLength();
+        int filamentCount = filaments.GetArrayLength();
 
         // Expected: ~28 filament profiles (what's in the OrcaFilamentLibrary bundle)
         // Note: The provider loads only profiles listed in the bundle metadata,
@@ -210,20 +212,20 @@ public class OrcaSlicerProfilesProviderTests
     public async Task PrusaProfiles_CanLoadProcessProfilesFromSampleData()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load all profiles to initialize
-        var machineProfiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Verify process profiles exist in sample data
-        var processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
+        string processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
         Directory.Exists(processDir).Should().BeTrue("Sample data should have Prusa process profiles directory");
 
-        var processFiles = Directory.GetFiles(processDir, "*.json");
+        string[] processFiles = Directory.GetFiles(processDir, "*.json");
 
         // Note: The provider loads only profiles explicitly listed in the bundle metadata.
         // Sample directory has 267 usable Prusa process profiles (281 total - 14 with instantiation="false"),
@@ -232,7 +234,7 @@ public class OrcaSlicerProfilesProviderTests
         processFiles.Length.Should().BeGreaterThanOrEqualTo(260, "Should have process profiles available in sample data");
 
         // Filaments should be loadable
-        var filamentsJson = await provider.GetUniversalFilamentsAsync();
+        string? filamentsJson = await provider.GetUniversalFilamentsAsync();
         filamentsJson.Should().NotBeNullOrWhiteSpace("Should load filament profiles");
     }
 
@@ -240,14 +242,14 @@ public class OrcaSlicerProfilesProviderTests
     public async Task PrusaMK4SProfiles_HaveCompleteHierarchy()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load machine profiles
-        var machineProfiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Verify Prusa MK4S exists
         var mk4sProfiles = machineProfiles
@@ -262,13 +264,13 @@ public class OrcaSlicerProfilesProviderTests
         // Verify we can load individual MK4S profile JSONs
         if (mk4sProfiles.Any())
         {
-            var testProfile = mk4sProfiles.First();
-            var profileJson = await provider.GetProfileJsonAsync(testProfile.Id);
+            SlicerProfileMetadata testProfile = mk4sProfiles.First();
+            string? profileJson = await provider.GetProfileJsonAsync(testProfile.Id);
             profileJson.Should().NotBeNullOrWhiteSpace("Should be able to load MK4S profile JSON");
         }
 
         // Verify filament and process profiles are available
-        var filamentsJson = await provider.GetUniversalFilamentsAsync();
+        string? filamentsJson = await provider.GetUniversalFilamentsAsync();
         filamentsJson.Should().NotBeNullOrWhiteSpace("Should have filament profiles available for MK4S");
     }
 
@@ -276,14 +278,14 @@ public class OrcaSlicerProfilesProviderTests
     public async Task ListOfficialProfiles_IncludesBothCoreOneAndMK4S()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load machine profiles
-        var machineProfiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Verify both CORE One and MK4S are present in the profile list
         var coreOneProfiles = machineProfiles
@@ -320,45 +322,45 @@ public class OrcaSlicerProfilesProviderTests
     public async Task ProcessProfileFiltering_MatchesOrcaSlicerBehavior()
     {
         // Use sample profiles from the repository
-        var currentDir = Directory.GetCurrentDirectory();
-        var repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        var sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load machine profiles
-        var machineProfiles = await provider.ListOfficialProfilesAsync();
+        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Find "Prusa CORE One 0.4 nozzle" profile
-        var coreOne04NozzleProfile = machineProfiles
+        SlicerProfileMetadata? coreOne04NozzleProfile = machineProfiles
             .FirstOrDefault(p => p.Name != null && p.Name.Equals("Prusa CORE One 0.4 nozzle", StringComparison.OrdinalIgnoreCase));
 
         if (coreOne04NozzleProfile != null)
         {
             // Load the process profiles from disk to check compatible_printers_condition
-            var processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
+            string processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
 
             if (Directory.Exists(processDir))
             {
-                var processFiles = Directory.GetFiles(processDir, "*.json");
-                var compatibleCount = 0;
+                string[] processFiles = Directory.GetFiles(processDir, "*.json");
+                int compatibleCount = 0;
 
                 // Count process profiles that have "Prusa CORE One 0.4 nozzle" in their compatible_printers
-                foreach (var processFile in processFiles)
+                foreach (string processFile in processFiles)
                 {
                     try
                     {
-                        var processJson = await File.ReadAllTextAsync(processFile);
+                        string processJson = await File.ReadAllTextAsync(processFile);
                         using var doc = System.Text.Json.JsonDocument.Parse(processJson);
-                        var root = doc.RootElement;
+                        JsonElement root = doc.RootElement;
 
                         // Check if this profile is compatible with CORE One 0.4 nozzle
-                        if (root.TryGetProperty("compatible_printers", out var compatiblePrinters) &&
+                        if (root.TryGetProperty("compatible_printers", out JsonElement compatiblePrinters) &&
                             compatiblePrinters.ValueKind == System.Text.Json.JsonValueKind.Array)
                         {
-                            foreach (var printer in compatiblePrinters.EnumerateArray())
+                            foreach (JsonElement printer in compatiblePrinters.EnumerateArray())
                             {
-                                var printerName = printer.GetString();
+                                string? printerName = printer.GetString();
                                 if (printerName?.Equals(coreOne04NozzleProfile.Name, StringComparison.OrdinalIgnoreCase) == true)
                                 {
                                     compatibleCount++;
@@ -395,8 +397,8 @@ public class OrcaSlicerAssetRegistryTests
     {
         var registry = new OrcaSlicerAssetRegistry();
 
-        var asset = await registry.GetAssetAsync("unknown", "model");
-        var assets = await registry.ListAssetsAsync();
+        SlicerAsset? asset = await registry.GetAssetAsync("unknown", "model");
+        IEnumerable<SlicerAsset> assets = await registry.ListAssetsAsync();
 
         asset.Should().BeNull();
         assets.Should().BeEmpty();
@@ -420,7 +422,7 @@ public class OrcaSlicerLibraryTests
         library.ProfilesProvider.Should().NotBeNull();
         library.AssetRegistry.Should().NotBeNull();
 
-        var validation = await library.ValidateConfigAsync(new object());
+        SlicerConfigValidationResult validation = await library.ValidateConfigAsync(new object());
         validation.Should().NotBeNull();
     }
 }

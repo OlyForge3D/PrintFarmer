@@ -60,6 +60,7 @@ public partial class SlicerAdminController : ControllerBase
         {
             result.AddIssue("Template should include an {input} placeholder pointing to the model path.");
         }
+
         if (!placeholders.Contains("output", StringComparer.OrdinalIgnoreCase))
         {
             result.AddWarning("Template does not include an {output} placeholder — default output name will be used.");

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -37,10 +38,10 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task TestAsync_WithNullRequest_ReturnsBadRequest()
         {
             // Act
-            var result = await _controller.TestAsync(null, CancellationToken.None);
+            IActionResult result = await _controller.TestAsync(null, CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -50,10 +51,10 @@ namespace Farm.Web.Api.Tests.Controllers
             var request = new SpoolmanConfigDto(BaseUrl: null);
 
             // Act
-            var result = await _controller.TestAsync(request, CancellationToken.None);
+            IActionResult result = await _controller.TestAsync(request, CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -63,10 +64,10 @@ namespace Farm.Web.Api.Tests.Controllers
             var request = new SpoolmanConfigDto(BaseUrl: "");
 
             // Act
-            var result = await _controller.TestAsync(request, CancellationToken.None);
+            IActionResult result = await _controller.TestAsync(request, CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -88,10 +89,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(probeResult);
 
             // Act
-            var result = await _controller.TestAsync(request, CancellationToken.None);
+            IActionResult result = await _controller.TestAsync(request, CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
             Assert.NotNull(okResult.Value);
         }
 
@@ -105,10 +106,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .Returns(config);
 
             // Act
-            var result = _controller.GetConfig();
+            ActionResult<SpoolmanConfigDto?> result = _controller.GetConfig();
 
             // Assert
-            var okResult = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
+            ActionResult<SpoolmanConfigDto> okResult = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
             Assert.NotNull(okResult.Value);
         }
 
@@ -121,10 +122,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .Returns((SpoolmanConfigDto?)null!);
 
             // Act
-            var result = _controller.GetConfig();
+            ActionResult<SpoolmanConfigDto?> result = _controller.GetConfig();
 
             // Assert
-            var okResult = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
+            ActionResult<SpoolmanConfigDto> okResult = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
         }
 
         [Fact]
@@ -132,7 +133,7 @@ namespace Farm.Web.Api.Tests.Controllers
         {
             // Note: SetConfig has [Authorize] attribute, so direct call fails without proper auth context
             // This test verifies the method signature exists
-            var methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
+            MethodInfo? methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
             Assert.NotNull(methodInfo);
         }
 
@@ -141,9 +142,9 @@ namespace Farm.Web.Api.Tests.Controllers
         {
             // Note: SetConfig has [Authorize] attribute, so direct call fails without proper auth context
             // This test verifies the method accepts SpoolmanConfigDto
-            var methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
+            MethodInfo? methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
             Assert.NotNull(methodInfo);
-            var parameters = methodInfo?.GetParameters();
+            ParameterInfo[]? parameters = methodInfo?.GetParameters();
             Assert.NotNull(parameters);
             Assert.Single(parameters);
             Assert.Contains("SpoolmanConfigDto", parameters![0].ParameterType.Name);
@@ -164,10 +165,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(spools);
 
             // Act
-            var result = await _controller.GetSpoolsAsync(CancellationToken.None);
+            ActionResult<IEnumerable<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<ActionResult<IEnumerable<SpoolmanSpoolDto>>>(result);
+            ActionResult<IEnumerable<SpoolmanSpoolDto>> okResult = Assert.IsType<ActionResult<IEnumerable<SpoolmanSpoolDto>>>(result);
         }
 
         [Fact]
@@ -206,10 +207,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(probeResult);
 
             // Act
-            var result = await _controller.HealthAsync(CancellationToken.None);
+            IActionResult result = await _controller.HealthAsync(CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -230,20 +231,20 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(probeResult);
 
             // Act
-            var result = await _controller.HealthAsync(CancellationToken.None);
+            IActionResult result = await _controller.HealthAsync(CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
         public void ClearConfig_ReturnsNoContent()
         {
             // Act
-            var result = _controller.ClearConfig();
+            IActionResult result = _controller.ClearConfig();
 
             // Assert
-            var noContentResult = Assert.IsType<NoContentResult>(result);
+            NoContentResult noContentResult = Assert.IsType<NoContentResult>(result);
             _spoolmanServiceMock.Verify(s => s.ClearConfig(), Times.Once);
         }
 
@@ -256,10 +257,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .Throws(new InvalidOperationException("Clear failed"));
 
             // Act
-            var result = _controller.ClearConfig();
+            IActionResult result = _controller.ClearConfig();
 
             // Assert
-            var statusCodeResult = Assert.IsType<ObjectResult>(result);
+            ObjectResult statusCodeResult = Assert.IsType<ObjectResult>(result);
             Assert.Equal(500, statusCodeResult.StatusCode);
         }
 
@@ -289,10 +290,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(discoveryResults);
 
             // Act
-            var result = await _controller.ScanNetworkAsync(CancellationToken.None);
+            IActionResult result = await _controller.ScanNetworkAsync(CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -313,10 +314,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ThrowsAsync(new HttpRequestException("Network error"));
 
             // Act
-            var result = await _controller.ScanNetworkAsync(CancellationToken.None);
+            IActionResult result = await _controller.ScanNetworkAsync(CancellationToken.None);
 
             // Assert
-            var statusCodeResult = Assert.IsType<ObjectResult>(result);
+            ObjectResult statusCodeResult = Assert.IsType<ObjectResult>(result);
             Assert.Equal(500, statusCodeResult.StatusCode);
         }
 
@@ -333,10 +334,10 @@ namespace Farm.Web.Api.Tests.Controllers
                 .ReturnsAsync(new List<SpoolmanDiscoveryResult>());
 
             // Act
-            var result = await _controller.ScanNetworkAsync(CancellationToken.None);
+            IActionResult result = await _controller.ScanNetworkAsync(CancellationToken.None);
 
             // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
+            OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
         }
     }
 }

@@ -18,7 +18,7 @@ namespace Farm.Web.Api.Controllers.Slicing;
 /// <remarks>
 /// This controller delegates profile orchestration to IProfilesService, maintaining a thin controller
 /// architecture. All operations are authenticated, with most requiring farm_admin policy for security.
-/// 
+///
 /// Key responsibilities:
 /// - Profile import/export with validation and hash-based deduplication
 /// - Hierarchical profile listing with optional filtering by manufacturer/machine model
@@ -28,11 +28,11 @@ namespace Farm.Web.Api.Controllers.Slicing;
 /// - Default profile configuration per slicer type
 /// - OrcaSlicer worker integration for profile discovery
 /// - Process, machine, and filament profile management
-/// 
+///
 /// Architecture note: This controller follows thin controller pattern by delegating
 /// business logic to IProfilesService. It handles HTTP concerns (routing, status codes,
 /// error handling) while the service handles orchestration.
-/// 
+///
 /// All operations are authenticated. Most critical operations (import, bulk operations, seeding)
 /// are restricted to farm_admin policy to prevent unauthorized modifications that could affect
 /// slicing job configuration and printer compatibility.
@@ -67,7 +67,7 @@ public class ProfilesController(
     /// - Supports optional system profile override by administrators
     /// - Returns 201 Created for new profiles, 200 OK for updated existing profiles
     /// - Stores sanitized JSON for long-term storage and audit trails
-    /// 
+    ///
     /// Requires farm_admin policy for access. Profile import is logged for audit purposes.
     /// </remarks>
     [HttpPost("import")]
@@ -83,6 +83,7 @@ public class ProfilesController(
         {
             return BadRequest("rawJson is required");
         }
+
         if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType _))
         {
             return BadRequest("Invalid slicerType");
@@ -119,7 +120,7 @@ public class ProfilesController(
     /// - Extracted metadata (layer height, infill, material, quality)
     /// - Profile creation timestamp and version information
     /// - Hash for integrity verification
-    /// 
+    ///
     /// Requires farm_admin policy for access. Exports include all data necessary to
     /// recreate the profile in another installation.
     /// </remarks>
@@ -157,7 +158,7 @@ public class ProfilesController(
     /// This endpoint marks a profile as the default choice for new slicing jobs.
     /// When no specific profile is selected, the default profile is automatically used.
     /// Only one profile per slicer type can be marked as default at a time.
-    /// 
+    ///
     /// Requires farm_admin policy for access. Default profile changes are logged for audit trails.
     /// </remarks>
     [HttpPost("{id:guid}/set-default")]
@@ -218,7 +219,7 @@ public class ProfilesController(
     /// <remarks>
     /// This endpoint creates a new process profile with the specified parameters.
     /// The profile is immediately available for use in slicing jobs.
-    /// 
+    ///
     /// Requires farm_admin policy for access. Profile creation is logged for audit purposes.
     /// All required fields (name, slicer type) must be provided in the request.
     /// </remarks>
@@ -234,19 +235,23 @@ public class ProfilesController(
             {
                 return BadRequest("Request body is required");
             }
+
             if (string.IsNullOrWhiteSpace(request.Name))
             {
                 return BadRequest("Name is required");
             }
+
             if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType slicerType))
             {
                 return BadRequest("Invalid slicer type");
             }
+
             ProfileQuality quality = ProfileQuality.Standard;
             if (!string.IsNullOrWhiteSpace(request.Quality) && !Enum.TryParse(request.Quality, true, out quality))
             {
                 return BadRequest("Invalid quality setting");
             }
+
             // Map to service request and delegate creation
             CreateProcessProfileDto createReq = new CreateProcessProfileDto
             {
@@ -302,7 +307,7 @@ public class ProfilesController(
     /// <remarks>
     /// This endpoint permanently removes a profile from the system. Deleted profiles cannot
     /// be recovered. Any jobs using the deleted profile may be affected.
-    /// 
+    ///
     /// Requires farm_admin policy for access. Profile deletion is logged for audit trails.
     /// Consider archiving instead of deleting to maintain historical references.
     /// </remarks>
@@ -335,7 +340,7 @@ public class ProfilesController(
     /// - If slicerType is provided, returns only profiles for that specific slicer application
     /// - If both parameters are provided, applies both filters (AND logic)
     /// - If neither parameter is provided, returns all available profiles
-    /// 
+    ///
     /// Used for populating UI profile selectors and providing filtered profile lists based on user context
     /// and printer capabilities. Returns empty list if no profiles match the filter criteria.
     /// </remarks>
@@ -491,7 +496,7 @@ public class ProfilesController(
     /// Seed system OrcaSlicer profiles from the worker service into the database.
     /// This endpoint fetches profiles from the OrcaSlicer worker and imports them as system profiles (IsSystem=true).
     /// Use this to bootstrap the database with official OrcaSlicer profiles.
-    /// 
+    ///
     /// VERSION HANDLING:
     /// - Profiles are deduplicated by hash (Material:Quality:LayerHeight:Infill)
     /// - Version information is extracted from the OrcaSlicer worker service during seeding
@@ -586,7 +591,7 @@ public class ProfilesController(
     /// Discovers all profiles available in the running worker's local OrcaSlicer installation and prepares them for bulk import.
     /// </summary>
     /// <param name="httpClient">
-    /// HTTP client for communicating with OrcaSlicer worker service. 
+    /// HTTP client for communicating with OrcaSlicer worker service.
     /// Uses named configuration for "OrcaSlicerWorker" endpoint discovery.
     /// </param>
     /// <param name="ct">Cancellation token for aborting the discovery operation</param>
@@ -606,18 +611,18 @@ public class ProfilesController(
     /// 1. Admin calls this endpoint to fetch profiles from OrcaSlicer worker
     /// 2. User reviews available profiles and selects which ones to import
     /// 3. User calls BulkImportFromWorkerAsync with selected profiles
-    /// 
+    ///
     /// The service uses the worker registry to discover the worker URL. If no OrcaSlicer
     /// worker is registered or online, a 503 Service Unavailable is returned.
-    /// 
+    ///
     /// Profiles are fetched from the worker without storing them in the database.
     /// The worker maintains its own profile catalog which is queried on demand.
-    /// 
+    ///
     /// Only farm_admin users can call this endpoint. Worker communication is logged for audit trails.
     /// Error codes from the worker are forwarded to the caller to indicate specific failure modes.
     /// </remarks>
     /// <response code="200">
-    /// Successfully fetched profiles from OrcaSlicer worker. 
+    /// Successfully fetched profiles from OrcaSlicer worker.
     /// Returns list of ProcessProfileDto entries (may be empty if no profiles available on worker).
     /// </response>
     /// <response code="401">Unauthorized - authentication required</response>
@@ -678,7 +683,7 @@ public class ProfilesController(
     /// - Manufacturer: Profile manufacturer if available
     /// - Compatible: Boolean indicating if profile is compatible with this printer
     /// - SystemProfile: Boolean indicating if this is a built-in system profile
-    /// 
+    ///
     /// Results are pre-filtered to show only profiles compatible with the printer model.
     /// </returns>
     /// <remarks>
@@ -687,16 +692,16 @@ public class ProfilesController(
     /// - Admin calls this endpoint with printer ID to fetch compatible profiles
     /// - UI displays available profiles with compatibility indicators
     /// - User selects profiles for bulk import via BulkImportProfilesForPrinterAsync
-    /// 
+    ///
     /// Filtering logic:
     /// - Profile machine model must match printer model exactly
     /// - Profile nozzle size (if specified) must match printer's active nozzle size
     /// - Only OrcaSlicer system profiles are returned (IsSystem=true)
     /// - Results sorted by manufacturer and profile name for UI display
-    /// 
+    ///
     /// Filtering is performed in the service layer to provide flexible query capability
     /// and support future compatibility condition evaluation.
-    /// 
+    ///
     /// Only farm_admin users can call this endpoint. Returns detailed profile metadata
     /// suitable for administrative profile management interfaces.
     /// </remarks>
@@ -762,7 +767,7 @@ public class ProfilesController(
     /// 1. Admin uses SeedSystemProfilesFromWorkerAsync to pre-load profiles from worker to database
     /// 2. Admin calls GetAvailableProfilesForPrinterAsync to get compatible profiles
     /// 3. User selects profiles and calls this endpoint to bulk import them
-    /// 
+    ///
     /// Bulk import operation characteristics:
     /// - Profiles are imported for the specific printer instance
     /// - Each profile is validated before import (hash check, compatibility check)
@@ -770,13 +775,13 @@ public class ProfilesController(
     /// - Only OrcaSlicer system profiles (IsSystem=true) are imported
     /// - Import preserves profile metadata, configurations, and hierarchy
     /// - Operation is all-or-nothing: if errors occur, partial results are returned
-    /// 
+    ///
     /// Error handling:
     /// - Invalid profile IDs are tracked in error count
     /// - Duplicate profiles are skipped if SkipDuplicates=true
     /// - System profiles can be overwritten if AllowSystemOverride=true
     /// - Each error is logged with specific failure reason
-    /// 
+    ///
     /// Only farm_admin users can call this endpoint. All bulk import operations are logged
     /// for audit trails and system monitoring.
     /// </remarks>
@@ -852,7 +857,7 @@ public class ProfilesController(
     /// - User selects a similar "template" machine from system profiles
     /// - System clones all profiles from that machine for the custom printer
     /// - User can then customize individual profiles as needed
-    /// 
+    ///
     /// Clone operation characteristics:
     /// - Only process profiles are cloned (compatible with the source machine)
     /// - Cloned profiles are marked as user-owned (IsSystem=false, IsPublic=false)
@@ -860,12 +865,12 @@ public class ProfilesController(
     /// - Machine compatibility is updated to reference the custom printer
     /// - Original profiles are never modified; clones are completely independent
     /// - Deduplication prevents re-cloning if profiles already exist
-    /// 
+    ///
     /// Use cases:
     /// - Custom printer variants: User has "Prusa CORE One L" but system only has "Prusa CORE One"
     /// - Extended configurations: User clones profiles and modifies them for specific use cases
     /// - Backup/restore: Clone profiles to create backups for specific printer instances
-    /// 
+    ///
     /// Only farm_admin users can call this endpoint. Clone operations are logged for audit trails.
     /// </remarks>
     /// <response code="200">Profiles cloned successfully (may include errors in response)</response>
@@ -917,7 +922,7 @@ public class ProfilesController(
     /// 1. Fetch profiles from worker using GetAvailableProfilesFromWorkerAsync
     /// 2. User selects which profiles to import
     /// 3. Call this endpoint to import selected profiles directly from worker
-    /// 
+    ///
     /// Profiles are created as user-owned (IsSystem=false) in the database.
     /// </summary>
     /// <param name="printerId">
@@ -930,7 +935,7 @@ public class ProfilesController(
     /// - Profiles: Array of ProcessProfileDto objects from the worker to import
     /// - SkipDuplicates: If true (default), skip profiles that already exist in database by hash
     /// - AllowSystemOverride: If true, allow overwriting existing system profiles with same name
-    /// 
+    ///
     /// Each profile in the Profiles array should contain:
     /// - Name: Profile name
     /// - SlicerType: Slicer application type (OrcaSlicer)
@@ -948,20 +953,20 @@ public class ProfilesController(
     /// </returns>
     /// <remarks>
     /// This is the PRIMARY profile import workflow for most use cases:
-    /// 
+    ///
     /// Workflow steps:
     /// 1. Admin calls GetAvailableProfilesFromWorkerAsync to fetch available profiles
     /// 2. User reviews and selects profiles in the UI
     /// 3. Frontend calls this endpoint with selected profiles from step 1
     /// 4. Service imports selected profiles directly to database
     /// 5. Profiles are immediately available for slicing jobs
-    /// 
+    ///
     /// Advantages of this workflow vs. seed + import:
     /// - Direct import is faster (no intermediate storage in database)
     /// - User selects only profiles they need (no need to pre-seed all)
     /// - Worker profiles are always fresh (not cached in database)
     /// - Simpler workflow for most administrators
-    /// 
+    ///
     /// Import operation characteristics:
     /// - Profiles are imported from worker (network I/O required)
     /// - Each profile is validated and hashed before import
@@ -969,20 +974,20 @@ public class ProfilesController(
     /// - Profiles are stored as user-owned (IsSystem=false, IsPublic=false)
     /// - Profiles are immediately searchable and usable in slicing jobs
     /// - Full operation is logged for audit trails
-    /// 
+    ///
     /// Error handling:
     /// - Invalid profiles are tracked separately (error count)
     /// - Duplicate profiles are skipped if SkipDuplicates=true
     /// - Each error is logged with specific failure reason
     /// - Operation returns partial results if errors occur
     /// - Failed profiles are reported but don't stop the import process
-    /// 
+    ///
     /// Security:
     /// - Only farm_admin users can call this endpoint
     /// - Imported profiles are validated against slicer type compatibility
     /// - Printer association ensures profiles are scoped appropriately
     /// - All operations are logged for audit trails
-    /// 
+    ///
     /// Performance considerations:
     /// - Bulk import is optimized for importing 10-100+ profiles efficiently
     /// - Network latency is minimized by importing all profiles in one request

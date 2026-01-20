@@ -33,6 +33,7 @@ namespace Farm.Web.Api.Services.SlicerServices
                 // WorkerId may be a GUID string in the shared model; try fallback
                 wid = Guid.NewGuid();
             }
+
             SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
             return job == null ? null : ToDistributedJob(job);
         }
@@ -106,6 +107,7 @@ namespace Farm.Web.Api.Services.SlicerServices
         public Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(job);
+
             // Bump retry and set status back to queued via repository
             return _repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3, ct: cancellationToken);
         }

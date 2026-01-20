@@ -157,7 +157,7 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
             .ToListAsync(ct);
 
         // Apply client-side filtering for case-insensitive search
-        var query = allFiles.AsEnumerable();
+        IEnumerable<HarvestDiscoveredFile> query = allFiles.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(search))
         {
             string term = search.Trim().ToLowerInvariant();
@@ -226,6 +226,7 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
         };
 
         _ = await _db.HarvestFileGcodeFileMappings.AddAsync(mapping, ct);
+
         // Do NOT save here - let the caller save when all changes are ready
         // This prevents transaction issues with concurrent imports
     }

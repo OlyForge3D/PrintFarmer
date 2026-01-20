@@ -14,10 +14,12 @@ public interface IPrinterStatusCacheWriter
     /// Update the cached status for a printer.
     /// Called by backend polling services after receiving status updates.
     /// </summary>
+    /// <param name="status">The printer status data to cache.</param>
     void UpdateStatus(PrinterStatusDto status);
 
     /// <summary>
     /// Update multiple printer statuses at once.
     /// </summary>
+    /// <param name="statuses">The collection of printer status data to cache.</param>
     void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses);
 }

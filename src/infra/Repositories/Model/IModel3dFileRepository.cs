@@ -84,7 +84,7 @@ public interface IModel3DFileRepository
     /// <param name="pageSize">Number of items per page</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Tuple of (models list, total count) for the query before pagination</returns>
-    Task<(List<Model3D> models, int totalCount)> QueryModelsAsync(
+    Task<(List<Model3D> Models, int TotalCount)> QueryModelsAsync(
         string? path,
         string? search,
         Guid[]? tagIds,

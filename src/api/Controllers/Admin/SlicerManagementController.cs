@@ -32,6 +32,7 @@ public class SlicerManagementController(ISlicersService service, ILogger<SlicerM
     /// <summary>
     /// Admin endpoint to force rotate a service's API key (for security incidents)
     /// </summary>
+    /// <param name="id">The unique identifier of the slicer service.</param>
     [HttpPost("{id}/admin-rotate-key")]
     public async Task<IActionResult> AdminRotateApiKeyAsync(Guid id)
     {
@@ -44,6 +45,7 @@ public class SlicerManagementController(ISlicersService service, ILogger<SlicerM
     /// <summary>
     /// Admin endpoint to forcibly deregister a service (for maintenance/security)
     /// </summary>
+    /// <param name="id">The unique identifier of the slicer service to deregister.</param>
     [HttpDelete("{id}")]
     public async Task<IActionResult> AdminDeregisterAsync(Guid id)
     {

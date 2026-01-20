@@ -32,7 +32,7 @@ public class CatalogService(
     private Dictionary<string, ManufacturerDto?>? _manufacturerNameCache;
     private Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>? _modelNameCache;
 
-    public async Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
+    public async Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         try
         {
@@ -103,7 +103,7 @@ public class CatalogService(
         return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name, m.Value.Url, m.Value.Description);
     }
 
-    public async Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         return await _cacheProvider.GetModelsAsync(manufacturerId, ct);
     }
@@ -122,7 +122,13 @@ public class CatalogService(
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -161,7 +167,13 @@ public class CatalogService(
             MaxY = maxY,
             MaxZ = maxZ,
             DefaultBackend = defaultBackend.HasValue ? (int)defaultBackend.Value : (int?)null,
-            DefaultNozzleDiameter = defaultNozzleDiameter
+            HasHeatedBed = hasHeatedBed ?? true,
+            HasEnclosure = hasEnclosure ?? false,
+            MultiMaterial = multiMaterial ?? false,
+            NumberOfExtruders = numberOfExtruders ?? 1,
+            SupportsAutoLeveling = supportsAutoLeveling ?? false,
+            MaxBedTemp = maxBedTemp,
+            MaxPrintSpeed = maxPrintSpeed
         };
 
         await _repo.AddModelAsync(model, ct);
@@ -218,7 +230,14 @@ public class CatalogService(
         double? maxZ,
         PrinterBackend? defaultBackend,
         Guid[]? supportedFilamentTypeIds,
-        double? defaultNozzleDiameter,
+        bool? hasHeatedBed,
+        bool? hasEnclosure,
+        bool? multiMaterial,
+        int? numberOfExtruders,
+        bool? supportsAutoLeveling,
+        int? maxBedTemp,
+        int? maxPrintSpeed,
+        PrinterModelToolheadDto[]? toolheads,
         CancellationToken ct)
     {
         PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
@@ -241,9 +260,40 @@ public class CatalogService(
         model.MaxZ = maxZ;
         model.DefaultBackend = defaultBackend.HasValue ? (int)defaultBackend.Value : (int?)null;
 
-        if (defaultNozzleDiameter.HasValue)
+        // Update capability fields
+        if (hasHeatedBed.HasValue)
         {
-            model.DefaultNozzleDiameter = defaultNozzleDiameter.Value;
+            model.HasHeatedBed = hasHeatedBed.Value;
+        }
+
+        if (hasEnclosure.HasValue)
+        {
+            model.HasEnclosure = hasEnclosure.Value;
+        }
+
+        if (multiMaterial.HasValue)
+        {
+            model.MultiMaterial = multiMaterial.Value;
+        }
+
+        if (numberOfExtruders.HasValue)
+        {
+            model.NumberOfExtruders = numberOfExtruders.Value;
+        }
+
+        if (supportsAutoLeveling.HasValue)
+        {
+            model.SupportsAutoLeveling = supportsAutoLeveling.Value;
+        }
+
+        if (maxBedTemp.HasValue)
+        {
+            model.MaxBedTemp = maxBedTemp.Value;
+        }
+
+        if (maxPrintSpeed.HasValue)
+        {
+            model.MaxPrintSpeed = maxPrintSpeed.Value;
         }
 
         if (supportedFilamentTypeIds != null)
@@ -254,19 +304,17 @@ public class CatalogService(
             await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);
         }
 
+        // Update toolheads if provided
+        if (toolheads != null)
+        {
+            await _repo.UpdateModelToolheadsAsync(model.Id, toolheads, ct);
+        }
+
         await _repo.SaveChangesAsync(ct);
         _cacheProvider.InvalidateModels(model.ManufacturerId);
 
-        return new PrinterModelDto(
-            model.Id,
-            model.Name,
-            model.ManufacturerId,
-            model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null,
-            model.MaxX,
-            model.MaxY,
-            model.MaxZ,
-            model.DefaultBackend.HasValue ? (PrinterBackend)model.DefaultBackend.Value : (PrinterBackend?)null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
+        // Re-fetch model to get updated toolheads
+        return await GetModelByIdAsync(model.Id, ct);
     }
 
     public async Task DeleteModelAsync(Guid id, CancellationToken ct)
@@ -309,6 +357,8 @@ public class CatalogService(
     }
 
     /// <summary>Finds a manufacturer by name with caching. Returns null if not found.</summary>
+    /// <param name="name">The manufacturer name to search for</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct)
     {
         // Initialize cache on first use
@@ -318,7 +368,7 @@ public class CatalogService(
         }
 
         // Check cache first
-        if (_manufacturerNameCache.TryGetValue(name, out var cached))
+        if (_manufacturerNameCache.TryGetValue(name, out ManufacturerDto? cached))
         {
             return cached;
         }
@@ -334,6 +384,9 @@ public class CatalogService(
     }
 
     /// <summary>Finds a printer model by name and manufacturer ID with caching. Returns null if not found.</summary>
+    /// <param name="name">The model name to search for</param>
+    /// <param name="manufacturerId">The manufacturer ID to filter by</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<PrinterModelDto?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct)
     {
         // Initialize cache on first use
@@ -342,10 +395,10 @@ public class CatalogService(
             _modelNameCache = new Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>();
         }
 
-        var cacheKey = (manufacturerId, name);
+        (Guid manufacturerId, string name) cacheKey = (manufacturerId, name);
 
         // Check cache first
-        if (_modelNameCache.TryGetValue(cacheKey, out var cached))
+        if (_modelNameCache.TryGetValue(cacheKey, out PrinterModelDto? cached))
         {
             return cached;
         }
@@ -370,6 +423,7 @@ public class CatalogService(
     }
 
     /// <summary>Gets the default (Unknown) manufacturer and model IDs with caching.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct)
     {
         // Return cached values if available
@@ -383,6 +437,7 @@ public class CatalogService(
         {
             throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
         }
+
         _cachedUnknownMfgId = unknownMfgId;
 
         Guid? unknownModelId = _cachedUnknownModelId ?? await _repo.GetUnknownModelIdAsync(ct);
@@ -390,17 +445,20 @@ public class CatalogService(
         {
             throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
         }
+
         _cachedUnknownModelId = unknownModelId;
 
         return (unknownMfgId.Value, unknownModelId.Value);
     }
 
     /// <summary>Gets all slicer model name aliases for a printer model.</summary>
+    /// <param name="modelId">The printer model ID to get aliases for</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
     {
         try
         {
-            var aliases = await _repo.GetModelAliasesAsync(modelId, ct);
+            List<PrinterModelAlias> aliases = await _repo.GetModelAliasesAsync(modelId, ct);
             return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
         }
         catch (Exception ex)
@@ -411,11 +469,15 @@ public class CatalogService(
     }
 
     /// <summary>Updates slicer model name aliases for a printer model.</summary>
+    /// <param name="modelId">The printer model ID to update aliases for</param>
+    /// <param name="orcaSlicerNames">The list of OrcaSlicer model names</param>
+    /// <param name="prusaSlicerNames">The list of PrusaSlicer model names</param>
+    /// <param name="ct">Cancellation token for async operation</param>
     public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
     {
         try
         {
-            var aliases = await _repo.UpdateModelAliasesAsync(modelId, orcaSlicerNames ?? new List<string>(), prusaSlicerNames ?? new List<string>(), ct);
+            List<PrinterModelAlias> aliases = await _repo.UpdateModelAliasesAsync(modelId, orcaSlicerNames ?? new List<string>(), prusaSlicerNames ?? new List<string>(), ct);
             await _repo.SaveChangesAsync(ct);
             return aliases.Select(a => new SlicerModelAliasDto(a.Id, a.PrinterModelId, a.SlicerModelName, a.SlicerType));
         }
@@ -425,4 +487,550 @@ public class CatalogService(
             throw;
         }
     }
+
+    // ============ Component Model Methods ============
+
+    /// <summary>Gets all hotend model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    public async Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> hotends = await _repo.GetHotendModelsAsync(ct);
+            return hotends.Select(h => new HotendModelDto(
+                h.Id,
+                h.Name,
+                h.ManufacturerId,
+                h.ManufacturerName,
+                h.MaxTemp,
+                h.IsHighFlow,
+                h.NozzleInterface,
+                h.Description,
+                h.Url)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetHotendModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all extruder model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    public async Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)> extruders = await _repo.GetExtruderModelsAsync(ct);
+            return extruders.Select(e => new ExtruderModelDto(
+                e.Id,
+                e.Name,
+                e.ManufacturerId,
+                e.ManufacturerName,
+                e.GearRatio,
+                e.IsDirectDrive,
+                e.Description,
+                e.Url)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetExtruderModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all toolhead model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    public async Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url, Guid? DefaultHotendId, Guid? DefaultExtruderId, Guid? DefaultNozzleId)> toolheads = await _repo.GetToolheadModelsAsync(ct);
+            return toolheads.Select(t => new ToolheadModelDto(
+                t.Id,
+                t.Name,
+                t.ManufacturerId,
+                t.ManufacturerName,
+                t.Description,
+                t.Url,
+                t.DefaultHotendId,
+                t.DefaultExtruderId,
+                t.DefaultNozzleId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetToolheadModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Gets all nozzle model definitions.</summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    public async Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            return nozzles.Select(n => new NozzleModelDto(
+                n.Id,
+                n.Name,
+                n.ManufacturerId,
+                n.ManufacturerName,
+                n.Diameter,
+                n.MaxTemp,
+                n.NozzleType,
+                n.IsHardened,
+                n.NozzleInterface,
+                n.Description,
+                n.Url)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CatalogService] GetNozzleModelsAsync failed: " + ex.Message);
+            throw;
+        }
+    }
+
+    // ============ Component Model CRUD Methods ============
+    #region Hotend Model CRUD
+
+    public async Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new ArgumentException("Name is required", nameof(dto));
+        }
+
+        bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
+        if (!mfgExists)
+        {
+            throw new KeyNotFoundException("Manufacturer not found");
+        }
+
+        Domain.HotendModelDefinition model = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            ManufacturerId = dto.ManufacturerId,
+            MaxTemp = dto.MaxTemp,
+            IsHighFlow = dto.IsHighFlow,
+            NozzleInterface = dto.NozzleInterface,
+            Description = dto.Description,
+            Url = dto.Url
+        };
+
+        await _repo.AddHotendModelAsync(model, ct);
+        _logger.LogInformation($"Created hotend model '{model.Name}' with ID {model.Id}");
+
+        // Fetch with manufacturer info
+        Domain.HotendModelDefinition? created = await _repo.GetHotendModelByIdAsync(model.Id, ct);
+        return new HotendModelDto(
+            created!.Id, created.Name, created.ManufacturerId,
+            created.Manufacturer?.Name, created.MaxTemp, created.IsHighFlow,
+            created.NozzleInterface, created.Description, created.Url);
+    }
+
+    public async Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct)
+    {
+        Domain.HotendModelDefinition? model = await _repo.GetHotendModelByIdAsync(id, ct);
+        if (model is null)
+        {
+            return null;
+        }
+
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
+        if (dto.ManufacturerId.HasValue)
+        {
+            bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
+            if (!mfgExists)
+            {
+                throw new KeyNotFoundException("Manufacturer not found");
+            }
+
+            model.ManufacturerId = dto.ManufacturerId.Value;
+        }
+
+        if (dto.MaxTemp.HasValue)
+        {
+            model.MaxTemp = dto.MaxTemp;
+        }
+
+        if (dto.IsHighFlow.HasValue)
+        {
+            model.IsHighFlow = dto.IsHighFlow.Value;
+        }
+
+        if (dto.NozzleInterface.HasValue)
+        {
+            model.NozzleInterface = dto.NozzleInterface.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
+
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Updated hotend model '{model.Name}' with ID {model.Id}");
+
+        // Re-fetch to get updated manufacturer navigation property
+        model = await _repo.GetHotendModelByIdAsync(id, ct);
+        return new HotendModelDto(
+            model!.Id, model.Name, model.ManufacturerId,
+            model.Manufacturer?.Name, model.MaxTemp, model.IsHighFlow,
+            model.NozzleInterface, model.Description, model.Url);
+    }
+
+    public async Task DeleteHotendModelAsync(Guid id, CancellationToken ct)
+    {
+        await _repo.RemoveHotendModelAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Deleted hotend model with ID {id}");
+    }
+
+    #endregion
+
+    #region Extruder Model CRUD
+
+    public async Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new ArgumentException("Name is required", nameof(dto));
+        }
+
+        bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
+        if (!mfgExists)
+        {
+            throw new KeyNotFoundException("Manufacturer not found");
+        }
+
+        Domain.ExtruderModelDefinition model = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            ManufacturerId = dto.ManufacturerId,
+            GearRatio = dto.GearRatio,
+            IsDirectDrive = dto.IsDirectDrive,
+            Description = dto.Description,
+            Url = dto.Url
+        };
+
+        await _repo.AddExtruderModelAsync(model, ct);
+        _logger.LogInformation($"Created extruder model '{model.Name}' with ID {model.Id}");
+
+        Domain.ExtruderModelDefinition? created = await _repo.GetExtruderModelByIdAsync(model.Id, ct);
+        return new ExtruderModelDto(
+            created!.Id, created.Name, created.ManufacturerId,
+            created.Manufacturer?.Name, created.GearRatio, created.IsDirectDrive,
+            created.Description, created.Url);
+    }
+
+    public async Task<ExtruderModelDto?> UpdateExtruderModelAsync(Guid id, UpdateExtruderModelDto dto, CancellationToken ct)
+    {
+        Domain.ExtruderModelDefinition? model = await _repo.GetExtruderModelByIdAsync(id, ct);
+        if (model is null)
+        {
+            return null;
+        }
+
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
+        if (dto.ManufacturerId.HasValue)
+        {
+            bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
+            if (!mfgExists)
+            {
+                throw new KeyNotFoundException("Manufacturer not found");
+            }
+
+            model.ManufacturerId = dto.ManufacturerId.Value;
+        }
+
+        if (dto.GearRatio is not null)
+        {
+            model.GearRatio = dto.GearRatio;
+        }
+
+        if (dto.IsDirectDrive.HasValue)
+        {
+            model.IsDirectDrive = dto.IsDirectDrive.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
+
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Updated extruder model '{model.Name}' with ID {model.Id}");
+
+        // Re-fetch to get updated manufacturer navigation property
+        model = await _repo.GetExtruderModelByIdAsync(id, ct);
+        return new ExtruderModelDto(
+            model!.Id, model.Name, model.ManufacturerId,
+            model.Manufacturer?.Name, model.GearRatio, model.IsDirectDrive,
+            model.Description, model.Url);
+    }
+
+    public async Task DeleteExtruderModelAsync(Guid id, CancellationToken ct)
+    {
+        await _repo.RemoveExtruderModelAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Deleted extruder model with ID {id}");
+    }
+
+    #endregion
+
+    #region Toolhead Model CRUD
+
+    public async Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new ArgumentException("Name is required", nameof(dto));
+        }
+
+        bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
+        if (!mfgExists)
+        {
+            throw new KeyNotFoundException("Manufacturer not found");
+        }
+
+        Domain.ToolheadModelDefinition model = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            ManufacturerId = dto.ManufacturerId,
+            Description = dto.Description,
+            Url = dto.Url
+        };
+
+        await _repo.AddToolheadModelAsync(model, ct);
+        _logger.LogInformation($"Created toolhead model '{model.Name}' with ID {model.Id}");
+
+        Domain.ToolheadModelDefinition? created = await _repo.GetToolheadModelByIdAsync(model.Id, ct);
+        return new ToolheadModelDto(
+            created!.Id, created.Name, created.ManufacturerId,
+            created.Manufacturer?.Name, created.Description, created.Url);
+    }
+
+    public async Task<ToolheadModelDto?> UpdateToolheadModelAsync(Guid id, UpdateToolheadModelDefDto dto, CancellationToken ct)
+    {
+        Domain.ToolheadModelDefinition? model = await _repo.GetToolheadModelByIdAsync(id, ct);
+        if (model is null)
+        {
+            return null;
+        }
+
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
+        if (dto.ManufacturerId.HasValue)
+        {
+            bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
+            if (!mfgExists)
+            {
+                throw new KeyNotFoundException("Manufacturer not found");
+            }
+
+            model.ManufacturerId = dto.ManufacturerId.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
+
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Updated toolhead model '{model.Name}' with ID {model.Id}");
+
+        // Re-fetch to get updated manufacturer navigation property
+        model = await _repo.GetToolheadModelByIdAsync(id, ct);
+        return new ToolheadModelDto(
+            model!.Id, model.Name, model.ManufacturerId,
+            model.Manufacturer?.Name, model.Description, model.Url);
+    }
+
+    public async Task DeleteToolheadModelAsync(Guid id, CancellationToken ct)
+    {
+        await _repo.RemoveToolheadModelAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Deleted toolhead model with ID {id}");
+    }
+
+    #endregion
+
+    #region Nozzle Model CRUD
+
+    public async Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new ArgumentException("Name is required", nameof(dto));
+        }
+
+        bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId, ct);
+        if (!mfgExists)
+        {
+            throw new KeyNotFoundException("Manufacturer not found");
+        }
+
+        Domain.NozzleModelDefinition model = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = dto.Name.Trim(),
+            ManufacturerId = dto.ManufacturerId,
+            Diameter = dto.Diameter,
+            MaxTemp = dto.MaxTemp,
+            NozzleType = dto.NozzleType,
+            NozzleInterface = dto.NozzleInterface,
+            Description = dto.Description,
+            Url = dto.Url
+        };
+
+        await _repo.AddNozzleModelAsync(model, ct);
+        _logger.LogInformation($"Created nozzle model '{model.Name}' with ID {model.Id}");
+
+        Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
+        return new NozzleModelDto(
+            created!.Id, created.Name, created.ManufacturerId,
+            created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType, created.IsHardened,
+            created.NozzleInterface, created.Description, created.Url);
+    }
+
+    public async Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct)
+    {
+        Domain.NozzleModelDefinition? model = await _repo.GetNozzleModelByIdAsync(id, ct);
+        if (model is null)
+        {
+            return null;
+        }
+
+        if (dto.Name is not null)
+        {
+            model.Name = dto.Name.Trim();
+        }
+
+        if (dto.ManufacturerId.HasValue)
+        {
+            bool mfgExists = await _repo.ManufacturerExistsAsync(dto.ManufacturerId.Value, ct);
+            if (!mfgExists)
+            {
+                throw new KeyNotFoundException("Manufacturer not found");
+            }
+
+            model.ManufacturerId = dto.ManufacturerId.Value;
+        }
+
+        if (dto.Diameter.HasValue)
+        {
+            model.Diameter = dto.Diameter.Value;
+        }
+
+        if (dto.MaxTemp.HasValue)
+        {
+            model.MaxTemp = dto.MaxTemp;
+        }
+
+        if (dto.NozzleType.HasValue)
+        {
+            model.NozzleType = dto.NozzleType.Value;
+        }
+
+        if (dto.NozzleInterface.HasValue)
+        {
+            model.NozzleInterface = dto.NozzleInterface.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            model.Description = dto.Description;
+        }
+
+        if (dto.Url is not null)
+        {
+            model.Url = dto.Url;
+        }
+
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Updated nozzle model '{model.Name}' with ID {model.Id}");
+
+        // Re-fetch to get updated manufacturer navigation property
+        model = await _repo.GetNozzleModelByIdAsync(id, ct);
+        return new NozzleModelDto(
+            model!.Id, model.Name, model.ManufacturerId,
+            model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType, model.IsHardened,
+            model.NozzleInterface, model.Description, model.Url);
+    }
+
+    public async Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)
+    {
+        await _repo.RemoveNozzleModelAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation($"Deleted nozzle model with ID {id}");
+    }
+
+    #endregion
+
+    #region Contextual Manufacturer Methods
+
+    public async Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
+    {
+        IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)> manufacturers = await _repo.GetManufacturersAsync(ct);
+
+        List<ManufacturerWithCountDto> withItems = [];
+        List<ManufacturerWithCountDto> withoutItems = [];
+
+        foreach ((Guid Id, string Name, string? Url, string? Description) mfg in manufacturers)
+        {
+            int count = context switch
+            {
+                CatalogContext.Printers => await _repo.CountPrinterModelsByManufacturerAsync(mfg.Id, ct),
+                CatalogContext.Hotends => await _repo.CountHotendModelsByManufacturerAsync(mfg.Id, ct),
+                CatalogContext.Extruders => await _repo.CountExtruderModelsByManufacturerAsync(mfg.Id, ct),
+                CatalogContext.Toolheads => await _repo.CountToolheadModelsByManufacturerAsync(mfg.Id, ct),
+                CatalogContext.Nozzles => await _repo.CountNozzleModelsByManufacturerAsync(mfg.Id, ct),
+                _ => throw new ArgumentOutOfRangeException(nameof(context))
+            };
+
+            ManufacturerWithCountDto dto = new(mfg.Id, mfg.Name, count);
+            if (count > 0)
+            {
+                withItems.Add(dto);
+            }
+            else
+            {
+                withoutItems.Add(dto);
+            }
+        }
+
+        return new ManufacturersByContextDto(withItems, withoutItems);
+    }
+
+    #endregion
 }

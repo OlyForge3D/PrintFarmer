@@ -57,12 +57,51 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         {
             return;
         }
+
         // Remove existing
         _db.PrinterModelFilamentTypes.RemoveRange(model.SupportedFilamentTypes);
+
         // Add new
         foreach (Guid filamentTypeId in filamentTypeIds)
         {
             _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
+        }
+    }
+
+    public async Task UpdateModelToolheadsAsync(Guid modelId, PrinterModelToolheadDto[] toolheads, CancellationToken ct = default)
+    {
+        PrinterModel? model = await _db.PrinterModels.Include(m => m.Toolheads).FirstOrDefaultAsync(m => m.Id == modelId, ct);
+        if (model is null)
+        {
+            return;
+        }
+
+        // Remove existing toolheads
+        _db.PrinterModelToolheads.RemoveRange(model.Toolheads);
+
+        // Add new toolheads
+        foreach (PrinterModelToolheadDto th in toolheads)
+        {
+            // Use the provided ID or generate a new one if it's empty
+            Guid toolheadId = th.Id == Guid.Empty ? Guid.NewGuid() : th.Id;
+            _ = _db.PrinterModelToolheads.Add(new PrinterModelToolhead
+            {
+                Id = toolheadId,
+                PrinterModelId = modelId,
+                Name = th.Name,
+                Index = th.Index,
+                MaxHotendTemp = th.MaxHotendTemp,
+                MaxFlowRate = th.MaxFlowRate,
+                ToolheadType = th.ToolheadType.HasValue ? (int)th.ToolheadType.Value : null,
+
+                // Component model references - nozzle diameter is derived from NozzleModel.Diameter
+                HotendModelId = th.HotendModelId,
+                ExtruderModelId = th.ExtruderModelId,
+                ToolheadModelDefId = th.ToolheadModelDefId,
+                NozzleModelId = th.NozzleModelId,
+                SupportedMaterials = th.SupportedMaterials ?? [],
+                IsPrimary = th.IsPrimary
+            });
         }
     }
 
@@ -73,6 +112,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         {
             q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
         }
+
         List<PrinterModel> models = await q.ToListAsync(ct);
         List<PrinterModelDto> list = models.Select(m => new PrinterModelDto(
             m.Id,
@@ -83,26 +123,66 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.MaxY,
             m.MaxZ,
             m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
-            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()
-        )).ToList();
+            m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+            m.HasHeatedBed,
+            m.HasEnclosure,
+            m.MultiMaterial,
+            m.NumberOfExtruders,
+            m.SupportsAutoLeveling,
+            m.MaxBedTemp,
+            m.MaxPrintSpeed)).ToList();
         return list;
     }
 
     public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
     {
-        PrinterModel? model = await _db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsSplitQuery()
+        PrinterModel? model = await _db.PrinterModels.AsNoTracking()
+            .Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            .Include(m => m.Toolheads).ThenInclude(t => t.HotendModel)
+            .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
+            .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
+            .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id, ct);
         return model is null
             ? null
-            : new PrinterModelDto(model.Id,
-            model.Name,
-            model.ManufacturerId,
-            model.MotionType.HasValue ? (MotionType?)model.MotionType.Value : null,
-            model.MaxX,
-            model.MaxY,
-            model.MaxZ,
-            model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
-            model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
+            : new PrinterModelDto(
+                model.Id,
+                model.Name,
+                model.ManufacturerId,
+                model.MotionType.HasValue ? (MotionType?)model.MotionType.Value : null,
+                model.MaxX,
+                model.MaxY,
+                model.MaxZ,
+                model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
+                model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray(),
+                model.HasHeatedBed,
+                model.HasEnclosure,
+                model.MultiMaterial,
+                model.NumberOfExtruders,
+                model.SupportsAutoLeveling,
+                model.MaxBedTemp,
+                model.MaxPrintSpeed,
+                model.Toolheads.Select(t => new PrinterModelToolheadDto(
+                    t.Id,
+                    t.Name,
+                    t.Index,
+                    t.MaxHotendTemp,
+                    t.MaxFlowRate,
+                    t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+
+                    // Component model references - nozzle diameter comes from NozzleModel.Diameter
+                    t.HotendModelId,
+                    t.HotendModel?.Name,
+                    t.ExtruderModelId,
+                    t.ExtruderModel?.Name,
+                    t.ToolheadModelDefId,
+                    t.ToolheadModelDef?.Name,
+                    t.NozzleModelId,
+                    t.NozzleModel?.Name,
+                    t.NozzleModel?.Diameter,
+                    t.SupportedMaterials,
+                    t.IsPrimary)).OrderBy(t => t.Index).ToArray());
     }
 
     public async Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
@@ -156,6 +236,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     /// Finds a manufacturer by exact name match for import/lookup purposes (read-only, no creation).
     /// Returns the Manufacturer entity if found, null otherwise.
     /// </summary>
+    /// <param name="name">The exact name of the manufacturer to find.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default)
     {
         return await _db.Manufacturers
@@ -167,6 +249,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     /// Finds a printer model by exact name match within a specific manufacturer for import/lookup purposes (read-only, no creation).
     /// Returns the PrinterModel entity if found, null otherwise.
     /// </summary>
+    /// <param name="name">The exact name of the printer model to find.</param>
+    /// <param name="manufacturerId">The ID of the manufacturer to search within.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
     public async Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default)
     {
         return await _db.PrinterModels
@@ -190,7 +275,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             .ExecuteDeleteAsync(ct);
 
         // Add new OrcaSlicer aliases
-        foreach (var name in orcaSlicerNames ?? new List<string>())
+        foreach (string name in orcaSlicerNames ?? new List<string>())
         {
             _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
@@ -203,7 +288,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         }
 
         // Add new PrusaSlicer aliases
-        foreach (var name in prusaSlicerNames ?? new List<string>())
+        foreach (string name in prusaSlicerNames ?? new List<string>())
         {
             _db.PrinterModelAliases.Add(new Domain.PrinterModelAlias
             {
@@ -220,5 +305,183 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             .Where(a => a.PrinterModelId == modelId)
             .ToListAsync(ct);
     }
-}
 
+    // ============ Component Model Methods ============
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, int? MaxTemp, bool IsHighFlow, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetHotendModelsAsync(CancellationToken ct = default)
+    {
+        List<HotendModelDefinition> hotends = await _db.HotendModelDefinitions
+            .Include(h => h.Manufacturer)
+            .AsNoTracking()
+            .OrderBy(h => h.Manufacturer!.Name)
+            .ThenBy(h => h.Name)
+            .ToListAsync(ct);
+
+        return hotends.Select(h => (
+            h.Id,
+            h.Name,
+            h.ManufacturerId,
+            h.Manufacturer?.Name,
+            h.MaxTemp,
+            h.IsHighFlow,
+            h.NozzleInterface,
+            h.Description,
+            h.Url)).ToList();
+    }
+
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? GearRatio, bool IsDirectDrive, string? Description, string? Url)>> GetExtruderModelsAsync(CancellationToken ct = default)
+    {
+        List<ExtruderModelDefinition> extruders = await _db.ExtruderModelDefinitions
+            .Include(e => e.Manufacturer)
+            .AsNoTracking()
+            .OrderBy(e => e.Manufacturer!.Name)
+            .ThenBy(e => e.Name)
+            .ToListAsync(ct);
+
+        return extruders.Select(e => (
+            e.Id,
+            e.Name,
+            e.ManufacturerId,
+            e.Manufacturer?.Name,
+            e.GearRatio,
+            e.IsDirectDrive,
+            e.Description,
+            e.Url)).ToList();
+    }
+
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, string? Description, string? Url, Guid? DefaultHotendId, Guid? DefaultExtruderId, Guid? DefaultNozzleId)>> GetToolheadModelsAsync(CancellationToken ct = default)
+    {
+        List<ToolheadModelDefinition> toolheads = await _db.ToolheadModelDefinitions
+            .Include(t => t.Manufacturer)
+            .AsNoTracking()
+            .OrderBy(t => t.Manufacturer!.Name)
+            .ThenBy(t => t.Name)
+            .ToListAsync(ct);
+
+        return toolheads.Select(t => (
+            t.Id,
+            t.Name,
+            t.ManufacturerId,
+            t.Manufacturer?.Name,
+            t.Description,
+            t.Url,
+            t.DefaultHotendId,
+            t.DefaultExtruderId,
+            t.DefaultNozzleId)).ToList();
+    }
+
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    {
+        List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
+            .Include(n => n.Manufacturer)
+            .AsNoTracking()
+            .OrderBy(n => n.Manufacturer!.Name)
+            .ThenBy(n => n.Name)
+            .ToListAsync(ct);
+
+        return nozzles.Select(n => (
+            n.Id,
+            n.Name,
+            n.ManufacturerId,
+            n.Manufacturer?.Name,
+            n.Diameter,
+            n.MaxTemp,
+            n.NozzleType,
+            n.IsHardened,
+            n.NozzleInterface,
+            n.Description,
+            n.Url)).ToList();
+    }
+
+    // ============ Component Model CRUD Methods ============
+
+    // Get By Id
+    public Task<HotendModelDefinition?> GetHotendModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.HotendModelDefinitions.Include(h => h.Manufacturer).FirstOrDefaultAsync(h => h.Id == id, ct);
+
+    public Task<ExtruderModelDefinition?> GetExtruderModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.ExtruderModelDefinitions.Include(e => e.Manufacturer).FirstOrDefaultAsync(e => e.Id == id, ct);
+
+    public Task<ToolheadModelDefinition?> GetToolheadModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.ToolheadModelDefinitions.Include(t => t.Manufacturer).FirstOrDefaultAsync(t => t.Id == id, ct);
+
+    public Task<NozzleModelDefinition?> GetNozzleModelByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.NozzleModelDefinitions.Include(n => n.Manufacturer).FirstOrDefaultAsync(n => n.Id == id, ct);
+
+    // Add
+    public async Task AddHotendModelAsync(HotendModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.HotendModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddExtruderModelAsync(ExtruderModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.ExtruderModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddToolheadModelAsync(ToolheadModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.ToolheadModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddNozzleModelAsync(NozzleModelDefinition model, CancellationToken ct = default)
+    {
+        _ = _db.NozzleModelDefinitions.Add(model);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    // Remove
+    public async Task RemoveHotendModelAsync(Guid id, CancellationToken ct = default)
+    {
+        HotendModelDefinition? model = await _db.HotendModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.HotendModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveExtruderModelAsync(Guid id, CancellationToken ct = default)
+    {
+        ExtruderModelDefinition? model = await _db.ExtruderModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.ExtruderModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveToolheadModelAsync(Guid id, CancellationToken ct = default)
+    {
+        ToolheadModelDefinition? model = await _db.ToolheadModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.ToolheadModelDefinitions.Remove(model);
+        }
+    }
+
+    public async Task RemoveNozzleModelAsync(Guid id, CancellationToken ct = default)
+    {
+        NozzleModelDefinition? model = await _db.NozzleModelDefinitions.FindAsync(new object[] { id }, ct);
+        if (model is not null)
+        {
+            _ = _db.NozzleModelDefinitions.Remove(model);
+        }
+    }
+
+    // Contextual manufacturer counts
+    public Task<int> CountPrinterModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.PrinterModels.CountAsync(m => m.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountHotendModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.HotendModelDefinitions.CountAsync(h => h.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountExtruderModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.ExtruderModelDefinitions.CountAsync(e => e.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountToolheadModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.ToolheadModelDefinitions.CountAsync(t => t.ManufacturerId == manufacturerId, ct);
+
+    public Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
+        => _db.NozzleModelDefinitions.CountAsync(n => n.ManufacturerId == manufacturerId, ct);
+}

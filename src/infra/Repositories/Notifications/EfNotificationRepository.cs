@@ -71,7 +71,8 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
         // EF Core 10: Use ExecuteUpdateAsync for efficient single-statement update
         await context.Notifications
             .Where(n => n.Id == id)
-            .ExecuteUpdateAsync(setters => setters
+            .ExecuteUpdateAsync(
+                setters => setters
                 .SetProperty(n => n.IsRead, true)
                 .SetProperty(n => n.ReadAt, DateTime.UtcNow), cancellationToken);
     }
@@ -82,7 +83,8 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
         var idList = ids.ToList();
         await context.Notifications
             .Where(n => idList.Contains(n.Id))
-            .ExecuteUpdateAsync(setters => setters
+            .ExecuteUpdateAsync(
+                setters => setters
                 .SetProperty(n => n.IsRead, true)
                 .SetProperty(n => n.ReadAt, DateTime.UtcNow), cancellationToken);
     }
@@ -98,7 +100,7 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
     public async Task DeleteExpiredAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
         await context.Notifications
             .Where(n => n.UserId == userId && n.ExpiresAt != null && n.ExpiresAt <= now)
             .ExecuteDeleteAsync(cancellationToken);
@@ -107,7 +109,7 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
     public async Task DeleteOldAsync(int retentionDays, CancellationToken cancellationToken = default)
     {
         // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
-        var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+        DateTime cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
         await context.Notifications
             .Where(n => n.CreatedAt < cutoffDate)
             .ExecuteDeleteAsync(cancellationToken);

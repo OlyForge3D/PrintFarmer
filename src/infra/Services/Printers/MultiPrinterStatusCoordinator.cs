@@ -37,13 +37,13 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
         ArgumentNullException.ThrowIfNull(operation);
         ArgumentNullException.ThrowIfNull(onError);
 
-        var printerList = printers as List<Printer> ?? printers.ToList();
+        List<Printer> printerList = printers as List<Printer> ?? printers.ToList();
         if (printerList.Count == 0)
         {
             return Array.Empty<TResult>();
         }
 
-        var tasks = printerList.Select(async p =>
+        IEnumerable<Task<TResult?>> tasks = printerList.Select(async p =>
         {
             try
             {
@@ -57,7 +57,7 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
             }
         });
 
-        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        TResult?[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
         return results;
     }
 
@@ -86,7 +86,7 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
         ArgumentNullException.ThrowIfNull(onTimeout);
         ArgumentNullException.ThrowIfNull(onError);
 
-        var printerList = printers as List<Printer> ?? printers.ToList();
+        List<Printer> printerList = printers as List<Printer> ?? printers.ToList();
         if (printerList.Count == 0)
         {
             return Array.Empty<TResult>();
@@ -96,7 +96,7 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
         using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
 
-        var tasks = printerList.Select(async p =>
+        IEnumerable<Task<TResult?>> tasks = printerList.Select(async p =>
         {
             try
             {
@@ -123,7 +123,7 @@ public class MultiPrinterStatusCoordinator : IMultiPrinterStatusCoordinator
             }
         });
 
-        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        TResult?[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
         return results;
     }
 }

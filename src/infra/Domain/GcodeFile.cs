@@ -1,0 +1,63 @@
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Annotations;
+
+namespace Farm.Infrastructure.Domain;
+
+public class GcodeFile : StoredFile
+{
+    /// <summary>
+    /// File extension/type derived from FileName (e.g., "gcode", "bgcode").
+    /// Computed property - not stored in database.
+    /// </summary>
+    public string FileType => System.IO.Path.GetExtension(FileName).TrimStart('.').ToLowerInvariant();
+
+    public GcodeSource Source { get; set; }
+
+    public Guid? SourcePrinterId { get; set; } // Printer it was harvested from
+
+    public Printer? SourcePrinter { get; set; }
+
+    public string? OriginalPrinterPath { get; set; } // Original path on the printer
+
+    public DateTime? LastSeenOnPrinter { get; set; } // Last time this file was seen during harvest
+
+    public double? RequiredNozzleDiameter { get; set; } // e.g., 0.4mm
+
+    public string? RequiredMaterial { get; set; } // e.g., "PLA", "PETG"
+
+    public double? EstimatedPrintTimeMinutes { get; set; }
+
+    public double? EstimatedFilamentLengthMm { get; set; }
+
+    public double? EstimatedFilamentWeightG { get; set; }
+
+    public string? ExtractedPrinterModelName { get; set; } // Raw printer model name extracted from gcode (before resolution to PrinterModelId)
+
+    public Guid? PrinterModelId { get; set; } // Printer model this file was sliced for (resolved from extracted name)
+
+    public PrinterModel? PrinterModel { get; set; }
+
+    public string? SlicerName { get; set; } // e.g., "PrusaSlicer", "Cura"
+
+    public string? SlicerVersion { get; set; }
+
+    public string? PrintSettingsId { get; set; } // Slicer process profile name (e.g., "Standard", "Draft") - different from printer model
+
+    public double? LayerHeight { get; set; }
+
+    public double? InfillPercentage { get; set; }
+
+    public int? Perimeters { get; set; } // Number of perimeter/wall loops
+
+    public double? PrintTemperature { get; set; } // First layer print/hotend temperature
+
+    public double? BedTemperature { get; set; } // First layer bed temperature
+
+    public double? PrintSpeed { get; set; }
+
+    // Navigation property to harvest file mappings
+    public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
+}

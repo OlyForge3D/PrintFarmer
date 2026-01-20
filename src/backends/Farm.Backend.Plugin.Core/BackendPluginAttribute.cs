@@ -14,7 +14,6 @@
 [AttributeUsage(AttributeTargets.Assembly)]
 public sealed class BackendPluginAttribute(int backendId, string name, string version) : Attribute
 {
-
     /// <summary>
     /// Gets the unique backend identifier as an integer for use in the status client registry.
     /// This maps to the PrinterBackend enum value (Moonraker=1, PrusaLink=2, SDCP=3, OctoPrint=4).

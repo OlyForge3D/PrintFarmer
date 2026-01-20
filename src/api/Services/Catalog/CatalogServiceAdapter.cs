@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Catalog;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 using Farm.Web.Api.Controllers.Requests;
 
 namespace Farm.Web.Api.Services.Catalog;
@@ -12,7 +13,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
 {
     private readonly Farm.Infrastructure.Services.Catalog.ICatalogService _coreCatalogService = coreCatalogService ?? throw new ArgumentNullException(nameof(coreCatalogService));
 
-    public Task<(IReadOnlyList<ManufacturerDto> list, string? etag)> GetManufacturersAsync(CancellationToken ct)
+    public Task<(IReadOnlyList<ManufacturerDto> List, string? Etag)> GetManufacturersAsync(CancellationToken ct)
     {
         return _coreCatalogService.GetManufacturersAsync(ct);
     }
@@ -27,7 +28,7 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.GetManufacturerByIdAsync(id, ct);
     }
 
-    public Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
+    public Task<(IReadOnlyList<PrinterModelDto> List, string? Etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct)
     {
         return _coreCatalogService.GetModelsAsync(manufacturerId, ct);
     }
@@ -42,13 +43,19 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.CreateModelAsync(
             req.ManufacturerId,
             req.Name,
-            req.Type,
+            req.MotionType,
             req.MaxX,
             req.MaxY,
             req.MaxZ,
             req.DefaultBackend,
             req.SupportedFilamentTypeIds,
-            req.DefaultNozzleDiameter,
+            req.HasHeatedBed,
+            req.HasEnclosure,
+            req.MultiMaterial,
+            req.NumberOfExtruders,
+            req.SupportsAutoLeveling,
+            req.MaxBedTemp,
+            req.MaxPrintSpeed,
             ct);
     }
 
@@ -57,13 +64,20 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
         return _coreCatalogService.UpdateModelAsync(
             id,
             req.Name,
-            req.Type,
+            req.MotionType,
             req.MaxX,
             req.MaxY,
             req.MaxZ,
             req.DefaultBackend,
             req.SupportedFilamentTypeIds,
-            req.DefaultNozzleDiameter,
+            req.HasHeatedBed,
+            req.HasEnclosure,
+            req.MultiMaterial,
+            req.NumberOfExtruders,
+            req.SupportsAutoLeveling,
+            req.MaxBedTemp,
+            req.MaxPrintSpeed,
+            req.Toolheads,
             ct);
     }
 
@@ -75,28 +89,85 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
     public async Task<IEnumerable<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct)
     {
         // Verify model exists
-        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        PrinterModelDto? model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
         if (model == null)
         {
             throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
         }
 
         // Get aliases from the database
-        var aliases = await _coreCatalogService.GetModelAliasesAsync(modelId, ct);
+        IEnumerable<SlicerModelAliasDto> aliases = await _coreCatalogService.GetModelAliasesAsync(modelId, ct);
         return aliases;
     }
 
     public async Task<IEnumerable<SlicerModelAliasDto>> UpdateModelAliasesAsync(Guid modelId, List<string> orcaSlicerNames, List<string> prusaSlicerNames, CancellationToken ct)
     {
         // Verify model exists
-        var model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
+        PrinterModelDto? model = await _coreCatalogService.GetModelByIdAsync(modelId, ct);
         if (model == null)
         {
             throw new KeyNotFoundException($"Printer model with ID {modelId} not found");
         }
 
         // Update aliases
-        var aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
+        IEnumerable<SlicerModelAliasDto> aliases = await _coreCatalogService.UpdateModelAliasesAsync(modelId, orcaSlicerNames, prusaSlicerNames, ct);
         return aliases;
     }
+
+    // Component model methods - delegate to core service
+    public Task<IReadOnlyList<HotendModelDto>> GetHotendModelsAsync(CancellationToken ct)
+        => _coreCatalogService.GetHotendModelsAsync(ct);
+
+    public Task<IReadOnlyList<ExtruderModelDto>> GetExtruderModelsAsync(CancellationToken ct)
+        => _coreCatalogService.GetExtruderModelsAsync(ct);
+
+    public Task<IReadOnlyList<ToolheadModelDto>> GetToolheadModelsAsync(CancellationToken ct)
+        => _coreCatalogService.GetToolheadModelsAsync(ct);
+
+    public Task<IReadOnlyList<NozzleModelDto>> GetNozzleModelsAsync(CancellationToken ct)
+        => _coreCatalogService.GetNozzleModelsAsync(ct);
+
+    // Component model CRUD - Hotend
+    public Task<HotendModelDto> CreateHotendModelAsync(CreateHotendModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateHotendModelAsync(dto, ct);
+
+    public Task<HotendModelDto?> UpdateHotendModelAsync(Guid id, UpdateHotendModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateHotendModelAsync(id, dto, ct);
+
+    public Task DeleteHotendModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteHotendModelAsync(id, ct);
+
+    // Component model CRUD - Extruder
+    public Task<ExtruderModelDto> CreateExtruderModelAsync(CreateExtruderModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateExtruderModelAsync(dto, ct);
+
+    public Task<ExtruderModelDto?> UpdateExtruderModelAsync(Guid id, UpdateExtruderModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateExtruderModelAsync(id, dto, ct);
+
+    public Task DeleteExtruderModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteExtruderModelAsync(id, ct);
+
+    // Component model CRUD - Toolhead
+    public Task<ToolheadModelDto> CreateToolheadModelAsync(CreateToolheadModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateToolheadModelAsync(dto, ct);
+
+    public Task<ToolheadModelDto?> UpdateToolheadModelAsync(Guid id, UpdateToolheadModelDefDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateToolheadModelAsync(id, dto, ct);
+
+    public Task DeleteToolheadModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteToolheadModelAsync(id, ct);
+
+    // Component model CRUD - Nozzle
+    public Task<NozzleModelDto> CreateNozzleModelAsync(CreateNozzleModelDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateNozzleModelAsync(dto, ct);
+
+    public Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateNozzleModelAsync(id, dto, ct);
+
+    public Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteNozzleModelAsync(id, ct);
+
+    // Contextual manufacturer query
+    public Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
+        => _coreCatalogService.GetManufacturersByContextAsync(context, ct);
 }

@@ -21,6 +21,8 @@ IGcodeHarvestService harvestService) : ControllerBase
     /// <summary>
     /// Extract metadata from an uploaded G-code file
     /// </summary>
+    /// <param name="file">The G-code file to analyze.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     [HttpPost("analyze")]
     [ProducesResponseType(typeof(GcodeMetadataDto), 200)]
     [ProducesResponseType(400)]

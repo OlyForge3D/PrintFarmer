@@ -52,7 +52,7 @@ public class InMemoryRateLimitServiceTests
         string email = "user@example.com";
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -71,7 +71,7 @@ public class InMemoryRateLimitServiceTests
         await _service.RecordPasswordResetAttemptAsync(email);
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -90,7 +90,7 @@ public class InMemoryRateLimitServiceTests
         await _service.RecordPasswordResetAttemptAsync(email);
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -109,7 +109,7 @@ public class InMemoryRateLimitServiceTests
         await _service.RecordPasswordResetAttemptAsync(email1);
 
         // Act - check using lowercase version
-        var result2 = await _service.CheckPasswordResetLimitAsync(email2);
+        RateLimitResult result2 = await _service.CheckPasswordResetLimitAsync(email2);
 
         // Assert - should see the same limit because email is normalized to lowercase
         Assert.True(result2.IsAllowed);
@@ -124,7 +124,7 @@ public class InMemoryRateLimitServiceTests
 
         // Act
         await _service.RecordPasswordResetAttemptAsync(email);
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.Equal(2, result.RemainingAttempts); // 3 - 1 recorded = 2 remaining
@@ -141,7 +141,7 @@ public class InMemoryRateLimitServiceTests
         string email = "user@example.com";
 
         // Act
-        var result = await _service.CheckEmailConfirmationLimitAsync(email);
+        RateLimitResult result = await _service.CheckEmailConfirmationLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -161,7 +161,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckEmailConfirmationLimitAsync(email);
+        RateLimitResult result = await _service.CheckEmailConfirmationLimitAsync(email);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -175,7 +175,7 @@ public class InMemoryRateLimitServiceTests
 
         // Act
         await _service.RecordEmailConfirmationAttemptAsync(email);
-        var result = await _service.CheckEmailConfirmationLimitAsync(email);
+        RateLimitResult result = await _service.CheckEmailConfirmationLimitAsync(email);
 
         // Assert
         Assert.Equal(4, result.RemainingAttempts); // 5 - 1 recorded = 4 remaining
@@ -192,7 +192,7 @@ public class InMemoryRateLimitServiceTests
         Guid userId = Guid.NewGuid();
 
         // Act
-        var result = await _service.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult result = await _service.CheckSliceJobSubmitLimitAsync(userId);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -212,7 +212,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult result = await _service.CheckSliceJobSubmitLimitAsync(userId);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -232,7 +232,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult result = await _service.CheckSliceJobSubmitLimitAsync(userId);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -246,7 +246,7 @@ public class InMemoryRateLimitServiceTests
 
         // Act
         await _service.RecordSliceJobSubmitAttemptAsync(userId);
-        var result = await _service.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult result = await _service.CheckSliceJobSubmitLimitAsync(userId);
 
         // Assert
         Assert.Equal(19, result.RemainingAttempts); // 20 - 1 recorded = 19 remaining
@@ -263,8 +263,8 @@ public class InMemoryRateLimitServiceTests
         await _service.RecordSliceJobSubmitAttemptAsync(user1);
         await _service.RecordSliceJobSubmitAttemptAsync(user1);
 
-        var result1 = await _service.CheckSliceJobSubmitLimitAsync(user1);
-        var result2 = await _service.CheckSliceJobSubmitLimitAsync(user2);
+        RateLimitResult result1 = await _service.CheckSliceJobSubmitLimitAsync(user1);
+        RateLimitResult result2 = await _service.CheckSliceJobSubmitLimitAsync(user2);
 
         // Assert
         Assert.Equal(18, result1.RemainingAttempts); // 20 - 2 = 18
@@ -282,7 +282,7 @@ public class InMemoryRateLimitServiceTests
         string ipAddress = "192.168.1.1";
 
         // Act
-        var result = await _service.CheckLoginLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckLoginLimitAsync(ipAddress);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -302,7 +302,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckLoginLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckLoginLimitAsync(ipAddress);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -322,7 +322,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckLoginLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckLoginLimitAsync(ipAddress);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -336,8 +336,8 @@ public class InMemoryRateLimitServiceTests
         string ip2 = "192.168.1.1";
 
         // Act
-        var result1 = await _service.CheckLoginLimitAsync(ip1);
-        var result2 = await _service.CheckLoginLimitAsync(ip2);
+        RateLimitResult result1 = await _service.CheckLoginLimitAsync(ip1);
+        RateLimitResult result2 = await _service.CheckLoginLimitAsync(ip2);
 
         // Assert
         Assert.True(result1.IsAllowed);
@@ -353,7 +353,7 @@ public class InMemoryRateLimitServiceTests
 
         // Act
         await _service.RecordLoginAttemptAsync(ipAddress);
-        var result = await _service.CheckLoginLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckLoginLimitAsync(ipAddress);
 
         // Assert
         Assert.Equal(9, result.RemainingAttempts); // 10 - 1 recorded = 9 remaining
@@ -370,7 +370,7 @@ public class InMemoryRateLimitServiceTests
         string ipAddress = "192.168.1.1";
 
         // Act
-        var result = await _service.CheckRegisterLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckRegisterLimitAsync(ipAddress);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -390,7 +390,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckRegisterLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckRegisterLimitAsync(ipAddress);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -410,7 +410,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckRegisterLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckRegisterLimitAsync(ipAddress);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -424,7 +424,7 @@ public class InMemoryRateLimitServiceTests
 
         // Act
         await _service.RecordRegisterAttemptAsync(ipAddress);
-        var result = await _service.CheckRegisterLimitAsync(ipAddress);
+        RateLimitResult result = await _service.CheckRegisterLimitAsync(ipAddress);
 
         // Assert
         Assert.Equal(9, result.RemainingAttempts); // 10 - 1 recorded = 9 remaining
@@ -441,7 +441,7 @@ public class InMemoryRateLimitServiceTests
         string email = "user@example.com";
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -462,7 +462,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.False(result.IsAllowed);
@@ -482,8 +482,8 @@ public class InMemoryRateLimitServiceTests
         string email = "user@example.com";
 
         // Act
-        var resetCheck = await _service.CheckPasswordResetLimitAsync(email);
-        var emailCheck = await _service.CheckEmailConfirmationLimitAsync(email);
+        RateLimitResult resetCheck = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult emailCheck = await _service.CheckEmailConfirmationLimitAsync(email);
 
         // Assert - different rate limit types should be independent
         Assert.True(resetCheck.IsAllowed);
@@ -499,8 +499,8 @@ public class InMemoryRateLimitServiceTests
         string email2 = "user2@example.com";
 
         // Act
-        var result1 = await _service.CheckPasswordResetLimitAsync(email1);
-        var result2 = await _service.CheckPasswordResetLimitAsync(email2);
+        RateLimitResult result1 = await _service.CheckPasswordResetLimitAsync(email1);
+        RateLimitResult result2 = await _service.CheckPasswordResetLimitAsync(email2);
 
         // Assert
         Assert.True(result1.IsAllowed);
@@ -517,8 +517,8 @@ public class InMemoryRateLimitServiceTests
         string ip2 = "192.168.1.2";
 
         // Act
-        var result1 = await _service.CheckRegisterLimitAsync(ip1);
-        var result2 = await _service.CheckRegisterLimitAsync(ip2);
+        RateLimitResult result1 = await _service.CheckRegisterLimitAsync(ip1);
+        RateLimitResult result2 = await _service.CheckRegisterLimitAsync(ip2);
 
         // Assert
         Assert.True(result1.IsAllowed);
@@ -544,7 +544,7 @@ public class InMemoryRateLimitServiceTests
             tasks.Add(_service.CheckPasswordResetLimitAsync(email));
         }
 
-        var results = await Task.WhenAll(tasks);
+        RateLimitResult[] results = await Task.WhenAll(tasks);
 
         // Assert
         Assert.True(results.Count(r => r.IsAllowed) >= 1);
@@ -564,7 +564,7 @@ public class InMemoryRateLimitServiceTests
         }
 
         await Task.WhenAll(tasks);
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.Equal(0, result.RemainingAttempts); // 3 recorded + 1 check = 4, exceeds limit
@@ -581,7 +581,7 @@ public class InMemoryRateLimitServiceTests
         string email = string.Empty;
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -594,7 +594,7 @@ public class InMemoryRateLimitServiceTests
         string email = "   ";
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -607,7 +607,7 @@ public class InMemoryRateLimitServiceTests
         string email = "user+special@example.com";
 
         // Act
-        var result = await _service.CheckPasswordResetLimitAsync(email);
+        RateLimitResult result = await _service.CheckPasswordResetLimitAsync(email);
 
         // Assert
         Assert.True(result.IsAllowed);
@@ -620,7 +620,7 @@ public class InMemoryRateLimitServiceTests
         Guid userId = Guid.Empty;
 
         // Act
-        var result = await _service.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult result = await _service.CheckSliceJobSubmitLimitAsync(userId);
 
         // Assert
         Assert.True(result.IsAllowed);

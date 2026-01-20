@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 
 namespace Farm.Infrastructure.Settings;
 
@@ -23,6 +22,7 @@ public sealed class SettingDisplayAttribute : Attribute
     /// Maximum allowed value for numeric settings. Used to constrain input in the UI.
     /// </summary>
     public double MaxValue { get; set; } = -1;
+
     /// <summary>
     /// Display name for the setting property or class. Used as the label in the UI.
     /// </summary>
@@ -66,5 +66,7 @@ public sealed class SettingDisplayAttribute : Attribute
     /// <summary>
     /// Creates a new instance of SettingDisplayAttribute.
     /// </summary>
-    public SettingDisplayAttribute() { }
+    public SettingDisplayAttribute()
+    {
+    }
 }

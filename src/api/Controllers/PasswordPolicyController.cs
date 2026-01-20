@@ -26,6 +26,7 @@ public class PasswordPolicyController(Services.PasswordPolicy.IPasswordPolicySer
         {
             return BadRequest("Request body required");
         }
+
         // The service enforces validation and persists changes via repository
         PasswordPolicyDto updated = await svc.UpdateAsync(request, ct);
         return Ok(updated);

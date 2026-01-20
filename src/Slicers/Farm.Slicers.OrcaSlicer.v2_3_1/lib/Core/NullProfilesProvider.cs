@@ -4,10 +4,10 @@ namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 
 /// <summary>
 /// Null implementation of ISlicerProfilesProvider.
-/// 
+///
 /// OrcaSlicer profiles are loaded dynamically from the OrcaSlicer worker service (/api/profiles),
 /// which parses them from the official OrcaSlicer installation at /opt/orcaslicer/resources/profiles/.
-/// 
+///
 /// Bundled profiles are not used as they don't match the OrcaSlicer folder structure and would
 /// be outdated. Use the worker service for all profile operations.
 /// </summary>

@@ -71,8 +71,7 @@ public class ProfilePreloadService(
                     string content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                     List<ManufacturerDto>? manufacturerDtos = JsonSerializer.Deserialize<List<ManufacturerDto>>(
                         content,
-                        s_jsonOptions
-                    );
+                        s_jsonOptions);
 
                     HashSet<string> catalogManufacturers = manufacturerDtos?
                         .Select(m => m.Name)

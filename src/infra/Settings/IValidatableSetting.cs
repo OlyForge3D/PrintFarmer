@@ -8,5 +8,6 @@ namespace Farm.Infrastructure.Settings;
 public interface IValidatableSetting
 {
     void Validate();
+
     // Optionally: Task ValidateAsync();
 }

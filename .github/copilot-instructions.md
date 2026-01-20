@@ -547,6 +547,20 @@ npm run lint 2>&1 | head -20
 - **TypeScript interfaces must match camelCase**: All properties in `src/types/api.ts` MUST be camelCase
 - **Client-side JSON parsing**: React/TypeScript uses JSON.parse() which is case-sensitive - property name mismatches result in undefined values
 
+**⚠️ ENUM SERIALIZATION: STRING VALUES (CRITICAL)**
+- **ALL enums are serialized as STRINGS** by the backend via `JsonStringEnumConverter` in Program.cs
+- **Backend sends**: `"HardenedSteel"`, `"Brass"`, `"Stock"`, `"Custom"` (enum member names as strings)
+- **Backend does NOT send**: `1`, `0`, `2` (numeric enum values)
+- **Frontend TypeScript enum handling**:
+  - TypeScript `enum` definitions use numeric values for type safety (e.g., `HardenedSteel = 1`)
+  - **BUT** the actual JSON values are STRINGS matching the enum member names
+  - Use `NozzleTypeStringLabels` (string-keyed) instead of `NozzleTypeLabels` (numeric-keyed) for Select components
+  - Do NOT use `parseInt()` when parsing enum values from API responses - they're already strings
+  - Select `<option value={}>` should use string enum names: `"Brass"`, `"HardenedSteel"`, etc.
+- **Common mistake**: Assuming `nozzleType: 1` when backend actually sends `nozzleType: "HardenedSteel"`
+- **Affected enums**: NozzleType, ToolheadType, PrinterBackend, MotionType, PrintJobStatus, etc.
+- **Location**: See `JsonStringEnumConverter` in `src/api/Program.cs` line ~148
+
 **Documentation Standards:**
 - **⚠️ CRITICAL: DO NOT create new markdown files for specific implementations or features**
 - Always integrate feature documentation into existing markdown files (README.md, docs/, etc.)

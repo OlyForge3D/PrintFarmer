@@ -13,10 +13,13 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
     private readonly ISlicerAssetRegistry _assetRegistry;
 
     public string SlicerName => "OrcaSlicer";
+
     public string SlicerVersion => "2.3.1";
+
     public string SlicerType => "OrcaSlicer";
 
     public ISlicerProfilesProvider ProfilesProvider => _profilesProvider;
+
     public ISlicerAssetRegistry AssetRegistry => _assetRegistry;
 
     public OrcaSlicerLibrary_v2_3_1()

@@ -25,7 +25,7 @@ public static class NetworkValidationService
         }
 
         // Validate each CIDR range
-        List<(string cidr, IPAddress network, int prefix)> validNetworks = new();
+        List<(string Cidr, IPAddress Network, int Prefix)> validNetworks = new();
 
         foreach (string cidr in settings.DiscoverySubnets)
         {
@@ -51,7 +51,7 @@ public static class NetworkValidationService
         }
 
         // Check for overlapping networks
-        List<(string cidr1, string cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
+        List<(string Cidr1, string Cidr2)> overlaps = FindOverlappingNetworks(validNetworks);
         foreach ((string cidr1, string cidr2) in overlaps)
         {
             result._warnings.Add($"Network ranges overlap: {cidr1} and {cidr2}");
@@ -69,7 +69,6 @@ public static class NetworkValidationService
         }
 
         // NOTE: Ports validation removed - each discovery probe handles its own backend-specific ports
-
         return result;
     }
 
@@ -165,7 +164,7 @@ public static class NetworkValidationService
     /// <summary>
     /// Finds overlapping networks in a collection.
     /// </summary>
-    private static List<(string cidr1, string cidr2)> FindOverlappingNetworks(List<(string cidr, IPAddress network, int prefix)> networks)
+    private static List<(string Cidr1, string Cidr2)> FindOverlappingNetworks(List<(string Cidr, IPAddress Network, int Prefix)> networks)
     {
         List<(string, string)> overlaps = new();
 
@@ -173,9 +172,9 @@ public static class NetworkValidationService
         {
             for (int j = i + 1; j < networks.Count; j++)
             {
-                if (NetworksOverlap(networks[i].network, networks[i].prefix, networks[j].network, networks[j].prefix))
+                if (NetworksOverlap(networks[i].Network, networks[i].Prefix, networks[j].Network, networks[j].Prefix))
                 {
-                    overlaps.Add((networks[i].cidr, networks[j].cidr));
+                    overlaps.Add((networks[i].Cidr, networks[j].Cidr));
                 }
             }
         }
@@ -216,12 +215,18 @@ public static class NetworkValidationService
 /// </summary>
 public class NetworkValidationResult
 {
+#pragma warning disable SA1401 // Fields should be private
     internal readonly List<string> _errors = new();
     internal readonly List<string> _warnings = new();
     internal readonly List<string> _suggestions = new();
+#pragma warning restore SA1401 // Fields should be private
+
     public IReadOnlyList<string> Errors => _errors;
+
     public IReadOnlyList<string> Warnings => _warnings;
+
     public IReadOnlyList<string> Suggestions => _suggestions;
+
     public bool IsValid => _errors.Count == 0;
 }
 
@@ -231,8 +236,12 @@ public class NetworkValidationResult
 public class CidrValidationResult
 {
     public bool IsValid { get; set; }
+
     public string Error { get; set; } = string.Empty;
+
     public string? Suggestion { get; set; }
+
     public IPAddress? NetworkAddress { get; set; }
+
     public int PrefixLength { get; set; }
 }

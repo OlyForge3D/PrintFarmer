@@ -48,7 +48,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<FolderNode> GetOrCreateGcodeFolderAsync(AppDbContext context)
     {
-        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+        FolderNode? folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
         if (folder == null)
         {
             folder = new FolderNode
@@ -69,11 +69,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryLibraryAsync_WithNoFilters_ReturnsAllFiles()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         // Create test files with FolderId
         var file1 = new GcodeFile
@@ -102,7 +102,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.QueryLibraryAsync(null, null, null, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync(null, null, null, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
@@ -113,13 +113,13 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryLibraryAsync_WithSearchFilter_ReturnsMatching()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
-        var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
+        string uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
@@ -135,7 +135,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.QueryLibraryAsync("benchmark", null, null, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync("benchmark", null, null, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
@@ -146,11 +146,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryLibraryAsync_WithMaterialFilter_ReturnsMatching()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -168,7 +168,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.QueryLibraryAsync(null, "PLA", null, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync(null, "PLA", null, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
@@ -179,11 +179,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryLibraryAsync_WithNozzleFilter_ReturnsMatching()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -201,7 +201,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.QueryLibraryAsync(null, null, 0.4, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync(null, null, 0.4, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
@@ -212,11 +212,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryLibraryAsync_WithMultipleFilters_ReturnsMatchingBoth()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -234,7 +234,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.QueryLibraryAsync("fixture", "PETG", 0.6, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> result = await service.QueryLibraryAsync("fixture", "PETG", 0.6, null, CancellationToken.None);
 
         // Assert
         result.Should().NotBeEmpty();
@@ -249,11 +249,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task GetFileAsync_WithValidId_ReturnsFile()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -269,7 +269,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.GetFileAsync(file.Id, CancellationToken.None);
+        GcodeFileDto? result = await service.GetFileAsync(file.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -281,11 +281,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task GetFileAsync_WithNonExistentId_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         // Act
-        var result = await service.GetFileAsync(Guid.NewGuid(), CancellationToken.None);
+        GcodeFileDto? result = await service.GetFileAsync(Guid.NewGuid(), CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -299,11 +299,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteFileAsync_WithValidId_DeletesSuccessfully()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -319,11 +319,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act
-        var result = await service.DeleteFileAsync(file.Id, CancellationToken.None);
+        bool result = await service.DeleteFileAsync(file.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeTrue();
-        var deleted = await context.GcodeFiles.FindAsync(file.Id);
+        GcodeFile? deleted = await context.GcodeFiles.FindAsync(file.Id);
         deleted.Should().BeNull();
     }
 
@@ -331,11 +331,11 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteFileAsync_WithNonExistentId_ReturnsFalse()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         // Act
-        var result = await service.DeleteFileAsync(Guid.NewGuid(), CancellationToken.None);
+        bool result = await service.DeleteFileAsync(Guid.NewGuid(), CancellationToken.None);
 
         // Assert
         result.Should().BeFalse();
@@ -349,13 +349,13 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     public async Task QueryAndGetAndDelete_CompleteWorkflow()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IGcodeFilesService service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        var folder = await GetOrCreateGcodeFolderAsync(context);
+        FolderNode folder = await GetOrCreateGcodeFolderAsync(context);
 
-        var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
+        string uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
@@ -371,19 +371,19 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         // Act & Assert - Query
-        var queried = await service.QueryLibraryAsync(null, "ABS", null, null, CancellationToken.None);
+        IReadOnlyList<GcodeFileDto> queried = await service.QueryLibraryAsync(null, "ABS", null, null, CancellationToken.None);
         queried.Should().Contain(g => g.Id == file.Id);
 
         // Act & Assert - Get
-        var fetched = await service.GetFileAsync(file.Id, CancellationToken.None);
+        GcodeFileDto? fetched = await service.GetFileAsync(file.Id, CancellationToken.None);
         fetched.Should().NotBeNull();
 
         // Act & Assert - Delete
-        var deleted = await service.DeleteFileAsync(file.Id, CancellationToken.None);
+        bool deleted = await service.DeleteFileAsync(file.Id, CancellationToken.None);
         deleted.Should().BeTrue();
 
         // Verify deleted
-        var afterDelete = await service.GetFileAsync(file.Id, CancellationToken.None);
+        GcodeFileDto? afterDelete = await service.GetFileAsync(file.Id, CancellationToken.None);
         afterDelete.Should().BeNull();
     }
 

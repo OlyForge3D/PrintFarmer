@@ -1,5 +1,6 @@
 import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition } from 'react';
 import { Button } from '@/common/components/ui/Button';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { apiClient } from '@/services/api';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
@@ -36,6 +37,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState<JobDetailsTabType>('overview');
   const [editedDetails, setEditedDetails] = useState<JobDetails>(initialJobDetails);
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
   
   // React 19: useTransition for managing async operations
   const [isPending, startTransition] = useTransition();
@@ -120,19 +122,21 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
     });
   }, [jobDetails.id, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
 
-  const handleClose = useCallback(() => {
-    if (hasChanges) {
-      const confirmed = window.confirm(
-        'You have unsaved changes. Are you sure you want to close?'
-      );
-      if (!confirmed) return;
-    }
-
+  const doClose = useCallback(() => {
     setIsEditing(false);
     setHasChanges(false);
     setError(null);
+    setShowUnsavedConfirm(false);
     onClose();
-  }, [hasChanges, onClose]);
+  }, [onClose]);
+
+  const handleClose = useCallback(() => {
+    if (hasChanges) {
+      setShowUnsavedConfirm(true);
+      return;
+    }
+    doClose();
+  }, [hasChanges, doClose]);
 
   if (!isOpen) return null;
 
@@ -412,6 +416,18 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
           )}
         </div>
       </div>
+
+      {/* Unsaved changes confirmation */}
+      <ConfirmationModal
+        isOpen={showUnsavedConfirm}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to close?"
+        confirmButtonText="Discard Changes"
+        cancelButtonText="Keep Editing"
+        isDangerous
+        onConfirm={doClose}
+        onCancel={() => setShowUnsavedConfirm(false)}
+      />
     </div>
   );
 }

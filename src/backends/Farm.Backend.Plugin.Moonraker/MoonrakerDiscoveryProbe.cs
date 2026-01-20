@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
@@ -22,6 +23,7 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     private static readonly int[] FrontendPorts = new[] { 80, 8080, 8808 };
 
     public string DisplayName => "Moonraker";
+
     public PrinterBackend Backend => PrinterBackend.Moonraker;
 
     /// <summary>
@@ -31,6 +33,8 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     /// Score 90: Most fields present (2 out of 3)
     /// Score 75: Some Klipper fields present (1 out of 3)
     /// </summary>
+    /// <param name="response">The HTTP response message to validate.</param>
+    /// <param name="content">The response content as a string.</param>
     protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
@@ -85,6 +89,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     /// 3. Attempts to extract actual camera URLs via API
     /// 4. Extracts hostname from response or via reverse DNS
     /// </summary>
+    /// <param name="ipAddress">The IP address to probe.</param>
+    /// <param name="timeoutMs">Timeout in milliseconds for probe operations.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
         using HttpClient client = new()
@@ -115,7 +122,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                     IPHostEntry entry = await Dns.GetHostEntryAsync(ipAddress, cancellationToken);
                     hostName = entry.HostName;
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             // Attempt to get camera URLs (basic implementation; can be extended with IMoonrakerClient in API layer)
@@ -142,7 +151,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
 
             return new ProbeResult(dto, confidence, reason);
         }
-        catch { }
+        catch
+        {
+        }
 
         return null;
     }
@@ -162,6 +173,7 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                 string testUrl = $"http://{ipAddress}:{port}/";
                 using CancellationTokenSource portTimeoutCts =
                     CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
                 // Use shorter timeout for port discovery (don't waste time on unresponsive ports)
                 portTimeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Min(timeoutMs / 2, 2000)));
 
@@ -172,7 +184,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                     return port;
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         // Default to 80 if no port responds
@@ -194,7 +208,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                 return hostnameElem.GetString();
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         return null;
     }
@@ -203,6 +219,11 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
     /// Attempts to discover camera URLs from Moonraker's /server/webcams/list API.
     /// Uses basic HTTP calls to query the API endpoint.
     /// </summary>
+    /// <param name="ipAddress">The IP address of the Moonraker instance.</param>
+    /// <param name="frontendPort">The frontend port to use for camera URLs.</param>
+    /// <param name="client">The HTTP client to use for requests.</param>
+    /// <param name="timeoutMs">Timeout in milliseconds for the request.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     private static async Task<(string? StreamUrl, string? SnapshotUrl)> DiscoverCameraUrlsAsync(
         string ipAddress, int frontendPort, HttpClient client, int timeoutMs, CancellationToken cancellationToken)
     {
@@ -261,7 +282,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         return (null, null);
     }

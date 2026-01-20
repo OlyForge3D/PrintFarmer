@@ -25,18 +25,14 @@ interface PrinterOption {
  */
 async function fetchPrinters(): Promise<PrinterOption[]> {
   const list = await queueService.getQueueOverview();
-  return list.map(p => {
-    const nozzle = (p as unknown as { nozzleDiameter?: number }).nozzleDiameter;
-    const mats = (p as unknown as { supportedMaterials?: string[] }).supportedMaterials;
-    return {
-      id: p.printerId,
-      name: p.printerName,
-      model: p.printerModel,
-      isAvailable: p.isAvailable,
-      nozzleDiameter: typeof nozzle === 'number' ? nozzle : undefined,
-      supportedMaterials: Array.isArray(mats) ? mats : undefined
-    };
-  });
+  return list.map(p => ({
+    id: p.printerId,
+    name: p.printerName,
+    model: p.printerModel,
+    isAvailable: p.isAvailable,
+    nozzleDiameter: p.nozzleDiameter,
+    supportedMaterials: p.supportedMaterials
+  }));
 }
 
 /**
@@ -102,12 +98,32 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
     }
   };
 
-  const isPrinterCompatible = (p: { nozzleDiameter?: number; supportedMaterials?: string[] }) => {
+  const isPrinterCompatible = (p: { model: string; nozzleDiameter?: number; supportedMaterials?: string[] }) => {
     if (!file) return true;
     const requiredNozzle = file.extractedNozzleDiameter;
     const requiredMaterial = file.extractedMaterial;
+    const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
 
-    if (typeof requiredNozzle === 'number' && (p.nozzleDiameter == null || p.nozzleDiameter < requiredNozzle)) return false;
+    // Check printer model compatibility (case-insensitive, normalizing spaces/dashes)
+    if (requiredModel && p.model && p.model.toLowerCase() !== 'unknown') {
+      const normalizeModel = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
+      const normalizedRequired = normalizeModel(requiredModel);
+      const normalizedPrinter = normalizeModel(p.model);
+      // Use partial matching - either string contains the other (handles variations like "Qidi X-Plus 4" vs "X-Plus 4")
+      const modelsMatch = normalizedRequired === normalizedPrinter 
+        || normalizedRequired.includes(normalizedPrinter) 
+        || normalizedPrinter.includes(normalizedRequired);
+      if (!modelsMatch) {
+        return false;
+      }
+    }
+
+    // Only check nozzle if printer has nozzle info configured (skip if unknown)
+    if (typeof requiredNozzle === 'number' && typeof p.nozzleDiameter === 'number' && p.nozzleDiameter < requiredNozzle) {
+      return false;
+    }
+    
+    // Only check material if printer has supported materials configured
     if (typeof requiredMaterial === 'string' && requiredMaterial.length > 0 && p.supportedMaterials && p.supportedMaterials.length > 0) {
       return p.supportedMaterials.map(s => s.toLowerCase()).includes(requiredMaterial.toLowerCase());
     }
@@ -196,9 +212,10 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
           </div>
         )}
 
-        {(file.extractedNozzleDiameter || file.extractedMaterial) && (
+        {(file.extractedPrinterModel || file.extractedPrinterModelName || file.extractedNozzleDiameter || file.extractedMaterial) && (
           <div className="text-sm text-pf-text-secondary bg-pf-bg-2 p-3 rounded-lg">
             <div className="font-medium mb-1">Compatibility required for this file:</div>
+            {(file.extractedPrinterModel || file.extractedPrinterModelName) && <div>- Printer Model: {file.extractedPrinterModel || file.extractedPrinterModelName}</div>}
             {file.extractedNozzleDiameter && <div>- Nozzle: {file.extractedNozzleDiameter} mm</div>}
             {file.extractedMaterial && <div>- Material: {file.extractedMaterial}</div>}
           </div>

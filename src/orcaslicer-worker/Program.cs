@@ -42,7 +42,6 @@ public static class Program
         _ = builder.Services.AddSingleton<ISlicerProfilesService, OrcaProfilesService>(); // generic profiles interface, implemented by OrcaSlicer
         _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 
-
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
         _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
         _ = builder.Services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
@@ -103,8 +102,7 @@ public static class Program
                     timestamp = DateTime.UtcNow,
                     checks = report.Entries.ToDictionary(
                         e => e.Key,
-                        e => new { status = e.Value.Status.ToString(), description = e.Value.Description }
-                    )
+                        e => new { status = e.Value.Status.ToString(), description = e.Value.Description })
                 }));
             }
         });

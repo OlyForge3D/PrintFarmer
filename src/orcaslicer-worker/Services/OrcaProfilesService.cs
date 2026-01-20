@@ -14,14 +14,14 @@ namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
 /// Service for discovering and loading OrcaSlicer profiles from the local installation.
-/// 
+///
 /// OrcaSlicer stores profiles organized by manufacturer:
 /// - ~/.config/OrcaSlicer/profiles/{manufacturer}.json - Bundle file listing all profiles for that manufacturer
 /// - ~/.config/OrcaSlicer/profiles/{manufacturer}/ - Directory containing actual profile JSON files
 ///   - machine/ - Machine/printer profiles
 ///   - filament/ - Filament/material profiles
 ///   - process/ - Process/quality profiles
-/// 
+///
 /// This service parses manufacturer bundles and follows sub_path references to load profiles.
 /// </summary>
 public class OrcaProfilesService : ISlicerProfilesService
@@ -44,20 +44,41 @@ public class OrcaProfilesService : ISlicerProfilesService
     private List<ProcessProfileDto>? _allProcessProfilesCache;
     private readonly Lock _profilesCacheLock = new();
 
+    /// <summary>
+    /// Creates an OrcaProfilesService with the default profile path (from ORCA_PROFILES_PATH env var or /opt/orcaslicer/resources/profiles).
+    /// </summary>
     public OrcaProfilesService(IUnifiedLoggingService logger)
+        : this(logger, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates an OrcaProfilesService with an explicit profile path.
+    /// </summary>
+    /// <param name="logger">Logging service for diagnostics.</param>
+    /// <param name="profilesPath">Custom path to profiles directory. If null, uses ORCA_PROFILES_PATH env var or default.</param>
+    public OrcaProfilesService(IUnifiedLoggingService logger, string? profilesPath)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        // Check for environment variable override (useful for testing with sample profiles)
-        string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
-        if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
+
+        if (!string.IsNullOrWhiteSpace(profilesPath) && Directory.Exists(profilesPath))
         {
-            _orcaProfilesPath = envPath;
+            _orcaProfilesPath = profilesPath;
         }
         else
         {
-            // In container environment, use the system installation profiles directly
-            // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
-            _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+            // Check for environment variable override (useful for testing with sample profiles)
+            string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
+            if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
+            {
+                _orcaProfilesPath = envPath;
+            }
+            else
+            {
+                // In container environment, use the system installation profiles directly
+                // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
+                _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+            }
         }
     }
 
@@ -422,7 +443,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
-    private T? LoadProfileFromFile<T>(string filePath) where T : class, new()
+    private T? LoadProfileFromFile<T>(string filePath)
+        where T : class, new()
     {
         try
         {
@@ -527,7 +549,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 {
                     // Find the parent profile in the same directory
                     string? profileDir = Path.GetDirectoryName(filePath);
-                    string parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
+                    string parentProfilePath = Path.Combine(profileDir ?? string.Empty, $"{inheritedProfileName}.json");
 
                     if (File.Exists(parentProfilePath))
                     {
@@ -535,6 +557,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
                         {
                             _logger.LogWarning($"Failed to load parent profile '{inheritedProfileName}' for '{filePath}'");
+
                             // Don't fail - continue with what we have
                         }
                     }
@@ -637,7 +660,9 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Reconstruct as JSON string
             StringBuilder sb = new StringBuilder("{");
             bool first = true;
-            foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
+
+            // Order for consistency
+            foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key))
             {
                 if (!first)
                 {
@@ -648,6 +673,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 _ = sb.Append(kvp.Value);
                 first = false;
             }
+
             _ = sb.Append('}');
 
             // Validate by parsing
@@ -890,6 +916,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             // If serialization fails, return empty dict
         }
+
         return dict;
     }
 
@@ -902,7 +929,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 if (printer.ValueKind == JsonValueKind.String)
                 {
-                    string printerName = printer.GetString() ?? "";
+                    string printerName = printer.GetString() ?? string.Empty;
                     if (!string.IsNullOrWhiteSpace(printerName))
                     {
                         targetList.Add(printerName);
@@ -926,7 +953,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         {
                             if (item.ValueKind == JsonValueKind.String)
                             {
-                                string printerName = item.GetString() ?? "";
+                                string printerName = item.GetString() ?? string.Empty;
                                 if (!string.IsNullOrWhiteSpace(printerName))
                                 {
                                     targetList.Add(printerName);
@@ -978,7 +1005,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                 return machines;
             }
         }
+
         return null;
     }
 }
-

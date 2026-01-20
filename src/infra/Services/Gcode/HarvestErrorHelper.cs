@@ -12,12 +12,13 @@ public static class HarvestErrorHelper
         string ExceptionType,
         string? StackTrace,
         string? InnerException,
-        Dictionary<string, string>? AdditionalInfo
-    );
+        Dictionary<string, string>? AdditionalInfo);
 
     /// <summary>
     /// Categorize an exception into a harvest error type
     /// </summary>
+    /// <param name="ex">The exception to categorize.</param>
+    /// <param name="failedResource">Optional identifier for the resource that failed.</param>
     public static string CategorizeError(Exception ex, string? failedResource = null)
     {
         return ex switch
@@ -39,6 +40,7 @@ public static class HarvestErrorHelper
     /// <summary>
     /// Determine if an error type is retryable
     /// </summary>
+    /// <param name="errorType">The error type string to check.</param>
     public static bool IsRetryableError(string errorType)
     {
         return errorType switch
@@ -59,6 +61,11 @@ public static class HarvestErrorHelper
         WriteIndented = false
     };
 
+    /// <summary>
+    /// Create detailed error JSON for logging/debugging.
+    /// </summary>
+    /// <param name="ex">The exception to serialize.</param>
+    /// <param name="failedResource">Optional identifier for the resource that failed.</param>
     public static string CreateErrorDetailsJson(Exception ex, string? failedResource = null)
     {
         ErrorDetails details = new(
@@ -67,8 +74,7 @@ public static class HarvestErrorHelper
             InnerException: ex.InnerException?.Message,
             AdditionalInfo: failedResource != null
                 ? new Dictionary<string, string> { ["FailedResource"] = failedResource }
-                : null
-        );
+                : null);
 
         return JsonSerializer.Serialize(details, ErrorJsonOptions);
     }
@@ -76,6 +82,8 @@ public static class HarvestErrorHelper
     /// <summary>
     /// Get user-friendly error message based on error type
     /// </summary>
+    /// <param name="errorType">The categorized error type.</param>
+    /// <param name="originalMessage">The original exception message.</param>
     public static string GetUserFriendlyMessage(string errorType, string originalMessage)
     {
         string prefix = errorType switch
@@ -93,6 +101,7 @@ public static class HarvestErrorHelper
     /// <summary>
     /// Get helpful suggestion based on error type
     /// </summary>
+    /// <param name="errorType">The categorized error type.</param>
     public static string? GetErrorSuggestion(string errorType)
     {
         return errorType switch
@@ -108,6 +117,10 @@ public static class HarvestErrorHelper
     /// <summary>
     /// Update operation with error details
     /// </summary>
+    /// <param name="operation">The harvest operation to update with error details.</param>
+    /// <param name="ex">The exception that caused the error.</param>
+    /// <param name="phase">The phase of the operation where the error occurred.</param>
+    /// <param name="failedResource">Optional identifier for the resource that failed.</param>
     public static void SetOperationError(
         GcodeHarvestOperation operation,
         Exception ex,

@@ -37,11 +37,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync(new FileHealthAudit { AuditDate = DateTime.UtcNow });
 
         // Act
-        var result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
+        ActionResult<FileHealthSummaryDto> result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var summary = Assert.IsType<FileHealthSummaryDto>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        FileHealthSummaryDto summary = Assert.IsType<FileHealthSummaryDto>(okResult.Value);
         Assert.Equal(100, summary.TotalModel3DFiles);
         Assert.Equal(90, summary.Model3DHealthy);
         Assert.Equal(200, summary.TotalGcodeFiles);
@@ -57,10 +57,10 @@ public class FileConsistencyControllerTests
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
-        var result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
+        ActionResult<FileHealthSummaryDto> result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
 
         // Assert
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, objectResult.StatusCode);
     }
 
@@ -87,11 +87,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync(audits);
 
         // Act
-        var result = await _controller.GetAuditHistoryAsync(20, CancellationToken.None);
+        ActionResult<List<FileHealthAuditDto>> result = await _controller.GetAuditHistoryAsync(20, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var auditDtos = Assert.IsType<List<FileHealthAuditDto>>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        List<FileHealthAuditDto> auditDtos = Assert.IsType<List<FileHealthAuditDto>>(okResult.Value);
         Assert.Single(auditDtos);
         Assert.Equal(300, auditDtos[0].FilesChecked);
     }
@@ -104,10 +104,10 @@ public class FileConsistencyControllerTests
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
-        var result = await _controller.GetAuditHistoryAsync(20, CancellationToken.None);
+        ActionResult<List<FileHealthAuditDto>> result = await _controller.GetAuditHistoryAsync(20, CancellationToken.None);
 
         // Assert
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, objectResult.StatusCode);
     }
 
@@ -148,11 +148,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync(corruptedGcode);
 
         // Act
-        var result = await _controller.GetFilesWithIssuesAsync(CancellationToken.None);
+        ActionResult<FileIssuesSummaryDto> result = await _controller.GetFilesWithIssuesAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var summary = Assert.IsType<FileIssuesSummaryDto>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        FileIssuesSummaryDto summary = Assert.IsType<FileIssuesSummaryDto>(okResult.Value);
         Assert.Equal(2, summary.TotalIssues);
         Assert.Equal(1, summary.MissingFiles);
         Assert.Equal(1, summary.CorruptedFiles);
@@ -166,10 +166,10 @@ public class FileConsistencyControllerTests
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
-        var result = await _controller.GetFilesWithIssuesAsync(CancellationToken.None);
+        ActionResult<FileIssuesSummaryDto> result = await _controller.GetFilesWithIssuesAsync(CancellationToken.None);
 
         // Assert
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, objectResult.StatusCode);
     }
 
@@ -195,11 +195,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync(model);
 
         // Act
-        var result = await _controller.GetModel3DHealthAsync(modelId, CancellationToken.None);
+        ActionResult<FileHealthDetailDto> result = await _controller.GetModel3DHealthAsync(modelId, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var detail = Assert.IsType<FileHealthDetailDto>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        FileHealthDetailDto detail = Assert.IsType<FileHealthDetailDto>(okResult.Value);
         Assert.Equal(modelId, detail.FileId);
         Assert.Equal("Test Model", detail.FileName);
         Assert.Equal("Healthy", detail.HealthStatus);
@@ -214,10 +214,10 @@ public class FileConsistencyControllerTests
             .ReturnsAsync((Model3D?)null);
 
         // Act
-        var result = await _controller.GetModel3DHealthAsync(modelId, CancellationToken.None);
+        ActionResult<FileHealthDetailDto> result = await _controller.GetModel3DHealthAsync(modelId, CancellationToken.None);
 
         // Assert
-        var notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
         Assert.Contains(modelId.ToString(), notFoundResult.Value?.ToString());
     }
 
@@ -243,11 +243,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync(gcode);
 
         // Act
-        var result = await _controller.GetGcodeFileHealthAsync(gcodeId, CancellationToken.None);
+        ActionResult<FileHealthDetailDto> result = await _controller.GetGcodeFileHealthAsync(gcodeId, CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var detail = Assert.IsType<FileHealthDetailDto>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        FileHealthDetailDto detail = Assert.IsType<FileHealthDetailDto>(okResult.Value);
         Assert.Equal(gcodeId, detail.FileId);
         Assert.Equal("Test Gcode", detail.FileName);
         Assert.Equal("Healthy", detail.HealthStatus);
@@ -262,10 +262,10 @@ public class FileConsistencyControllerTests
             .ReturnsAsync((GcodeFile?)null);
 
         // Act
-        var result = await _controller.GetGcodeFileHealthAsync(gcodeId, CancellationToken.None);
+        ActionResult<FileHealthDetailDto> result = await _controller.GetGcodeFileHealthAsync(gcodeId, CancellationToken.None);
 
         // Assert
-        var notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result.Result);
         Assert.Contains(gcodeId.ToString(), notFoundResult.Value?.ToString());
     }
 
@@ -287,11 +287,11 @@ public class FileConsistencyControllerTests
             .ReturnsAsync((FileHealthAudit?)null);
 
         // Act
-        var result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
+        ActionResult<FileHealthSummaryDto> result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
 
         // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var summary = Assert.IsType<FileHealthSummaryDto>(okResult.Value);
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        FileHealthSummaryDto summary = Assert.IsType<FileHealthSummaryDto>(okResult.Value);
         Assert.Equal(100.0, summary.OverallHealthPercentage);
     }
 }

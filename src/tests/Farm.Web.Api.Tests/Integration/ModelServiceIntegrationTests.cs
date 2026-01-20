@@ -51,7 +51,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
     {
-        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        FolderNode? folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
         if (folder == null)
         {
             folder = new FolderNode
@@ -70,18 +70,18 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         string originalFileName = "test-model.stl",
         string? path = null)
     {
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var folder = await GetOrCreateModelFolderAsync(context);
+        FolderNode folder = await GetOrCreateModelFolderAsync(context);
 
-        var filePath = Path.Combine(
+        string filePath = Path.Combine(
             Path.GetTempPath(),
             path ?? string.Empty,
             Guid.NewGuid() + "_" + originalFileName);
 
         // Ensure directory exists
-        var directory = Path.GetDirectoryName(filePath);
+        string? directory = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory);
@@ -136,11 +136,11 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task ListModelsAsync_ReturnsListNotNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         // Act
-        var result = await service.ListModelsAsync(CancellationToken.None);
+        IReadOnlyList<Model3DDto> result = await service.ListModelsAsync(CancellationToken.None);
 
         // Assert - Just verify list is returned (may contain previous test data)
         result.Should().NotBeNull();
@@ -151,17 +151,17 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task ListModelsAsync_IncludesUploadedModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("specific-model.stl");
+        Model3D model = await CreateTestModelAsync("specific-model.stl");
 
         // Act
-        var result = await service.ListModelsAsync(CancellationToken.None);
+        IReadOnlyList<Model3DDto> result = await service.ListModelsAsync(CancellationToken.None);
 
         // Assert - Verify created model is in the list (may contain other test data)
         result.Should().Contain(m => m.Id == model.Id);
-        var foundModel = result.First(m => m.Id == model.Id);
+        Model3DDto foundModel = result.First(m => m.Id == model.Id);
         foundModel.FileName.Should().Be(model.FileName);
     }
 
@@ -169,15 +169,15 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task ListModelsAsync_IncludesMultipleUploadedModels()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model1 = await CreateTestModelAsync("multi-model-1.stl");
-        var model2 = await CreateTestModelAsync("multi-model-2.stl");
-        var model3 = await CreateTestModelAsync("multi-model-3.stl");
+        Model3D model1 = await CreateTestModelAsync("multi-model-1.stl");
+        Model3D model2 = await CreateTestModelAsync("multi-model-2.stl");
+        Model3D model3 = await CreateTestModelAsync("multi-model-3.stl");
 
         // Act
-        var result = await service.ListModelsAsync(CancellationToken.None);
+        IReadOnlyList<Model3DDto> result = await service.ListModelsAsync(CancellationToken.None);
 
         // Assert - All created models should be in list (may contain other data)
         result.Select(m => m.Id).Should().Contain(new[] { model1.Id, model2.Id, model3.Id });
@@ -187,15 +187,15 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task ListModelsAsync_ContainsUploadedModelsInOrder()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model1 = await CreateTestModelAsync("ordered-1.stl");
+        Model3D model1 = await CreateTestModelAsync("ordered-1.stl");
         await Task.Delay(10); // Small delay to ensure different timestamps
-        var model2 = await CreateTestModelAsync("ordered-2.stl");
+        Model3D model2 = await CreateTestModelAsync("ordered-2.stl");
 
         // Act
-        var result = await service.ListModelsAsync(CancellationToken.None);
+        IReadOnlyList<Model3DDto> result = await service.ListModelsAsync(CancellationToken.None);
 
         // Assert - Verify both models are present (ordering may vary with other test data)
         result.Should().Contain(m => m.Id == model1.Id);
@@ -210,13 +210,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelAsync_WithValidId_ReturnsModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("test-model.stl");
+        Model3D model = await CreateTestModelAsync("test-model.stl");
 
         // Act
-        var result = await service.GetModelAsync(model.Id, CancellationToken.None);
+        Model3DDto? result = await service.GetModelAsync(model.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -229,13 +229,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelAsync_WithNonExistentId_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
         // Act
-        var result = await service.GetModelAsync(nonExistentId, CancellationToken.None);
+        Model3DDto? result = await service.GetModelAsync(nonExistentId, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -245,13 +245,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelAsync_IncludesModelMetadata()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("metadata-test.stl");
+        Model3D model = await CreateTestModelAsync("metadata-test.stl");
 
         // Act
-        var result = await service.GetModelAsync(model.Id, CancellationToken.None);
+        Model3DDto? result = await service.GetModelAsync(model.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -267,13 +267,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelFilePathAsync_WithValidId_ReturnsFilePath()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("file-path-test.stl");
+        Model3D model = await CreateTestModelAsync("file-path-test.stl");
 
         // Act
-        var result = await service.GetModelFilePathAsync(model.Id, CancellationToken.None);
+        string? result = await service.GetModelFilePathAsync(model.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -288,13 +288,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelFilePathAsync_WithNonExistentId_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
         // Act
-        var result = await service.GetModelFilePathAsync(nonExistentId, CancellationToken.None);
+        string? result = await service.GetModelFilePathAsync(nonExistentId, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -308,13 +308,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelThumbnailPathAsync_WithValidIdButNoThumbnail_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("no-thumbnail.stl");
+        Model3D model = await CreateTestModelAsync("no-thumbnail.stl");
 
         // Act
-        var result = await service.GetModelThumbnailPathAsync(model.Id, CancellationToken.None);
+        string? result = await service.GetModelThumbnailPathAsync(model.Id, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -324,13 +324,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task GetModelThumbnailPathAsync_WithNonExistentId_ReturnsNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
         // Act
-        var result = await service.GetModelThumbnailPathAsync(nonExistentId, CancellationToken.None);
+        string? result = await service.GetModelThumbnailPathAsync(nonExistentId, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -344,18 +344,18 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteModelAsync_WithValidId_DeletesModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var model = await CreateTestModelAsync("to-delete.stl");
-        var modelId = model.Id;
+        Model3D model = await CreateTestModelAsync("to-delete.stl");
+        Guid modelId = model.Id;
 
         // Act
         await service.DeleteModelAsync(modelId, CancellationToken.None);
 
         // Assert - Model should be soft-deleted or removed
-        var result = await service.GetModelAsync(modelId, CancellationToken.None);
+        Model3DDto? result = await service.GetModelAsync(modelId, CancellationToken.None);
         result.Should().BeNull();
     }
 
@@ -363,13 +363,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteModelAsync_WithNonExistentId_ThrowsKeyNotFoundException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
         // Act & Assert - Should throw KeyNotFoundException
-        var act = async () => await service.DeleteModelAsync(nonExistentId, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteModelAsync(nonExistentId, CancellationToken.None);
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
@@ -377,20 +377,20 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task DeleteModelAsync_MakesModelInaccessibleById()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("will-delete.stl");
+        Model3D model = await CreateTestModelAsync("will-delete.stl");
 
         // Verify model exists before delete
-        var beforeDelete = await service.GetModelAsync(model.Id, CancellationToken.None);
+        Model3DDto? beforeDelete = await service.GetModelAsync(model.Id, CancellationToken.None);
         beforeDelete.Should().NotBeNull();
 
         // Act
         await service.DeleteModelAsync(model.Id, CancellationToken.None);
 
         // Assert - Model should not be accessible by ID
-        var afterDelete = await service.GetModelAsync(model.Id, CancellationToken.None);
+        Model3DDto? afterDelete = await service.GetModelAsync(model.Id, CancellationToken.None);
         afterDelete.Should().BeNull();
     }
 
@@ -402,13 +402,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_WithValidFile_SucceedsAndCreatesModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var formFile = CreateMockFormFile("upload-test.stl");
+        IFormFile formFile = CreateMockFormFile("upload-test.stl");
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -420,13 +420,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_WithSTLFile_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var formFile = CreateMockFormFile("model.stl");
+        IFormFile formFile = CreateMockFormFile("model.stl");
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -436,13 +436,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_WithOBJFile_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var formFile = CreateMockFormFile("model.obj");
+        IFormFile formFile = CreateMockFormFile("model.obj");
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -452,13 +452,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_With3MFFile_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var formFile = CreateMockFormFile("model.3mf");
+        IFormFile formFile = CreateMockFormFile("model.3mf");
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -468,25 +468,25 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_With3MFFile_GeneratesThumbnail()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
         // Create a minimal valid 3MF file (ZIP-based format with XML manifest)
         // 3MF files are essentially ZIP archives containing XML and model data
-        var threeMFContent = "PK\x03\x04"; // ZIP magic bytes - minimal ZIP structure for testing
+        string threeMFContent = "PK\x03\x04"; // ZIP magic bytes - minimal ZIP structure for testing
 
-        var formFile = CreateMockFormFile("thumbnail-test.3mf", threeMFContent);
+        IFormFile formFile = CreateMockFormFile("thumbnail-test.3mf", threeMFContent);
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert - Upload should succeed
         result.Should().NotBeNull();
         result.Id.Should().NotBe(Guid.Empty);
 
         // Assert - Check that thumbnail was attempted to be generated
-        var uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        Model3D? uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
         uploadedModel.Should().NotBeNull();
 
         // Note: ThumbnailPath may be null if:
@@ -505,15 +505,15 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_CreatesUniqueModelIds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var file1 = CreateMockFormFile("model1.stl");
-        var file2 = CreateMockFormFile("model2.stl");
+        IFormFile file1 = CreateMockFormFile("model1.stl");
+        IFormFile file2 = CreateMockFormFile("model2.stl");
 
         // Act
-        var result1 = await service.UploadModelAsync(file1, CancellationToken.None);
-        var result2 = await service.UploadModelAsync(file2, CancellationToken.None);
+        Model3DUploadResultDto result1 = await service.UploadModelAsync(file1, CancellationToken.None);
+        Model3DUploadResultDto result2 = await service.UploadModelAsync(file2, CancellationToken.None);
 
         // Assert
         result1.Id.Should().NotBe(result2.Id);
@@ -523,14 +523,14 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_PreservesFileName()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var originalFileName = "my-custom-model.stl";
-        var formFile = CreateMockFormFile(originalFileName);
+        string originalFileName = "my-custom-model.stl";
+        IFormFile formFile = CreateMockFormFile(originalFileName);
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -543,15 +543,15 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_WithLargeFile_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         // Create a larger mock file (5MB)
-        var largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
-        var formFile = CreateMockFormFile("large-model.stl", largeContent);
+        string largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
+        IFormFile formFile = CreateMockFormFile("large-model.stl", largeContent);
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -561,14 +561,14 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_WithSpecialCharactersInFileName_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var specialFileName = "model-with-special-chars_#@!.stl";
-        var formFile = CreateMockFormFile(specialFileName);
+        string specialFileName = "model-with-special-chars_#@!.stl";
+        IFormFile formFile = CreateMockFormFile(specialFileName);
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
@@ -582,21 +582,21 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModel_ThenListModels_IncludesNewModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var initialList = await service.ListModelsAsync(CancellationToken.None);
-        var initialCount = initialList.Count;
+        IReadOnlyList<Model3DDto> initialList = await service.ListModelsAsync(CancellationToken.None);
+        int initialCount = initialList.Count;
 
         // Act
-        var uploadResult = await service.UploadModelAsync(
+        Model3DUploadResultDto uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("new-model.stl"),
             CancellationToken.None);
 
         // Assert
         uploadResult.Id.Should().NotBe(Guid.Empty);
 
-        var afterUpload = await service.ListModelsAsync(CancellationToken.None);
+        IReadOnlyList<Model3DDto> afterUpload = await service.ListModelsAsync(CancellationToken.None);
         afterUpload.Should().HaveCount(initialCount + 1);
     }
 
@@ -604,16 +604,16 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModel_ThenGetModel_ReturnsUploadedModel()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var fileName = "integration-test-model.stl";
-        var uploadResult = await service.UploadModelAsync(
+        string fileName = "integration-test-model.stl";
+        Model3DUploadResultDto uploadResult = await service.UploadModelAsync(
             CreateMockFormFile(fileName),
             CancellationToken.None);
 
         // Act
-        var getResult = await service.GetModelAsync(uploadResult.Id, CancellationToken.None);
+        Model3DDto? getResult = await service.GetModelAsync(uploadResult.Id, CancellationToken.None);
 
         // Assert
         getResult.Should().NotBeNull();
@@ -625,10 +625,10 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModel_ThenDelete_RemovesFromList()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var uploadResult = await service.UploadModelAsync(
+        Model3DUploadResultDto uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("to-delete.stl"),
             CancellationToken.None);
 
@@ -636,7 +636,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         await service.DeleteModelAsync(uploadResult.Id, CancellationToken.None);
 
         // Assert
-        var result = await service.GetModelAsync(uploadResult.Id, CancellationToken.None);
+        Model3DDto? result = await service.GetModelAsync(uploadResult.Id, CancellationToken.None);
         result.Should().BeNull();
     }
 
@@ -644,16 +644,16 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModel_ThenGetFilePath_ReturnsValidPath()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IConfiguration config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
-        var uploadResult = await service.UploadModelAsync(
+        Model3DUploadResultDto uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("path-test.stl"),
             CancellationToken.None);
 
         // Act
-        var filePath = await service.GetModelFilePathAsync(uploadResult.Id, CancellationToken.None);
+        string? filePath = await service.GetModelFilePathAsync(uploadResult.Id, CancellationToken.None);
 
         // Assert
         filePath.Should().NotBeNull();
@@ -669,12 +669,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task UploadModelAsync_GeneratesThumbnail_WhenValidModelUploaded()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        IModel3DFileRepository repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
         // Create a valid STL file for upload
-        var stlContent = "solid test\n" +
+        string stlContent = "solid test\n" +
                        "  facet normal 0.0 0.0 1.0\n" +
                        "    outer loop\n" +
                        "      vertex 0.0 0.0 0.0\n" +
@@ -684,17 +684,17 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
                        "  endfacet\n" +
                        "endsolid test\n";
 
-        var formFile = CreateMockFormFile("thumbnail-test.stl", stlContent);
+        IFormFile formFile = CreateMockFormFile("thumbnail-test.stl", stlContent);
 
         // Act
-        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+        Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert - Upload should succeed
         result.Should().NotBeNull();
         result.Id.Should().NotBe(Guid.Empty);
 
         // Assert - Check that model was saved to database
-        var uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        Model3D? uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
         uploadedModel.Should().NotBeNull();
 
         // The database record should exist with the uploaded file

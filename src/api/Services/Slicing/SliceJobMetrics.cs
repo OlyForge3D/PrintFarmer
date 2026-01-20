@@ -11,9 +11,13 @@ public sealed class SliceJobMetrics : IDisposable
     private bool _disposed;
 
     public Counter<long> JobsCompletedTotal { get; }
+
     public Counter<long> JobsCompletedWithLogTotal { get; }
+
     public Histogram<int> ArtifactsPerJobHistogram { get; }
+
     public Counter<long> JobsTimedOutTotal { get; }
+
     public Counter<long> JobRetriesTotal { get; }
 
     public SliceJobMetrics()
@@ -40,6 +44,8 @@ public sealed class SliceJobMetrics : IDisposable
     /// <summary>
     /// Record job completion with artifact metadata.
     /// </summary>
+    /// <param name="artifactCount">The number of artifacts associated with the job.</param>
+    /// <param name="hasLog">Indicates whether the job included a log artifact.</param>
     public void RecordJobCompletion(int artifactCount, bool hasLog)
     {
         JobsCompletedTotal.Add(1);

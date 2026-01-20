@@ -36,4 +36,11 @@ export default tseslint.config([
       'local/pf-require-apiclient': 'off',
     },
   },
+  // Disable raw HTML controls rule in test files (tests often need raw elements for testing)
+  {
+    files: ['src/test/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    rules: {
+      'local/pf-no-raw-html-controls': 'off',
+    },
+  },
 ])

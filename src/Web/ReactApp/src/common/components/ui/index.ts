@@ -1,6 +1,7 @@
 // UI Component Library
 // This file exports all shared UI components for consistent styling across the application
 
+export { AccordionButton, type AccordionButtonProps } from './AccordionButton';
 export { Alert, type AlertProps } from './Alert';
 export { Badge, type BadgeProps, type BadgeVariant, type BadgeSize } from './Badge';
 export { Button, type ButtonVariant, type ButtonSize } from './Button';
@@ -11,7 +12,6 @@ export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
-export { Modal, type ModalProps, type ModalSize } from './Modal';
 export { MovementInput, type MovementInputProps } from './MovementInput';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Radio, type RadioProps } from './Radio';

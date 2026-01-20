@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useOptimistic, useTransition } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { Location, CreateLocationRequest, UpdateLocationRequest, locationService } from '@/services/locationService';
-// ConfirmationModal removed; not used in this component
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import { Button, Textarea } from '@/common/components/ui';
 
@@ -29,6 +29,9 @@ export const LocationManagement: React.FC = () => {
     locations,
     (state, deletedLocationId) => state.filter(loc => loc.id !== deletedLocationId)
   );
+
+  // State for delete confirmation modal
+  const [locationToDelete, setLocationToDelete] = useState<string | null>(null);
 
   // Load locations on component mount
   useEffect(() => {
@@ -89,8 +92,14 @@ export const LocationManagement: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    const confirmed = window.confirm('Delete this location? This action cannot be undone.');
-    if (!confirmed) return;
+    setLocationToDelete(id);
+  };
+
+  const confirmDelete = () => {
+    if (!locationToDelete) return;
+
+    const id = locationToDelete;
+    setLocationToDelete(null);
 
     // React 19: Use startTransition for optimistic deletion
     startTransition(async () => {
@@ -272,6 +281,18 @@ export const LocationManagement: React.FC = () => {
           <PrinterLocationDragDrop key={optimisticLocations.length} locations={optimisticLocations} />
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={!!locationToDelete}
+        title="Delete Location?"
+        message="Delete this location? This action cannot be undone."
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={confirmDelete}
+        onCancel={() => setLocationToDelete(null)}
+      />
     </div>
   );
 };

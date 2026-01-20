@@ -240,7 +240,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   };
 
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border w-full min-w-0 max-w-sm`}>
+    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border w-full min-w-[23rem]`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">

@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services.Slicing;
 /// Parses OrcaSlicer config bundle JSON into structured preview DTOs.
 /// OrcaSlicer bundles typically contain:
 /// - "printer": array of printer presets
-/// - "filament": array of filament presets  
+/// - "filament": array of filament presets
 /// - "process": array of process/print settings presets
 /// Each preset can inherit from a base preset via "inherits" or "from" keys.
 /// </summary>
@@ -129,6 +129,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             {
                 continue;
             }
+
             // Validate presence of certain required fields. Historically callers expected
             // missing critical fields (like nozzle diameter) to cause a BadRequest on preview.
             // Enforce that at least one of the known nozzle diameter keys exists; otherwise
@@ -310,6 +311,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 }
             }
         }
+
         return null;
     }
 
@@ -323,6 +325,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 {
                     return dbl;
                 }
+
                 // Also handle string representations of numbers
                 if (value.TryGetValue(out string? str) && double.TryParse(str, out dbl))
                 {
@@ -330,6 +333,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 }
             }
         }
+
         return null;
     }
 
@@ -343,10 +347,12 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 {
                     return intVal;
                 }
+
                 if (value.TryGetValue(out long lng))
                 {
                     return (int)lng;
                 }
+
                 // Handle string representations
                 if (value.TryGetValue(out string? str) && int.TryParse(str, out intVal))
                 {
@@ -354,6 +360,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 }
             }
         }
+
         return null;
     }
 
@@ -367,6 +374,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 {
                     return bln;
                 }
+
                 // Handle string representations ("true", "false", "1", "0")
                 if (value.TryGetValue(out string? str))
                 {
@@ -374,6 +382,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                     {
                         return bln;
                     }
+
                     if (str == "1")
                     {
                         return true;
@@ -384,6 +393,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                         return false;
                     }
                 }
+
                 // Handle numeric representations (1 = true, 0 = false)
                 if (value.TryGetValue(out int intVal))
                 {
@@ -391,6 +401,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 }
             }
         }
+
         return null;
     }
 }

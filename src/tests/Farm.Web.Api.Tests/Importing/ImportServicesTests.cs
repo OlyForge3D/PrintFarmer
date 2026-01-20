@@ -24,7 +24,7 @@ public class ImportParserServiceTests
         var service = new ImportParserService();
 
         using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csv));
-        var (dtos, errors) = await service.ParseCsvAsync(ms, CancellationToken.None);
+        (CreatePrinterDto[]? dtos, List<string>? errors) = await service.ParseCsvAsync(ms, CancellationToken.None);
 
         errors.Should().BeEmpty();
         dtos.Should().ContainSingle();
@@ -38,11 +38,10 @@ public class ImportParserServiceTests
         var service = new ImportParserService();
         using var ms = new MemoryStream(Encoding.UTF8.GetBytes("not-json"));
 
-        var (dtos, errors) = await service.ParseJsonAsync(ms, CancellationToken.None);
+        (CreatePrinterDto[]? dtos, List<string>? errors) = await service.ParseJsonAsync(ms, CancellationToken.None);
 
         dtos.Should().BeEmpty();
         errors.Should().ContainSingle();
     }
 }
-
 

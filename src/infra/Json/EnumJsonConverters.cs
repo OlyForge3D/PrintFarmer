@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Json;
 
@@ -37,11 +38,13 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
         {
             return PrinterBackend.Moonraker;
         }
+
         // numeric-as-string
         if (int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrinterBackend), num))
         {
             return (PrinterBackend)num;
         }
+
         // case-insensitive name match
         return Enum.TryParse(value, ignoreCase: true, out PrinterBackend parsed) ? parsed : PrinterBackend.Moonraker;
     }
@@ -49,8 +52,9 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
     public override void Write(Utf8JsonWriter writer, PrinterBackend value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        // Serialize as integer for frontend compatibility
-        writer.WriteNumberValue((int)value);
+
+        // Serialize as string name for frontend compatibility (matches TypeScript PrinterBackendString)
+        writer.WriteStringValue(value.ToString());
     }
 }
 

@@ -40,7 +40,7 @@ public class PrintJobQueueAdapterTests
 
         var enqueueReq = new EnqueuePrintJobRequest(requestDto.GcodeFileId, null, "normal", 0.4, "PLA");
 
-        var result = await adapter.EnqueueAsync(enqueueReq, CancellationToken.None);
+        Api.Services.PrintJobQueue.PrintJobDto? result = await adapter.EnqueueAsync(enqueueReq, CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal(returned.Id, result!.Id);

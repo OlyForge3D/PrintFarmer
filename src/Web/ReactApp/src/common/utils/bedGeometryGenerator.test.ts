@@ -262,15 +262,17 @@ describe('Bed Geometry Generator', () => {
         maxX: 180,
         maxY: 180,
         maxZ: 210,
-        defaultNozzleDiameter: 0.4,
+        toolheads: [
+          { id: 'th-1', name: 'Extruder 1', index: 0, nozzleDiameter: 0.4, isPrimary: true }
+        ],
       };
 
-      const dims = extractBedDimensions(realisticPrinter);
-      const validation = validateBedDimensions(dims);
-      const { group } = createBedVisualization(realisticPrinter);
+      const { group, dimensions } = createBedVisualization(realisticPrinter);
 
-      expect(validation.valid).toBe(true);
-      expect(group.children.length).toBeGreaterThan(0);
+      expect(group).toBeInstanceOf(THREE.Group);
+      expect(dimensions.width).toBe(180);
+      expect(dimensions.depth).toBe(180);
+      expect(dimensions.height).toBe(210);
     });
   });
 });

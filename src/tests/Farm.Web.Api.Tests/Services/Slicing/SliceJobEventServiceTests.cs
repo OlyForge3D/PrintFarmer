@@ -39,7 +39,7 @@ public class SliceJobEventServiceTests
     public void Constructor_WithNullHubContext_ThrowsArgumentNullException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ArgumentNullException>(() =>
+        ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
             new SliceJobEventService(null!, _loggerMock.Object));
         Assert.Equal("hubContext", ex.ParamName);
     }
@@ -48,7 +48,7 @@ public class SliceJobEventServiceTests
     public void Constructor_WithNullLogger_ThrowsArgumentNullException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ArgumentNullException>(() =>
+        ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
             new SliceJobEventService(_hubContextMock.Object, null!));
         Assert.Equal("logger", ex.ParamName);
     }
@@ -77,7 +77,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobQueuedAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobQueuedAsync(job, CancellationToken.None);
@@ -102,7 +102,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobStartedAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobStartedAsync(job, CancellationToken.None);
@@ -127,7 +127,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobProgressAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobProgressAsync(job, CancellationToken.None);
@@ -152,7 +152,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobCompletedAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobCompletedAsync(job, CancellationToken.None);
@@ -177,7 +177,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobFailedAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobFailedAsync(job, CancellationToken.None);
@@ -202,7 +202,7 @@ public class SliceJobEventServiceTests
     public async Task NotifyJobCancelledAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange
-        var job = CreateSliceJob();
+        SliceJob job = CreateSliceJob();
 
         // Act
         await _service.NotifyJobCancelledAsync(job, CancellationToken.None);

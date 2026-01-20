@@ -7,7 +7,8 @@ public class ConfigurationSystemSettingsProvider(IConfiguration config) : ISyste
 {
     private readonly IConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
 
-    public T Get<T>() where T : class, new()
+    public T Get<T>()
+        where T : class, new()
     {
         // Try to find a public constant/field or static property named SectionName on the type T
         FieldInfo? field = typeof(T).GetField("SectionName", BindingFlags.Public | BindingFlags.Static);
@@ -31,7 +32,9 @@ public class ConfigurationSystemSettingsProvider(IConfiguration config) : ISyste
                 }
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         if (string.IsNullOrWhiteSpace(section))
         {
@@ -42,7 +45,8 @@ public class ConfigurationSystemSettingsProvider(IConfiguration config) : ISyste
         return Get<T>(section);
     }
 
-    public T Get<T>(string sectionName) where T : class, new()
+    public T Get<T>(string sectionName)
+        where T : class, new()
     {
         if (string.IsNullOrWhiteSpace(sectionName))
         {

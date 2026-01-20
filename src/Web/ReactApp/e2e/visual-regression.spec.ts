@@ -96,9 +96,7 @@ test.describe('Dark Mode Visual Tests', () => {
       // Parse RGB values
       const rgb = bgColor.match(/\d+/g);
       if (rgb) {
-        const [r, g, b] = rgb.map(Number);
-        // Dark theme should have low luminance
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        // Dark theme detection - verify background color changed
         // We can't strictly test this without knowing the theme, so just verify change happened
         expect(bgColor).toBeDefined();
       }

@@ -155,8 +155,11 @@ public class SliceJobStatusResponse
 
     // Extended fields needed by workers to actually perform slicing (added for BLOCKER 1 bridging)
     public string ModelFileUrl { get; set; } = string.Empty;
+
     public string ModelFileName { get; set; } = string.Empty;
+
     public int SlicerEngine { get; set; } // matches SliceJob.SlicerEngine (enum int)
+
     public string? SlicerProfileJson { get; set; }
 }
 
@@ -245,6 +248,7 @@ public class CompleteSliceJobResponse
     /// Optional slicer-generated metrics.
     /// </summary>
     public int? EstimatedPrintTimeSeconds { get; set; }
+
     public decimal? FilamentUsedGrams { get; set; }
 
     /// <summary>

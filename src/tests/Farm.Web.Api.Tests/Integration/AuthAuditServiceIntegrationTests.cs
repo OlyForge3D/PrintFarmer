@@ -41,8 +41,8 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     /// </summary>
     private async Task<User> CreateTestUserAsync(string username = "testuser")
     {
-        using var scope = _factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var user = new User
         {
@@ -63,18 +63,18 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogLoginAsync_WithValidParameters_SavesAndRetrievesAuditLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("login-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
-        var ipAddress = "192.168.1.100";
-        var correlationId = "test-correlation-123";
+        User user = await CreateTestUserAsync("login-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        string ipAddress = "192.168.1.100";
+        string correlationId = "test-correlation-123";
 
         // Act
         await service.LogLoginAsync(user.Id, ipAddress, "Mozilla/5.0", correlationId);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().NotBeEmpty();
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.Login && l.CorrelationId == correlationId);
         logs[0].IpAddress.Should().Be(ipAddress);
@@ -85,10 +85,10 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogLoginAsync_MultipleLogins_StoresAllEvents()
     {
         // Arrange
-        var user = await CreateTestUserAsync("multi-login-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("multi-login-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogLoginAsync(user.Id, "192.168.1.1", "Chrome", null);
@@ -96,7 +96,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
         await service.LogLoginAsync(user.Id, "192.168.1.3", "Safari", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id, pageSize: 10);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id, pageSize: 10);
         logs.Should().HaveCount(3);
         logs.Should().AllSatisfy(l => l.EventType.Should().Be(AuthEventType.Login));
     }
@@ -105,16 +105,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogLoginFailedAsync_WithValidParameters_SavesFailureLog()
     {
         // Arrange
-        var username = "loginfail-test@example.com";
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        string username = "loginfail-test@example.com";
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogLoginFailedAsync(username, "Invalid password", "192.168.1.100", null, null);
 
         // Assert
-        var logs = await repository.GetRecentFailedLoginsAsync(count: 100);
+        List<AuthAuditLog> logs = await repository.GetRecentFailedLoginsAsync(count: 100);
         logs.Where(l => l.EventType == AuthEventType.LoginFailed && l.FailureReason == "Invalid password").Should().HaveCountGreaterThanOrEqualTo(1);
         logs.Should().Contain(l => l.EventType == AuthEventType.LoginFailed && l.FailureReason == "Invalid password");
         logs.Where(l => l.EventType == AuthEventType.LoginFailed && l.FailureReason == "Invalid password").First().Success.Should().BeFalse();
@@ -124,10 +124,10 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogLoginFailedAsync_MultipleFailures_AllStored()
     {
         // Arrange
-        var username = "multifail-test@example.com";
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        string username = "multifail-test@example.com";
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogLoginFailedAsync(username, "Invalid password", "192.168.1.1", null, null);
@@ -135,7 +135,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
         await service.LogLoginFailedAsync(username, "Invalid password", "192.168.1.3", null, null);
 
         // Assert
-        var logs = await repository.GetRecentFailedLoginsAsync(count: 10);
+        List<AuthAuditLog> logs = await repository.GetRecentFailedLoginsAsync(count: 10);
         var failedLogins = logs.Where(l => l.EventType == AuthEventType.LoginFailed && l.FailureReason == "Invalid password").ToList();
         failedLogins.Should().HaveCountGreaterThanOrEqualTo(3);
     }
@@ -144,16 +144,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogLogoutAsync_WithValidParameters_SavesLogoutLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("logout-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("logout-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogLogoutAsync(user.Id, "192.168.1.100", "Chrome", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.Logout);
         logs[0].Success.Should().BeTrue();
     }
@@ -162,16 +162,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogPasswordChangeAsync_WithValidParameters_SavesPasswordChangeLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("pwdchange-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("pwdchange-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogPasswordChangeAsync(user.Id, "192.168.1.100", "Firefox", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.PasswordChange);
         logs[0].Success.Should().BeTrue();
     }
@@ -180,16 +180,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogRegisterAsync_WithValidParameters_SavesRegistrationLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("register-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("register-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogRegisterAsync(user.Id, "192.168.1.100", "Safari", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.Register);
         logs[0].Success.Should().BeTrue();
     }
@@ -198,17 +198,17 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogAccountLockedAsync_WithValidParameters_SavesLockoutLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("locked-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("locked-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
         var lockoutDuration = TimeSpan.FromMinutes(15);
 
         // Act
         await service.LogAccountLockedAsync(user.Id, 5, lockoutDuration, "192.168.1.100", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.AccountLocked);
         logs[0].Metadata.Should().Contain("15"); // Duration should be in metadata
     }
@@ -217,16 +217,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogAccountUnlockedAsync_WithValidParameters_SavesUnlockLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("unlocked-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("unlocked-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogAccountUnlockedAsync(user.Id, "Admin unlock", "192.168.1.100", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.AccountUnlocked);
         logs[0].Success.Should().BeTrue();
     }
@@ -235,16 +235,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogRefreshTokenAsync_WithValidParameters_SavesRefreshLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("refresh-test-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("refresh-test-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogRefreshTokenAsync(user.Id, "192.168.1.100", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.RefreshToken);
         logs[0].Success.Should().BeTrue();
     }
@@ -253,17 +253,17 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task LogTokenRevokedAsync_WithValidParameters_SavesRevocationLog()
     {
         // Arrange
-        var user = await CreateTestUserAsync("revoked-test-user");
-        var adminUser = await CreateTestUserAsync("admin-revoke-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        User user = await CreateTestUserAsync("revoked-test-user");
+        User adminUser = await CreateTestUserAsync("admin-revoke-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
 
         // Act
         await service.LogTokenRevokedAsync(user.Id, adminUser.Id, "Security incident", "192.168.1.100", null);
 
         // Assert
-        var logs = await repository.GetByUserIdAsync(user.Id);
+        List<AuthAuditLog> logs = await repository.GetByUserIdAsync(user.Id);
         logs.Should().ContainSingle(l => l.EventType == AuthEventType.TokenRevoked);
         logs[0].Metadata.Should().Contain(adminUser.Id.ToString());
     }
@@ -272,9 +272,9 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task GetUserAuditLogAsync_WithValidUserId_ReturnsPagedLogs()
     {
         // Arrange
-        var user = await CreateTestUserAsync("paged-logs-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        User user = await CreateTestUserAsync("paged-logs-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
 
         // Create multiple audit log entries
         await service.LogLoginAsync(user.Id, "192.168.1.1", "Chrome", null);
@@ -282,7 +282,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
         await service.LogPasswordChangeAsync(user.Id, "192.168.1.1", "Chrome", null);
 
         // Act
-        var logs = await service.GetUserAuditLogAsync(user.Id, pageSize: 50, pageNumber: 1);
+        List<AuthAuditLog> logs = await service.GetUserAuditLogAsync(user.Id, pageSize: 50, pageNumber: 1);
 
         // Assert
         logs.Should().HaveCountGreaterThanOrEqualTo(3);
@@ -293,16 +293,16 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task GetSecurityEventsAsync_ReturnsSecurityRelatedEvents()
     {
         // Arrange
-        var user = await CreateTestUserAsync("security-events-user");
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        User user = await CreateTestUserAsync("security-events-user");
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
 
         // Create various security events
         await service.LogAccountLockedAsync(user.Id, 5, TimeSpan.FromMinutes(15), null, null);
         await service.LogAccountUnlockedAsync(user.Id, "Unlocked", null, null);
 
         // Act
-        var events = await service.GetSecurityEventsAsync(since: DateTime.UtcNow.AddHours(-1));
+        List<AuthAuditLog> events = await service.GetSecurityEventsAsync(since: DateTime.UtcNow.AddHours(-1));
 
         // Assert - Just verify events exist for this user, since other tests may have run
         events.Should().NotBeEmpty();
@@ -314,9 +314,9 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     public async Task CountRecentFailedLoginsAsync_WithMultipleFailures_CountsCorrectly()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IAuthAuditService service = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        IAuthAuditLogRepository repository = scope.ServiceProvider.GetRequiredService<IAuthAuditLogRepository>();
         var timeWindow = TimeSpan.FromHours(1);
 
         // Count should be at least the ones we created
@@ -324,7 +324,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
         await service.LogLoginFailedAsync("user2@test.com", "Invalid", null, null, null);
 
         // Act
-        var count = await repository.CountRecentFailedLoginsAsync(null, timeWindow);
+        int count = await repository.CountRecentFailedLoginsAsync(null, timeWindow);
 
         // Assert
         count.Should().BeGreaterThanOrEqualTo(2);

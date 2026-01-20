@@ -10,4 +10,3 @@ public sealed class AppSettingAttribute(string key) : Attribute
 {
     public string Key { get; } = key;
 }
-

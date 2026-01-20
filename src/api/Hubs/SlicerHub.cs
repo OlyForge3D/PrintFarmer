@@ -27,6 +27,7 @@ public class SlicerHub(ILogger<SlicerHub> logger) : Hub
     public async Task RequestRegistryUpdateAsync()
     {
         _logger.LogDebug("Client {ConnectionId} requested registry update", Context.ConnectionId);
+
         // The client should call GET /api/slicers after receiving this acknowledgment
         await Clients.Caller.SendAsync("RegistryUpdateRequested");
     }

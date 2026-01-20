@@ -51,13 +51,16 @@ public sealed class OctoPrintWebSocketAdapter(
     private DateTime _lastHttpPoll = DateTime.MinValue;
 
     public string SocketState => _socketState;
+
     public string ApiState => _apiState;
+
     public bool IsConnected => _webSocket?.State == WebSocketState.Open && _isAuthenticated;
 
     /// <summary>
     /// Establishes WebSocket connection and starts receive loop.
     /// Handles authentication and fallback to HTTP polling on failure.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task ConnectAsync(CancellationToken ct)
     {
         try
@@ -100,6 +103,7 @@ public sealed class OctoPrintWebSocketAdapter(
             _isAuthenticated = false;
             _webSocket?.Dispose();
             _webSocket = null;
+
             // Don't throw - let polling fallback take over
         }
     }
@@ -175,18 +179,20 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <summary>
     /// Handles incoming WebSocket messages. Parses 'current' events containing printer status.
     /// </summary>
+    /// <param name="message">The raw WebSocket message to handle.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task HandleWebSocketMessageAsync(string message, CancellationToken ct)
     {
         try
         {
             // OctoPrint WebSocket messages are JSON objects
             using var doc = JsonDocument.Parse(message);
-            var root = doc.RootElement;
+            JsonElement root = doc.RootElement;
 
             // Look for 'current' message which contains printer state
-            if (root.TryGetProperty("current", out var currentObj))
+            if (root.TryGetProperty("current", out JsonElement currentObj))
             {
-                var printerStatus = ParsePrinterStatus(currentObj);
+                OctoPrintStatusData? printerStatus = ParsePrinterStatus(currentObj);
                 if (printerStatus != null)
                 {
                     await BroadcastStatusAsync(printerStatus, ct);
@@ -208,6 +214,8 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <summary>
     /// Broadcasts printer status update via SignalR hub.
     /// </summary>
+    /// <param name="status">The OctoPrint status data to broadcast.</param>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task BroadcastStatusAsync(OctoPrintStatusData status, CancellationToken ct)
     {
         try
@@ -229,8 +237,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
-                SpoolInfo: null
-            );
+                SpoolInfo: null);
 
             // Update cache before broadcasting to clients
             _statusCacheWriter.UpdateStatus(cacheUpdate);
@@ -252,8 +259,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
                 HomedAxes: null,
-                SpoolInfo: null
-            );
+                SpoolInfo: null);
 
             await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
         }
@@ -267,6 +273,7 @@ public sealed class OctoPrintWebSocketAdapter(
     /// Attempts HTTP polling fallback when WebSocket is unavailable.
     /// Called from polling service if WebSocket is not connected.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<OctoPrintStatusData?> TryHttpPollingFallbackAsync(CancellationToken ct)
     {
         // Only poll if enough time has passed since last poll
@@ -341,6 +348,7 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <summary>
     /// Acquires OctoPrint session token via HTTP for WebSocket authentication.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task AcquireSessionTokenAsync(CancellationToken ct)
     {
         try
@@ -349,12 +357,12 @@ public sealed class OctoPrintWebSocketAdapter(
             request.Headers.Add("X-Api-Key", _printer.ApiKey);
             request.Content = new StringContent("{\"passive\":true}", Encoding.UTF8, "application/json");
 
-            var response = await _octoPrintClient.SendAsync(request, ct);
+            HttpResponseMessage response = await _octoPrintClient.SendAsync(request, ct);
             response.EnsureSuccessStatusCode();
 
             string content = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(content);
-            if (doc.RootElement.TryGetProperty("session", out var sessionProp))
+            if (doc.RootElement.TryGetProperty("session", out JsonElement sessionProp))
             {
                 _sessionToken = sessionProp.GetString();
                 _logger.LogDebug($"OctoPrint WebSocket {_printerId}: Acquired session token");
@@ -371,6 +379,7 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <summary>
     /// Sends authentication message to OctoPrint WebSocket.
     /// </summary>
+    /// <param name="ct">Cancellation token for the async operation.</param>
     private async Task SendAuthMessageAsync(CancellationToken ct)
     {
         try
@@ -420,8 +429,8 @@ public sealed class OctoPrintWebSocketAdapter(
     {
         try
         {
-            var stateObj = currentObj.GetProperty("state");
-            var flags = stateObj.GetProperty("flags");
+            JsonElement stateObj = currentObj.GetProperty("state");
+            JsonElement flags = stateObj.GetProperty("flags");
             bool operational = flags.GetProperty("operational").GetBoolean();
             bool printing = flags.GetProperty("printing").GetBoolean();
             bool paused = flags.GetProperty("paused").GetBoolean();
@@ -429,51 +438,52 @@ public sealed class OctoPrintWebSocketAdapter(
             string state = printing ? "Printing" : paused ? "Paused" : operational ? "Idle" : "Offline";
 
             double? progress = null;
-            if (currentObj.TryGetProperty("progress", out var progObj) &&
-                progObj.TryGetProperty("completion", out var completion) &&
+            if (currentObj.TryGetProperty("progress", out JsonElement progObj) &&
+                progObj.TryGetProperty("completion", out JsonElement completion) &&
                 completion.ValueKind != JsonValueKind.Null)
             {
                 progress = completion.GetDouble() * 100.0;
             }
 
             string? jobName = null;
-            if (currentObj.TryGetProperty("job", out var jobObj) &&
-                jobObj.TryGetProperty("file", out var fileObj) &&
-                fileObj.TryGetProperty("name", out var name) &&
+            if (currentObj.TryGetProperty("job", out JsonElement jobObj) &&
+                jobObj.TryGetProperty("file", out JsonElement fileObj) &&
+                fileObj.TryGetProperty("name", out JsonElement name) &&
                 name.ValueKind != JsonValueKind.Null)
             {
                 jobName = name.GetString();
             }
 
             double? z = null;
-            if (currentObj.TryGetProperty("currentZ", out var zProp) && zProp.ValueKind != JsonValueKind.Null)
+            if (currentObj.TryGetProperty("currentZ", out JsonElement zProp) && zProp.ValueKind != JsonValueKind.Null)
             {
                 z = zProp.GetDouble();
             }
 
             double? hotendTemp = null, bedTemp = null, hotendTarget = null, bedTarget = null;
-            if (currentObj.TryGetProperty("temperature", out var tempProp))
+            if (currentObj.TryGetProperty("temperature", out JsonElement tempProp))
             {
-                if (tempProp.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
+                if (tempProp.TryGetProperty("tool0", out JsonElement tool0) && tool0.ValueKind != JsonValueKind.Null)
                 {
-                    if (tool0.TryGetProperty("actual", out var actual))
+                    if (tool0.TryGetProperty("actual", out JsonElement actual))
                     {
                         hotendTemp = actual.GetDouble();
                     }
 
-                    if (tool0.TryGetProperty("target", out var target))
+                    if (tool0.TryGetProperty("target", out JsonElement target))
                     {
                         hotendTarget = target.GetDouble();
                     }
                 }
-                if (tempProp.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
+
+                if (tempProp.TryGetProperty("bed", out JsonElement bed) && bed.ValueKind != JsonValueKind.Null)
                 {
-                    if (bed.TryGetProperty("actual", out var actual))
+                    if (bed.TryGetProperty("actual", out JsonElement actual))
                     {
                         bedTemp = actual.GetDouble();
                     }
 
-                    if (bed.TryGetProperty("target", out var target))
+                    if (bed.TryGetProperty("target", out JsonElement target))
                     {
                         bedTarget = target.GetDouble();
                     }
@@ -525,18 +535,28 @@ public sealed class OctoPrintWebSocketAdapter(
     private sealed class PrinterStateData
     {
         public bool IsOnline { get; set; }
+
         public bool Operational { get; set; }
+
         public string? State { get; set; }
+
         public double? X { get; set; }
+
         public double? Y { get; set; }
+
         public double? Z { get; set; }
+
         public double? HotendTemp { get; set; }
+
         public double? BedTemp { get; set; }
+
         public double? HotendTarget { get; set; }
+
         public double? BedTarget { get; set; }
+
         public string? ThumbnailUrl { get; set; }
+
         public string? CameraStreamUrl { get; set; }
     }
 #pragma warning restore S3459, S1144
 }
-

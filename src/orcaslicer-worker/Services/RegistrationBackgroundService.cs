@@ -80,6 +80,7 @@ public class RegistrationBackgroundService : BackgroundService
                 if (!success)
                 {
                     _logger.LogWarning("Heartbeat failed. May need to re-register on next cycle.");
+
                     // Don't immediately mark as unregistered - could be temporary network issue
                 }
             }
@@ -91,6 +92,7 @@ public class RegistrationBackgroundService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in heartbeat loop");
+
                 // Continue trying
             }
         }

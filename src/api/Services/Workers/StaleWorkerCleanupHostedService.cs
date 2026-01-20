@@ -19,7 +19,7 @@ public class StaleWorkerCleanupHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var settings = _settingsMonitor.CurrentValue;
+        StaleWorkerCleanupSettings settings = _settingsMonitor.CurrentValue;
 
         if (!settings.Enabled)
         {
@@ -70,13 +70,13 @@ public class StaleWorkerCleanupHostedService(
         try
         {
             // Create a scope to get the scoped repository
-            using var scope = _serviceProvider.CreateScope();
-            var workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+            using IServiceScope scope = _serviceProvider.CreateScope();
+            IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
 
-            var cutoffTime = DateTime.UtcNow.AddMinutes(-settings.StaleAfterMinutes);
+            DateTime cutoffTime = DateTime.UtcNow.AddMinutes(-settings.StaleAfterMinutes);
 
             // Get all workers
-            var allWorkers = await workerRepository.GetAllAsync(int.MaxValue, 0);
+            IReadOnlyList<Worker> allWorkers = await workerRepository.GetAllAsync(int.MaxValue, 0);
 
             var staleWorkers = allWorkers
                 .Where(w => IsStale(w, cutoffTime))
@@ -114,7 +114,6 @@ public class StaleWorkerCleanupHostedService(
         // 1. It hasn't sent a heartbeat (LastHeartbeat is null)
         // 2. Last heartbeat was before cutoff time
         // 3. Worker is marked as offline
-
         if (worker.LastHeartbeat == null)
         {
             return true;
@@ -127,7 +126,7 @@ public class StaleWorkerCleanupHostedService(
     {
         try
         {
-            foreach (var worker in staleWorkers)
+            foreach (Worker worker in staleWorkers)
             {
                 if (worker.Status == WorkerStatus.Offline)
                 {
@@ -152,7 +151,7 @@ public class StaleWorkerCleanupHostedService(
     {
         try
         {
-            foreach (var worker in staleWorkers)
+            foreach (Worker worker in staleWorkers)
             {
                 await workerRepository.DeleteAsync(worker.Id);
 

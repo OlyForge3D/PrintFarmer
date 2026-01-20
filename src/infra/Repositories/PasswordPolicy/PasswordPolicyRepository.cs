@@ -22,6 +22,7 @@ public class PasswordPolicyRepository(AppDbContext db) : IPasswordPolicyReposito
         {
             _ = _db.PasswordPolicies.Add(policy);
         }
+
         _ = await _db.SaveChangesAsync(ct);
     }
 }

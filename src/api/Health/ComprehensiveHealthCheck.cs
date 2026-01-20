@@ -65,6 +65,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                                             || string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
                     using HttpClient client = httpClientFactory.CreateClient();
                     client.Timeout = TimeSpan.FromSeconds(3);
+
                     // Determine API base URL for internal health check
                     const string DefaultApiBaseUrl = "http://localhost:5245";
                     string? baseUrl = Environment.GetEnvironmentVariable("API_URL")
@@ -114,7 +115,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     }
 #pragma warning disable CS0168 // Variable declared but never used
                     catch (Exception)
-#pragma warning restore CS0168 
+#pragma warning restore CS0168
                     {
                         // best-effort normalization - ignore failures and fall back to default
                         baseUrl = DefaultApiBaseUrl;
@@ -148,6 +149,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                             else
                             {
                                 string json = await resp.Content.ReadAsStringAsync(cancellationToken);
+
                                 // Try to parse as array
                                 bool valid = false;
                                 int count = 0;
@@ -160,7 +162,10 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                                         valid = true;
                                     }
                                 }
-                                catch { }
+                                catch
+                                {
+                                }
+
                                 if (!valid)
                                 {
                                     checks["CatalogApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
@@ -232,7 +237,10 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                                         valid = true;
                                     }
                                 }
-                                catch { }
+                                catch
+                                {
+                                }
+
                                 if (!valid)
                                 {
                                     checks["FilamentTypesApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
@@ -276,7 +284,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             long memoryMB = memoryUsed / (1024 * 1024);
             checks["Memory"] = new { Status = memoryMB < 500 ? "Healthy" : "Warning", UsageMB = memoryMB };
 
-            if (memoryMB > 1000) // Warning threshold
+            // Warning threshold
+            if (memoryMB > 1000)
             {
                 issues.Add($"High memory usage: {memoryMB}MB");
             }
@@ -301,7 +310,9 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     printersToCheck = s.PrintersToCheck;
                 }
             }
-            catch { }
+            catch
+            {
+            }
 
             if (printersToCheck == 0)
             {
@@ -313,13 +324,15 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     ? await dbContext.Printers.ToListAsync(cancellationToken)
                     : await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
             }
+
             int externalServiceCount = 0;
             int failedServices = 0;
             List<object> failedDetails = new();
 
             foreach (Printer? printer in printers)
             {
-                if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker) // Moonraker
+                // Check Moonraker printers
+                if (printer.Backend == (int)PrinterBackend.Moonraker)
                 {
                     externalServiceCount++;
                     try
@@ -333,13 +346,15 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                         if (!response.IsSuccessStatusCode)
                         {
                             failedServices++;
-                            string snippet = "";
+                            string snippet = string.Empty;
                             try
                             {
                                 string body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
                                 snippet = body.Length > 200 ? body[..200] : body;
                             }
-                            catch { }
+                            catch
+                            {
+                            }
 
                             failedDetails.Add(new
                             {
@@ -404,7 +419,9 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     threshold = Math.Clamp(s.PercentFailedThreshold, 0, 100);
                 }
             }
-            catch { }
+            catch
+            {
+            }
 
             if (failedServices > 0)
             {
@@ -459,8 +476,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         HealthCheckResult result = new(
             finalStatus,
             description: description,
-            data: checks
-        );
+            data: checks);
 
         return result;
     }
