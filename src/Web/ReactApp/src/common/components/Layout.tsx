@@ -152,6 +152,12 @@ const navigation: NavigationElement[] = [
     icon: GearIcon,
     requiredRole: 'farm_admin'
   },
+  {
+    name: 'Data Management',
+    href: '/admin/data',
+    icon: DatabaseIcon,
+    requiredRole: 'farm_admin'
+  },
 ];
 
 export function Layout() {
