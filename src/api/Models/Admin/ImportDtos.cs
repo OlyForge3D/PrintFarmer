@@ -46,9 +46,13 @@ public class FullBackupImportRequest
 public class ImportResponseDto
 {
     public bool Success { get; set; }
+
     public List<string> Errors { get; set; } = new();
+
     public List<string> Warnings { get; set; } = new();
+
     public ImportStatistics Statistics { get; set; } = new();
+
     public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -58,14 +62,24 @@ public class ImportResponseDto
 public class ImportStatistics
 {
     public int ManufacturersImported { get; set; }
+
     public int FilamentTypesImported { get; set; }
+
     public int PrinterModelsImported { get; set; }
+
     public int HotendsImported { get; set; }
+
     public int ExtrudersImported { get; set; }
+
     public int ToolheadsImported { get; set; }
+
     public int NozzlesImported { get; set; }
+
     public int PrintersImported { get; set; }
+
     public int LocationsImported { get; set; }
+
     public int TotalItemsImported { get; set; }
+
     public TimeSpan Duration { get; set; }
 }

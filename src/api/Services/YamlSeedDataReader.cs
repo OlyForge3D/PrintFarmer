@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Models.SeedData;
 using Farm.Web.Api.Services.Interfaces;
 using YamlDotNet.Serialization;
@@ -71,7 +71,8 @@ public class YamlSeedDataReader : IYamlSeedDataReader
         return await ReadYamlFileAsync<List<NozzleModelSeedDto>>(filePath, "nozzles");
     }
 
-    private async Task<T> ReadYamlFileAsync<T>(string filePath, string dataType) where T : new()
+    private async Task<T> ReadYamlFileAsync<T>(string filePath, string dataType)
+        where T : new()
     {
         try
         {
@@ -93,7 +94,7 @@ public class YamlSeedDataReader : IYamlSeedDataReader
 
             T? data = _yamlDeserializer.Deserialize<T>(yaml);
 
-            if (data == null)
+            if (object.Equals(data, default(T)))
             {
                 _logger.LogWarning("[SeedData] Failed to deserialize YAML from {FilePath}. Using empty dataset for {DataType}", filePath, dataType);
                 return new T();

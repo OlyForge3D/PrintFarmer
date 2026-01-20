@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Web.Api.Services.Interfaces;
 
 /// <summary>
 /// Service for loading and seeding database data from YAML configuration files

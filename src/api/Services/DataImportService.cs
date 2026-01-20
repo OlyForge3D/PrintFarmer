@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -6,7 +7,6 @@ using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Models.Admin;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using System.Diagnostics;
 
 namespace Farm.Web.Api.Services;
 
@@ -93,7 +93,7 @@ public class DataImportService : IDataImportService
         {
             // First import catalog
             ImportResponseDto catalogResult = await ImportCatalogAsync(backup.Catalog, mode, ct);
-            
+
             // Merge catalog statistics
             stats.ManufacturersImported = catalogResult.Statistics.ManufacturersImported;
             stats.FilamentTypesImported = catalogResult.Statistics.FilamentTypesImported;
@@ -102,7 +102,7 @@ public class DataImportService : IDataImportService
             stats.ExtrudersImported = catalogResult.Statistics.ExtrudersImported;
             stats.ToolheadsImported = catalogResult.Statistics.ToolheadsImported;
             stats.NozzlesImported = catalogResult.Statistics.NozzlesImported;
-            
+
             // Copy catalog errors and warnings
             response.Errors.AddRange(catalogResult.Errors);
             response.Warnings.AddRange(catalogResult.Warnings);
@@ -150,7 +150,6 @@ public class DataImportService : IDataImportService
     }
 
     // Private helper methods for importing specific entity types
-
     private async Task<int> ImportManufacturersAsync(List<ManufacturerExportDto> manufacturers, ImportMode mode, List<string> errors, CancellationToken ct)
     {
         int imported = 0;
@@ -183,6 +182,7 @@ public class DataImportService : IDataImportService
                     existing.IsActive = dto.IsActive;
                     imported++;
                 }
+
                 // In merge mode, skip existing
             }
             catch (Exception ex)
@@ -302,6 +302,7 @@ public class DataImportService : IDataImportService
                             });
                         }
                     }
+
                     imported++;
                 }
                 else if (mode == ImportMode.Replace)
@@ -336,6 +337,7 @@ public class DataImportService : IDataImportService
                             });
                         }
                     }
+
                     imported++;
                 }
             }
@@ -630,7 +632,7 @@ public class DataImportService : IDataImportService
                 {
                     Guid manufacturerId = model?.ManufacturerId ?? Guid.Empty;
                     Guid modelId = model?.Id ?? Guid.Empty;
-                    
+
                     _context.Printers.Add(new Printer
                     {
                         Id = Guid.NewGuid(),
@@ -658,6 +660,7 @@ public class DataImportService : IDataImportService
                         existing.ManufacturerId = model.ManufacturerId;
                         existing.ModelId = model.Id;
                     }
+
                     existing.LocationId = location?.Id;
                     existing.Backend = dto.Backend;
                     existing.IsAvailable = false; // Always set to unavailable on import for safety
@@ -676,7 +679,6 @@ public class DataImportService : IDataImportService
     }
 
     // Delete methods for Replace mode
-
     private async Task DeleteAllCatalogDataAsync(CancellationToken ct)
     {
         _logger.LogWarning("[DataImport] Deleting all catalog data (Replace mode)");

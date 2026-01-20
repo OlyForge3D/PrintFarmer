@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
@@ -140,7 +140,8 @@ public class DataSeedService : IDataSeedService
             {
                 if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
                 {
-                    _logger.LogWarning("[SeedData] Manufacturer '{Manufacturer}' not found for model '{Model}', skipping",
+                    _logger.LogWarning(
+                        "[SeedData] Manufacturer '{Manufacturer}' not found for model '{Model}', skipping",
                         dto.Manufacturer, dto.Name);
                     continue;
                 }
@@ -251,7 +252,8 @@ public class DataSeedService : IDataSeedService
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
             {
-                _logger.LogWarning("[SeedData] Manufacturer '{Manufacturer}' not found for hotend '{Name}', skipping",
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for hotend '{Name}', skipping",
                     dto.Manufacturer, dto.Name);
                 continue;
             }
@@ -293,7 +295,8 @@ public class DataSeedService : IDataSeedService
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
             {
-                _logger.LogWarning("[SeedData] Manufacturer '{Manufacturer}' not found for extruder '{Name}', skipping",
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for extruder '{Name}', skipping",
                     dto.Manufacturer, dto.Name);
                 continue;
             }
@@ -335,7 +338,8 @@ public class DataSeedService : IDataSeedService
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
             {
-                _logger.LogWarning("[SeedData] Manufacturer '{Manufacturer}' not found for toolhead '{Name}', skipping",
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for toolhead '{Name}', skipping",
                     dto.Manufacturer, dto.Name);
                 continue;
             }
@@ -375,7 +379,8 @@ public class DataSeedService : IDataSeedService
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
             {
-                _logger.LogWarning("[SeedData] Manufacturer '{Manufacturer}' not found for nozzle '{Name}', skipping",
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for nozzle '{Name}', skipping",
                     dto.Manufacturer, dto.Name);
                 continue;
             }
@@ -388,7 +393,7 @@ public class DataSeedService : IDataSeedService
                 // Parse nozzle type
                 NozzleType nozzleType = NozzleType.Brass;
                 if (!string.IsNullOrEmpty(dto.NozzleType) &&
-                    Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", ""), out NozzleType parsedType))
+                    Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", string.Empty), out NozzleType parsedType))
                 {
                     nozzleType = parsedType;
                 }

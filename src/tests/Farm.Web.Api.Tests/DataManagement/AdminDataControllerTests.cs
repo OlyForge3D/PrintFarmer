@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Models.Admin;
@@ -142,7 +142,7 @@ public class AdminDataControllerTests : IClassFixture<CustomWebApplicationFactor
         var result = await response.Content.ReadFromJsonAsync<ImportResponseDto>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
-        
+
         // Should have imported manufacturers from YAML files
         result.Statistics.ManufacturersImported.Should().BeGreaterThan(0);
         result.Statistics.FilamentTypesImported.Should().BeGreaterThan(0);

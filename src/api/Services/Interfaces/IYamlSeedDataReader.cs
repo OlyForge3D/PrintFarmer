@@ -1,4 +1,4 @@
-using Farm.Web.Api.Models.SeedData;
+﻿using Farm.Web.Api.Models.SeedData;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
