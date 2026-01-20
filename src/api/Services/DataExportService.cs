@@ -147,7 +147,7 @@ public class DataExportService : IDataExportService
     {
         List<PrinterModel> printerModels = await _context.PrinterModels
             .Include(pm => pm.Manufacturer)
-            .Include(pm => pm.SupportedFilamentTypes).ThenInclude(sft => sft.FilamentType)
+            .Include(pm => pm.SupportedFilamentTypes)
             .ToListAsync(ct);
 
         return printerModels.Select(pm => new PrinterModelExportDto
@@ -168,7 +168,7 @@ public class DataExportService : IDataExportService
             MaxBedTemp = pm.MaxBedTemp,
             MaxPrintSpeed = pm.MaxPrintSpeed,
             SupportedFilamentTypes = pm.SupportedFilamentTypes
-                .Select(sft => sft.FilamentType?.Name ?? "Unknown")
+                .Select(ft => ft.Name ?? "Unknown")
                 .ToList(),
             IsActive = pm.IsActive
         }).ToList();

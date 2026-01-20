@@ -476,21 +476,24 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
+            // Ensure the model's SupportedFilamentTypes collection is loaded
+            await _context.Entry(model).Collection(m => m.SupportedFilamentTypes).LoadAsync();
+
             foreach (string material in dto.SupportedMaterials)
             {
                 if (filamentTypes.TryGetValue(material, out Guid filamentTypeId))
                 {
-                    bool exists = await _context.PrinterModelFilamentTypes
-                        .AnyAsync(pmft => pmft.PrinterModelId == model.Id &&
-                            pmft.FilamentTypeId == filamentTypeId);
+                    // Check if filament type is already associated using skip navigation
+                    bool exists = model.SupportedFilamentTypes.Any(ft => ft.Id == filamentTypeId);
 
                     if (!exists)
                     {
-                        _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
+                        // Load the FilamentType entity and add to the collection
+                        FilamentType? filamentType = await _context.FilamentTypes.FindAsync(filamentTypeId);
+                        if (filamentType != null)
                         {
-                            PrinterModelId = model.Id,
-                            FilamentTypeId = filamentTypeId
-                        });
+                            model.SupportedFilamentTypes.Add(filamentType);
+                        }
                     }
                 }
             }

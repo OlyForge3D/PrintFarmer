@@ -286,20 +286,15 @@ public class DataImportService : IDataImportService
                         IsActive = dto.IsActive
                     };
                     _context.PrinterModels.Add(newModel);
-                    await _context.SaveChangesAsync(ct); // Save to get the Id
 
-                    // Add supported filament types
+                    // Add supported filament types using EF Core skip navigation
                     foreach (string filamentName in dto.SupportedFilamentTypes)
                     {
                         FilamentType? filamentType = await _context.FilamentTypes
                             .FirstOrDefaultAsync(f => f.Name == filamentName, ct);
                         if (filamentType != null)
                         {
-                            _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
-                            {
-                                PrinterModelId = newModel.Id,
-                                FilamentTypeId = filamentType.Id
-                            });
+                            newModel.SupportedFilamentTypes.Add(filamentType);
                         }
                     }
 
@@ -322,19 +317,15 @@ public class DataImportService : IDataImportService
                     existing.MaxPrintSpeed = dto.MaxPrintSpeed;
                     existing.IsActive = dto.IsActive;
 
-                    // Update supported filament types
-                    _context.PrinterModelFilamentTypes.RemoveRange(existing.SupportedFilamentTypes);
+                    // Update supported filament types using EF Core skip navigation
+                    existing.SupportedFilamentTypes.Clear();
                     foreach (string filamentName in dto.SupportedFilamentTypes)
                     {
                         FilamentType? filamentType = await _context.FilamentTypes
                             .FirstOrDefaultAsync(f => f.Name == filamentName, ct);
                         if (filamentType != null)
                         {
-                            _context.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType
-                            {
-                                PrinterModelId = existing.Id,
-                                FilamentTypeId = filamentType.Id
-                            });
+                            existing.SupportedFilamentTypes.Add(filamentType);
                         }
                     }
 
@@ -684,7 +675,8 @@ public class DataImportService : IDataImportService
         _logger.LogWarning("[DataImport] Deleting all catalog data (Replace mode)");
 
         // Delete in reverse order of dependencies
-        _context.PrinterModelFilamentTypes.RemoveRange(await _context.PrinterModelFilamentTypes.ToListAsync(ct));
+        // Note: PrinterModel-FilamentType relationship is handled via EF Core skip navigation (implicit join table)
+        // Clearing the collections and deleting PrinterModels will cascade-delete the join entries
         _context.PrinterModelToolheads.RemoveRange(await _context.PrinterModelToolheads.ToListAsync(ct));
         _context.NozzleModelDefinitions.RemoveRange(await _context.NozzleModelDefinitions.ToListAsync(ct));
         _context.ToolheadModelDefinitions.RemoveRange(await _context.ToolheadModelDefinitions.ToListAsync(ct));
