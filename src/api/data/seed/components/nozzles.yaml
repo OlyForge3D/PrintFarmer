@@ -1,0 +1,432 @@
+# PrintFarmer Nozzle Models Seed Data
+# Format: YAML (human-readable, supports comments)
+# Schema: printfarmer/components/nozzles/v1
+#
+# This file defines nozzle model specifications for seeding the database.
+# Users can customize this file without recompiling the application.
+#
+# Field Descriptions:
+# - name: Nozzle model name (must be unique per manufacturer)
+# - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
+# - maxTemp: Maximum operating temperature in °C
+# - nozzleType: Material type (Brass, HardenedSteel, StainlessSteel, Abrasive, TungstenCarbide)
+# - nozzleInterface: Thread/mount type (V6, Volcano, Revo, Proprietary)
+# - description: Brief description of the nozzle model and its characteristics
+# - url: Product or information URL (optional)
+
+# Generic Nozzles - V6 Interface (standard E3D-style thread)
+- name: Brass Nozzle
+  manufacturer: Generic
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Standard brass nozzle, not suitable for abrasive filaments
+
+- name: Hardened Steel Nozzle
+  manufacturer: Generic
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Generic hardened steel nozzle for abrasive filaments
+
+- name: Stainless Steel Nozzle
+  manufacturer: Generic
+  maxTemp: 300
+  nozzleType: StainlessSteel
+  nozzleInterface: V6
+  description: Generic stainless steel nozzle
+
+# Generic Nozzles - Volcano Interface (extended melt zone)
+- name: Volcano Brass Nozzle
+  manufacturer: Generic
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Volcano
+  description: Generic Volcano-length brass nozzle for high flow
+
+- name: Volcano Hardened Steel Nozzle
+  manufacturer: Generic
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Generic Volcano-length hardened steel nozzle
+
+# Slice Engineering Nozzles (V6 interface)
+- name: Vanadium
+  manufacturer: Slice Engineering
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Extreme wear resistance
+  url: https://www.sliceengineering.com/products/vanadium-nozzle
+
+- name: BridgeMaster
+  manufacturer: Slice Engineering
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Optimized for bridging
+  url: https://www.sliceengineering.com/products/bridgemaster-nozzle
+
+- name: GammaMaster
+  manufacturer: Slice Engineering
+  maxTemp: 300
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Precision nozzle
+  url: https://www.sliceengineering.com/products/gammamaster-nozzle
+
+# West3D Nozzles
+- name: Undertaker
+  manufacturer: West3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: High flow hardened nozzle
+  url: https://west3d.com/products/undertaker-nozzle
+
+- name: Undertaker Volcano
+  manufacturer: West3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Volcano-style Undertaker
+  url: https://west3d.com/products/undertaker-volcano-nozzle
+
+# E3D V6/Volcano Threaded Nozzles
+- name: V6 Brass
+  manufacturer: E3D
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Standard brass nozzle for V6 hotends, not for abrasives
+  url: https://e3d-online.com/products/v6-brass-nozzle
+
+- name: V6 Hardened Steel
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Abrasion resistant nozzle for V6 hotends
+  url: https://e3d-online.com/products/v6-hardened-steel-nozzle
+
+- name: V6 Plated Copper
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Nickel-plated copper for excellent thermal conductivity
+  url: https://e3d-online.com/products/v6-plated-copper-nozzle
+
+- name: Volcano Brass
+  manufacturer: E3D
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Volcano
+  description: Extended melt zone brass nozzle for high flow
+  url: https://e3d-online.com/products/volcano-nozzle
+
+- name: Volcano Hardened Steel
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Volcano nozzle for abrasive filaments
+  url: https://e3d-online.com/products/volcano-hardened-steel-nozzle
+
+- name: NozzleX
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: WS2 coated hardened steel, excellent release and wear resistance
+  url: https://e3d-online.com/products/nozzle-x
+
+- name: NozzleX Volcano
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: NozzleX coating on Volcano-length nozzle
+  url: https://e3d-online.com/products/nozzle-x-volcano
+
+# E3D Revo Quick-Swap Nozzles (RapidChange system)
+- name: Revo Brass
+  manufacturer: E3D
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Revo
+  description: Quick-swap brass nozzle for Revo hotends
+  url: https://e3d-online.com/products/revo-nozzle
+
+- name: Revo High Flow
+  manufacturer: E3D
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Revo
+  description: Revo nozzle with extended melt zone for faster printing
+  url: https://e3d-online.com/products/revo-high-flow-nozzle
+
+- name: Revo ObXidian
+  manufacturer: E3D
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Revo
+  description: Hardened Revo nozzle for abrasive materials like CF and GF
+  url: https://e3d-online.com/products/revo-obxidian-nozzle
+
+- name: Revo Micro
+  manufacturer: E3D
+  maxTemp: 250
+  nozzleType: Brass
+  nozzleInterface: Revo
+  description: Compact Revo nozzle for Revo Micro hotend
+  url: https://e3d-online.com/products/revo-micro-nozzle
+
+# TriangleLabs Hardened Nozzles
+- name: ZS Nozzle
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Hardened steel V6-compatible nozzle
+  url: https://www.aliexpress.com/item/1005001347220543.html
+
+- name: ZS Volcano
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Hardened steel Volcano-length nozzle
+  url: https://www.aliexpress.com/item/1005001347220543.html
+
+- name: Ruby Nozzle
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: Abrasive
+  nozzleInterface: V6
+  description: Ruby-tipped nozzle for extreme abrasion resistance
+  url: https://www.aliexpress.com/item/1005001543676594.html
+
+- name: Tungsten Carbide
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: TungstenCarbide
+  nozzleInterface: V6
+  description: Budget tungsten carbide nozzle
+  url: https://www.aliexpress.com/item/1005003456789012.html
+
+# TriangleLabs CHC Nozzles (CHC uses V6 thread)
+- name: CHC Nozzle
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: For CHC ceramic heater hotends
+  url: https://www.aliexpress.com/item/1005004566533274.html
+
+- name: CHC Hardened
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Hardened CHC nozzle for abrasives
+  url: https://www.aliexpress.com/item/1005004566533274.html
+
+# TriangleLabs Standard Nozzles
+- name: V6 Brass
+  manufacturer: TriangleLabs
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Budget brass V6-compatible nozzle
+  url: https://www.aliexpress.com/item/32851848033.html
+
+- name: V6 Hardened Steel
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Budget hardened steel V6 nozzle
+  url: https://www.aliexpress.com/item/32851848033.html
+
+- name: Volcano Brass
+  manufacturer: TriangleLabs
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Volcano
+  description: Budget brass Volcano nozzle
+  url: https://www.aliexpress.com/item/32851848033.html
+
+- name: Volcano Hardened Steel
+  manufacturer: TriangleLabs
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Budget hardened Volcano nozzle
+  url: https://www.aliexpress.com/item/32851848033.html
+
+# Phaetus Dragon/V6 Compatible Nozzles
+- name: PS Nozzle
+  manufacturer: Phaetus
+  maxTemp: 300
+  nozzleType: StainlessSteel
+  nozzleInterface: V6
+  description: Plated steel nozzle, non-stick surface
+  url: https://www.phaetus.com/products/ps-nozzle
+
+- name: Hardened Steel
+  manufacturer: Phaetus
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Hardened steel for abrasive filaments
+  url: https://www.phaetus.com/products/hardened-steel-nozzle
+
+- name: Tungsten Carbide
+  manufacturer: Phaetus
+  maxTemp: 500
+  nozzleType: TungstenCarbide
+  nozzleInterface: V6
+  description: Maximum wear resistance for highly abrasive materials
+  url: https://www.phaetus.com/products/tungsten-carbide-nozzle
+
+- name: Brass Nozzle
+  manufacturer: Phaetus
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Standard brass nozzle for Dragon/V6 hotends
+  url: https://www.phaetus.com/products/brass-nozzle
+
+# Phaetus Rapido-Specific Nozzles (Rapido uses V6 thread)
+- name: Rapido Brass
+  manufacturer: Phaetus
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Brass nozzle for Rapido hotends
+  url: https://www.phaetus.com/products/rapido-nozzle
+
+- name: Rapido Hardened Steel
+  manufacturer: Phaetus
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Hardened steel for Rapido with abrasives
+  url: https://www.phaetus.com/products/rapido-hardened-nozzle
+
+- name: Rapido Tungsten Carbide
+  manufacturer: Phaetus
+  maxTemp: 500
+  nozzleType: TungstenCarbide
+  nozzleInterface: V6
+  description: Maximum wear resistance Rapido nozzle
+  url: https://www.phaetus.com/products/rapido-tc-nozzle
+
+# Bondtech CHT (Clone Hotend Technology) High Flow Nozzles
+- name: CHT Brass
+  manufacturer: Bondtech
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: High flow brass nozzle with multi-channel design
+  url: https://www.bondtech.se/product/bondtech-cht-nozzle/
+
+- name: CHT Coated
+  manufacturer: Bondtech
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: CHT with hardened coating for abrasive filaments
+  url: https://www.bondtech.se/product/bondtech-cht-coated-nozzle/
+
+- name: CHT BiMetal
+  manufacturer: Bondtech
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Copper core with hardened steel tip for best of both worlds
+  url: https://www.bondtech.se/product/bondtech-cht-bimetal-nozzle/
+
+- name: CHT Volcano
+  manufacturer: Bondtech
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Volcano
+  description: CHT design in Volcano length for maximum flow
+  url: https://www.bondtech.se/product/bondtech-cht-volcano-nozzle/
+
+- name: CHT Volcano Coated
+  manufacturer: Bondtech
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Volcano
+  description: Coated CHT Volcano for abrasives
+  url: https://www.bondtech.se/product/bondtech-cht-volcano-coated-nozzle/
+
+# Bambu Lab Model-Specific Nozzles (proprietary quick-swap system)
+- name: Bambu Brass Nozzle
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Standard brass nozzle for Bambu Lab printers, quick-swap compatible
+  url: https://bambulab.com
+
+- name: Bambu Hardened Steel Nozzle
+  manufacturer: Bambu Lab
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Proprietary
+  description: Hardened steel nozzle for abrasive filaments on Bambu printers
+  url: https://bambulab.com
+
+- name: Bambu Stainless Steel Nozzle
+  manufacturer: Bambu Lab
+  maxTemp: 300
+  nozzleType: StainlessSteel
+  nozzleInterface: Proprietary
+  description: Stainless steel nozzle for corrosion resistance
+  url: https://bambulab.com
+
+# Prusa Model-Specific Nozzles
+- name: Prusa V6 Brass Nozzle
+  manufacturer: Prusa
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Stock brass nozzle for MK3S and earlier models
+  url: https://www.prusa3d.com
+
+- name: Prusa Hardened Steel Nozzle
+  manufacturer: Prusa
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: V6
+  description: Hardened steel nozzle for MK3S/MK4 with abrasives
+  url: https://www.prusa3d.com
+
+- name: Nextruder Brass Nozzle
+  manufacturer: Prusa
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Quick-swap brass nozzle for Nextruder toolhead
+  url: https://www.prusa3d.com
+
+- name: Nextruder Hardened Steel Nozzle
+  manufacturer: Prusa
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Proprietary
+  description: Quick-swap hardened steel for Nextruder with abrasives
+  url: https://www.prusa3d.com
+
+- name: Nextruder High Flow Nozzle
+  manufacturer: Prusa
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: High flow nozzle for Nextruder, extended melt zone
+  url: https://www.prusa3d.com
