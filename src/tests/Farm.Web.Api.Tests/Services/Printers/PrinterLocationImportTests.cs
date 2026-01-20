@@ -48,28 +48,6 @@ public class PrinterLocationImportTests : IAsyncLifetime
         _printersService = _scope.ServiceProvider.GetRequiredService<IPrintersService>();
         _locationService = _scope.ServiceProvider.GetRequiredService<ILocationService>();
 
-        // Create test manufacturer and model for printer imports
-        // This prevents "Unknown manufacturer not found" errors
-        var testManufacturer = new Manufacturer
-        {
-            Id = Guid.NewGuid(),
-            Name = "TestMfg",
-            IsActive = true
-        };
-        
-        var testModel = new PrinterModel
-        {
-            Id = Guid.NewGuid(),
-            Name = "Ender3",
-            ManufacturerId = testManufacturer.Id,
-            MaxX = 220,
-            MaxY = 220,
-            MaxZ = 250
-        };
-        
-        _dbContext.Manufacturers.Add(testManufacturer);
-        _dbContext.PrinterModels.Add(testModel);
-
         // Create test locations - use unique IDs to avoid conflicts
         _testLocation1 = new Location
         {
@@ -158,7 +136,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - CSV without LocationName column (backward compatibility)
         string ip = GetNextIpAddress();
-        string mfg = "TestMfg"; // Use seeded test manufacturer
+        string mfg = GetNextUniqueMfgName();
         string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired
 ""Printer3"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""" ";
 
@@ -208,7 +186,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Location column present but empty
         string ip = GetNextIpAddress();
-        string mfg = "TestMfg"; // Use seeded test manufacturer
+        string mfg = GetNextUniqueMfgName();
         string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
 ""PrinterEmptyLocation"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""","""" ";
 
@@ -253,7 +231,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Import with overwrite and location assignment - use same IP for overwrite
-        string mfg = "TestMfg"; // Use seeded test manufacturer
+        string mfg = GetNextUniqueMfgName();
         string csv = GetCsvWithLocations(new[]
         {
             new { Name = "OverwritePrinter", Location = "Warehouse" }
@@ -284,7 +262,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Location name with leading/trailing whitespace
         string ip = GetNextIpAddress();
-        string mfg = "TestMfg"; // Use seeded test manufacturer
+        string mfg = GetNextUniqueMfgName();
         string csv = $@"Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName
 ""PrinterWhitespace"",""{ip}"",""Moonraker"",""7125"",""80"",""{mfg}"",""Ender3"",""Test"","""",""true"","""","""","""",""  Warehouse  """;
 
@@ -541,8 +519,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
 
     private string GetCsvWithLocations(dynamic[] printerData, string? manufacturerName = null, string? ipAddress = null)
     {
-        // Use TestMfg as default (seeded in InitializeAsync) instead of generating random manufacturers
-        manufacturerName ??= "TestMfg";
+        manufacturerName ??= GetNextUniqueMfgName();
         var lines = new StringBuilder();
         lines.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,ApiKey,IsEnabled,CameraStreamUrl,CameraSnapshotUrl,DateAcquired,LocationName");
 

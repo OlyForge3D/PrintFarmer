@@ -7,33 +7,34 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.DataManagement;
 
-public class AdminDataControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
+public class AdminDataControllerTests : IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly HttpClient _client;
-
-    public AdminDataControllerTests(CustomWebApplicationFactory factory)
-    {
-        _factory = factory;
-        _client = factory.CreateClient();
-    }
+    private CustomWebApplicationFactory? _factory;
+    private HttpClient? _client;
 
     public async Task InitializeAsync()
     {
-        // Reset database before each test to ensure isolation
+        // Create a fresh factory for each test to ensure database isolation
+        _factory = new CustomWebApplicationFactory();
+        _client = _factory.CreateClient();
+        
+        // Ensure database is reset to empty state
         await _factory.ResetDatabaseAsync();
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
-        return Task.CompletedTask;
+        if (_factory != null)
+        {
+            await _factory.DisposeAsync();
+        }
     }
 
     [Fact]
     public async Task ExportCatalog_EmptyDatabase_ReturnsEmptyCatalog()
     {
         // Act
-        var response = await _client.GetAsync("/api/admin/data/export/catalog");
+        var response = await _client!.GetAsync("/api/admin/data/export/catalog");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);

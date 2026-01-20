@@ -27,19 +27,13 @@ namespace Farm.Web.Api.Tests
         private readonly string _modelStoragePath;
         private readonly string _gcodeStoragePath;
         private static int _databaseCounter = 0;
-        private Microsoft.Data.Sqlite.SqliteConnection? _keepAliveConnection;
 
         public CustomWebApplicationFactory()
         {
             // Create a unique in-memory database per factory instance
             // Using auto-increment ID ensures complete isolation between tests
             int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
-            string dbName = $"farmtest_{dbId}";
-            _connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-
-            // Keep a connection open to maintain the in-memory database
-            _keepAliveConnection = new Microsoft.Data.Sqlite.SqliteConnection(_connectionString);
-            _keepAliveConnection.Open();
+            _connectionString = $"Data Source=:memory:?mode=memory&cache=shared";
 
             // Create temp directories for file storage (isolated per test)
             string tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
@@ -79,20 +73,6 @@ namespace Farm.Web.Api.Tests
                     options.UseSqlite(_connectionString);
                 });
 
-                // Replace DatabaseInitializer with NoOpDatabaseInitializer to prevent automatic seeding in tests
-                ServiceDescriptor? databaseInitializerDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.DatabaseInitializer));
-                if (databaseInitializerDescriptor != null)
-                {
-                    services.Remove(databaseInitializerDescriptor);
-                }
-                ServiceDescriptor? idatabaseInitializerDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.Interfaces.IDatabaseInitializer));
-                if (idatabaseInitializerDescriptor != null)
-                {
-                    services.Remove(idatabaseInitializerDescriptor);
-                }
-                services.AddScoped<Farm.Web.Api.Services.DatabaseInitializer, Farm.Web.Api.Tests.TestInfrastructure.NoOpDatabaseInitializer>();
-                services.AddScoped<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer, Farm.Web.Api.Tests.TestInfrastructure.NoOpDatabaseInitializer>();
-
                 // Ensure database is created after all services are registered
                 ServiceProvider sp = services.BuildServiceProvider();
                 using (IServiceScope scope = sp.CreateScope())
@@ -114,10 +94,6 @@ namespace Farm.Web.Api.Tests
         /// </summary>
         public override async ValueTask DisposeAsync()
         {
-            // Close the keep-alive connection to release the in-memory database
-            _keepAliveConnection?.Close();
-            _keepAliveConnection?.Dispose();
-
             // Clean up temporary storage directories
             try
             {
