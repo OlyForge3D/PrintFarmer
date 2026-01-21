@@ -370,6 +370,7 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infr
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceScheduleRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceScheduleRepository>();
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
 
 // Maintenance Module - Services
 builder.Services.AddScoped<Farm.Web.Api.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
