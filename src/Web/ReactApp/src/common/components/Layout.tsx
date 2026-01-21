@@ -85,6 +85,12 @@ const navigation: NavigationElement[] = [
     href: '/spools', 
     icon: SpoolIcon
   },
+  {
+    name: 'Maintenance',
+    href: '/maintenance',
+    icon: WrenchIcon,
+    requiredPermission: { resource: 'printers', action: 'read' }
+  },
   { name: '', isDivider: true },
   {
     name: 'API Keys',
