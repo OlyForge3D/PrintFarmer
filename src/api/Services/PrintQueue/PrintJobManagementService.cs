@@ -26,6 +26,7 @@ public class PrintJobManagementService(
 {
     // Legacy: Being phased out - use _repository for new code
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+
     // New: Repository pattern - use this for new code and migrations
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));

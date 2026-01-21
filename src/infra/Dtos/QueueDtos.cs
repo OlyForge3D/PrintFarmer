@@ -37,6 +37,12 @@ public class QueueOverviewDto
 
     public string PrinterModel { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS").
+    /// Used for matching G-code files to compatible printers when the file contains raw slicer names.
+    /// </summary>
+    public List<string>? ModelAliases { get; set; }
+
     public bool IsAvailable { get; set; }
 
     public int QueuedJobsCount { get; set; }

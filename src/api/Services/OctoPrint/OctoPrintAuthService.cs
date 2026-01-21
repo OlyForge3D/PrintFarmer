@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.OctoPrint
 {
@@ -12,18 +12,24 @@ namespace Farm.Web.Api.Services.OctoPrint
         Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null);
     }
 
-    public class OctoPrintAuthService(IOptions<OctoPrintSettings> options, ILogger<OctoPrintAuthService> logger, Farm.Web.Api.Data.Repositories.IApiKeyRepository apiKeyRepo, IConfiguration config) : IOctoPrintAuthService
+    public class OctoPrintAuthService(
+        ISettingsService settingsService,
+        ILogger<OctoPrintAuthService> logger,
+        Farm.Web.Api.Data.Repositories.IApiKeyRepository apiKeyRepo,
+        IConfiguration config) : IOctoPrintAuthService
     {
-        private readonly OctoPrintSettings _settings = options.Value;
+        private readonly ISettingsService _settingsService = settingsService;
         private readonly ILogger<OctoPrintAuthService> _logger = logger;
         private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _apiKeyRepo = apiKeyRepo;
         private readonly IConfiguration _config = config;
 
         public async Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null)
         {
-            // TODO: Implement DB-backed validation against per-user, per-printer and global keys.
-            // For now, if RequireApiKey is false, accept any (or null) apiKey.
-            if (!_settings.RequireApiKey)
+            // Read settings from database on each request so changes take effect immediately
+            var settings = _settingsService.Get<OctoPrintSettings>();
+
+            // If RequireApiKey is false, accept any (or null) apiKey.
+            if (!settings.RequireApiKey)
             {
                 _logger.LogDebug("OctoPrint API key validation disabled in settings.");
                 return true;
@@ -43,9 +49,17 @@ namespace Farm.Web.Api.Services.OctoPrint
                 return true;
             }
 
+            // Try raw key match first (when hashing is disabled)
+            ApiKey? stored = await _apiKeyRepo.GetByRawKeyAsync(apiKey);
+            if (stored is not null)
+            {
+                _logger.LogInformation("OctoPrint API key validated (raw match) for user {UserId}", stored.UserId);
+                return true;
+            }
+
             // Hash the provided key and compare against stored KeyHash
             string hash = ComputeSha256Hash(apiKey);
-            ApiKey? stored = await _apiKeyRepo.GetByKeyHashAsync(hash);
+            stored = await _apiKeyRepo.GetByKeyHashAsync(hash);
             if (stored is null)
             {
                 _logger.LogWarning("Invalid OctoPrint API key presented (redacted)");

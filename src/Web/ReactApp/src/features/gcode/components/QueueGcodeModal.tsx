@@ -15,20 +15,24 @@ interface PrinterOption {
   id: string;
   name: string;
   model: string;
+  /** Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS") */
+  modelAliases?: string[];
   isAvailable: boolean;
   nozzleDiameter?: number;
   supportedMaterials?: string[];
 }
 
 /**
- * React 19 async function to fetch printer list
+ * React 19 async function to fetch compatible printers.
+ * When a required model is specified, only fetches printers compatible with that model.
  */
-async function fetchPrinters(): Promise<PrinterOption[]> {
-  const list = await queueService.getQueueOverview();
+async function fetchPrinters(requiredModel?: string): Promise<PrinterOption[]> {
+  const list = await queueService.getQueueOverview(requiredModel);
   return list.map(p => ({
     id: p.printerId,
     name: p.printerName,
     model: p.printerModel,
+    modelAliases: p.modelAliases,
     isAvailable: p.isAvailable,
     nozzleDiameter: p.nozzleDiameter,
     supportedMaterials: p.supportedMaterials
@@ -47,11 +51,13 @@ function QueueGcodeModalInner({ file, printerPromise, isOpen, onClose }: {
 }) {
   // Call use() here, inside the actual component render
   const printers = use(printerPromise);
+  const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
   
   return (
     <QueueGcodeModalContent 
       file={file}
       printers={printers}
+      requiredModel={requiredModel || undefined}
       isOpen={isOpen}
       onClose={onClose}
     />
@@ -61,9 +67,11 @@ function QueueGcodeModalInner({ file, printerPromise, isOpen, onClose }: {
 /**
  * Content component with modal UI
  */
-function QueueGcodeModalContent({ file, printers, isOpen, onClose }: { 
+function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose }: { 
   file: GcodeFile; 
   printers: PrinterOption[];
+  /** The model filter that was used when fetching printers (for messaging) */
+  requiredModel?: string;
   isOpen: boolean;
   onClose: (added?: boolean) => void;
 }) {
@@ -98,25 +106,13 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
     }
   };
 
-  const isPrinterCompatible = (p: { model: string; nozzleDiameter?: number; supportedMaterials?: string[] }) => {
+  const isPrinterCompatible = (p: { nozzleDiameter?: number; supportedMaterials?: string[] }) => {
     if (!file) return true;
     const requiredNozzle = file.extractedNozzleDiameter;
     const requiredMaterial = file.extractedMaterial;
-    const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
 
-    // Check printer model compatibility (case-insensitive, normalizing spaces/dashes)
-    if (requiredModel && p.model && p.model.toLowerCase() !== 'unknown') {
-      const normalizeModel = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
-      const normalizedRequired = normalizeModel(requiredModel);
-      const normalizedPrinter = normalizeModel(p.model);
-      // Use partial matching - either string contains the other (handles variations like "Qidi X-Plus 4" vs "X-Plus 4")
-      const modelsMatch = normalizedRequired === normalizedPrinter 
-        || normalizedRequired.includes(normalizedPrinter) 
-        || normalizedPrinter.includes(normalizedRequired);
-      if (!modelsMatch) {
-        return false;
-      }
-    }
+    // Note: Model compatibility is already filtered server-side when fetching printers.
+    // This function only checks nozzle and material compatibility.
 
     // Only check nozzle if printer has nozzle info configured (skip if unknown)
     if (typeof requiredNozzle === 'number' && typeof p.nozzleDiameter === 'number' && p.nozzleDiameter < requiredNozzle) {
@@ -132,7 +128,7 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
 
   if (!isOpen) return null;
 
-  // Check if there are no printers available
+  // Check if there are no printers available (could mean no compatible printers when model filter is applied)
   const noPrintersAvailable = printers.length === 0;
   const availablePrinters = printers.filter(p => p.isAvailable);
   const noAvailablePrinters = availablePrinters.length === 0;
@@ -159,7 +155,17 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
           <div className="font-medium text-pf-text-primary">{file.name}</div>
         </div>
 
-        {noPrintersAvailable && (
+        {noPrintersAvailable && requiredModel && (
+          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+            <div className="font-medium">No compatible printers found</div>
+            <div className="text-sm mt-1">
+              No printers match the required model "{requiredModel}". 
+              Add a printer with this model or a matching alias to your fleet.
+            </div>
+          </div>
+        )}
+
+        {noPrintersAvailable && !requiredModel && (
           <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
             <div className="font-medium">No printers configured</div>
             <div className="text-sm mt-1">Add at least one printer before queuing jobs.</div>
@@ -168,7 +174,7 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
 
         {!noPrintersAvailable && noAvailablePrinters && (
           <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
-            <div className="font-medium">All printers are offline</div>
+            <div className="font-medium">All compatible printers are offline</div>
             <div className="text-sm mt-1">Please wait for at least one printer to come online.</div>
           </div>
         )}
@@ -226,11 +232,19 @@ function QueueGcodeModalContent({ file, printers, isOpen, onClose }: {
 }
 
 /**
- * React 19 wrapper with Suspense boundary for printer list loading
+ * React 19 wrapper with Suspense boundary for printer list loading.
+ * Only fetches printers compatible with the file's required model (server-side filtering).
  */
 export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
-  // Memoize the printer promise to prevent re-fetching on every render
-  const printerPromise = useMemo(() => fetchPrinters(), []);
+  // Get the required model from the file (could be slicer alias like "COREONEL" or canonical name)
+  const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
+  
+  // Memoize the printer promise - re-fetch when required model changes
+  // Pass the model to server for efficient filtering (avoids loading 1000s of printers)
+  const printerPromise = useMemo(
+    () => fetchPrinters(requiredModel || undefined), 
+    [requiredModel]
+  );
 
   if (!isOpen) return null;
 
@@ -244,7 +258,7 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
         <div className="flex items-center justify-center py-8">
           <div className="text-center">
             <div className="animate-spin w-8 h-8 border-2 border-pf-accent border-t-transparent rounded-full mx-auto mb-2"></div>
-            <p className="text-pf-text-secondary">Loading printers...</p>
+            <p className="text-pf-text-secondary">Loading compatible printers...</p>
           </div>
         </div>
       </Modal>

@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Data;
 using System.Data.Common;
@@ -19,7 +20,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Integration;
 
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
 public class AuthAuditIntegrationTests : IAsyncLifetime
 {

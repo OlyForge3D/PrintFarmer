@@ -177,7 +177,7 @@ builder.Services.AddCors(options =>
         });
         _ = policy.AllowCredentials();
         _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
-        _ = policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+        _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     });
 });
 

@@ -12,7 +12,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
     // ============= BASIC CRUD OPERATIONS =============
-
     public async Task<PrintJob?> GetByIdWithRelationsAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.PrintJobs
@@ -52,7 +51,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
 
     // ============= FILTERED QUERIES =============
-
     public async Task<List<PrintJob>> GetFilteredJobsAsync(
         PrintJobStatus? filterStatus = null,
         string? filterModel = null,
@@ -128,7 +126,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     }
 
     // ============= STATISTICS & ANALYTICS =============
-
     public async Task<(int queued, int printing, int paused, int completed, int failed)> GetQueueStatsAsync(CancellationToken ct = default)
     {
         List<PrintJob> allJobs = await _context.PrintJobs.ToListAsync(ct);
@@ -138,8 +135,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             printing: allJobs.Count(j => j.Status == PrintJobStatus.Printing),
             paused: allJobs.Count(j => j.Status == PrintJobStatus.Paused),
             completed: allJobs.Count(j => j.Status == PrintJobStatus.Completed),
-            failed: allJobs.Count(j => j.Status == PrintJobStatus.Failed)
-        );
+            failed: allJobs.Count(j => j.Status == PrintJobStatus.Failed));
     }
 
     public async Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default)
@@ -174,7 +170,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         query = sortBy.ToLowerInvariant() switch
         {
             "duration" => query.OrderByDescending(pj => pj.ActualPrintTime),
-            "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.FileName : ""),
+            "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.FileName : string.Empty),
             "status" => query.OrderBy(pj => pj.Status),
             _ => query.OrderByDescending(pj => pj.ActualEndTime)
         };
@@ -185,7 +181,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     }
 
     // ============= TIMELINE & HISTORY =============
-
     public async Task<List<PrintJob>> GetTimelineJobsAsync(
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
@@ -259,7 +254,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     }
 
     // ============= RELATED ENTITIES =============
-
     public async Task<GcodeFile?> GetGcodeFileAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.GcodeFiles.FindAsync([id], ct);
@@ -291,7 +285,6 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     }
 
     // ============= BULK OPERATIONS =============
-
     public async Task<List<PrintJob>> GetByIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
     {
         List<Guid> idList = ids.ToList();

@@ -8,7 +8,13 @@ namespace Farm.Web.Api.Services.Queue
 {
     public interface IJobQueueService
     {
-        Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct);
+        /// <summary>
+        /// Gets queue overview for all available printers, optionally filtered by model compatibility.
+        /// </summary>
+        /// <param name="requiredModel">Optional printer model name or alias to filter by (e.g., "COREONEL", "Prusa MK4")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of compatible printers with their queue status</returns>
+        Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, CancellationToken ct);
 
         Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct);
 

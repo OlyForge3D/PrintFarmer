@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
@@ -16,7 +17,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// Tests user authentication, registration, password management, and token handling
 /// </summary>
 [Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
+[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
 public class AuthenticationServiceIntegrationTests : IAsyncLifetime
 {

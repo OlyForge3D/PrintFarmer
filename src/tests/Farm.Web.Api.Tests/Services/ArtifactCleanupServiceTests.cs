@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Threading;
@@ -17,6 +18,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Services;
 
+[Collection(IntegrationTestCollection.Name)]
 public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

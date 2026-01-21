@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
@@ -24,6 +25,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests inline log text handling in slice job completion endpoint.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

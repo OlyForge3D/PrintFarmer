@@ -48,6 +48,11 @@ public class PrinterModel
     // Toolhead templates for multi-toolhead printers (contains nozzle diameter and max hotend temp)
     public ICollection<PrinterModelToolhead> Toolheads { get; } = new List<PrinterModelToolhead>();
 
+    /// <summary>
+    /// Slicer-specific model names that map to this printer model (e.g., "COREONEL", "MK4IS").
+    /// </summary>
+    public ICollection<PrinterModelAlias> Aliases { get; } = new List<PrinterModelAlias>();
+
     // Asset URLs for UI display
     public string? CoverImageUrl { get; set; } // URL to printer cover image (from OrcaSlicer assets)
 

@@ -2714,6 +2714,16 @@ export class ApiClient {
     const response = await this.client.post(`/users/${userId}/apikeys/${keyId}/rotate`);
     return response.data;
   }
+
+  async revealUserApiKey(userId: string, keyId: string): Promise<unknown> {
+    const response = await this.client.get(`/users/${userId}/apikeys/${keyId}/reveal`);
+    return response.data;
+  }
+
+  async getApiKeySettings(): Promise<unknown> {
+    const response = await this.client.get('/apikeys/settings');
+    return response.data;
+  }
 }
 
 // Export singleton instance

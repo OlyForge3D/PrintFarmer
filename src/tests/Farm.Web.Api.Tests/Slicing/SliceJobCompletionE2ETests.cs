@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.IO;
 using System.Text;
@@ -15,6 +16,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// End-to-end test validating complete slice job lifecycle: queue, claim, bulk artifact upload, inline log, completion, authorization.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class SliceJobCompletionE2ETests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

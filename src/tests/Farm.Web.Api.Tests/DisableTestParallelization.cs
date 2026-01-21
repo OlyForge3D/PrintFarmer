@@ -1,8 +1,7 @@
 ﻿using Xunit;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
-
-// NOTE: This file temporarily disables xUnit parallelization to stabilize CI while
-// we implement a robust parallel-safe metrics reset. After the next-phase fix
-// (host-tokened metrics reset) is validated, this file should be removed.
-
+// Enable parallel test execution at the assembly level.
+// Unit tests will run in parallel for speed.
+// Integration tests using SQLite should use [Collection(IntegrationTestCollection.Name)]
+// to run sequentially and avoid disk I/O conflicts.
+[assembly: CollectionBehavior(CollectionBehavior.CollectionPerClass, MaxParallelThreads = 4)]

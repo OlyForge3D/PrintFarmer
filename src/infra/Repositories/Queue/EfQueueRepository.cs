@@ -87,7 +87,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
 
     /// <summary>
     /// Retrieves all printers that are available for print job assignment.
-    /// Includes related entities (Model and Toolheads) needed for job assignment decisions.
+    /// Includes related entities (Model with Aliases, and Toolheads) needed for job assignment decisions.
     /// </summary>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>List of available printers with model and toolhead information</returns>
@@ -95,9 +95,89 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     {
         return await _db.Printers
             .Include(p => p.Model)
+                .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Retrieves all printers that are available and compatible with the specified model name or alias.
+    /// Matches against both canonical model names (case-insensitive, normalizing whitespace/dashes)
+    /// and slicer-specific aliases (e.g., "COREONEL" matches "Prusa CORE One L").
+    /// </summary>
+    /// <param name="modelNameOrAlias">The printer model name or slicer alias to match</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>List of compatible printers with model and toolhead information</returns>
+    public async Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct)
+    {
+        // Normalize the search term for comparison
+        string normalizedSearch = NormalizeModelName(modelNameOrAlias);
+
+        // Get all available printers with their models and aliases
+        List<Printer> allPrinters = await _db.Printers
+            .Include(p => p.Model)
+                .ThenInclude(m => m!.Aliases)
+            .Include(p => p.Toolheads)
+            .Where(p => p.IsAvailable)
+            .ToListAsync(ct);
+
+        // Filter in-memory for flexible matching (EF Core can't translate complex string normalization)
+        return allPrinters.Where(p =>
+        {
+            if (p.Model == null)
+            {
+                return false;
+            }
+
+            // Check canonical model name
+            string normalizedModelName = NormalizeModelName(p.Model.Name ?? string.Empty);
+            if (IsModelMatch(normalizedSearch, normalizedModelName))
+            {
+                return true;
+            }
+
+            // Check aliases
+            if (p.Model.Aliases != null)
+            {
+                foreach (var alias in p.Model.Aliases)
+                {
+                    string normalizedAlias = NormalizeModelName(alias.SlicerModelName ?? string.Empty);
+                    if (IsModelMatch(normalizedSearch, normalizedAlias))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Normalizes a model name for comparison by converting to lowercase and replacing separators with spaces.
+    /// </summary>
+    private static string NormalizeModelName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        return name.ToLowerInvariant().Replace('-', ' ').Replace('_', ' ').Trim();
+    }
+
+    /// <summary>
+    /// Checks if two normalized model names match (exact or substring match).
+    /// </summary>
+    private static bool IsModelMatch(string search, string candidate)
+    {
+        if (string.IsNullOrEmpty(search) || string.IsNullOrEmpty(candidate))
+        {
+            return false;
+        }
+
+        return search == candidate || search.Contains(candidate) || candidate.Contains(search);
     }
 
     /// <summary>

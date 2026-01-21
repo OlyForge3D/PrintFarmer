@@ -3,6 +3,8 @@ export interface QueueOverview {
   printerId: string;
   printerName: string;
   printerModel: string;
+  /** Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS") */
+  modelAliases?: string[];
   isAvailable: boolean;
   queuedJobsCount: number;
   currentJobId?: string;
@@ -47,8 +49,14 @@ export interface UpdateJobPriorityRequest {
 class QueueService {
   private baseUrl = '/api';
 
-  async getQueueOverview(): Promise<QueueOverview[]> {
-    const response = await fetch(`${this.baseUrl}/job-queue`);
+  /**
+   * Get queue overview for available printers.
+   * When model is specified, only returns printers compatible with that model (matching name or alias).
+   * @param model Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")
+   */
+  async getQueueOverview(model?: string): Promise<QueueOverview[]> {
+    const params = model ? `?model=${encodeURIComponent(model)}` : '';
+    const response = await fetch(`${this.baseUrl}/job-queue${params}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch queue overview: ${response.statusText}`);
     }

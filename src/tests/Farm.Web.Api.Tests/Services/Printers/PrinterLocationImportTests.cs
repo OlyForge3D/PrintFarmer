@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.IO;
 using System.Linq;
@@ -25,6 +26,7 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 /// Verifies that LocationName is correctly parsed from CSV/JSON imports
 /// and that locations are properly assigned to printers during import.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class PrinterLocationImportTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
