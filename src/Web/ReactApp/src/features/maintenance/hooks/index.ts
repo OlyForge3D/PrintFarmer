@@ -11,3 +11,10 @@ export type {
   PrinterMaintenanceStatus,
   FleetMaintenanceStats 
 } from './useMaintenanceStats';
+
+export { useUpcomingMaintenance } from './useUpcomingMaintenance';
+export type { 
+  UseUpcomingMaintenanceOptions, 
+  UseUpcomingMaintenanceResult,
+  UpcomingMaintenanceTask 
+} from './useUpcomingMaintenance';

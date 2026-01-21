@@ -1466,6 +1466,24 @@ export function ChevronRightIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron r
 }
 
 /**
+ * ChevronLeftIcon - Chevron left icon (from @mdi/js mdiChevronLeft)
+ * @preview https://cdn.jsdelivr.net/npm/@mdi/js/mdiChevronLeft.js
+ */
+export function ChevronLeftIcon({ className = 'w-4 h-4', ariaLabel = 'Chevron left' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronLeft} />
+    </svg>
+  );
+}
+
+/**
  * External link icon
  * 
  * Material Design icon component for opening external links.

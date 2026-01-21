@@ -120,16 +120,28 @@ src/Web/ReactApp/src/features/maintenance/
 
 ---
 
-## Phase 5.3: Calendar & Timeline (Future)
+## Phase 5.3: Calendar & Timeline ✅ COMPLETED
 
-### Components
-- `UpcomingMaintenanceCalendar.tsx` - Month view calendar
-- `MaintenanceTimeline.tsx` - Vertical timeline view
-- Period selector: 7/14/30/90 days
+### Components Created
+- ✅ `useUpcomingMaintenance.ts` - Hook to calculate upcoming tasks from schedules
+- ✅ `UpcomingMaintenanceCalendar.tsx` - Month view calendar with task indicators
+- ✅ `MaintenanceTimeline.tsx` - Timeline/list view grouped by relative date
 
-### Data Requirements
-- Calculate next due dates from schedules + last completion
-- Use existing `/maintenance/schedules` + `/maintenance/logs`
+### Features Implemented
+- ✅ Month navigation (previous, next, today buttons)
+- ✅ Color-coded task indicators by priority (Critical, High, Medium, Low)
+- ✅ Overdue task highlighting with pulsing indicator
+- ✅ Day click shows tasks for selected day
+- ✅ Timeline groups: Overdue, Today, Tomorrow, This Week, Next Week, Later
+- ✅ Configurable lookahead period (default 60 days)
+- ✅ Integrated into MaintenanceDashboardPage via tabs (Calendar | Timeline)
+- ✅ Show more/less functionality for large task lists
+- ✅ ChevronLeftIcon added to MdiIcons
+
+### Data Flow
+- Uses existing `/maintenance/schedules` and `/maintenance/logs/{printerId}` APIs
+- Calculates due dates from intervalDays/intervalHours + last completion time
+- Tasks sorted by due date, grouped for calendar and timeline views
 
 ---
 
