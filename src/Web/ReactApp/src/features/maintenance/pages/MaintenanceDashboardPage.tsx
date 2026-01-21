@@ -9,16 +9,19 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { WrenchIcon, RefreshIcon, CalendarIcon, ListIcon } from '@/common/components/icons/MdiIcons';
+import { WrenchIcon, RefreshIcon, CalendarIcon, ListIcon, GearIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Tabs } from '@/common/components/ui';
 import { FleetMaintenanceOverview } from '../components/FleetMaintenanceOverview';
 import { MaintenanceStatusGrid } from '../components/MaintenanceStatusGrid';
 import { MaintenancePriorityList } from '../components/MaintenancePriorityList';
 import { UpcomingMaintenanceCalendar } from '../components/UpcomingMaintenanceCalendar';
 import { MaintenanceTimeline } from '../components/MaintenanceTimeline';
+import { ComponentMaintenanceTracker } from '../components/ComponentMaintenanceTracker';
+import { ComponentReplacementHistory } from '../components/ComponentReplacementHistory';
 import { useMaintenanceStats } from '../hooks/useMaintenanceStats';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
+import { useComponentMaintenance } from '../hooks/useComponentMaintenance';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
 
 /**
@@ -50,10 +53,21 @@ export function MaintenanceDashboardPage() {
     dueSoonCount
   } = useUpcomingMaintenance({ lookaheadDays: 60 });
 
+  // Fetch component maintenance data
+  const {
+    componentData,
+    replacements,
+    componentNames,
+    isLoading: componentsLoading,
+    error: componentsError,
+    refetch: refetchComponents
+  } = useComponentMaintenance();
+
   const handleRefresh = () => {
     refetchStats();
     refetchAlerts();
     refetchTasks();
+    refetchComponents();
   };
 
   const handlePrinterClick = (printerId: string) => {
@@ -72,6 +86,8 @@ export function MaintenanceDashboardPage() {
     navigate(`/printers/${task.printerId}/maintenance`);
   };
 
+  const isAnyLoading = statsLoading || alertsLoading || tasksLoading || componentsLoading;
+
   return (
     <PageTemplate
       title="Maintenance Dashboard"
@@ -84,11 +100,11 @@ export function MaintenanceDashboardPage() {
           variant="secondary"
           size="sm"
           onClick={handleRefresh}
-          disabled={statsLoading || alertsLoading || tasksLoading}
+          disabled={isAnyLoading}
           className="gap-2"
         >
           <RefreshIcon 
-            className={`h-4 w-4 ${(statsLoading || alertsLoading || tasksLoading) ? 'animate-spin' : ''}`} 
+            className={`h-4 w-4 ${isAnyLoading ? 'animate-spin' : ''}`} 
             aria-hidden="true"
           />
           Refresh
@@ -261,11 +277,63 @@ export function MaintenanceDashboardPage() {
           </div>
         </section>
 
+        {/* Component Tracking Section */}
+        <section aria-labelledby="component-tracking-heading">
+          <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-pf-border">
+              <h2 
+                id="component-tracking-heading" 
+                className="text-lg font-semibold text-pf-text-primary"
+              >
+                Component Tracking
+              </h2>
+              <p className="text-sm text-pf-text-tertiary mt-1">
+                {componentData.length > 0 
+                  ? `${componentData.length} component type${componentData.length !== 1 ? 's' : ''} tracked`
+                  : 'Track maintenance by component type'
+                }
+              </p>
+            </div>
+            
+            <Tabs defaultTab="components" className="p-0">
+              <Tabs.List className="border-b border-pf-border bg-pf-bg-2">
+                <Tabs.Tab id="components" icon={<GearIcon className="h-4 w-4" />}>
+                  Components
+                </Tabs.Tab>
+                <Tabs.Tab id="replacements" icon={<RefreshIcon className="h-4 w-4" />}>
+                  Replacements
+                </Tabs.Tab>
+              </Tabs.List>
+              
+              <Tabs.Panels>
+                <Tabs.Panel id="components">
+                  <div className="p-5">
+                    <ComponentMaintenanceTracker
+                      componentData={componentData}
+                      isLoading={componentsLoading}
+                    />
+                  </div>
+                </Tabs.Panel>
+                
+                <Tabs.Panel id="replacements">
+                  <div className="p-5 max-h-[600px] overflow-y-auto">
+                    <ComponentReplacementHistory
+                      replacements={replacements}
+                      componentNames={componentNames}
+                      isLoading={componentsLoading}
+                    />
+                  </div>
+                </Tabs.Panel>
+              </Tabs.Panels>
+            </Tabs>
+          </div>
+        </section>
+
         {/* Error display */}
-        {(statsError || alertsError || tasksError) && (
+        {(statsError || alertsError || tasksError || componentsError) && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
             <p className="text-sm text-red-400">
-              {statsError?.message || alertsError?.message || tasksError?.message || 'An error occurred loading maintenance data'}
+              {statsError?.message || alertsError?.message || tasksError?.message || componentsError?.message || 'An error occurred loading maintenance data'}
             </p>
           </div>
         )}

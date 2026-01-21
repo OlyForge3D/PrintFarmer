@@ -18,3 +18,11 @@ export type {
   UseUpcomingMaintenanceResult,
   UpcomingMaintenanceTask 
 } from './useUpcomingMaintenance';
+
+export { useComponentMaintenance, COMPONENT_CATEGORIES } from './useComponentMaintenance';
+export type { 
+  UseComponentMaintenanceOptions, 
+  UseComponentMaintenanceResult,
+  ComponentMaintenanceData,
+  ComponentReplacement 
+} from './useComponentMaintenance';

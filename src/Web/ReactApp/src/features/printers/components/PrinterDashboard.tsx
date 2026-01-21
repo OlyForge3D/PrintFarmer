@@ -4,6 +4,7 @@ import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircleIcon, AlertCircleIcon, DashboardIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { DetailedSystemHealth } from '@/features/printers/components/SystemHealth';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
 
 interface StatsCardProps {
   title: string;
@@ -203,6 +204,12 @@ export const PrinterDashboard: React.FC = () => {
                 </div>
               </div>
             ) : null}
+
+            {/* Maintenance Widgets */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MaintenanceAlertsWidget maxAlerts={3} />
+              <MaintenanceOverviewWidget maxUpcoming={3} />
+            </div>
 
             {/* System Health */}
             <div className="mt-8">

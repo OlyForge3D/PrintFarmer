@@ -15,3 +15,15 @@ export type { UpcomingMaintenanceCalendarProps } from './UpcomingMaintenanceCale
 
 export { MaintenanceTimeline } from './MaintenanceTimeline';
 export type { MaintenanceTimelineProps } from './MaintenanceTimeline';
+
+export { ComponentMaintenanceTracker } from './ComponentMaintenanceTracker';
+export type { ComponentMaintenanceTrackerProps } from './ComponentMaintenanceTracker';
+
+export { ComponentReplacementHistory } from './ComponentReplacementHistory';
+export type { ComponentReplacementHistoryProps } from './ComponentReplacementHistory';
+
+export { MaintenanceAlertsWidget } from './MaintenanceAlertsWidget';
+export type { MaintenanceAlertsWidgetProps } from './MaintenanceAlertsWidget';
+
+export { MaintenanceOverviewWidget } from './MaintenanceOverviewWidget';
+export type { MaintenanceOverviewWidgetProps } from './MaintenanceOverviewWidget';
