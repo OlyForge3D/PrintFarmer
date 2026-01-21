@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Threading;
@@ -7,6 +6,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Workers;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

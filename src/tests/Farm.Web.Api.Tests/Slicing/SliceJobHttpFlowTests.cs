@@ -1,9 +1,9 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Xunit;
 

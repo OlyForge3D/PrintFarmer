@@ -59,6 +59,16 @@ public class MaintenanceSchedule
     public int? IntervalDays { get; set; }
 
     /// <summary>
+    /// Optional: Manufacturer this schedule applies to (for manufacturer-wide defaults)
+    /// </summary>
+    public Guid? ManufacturerId { get; set; }
+
+    /// <summary>
+    /// Estimated duration of this maintenance task in minutes (for reporting/analytics)
+    /// </summary>
+    public int? EstimatedDurationMinutes { get; set; }
+
+    /// <summary>
     /// Priority level for this maintenance task (1=Low, 2=Medium, 3=High, 4=Critical)
     /// </summary>
     public int Priority { get; set; } = 2;

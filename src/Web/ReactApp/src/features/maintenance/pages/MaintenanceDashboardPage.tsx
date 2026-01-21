@@ -23,6 +23,12 @@ import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { useComponentMaintenance } from '../hooks/useComponentMaintenance';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
+import {
+  MaintenanceTrendsChart,
+  ComponentLifespanChart,
+  MaintenanceCostAnalysis,
+  PrinterUptimeChart
+} from '../components';
 
 /**
  * Main maintenance dashboard page component
@@ -274,6 +280,29 @@ export function MaintenanceDashboardPage() {
                 </Tabs.Panel>
               </Tabs.Panels>
             </Tabs>
+          </div>
+        </section>
+
+        {/* Analytics & Trends Section */}
+        <section aria-labelledby="analytics-trends-heading">
+          <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden mb-8">
+            <div className="px-5 py-4 border-b border-pf-border">
+              <h2 
+                id="analytics-trends-heading" 
+                className="text-lg font-semibold text-pf-text-primary"
+              >
+                Analytics & Trends
+              </h2>
+              <p className="text-sm text-pf-text-tertiary mt-1">
+                Visualize maintenance patterns, costs, and printer reliability
+              </p>
+            </div>
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <MaintenanceTrendsChart />
+              <ComponentLifespanChart />
+              <MaintenanceCostAnalysis />
+              <PrinterUptimeChart />
+            </div>
           </div>
         </section>
 

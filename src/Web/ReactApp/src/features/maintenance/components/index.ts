@@ -27,3 +27,8 @@ export type { MaintenanceAlertsWidgetProps } from './MaintenanceAlertsWidget';
 
 export { MaintenanceOverviewWidget } from './MaintenanceOverviewWidget';
 export type { MaintenanceOverviewWidgetProps } from './MaintenanceOverviewWidget';
+
+export { MaintenanceTrendsChart } from './MaintenanceTrendsChart';
+export { ComponentLifespanChart } from './ComponentLifespanChart';
+export { MaintenanceCostAnalysis } from './MaintenanceCostAnalysis';
+export { PrinterUptimeChart } from './PrinterUptimeChart';

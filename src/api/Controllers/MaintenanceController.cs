@@ -528,9 +528,9 @@ public class MaintenanceController(
             }
 
             printer.InMaintenance = request.InMaintenance;
+
             // The IPrintersService doesn't have UpdateAsync, so we rely on EF Core change tracking
             // No explicit call needed - changes are saved automatically
-
             _logger.LogInformation($"[MaintenanceController] Printer {printerId} maintenance mode set to {request.InMaintenance}");
 
             return NoContent();

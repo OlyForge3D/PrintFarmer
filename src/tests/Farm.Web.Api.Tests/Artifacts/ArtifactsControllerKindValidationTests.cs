@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
@@ -6,6 +5,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Tests.Slicing;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,7 +16,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Artifacts
 {
     [Collection(IntegrationTestCollection.Name)]
-public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
+    public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly CustomWebApplicationFactory _factory = factory;
 

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

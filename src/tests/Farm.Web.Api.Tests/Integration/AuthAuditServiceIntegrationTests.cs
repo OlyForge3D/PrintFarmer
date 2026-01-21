@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -7,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
