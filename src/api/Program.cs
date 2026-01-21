@@ -365,6 +365,9 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
 // Retry Service (Phase 4.4)
 builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infrastructure.Services.RetryService>();
 
+// Maintenance Module - Printer Statistics Repository
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)
@@ -432,6 +435,10 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScanne
 // Stale worker cleanup service
 builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
+
+// Maintenance Module - Print Statistics Sync Service
+builder.Services.Configure<Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
 
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
