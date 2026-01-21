@@ -17,11 +17,11 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class RetriesController(
     IRetryService retryService,
-    IPrintQueueService printQueueService,
+    IPrintJobManagementService printJobManagementService,
     ILogger<RetriesController> logger) : ControllerBase
 {
     private readonly IRetryService _retryService = retryService ?? throw new ArgumentNullException(nameof(retryService));
-    private readonly IPrintQueueService _printQueueService = printQueueService ?? throw new ArgumentNullException(nameof(printQueueService));
+    private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
     private readonly ILogger<RetriesController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
@@ -145,7 +145,7 @@ public class RetriesController(
         try
         {
             // Verify job exists
-            QueuedPrintJobDto? job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
+            QueuedPrintJobDto? job = await _printJobManagementService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
             {
                 return NotFound($"Job {jobId} not found");
@@ -241,7 +241,7 @@ public class RetriesController(
         try
         {
             // Verify job exists
-            QueuedPrintJobDto? job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
+            QueuedPrintJobDto? job = await _printJobManagementService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
             {
                 return NotFound($"Job {jobId} not found");

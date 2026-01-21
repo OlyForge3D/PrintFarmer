@@ -3,9 +3,10 @@
 namespace Farm.Api.Services.Interfaces;
 
 /// <summary>
-/// Service for managing print queue operations
+/// Service for managing print jobs including CRUD operations, queue management,
+/// analytics, timeline visualization, and history tracking.
 /// </summary>
-public interface IPrintQueueService
+public interface IPrintJobManagementService
 {
     // ============= QUERY OPERATIONS =============
 

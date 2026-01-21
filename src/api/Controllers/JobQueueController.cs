@@ -17,16 +17,18 @@ namespace Farm.Web.Api.Controllers;
 public class JobQueueController(Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
-    /// Get all jobs in the queue
+    /// Get queue overview with optional model filtering.
+    /// When model is specified, only returns printers compatible with that model (matching name or alias).
     /// </summary>
+    /// <param name="model">Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")</param>
     [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<JobQueuePrintJobDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<QueueOverviewDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<JobQueuePrintJobDto>>> GetQueueAsync()
+    public async Task<ActionResult<IEnumerable<QueueOverviewDto>>> GetQueueAsync([FromQuery] string? model = null)
     {
         try
         {
-            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(CancellationToken.None);
+            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(model, CancellationToken.None);
             return Ok(dtos);
         }
         catch (Exception ex)

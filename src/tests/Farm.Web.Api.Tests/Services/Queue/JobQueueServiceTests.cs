@@ -72,7 +72,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(new List<Printer>());
 
         // Act
-        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, CancellationToken.None);
 
         // Assert
         result.Should().BeEmpty();
@@ -95,7 +95,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);
@@ -124,7 +124,7 @@ public class JobQueueServiceTests
             .ReturnsAsync((PrintJob?)null);
 
         // Act
-        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);
@@ -161,7 +161,7 @@ public class JobQueueServiceTests
             .ReturnsAsync(currentJob);
 
         // Act
-        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(CancellationToken.None);
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, CancellationToken.None);
 
         // Assert
         result.Should().HaveCount(1);

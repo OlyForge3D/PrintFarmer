@@ -22,6 +22,14 @@ export interface ToggleApiKeyResponse {
   isActive: boolean;
 }
 
+export interface RevealApiKeyResponse {
+  key: string;
+}
+
+export interface ApiKeySettingsResponse {
+  hashingEnabled: boolean;
+}
+
 export async function listApiKeys(userId: string): Promise<ApiKeyDto[]> {
   const response = await apiClient.listUserApiKeys(userId);
   return response as ApiKeyDto[];
@@ -44,4 +52,14 @@ export async function deleteApiKey(userId: string, keyId: string): Promise<void>
 export async function rotateApiKey(userId: string, keyId: string): Promise<CreateApiKeyResponse> {
   const response = await apiClient.rotateUserApiKey(userId, keyId);
   return response as CreateApiKeyResponse;
+}
+
+export async function revealApiKey(userId: string, keyId: string): Promise<RevealApiKeyResponse> {
+  const response = await apiClient.revealUserApiKey(userId, keyId);
+  return response as RevealApiKeyResponse;
+}
+
+export async function getApiKeySettings(): Promise<ApiKeySettingsResponse> {
+  const response = await apiClient.getApiKeySettings();
+  return response as ApiKeySettingsResponse;
 }

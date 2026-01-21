@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http;
@@ -14,6 +15,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Integration tests for OrcaSlicer bundle preview endpoint.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class OrcaBundlePreviewTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

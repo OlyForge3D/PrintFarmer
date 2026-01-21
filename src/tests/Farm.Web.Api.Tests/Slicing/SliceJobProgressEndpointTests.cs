@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http.Json;
@@ -11,6 +12,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests /api/slice/{id}/progress endpoint updates job state and emits event prerequisites.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class SliceJobProgressEndpointTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

@@ -1,6 +1,7 @@
 ﻿using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Web.Api.DTOs.PrintQueue;
@@ -9,16 +10,26 @@ using Microsoft.EntityFrameworkCore;
 namespace Farm.Api.Services.PrintQueue;
 
 /// <summary>
-/// Service for managing print queue operations
+/// Service for managing print jobs including CRUD operations, queue management,
+/// analytics, timeline visualization, and history tracking.
 /// </summary>
-public class PrintQueueService(
+/// <remarks>
+/// NOTE: This service is being incrementally migrated from AppDbContext to IPrintJobManagementRepository.
+/// New methods should use _repository. Legacy methods still use _dbContext and will be migrated.
+/// </remarks>
+public class PrintJobManagementService(
     AppDbContext dbContext,
-    ILogger<PrintQueueService> logger,
+    IPrintJobManagementRepository repository,
+    ILogger<PrintJobManagementService> logger,
     INotificationService? notificationService = null,
-    IRetryService? retryService = null) : IPrintQueueService
+    IRetryService? retryService = null) : IPrintJobManagementService
 {
+    // Legacy: Being phased out - use _repository for new code
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    private readonly ILogger<PrintQueueService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    // New: Repository pattern - use this for new code and migrations
+    private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
 
@@ -43,50 +54,15 @@ public class PrintQueueService(
     {
         try
         {
-            IQueryable<PrintJob> query = _dbContext.PrintJobs
-                .Include(pj => pj.GcodeFile)
-                .Include(pj => pj.AssignedPrinter)
-                    .ThenInclude(p => p!.Model)
-                .AsQueryable();
-
-            // Filter by status
-            if (!string.IsNullOrEmpty(filterStatus))
+            PrintJobStatus? status = null;
+            if (!string.IsNullOrEmpty(filterStatus) &&
+                Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus parsedStatus))
             {
-                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus status))
-                {
-                    query = query.Where(pj => pj.Status == status);
-                }
-            }
-            else
-            {
-                // Default: only show queued and printing jobs
-                query = query.Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing);
+                status = parsedStatus;
             }
 
-            // Filter by printer model
-            if (!string.IsNullOrEmpty(filterModel))
-            {
-                query = query.Where(pj => pj.AssignedPrinter != null &&
-                    pj.AssignedPrinter.Model != null &&
-                    pj.AssignedPrinter.Model.Name.Contains(filterModel));
-            }
-
-            // Filter by material
-            if (!string.IsNullOrEmpty(filterMaterial))
-            {
-                query = query.Where(pj => (pj.RequiredMaterialType != null &&
-                    pj.RequiredMaterialType.Contains(filterMaterial)) ||
-                    (pj.GcodeFile != null && pj.GcodeFile.RequiredMaterial != null &&
-                    pj.GcodeFile.RequiredMaterial.Contains(filterMaterial)));
-            }
-
-            // Apply pagination
-            List<PrintJob> jobs = await query
-                .OrderByDescending(pj => pj.Priority)
-                .ThenBy(pj => pj.QueuePosition)
-                .Skip(offset)
-                .Take(limit)
-                .ToListAsync(cancellationToken);
+            List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
+                status, filterModel, filterMaterial, limit, offset, cancellationToken);
 
             return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
         }
@@ -111,15 +87,8 @@ public class PrintQueueService(
     {
         try
         {
-            var printerId_guid = Guid.Parse(printerId);
-            List<PrintJob> jobs = await _dbContext.PrintJobs
-                .Where(pj => pj.AssignedPrinterId == printerId_guid &&
-                    (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
-                .OrderByDescending(pj => pj.Priority)
-                .ThenBy(pj => pj.QueuePosition)
-                .Take(limit)
-                .ToListAsync(cancellationToken);
-
+            var printerIdGuid = Guid.Parse(printerId);
+            List<PrintJob> jobs = await _repository.GetJobsByPrinterAsync(printerIdGuid, limit, cancellationToken);
             return jobs.Select(MapToQueuedPrintJobDto).ToList();
         }
         catch (Exception ex)
@@ -137,17 +106,15 @@ public class PrintQueueService(
     {
         try
         {
-            List<PrintJob> allJobs = await _dbContext.PrintJobs.ToListAsync(cancellationToken);
+            (int queued, int printing, int paused, int completed, int failed) = await _repository.GetQueueStatsAsync(cancellationToken);
 
-            var stats = new QueueStatsDto
+            return new QueueStatsDto
             {
-                TotalQueued = allJobs.Count(j => j.Status == PrintJobStatus.Queued),
-                TotalPrinting = allJobs.Count(j => j.Status == PrintJobStatus.Printing),
-                TotalPaused = allJobs.Count(j => j.Status == PrintJobStatus.Paused),
+                TotalQueued = queued,
+                TotalPrinting = printing,
+                TotalPaused = paused,
                 AverageWaitTimeMinutes = 0 // TODO: Calculate from queue entries
             };
-
-            return stats;
         }
         catch (Exception ex)
         {
@@ -164,23 +131,16 @@ public class PrintQueueService(
     {
         try
         {
-            List<QueuePrinterModelStatsDto> stats = await _dbContext.PrintJobs
-                .Include(pj => pj.AssignedPrinter)
-                    .ThenInclude(p => p!.Model)
-                .Where(pj => pj.AssignedPrinter != null && pj.AssignedPrinter.Model != null)
-                .GroupBy(pj => pj.AssignedPrinter!.Model!.Name)
-                .Select(g => new QueuePrinterModelStatsDto
-                {
-                    ModelName = g.Key,
-                    TotalQueued = g.Count(j => j.Status == PrintJobStatus.Queued),
-                    CurrentlyPrinting = g.Count(j => j.Status == PrintJobStatus.Printing),
-                    OldestQueuedAtUtc = g.Where(j => j.Status == PrintJobStatus.Queued)
-                        .Min(j => (DateTime?)j.QueuedAt),
-                    AverageQueueWaitMinutes = 0 // TODO: Calculate from historical data
-                })
-                .ToListAsync(cancellationToken);
+            List<PrinterModelQueueStats> stats = await _repository.GetModelStatsAsync(cancellationToken);
 
-            return stats;
+            return stats.Select(s => new QueuePrinterModelStatsDto
+            {
+                ModelName = s.ModelName,
+                TotalQueued = s.TotalQueued,
+                CurrentlyPrinting = s.CurrentlyPrinting,
+                OldestQueuedAtUtc = s.OldestQueuedAtUtc,
+                AverageQueueWaitMinutes = 0 // TODO: Calculate from historical data
+            }).ToList();
         }
         catch (Exception ex)
         {

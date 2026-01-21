@@ -98,6 +98,9 @@ src/api/artifacts/
 # Ignore API uploads directory (test-generated files and temporary uploads)
 src/api/uploads/
 
+# Local development storage (uploads, models, gcode - outside src/api)
+.local-storage/
+
 # Auto-generated docker files 
 /dockerfiles/
 /docker-entrypoint-config.sh

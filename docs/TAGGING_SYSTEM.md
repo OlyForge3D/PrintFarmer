@@ -156,6 +156,7 @@ The PrintFarmer 3D Model Tagging System is a complete tagging solution for organ
 The PrintFarmer tagging system uses a **generic polymorphic architecture** to support tagging multiple object types (3D Models, GcodeFiles, Printers, etc.) with a single Tag entity and shared functionality.
 
 **Core Design Principles:**
+
 - **Single Tag Definition**: One `Tag` entity used across all object types
 - **Shared Tag Namespace**: All tags apply globally for discovery and reuse
 - **Extensibility**: New object types require minimal code additions
@@ -248,17 +249,21 @@ UI Re-render
 ### Feature 1: Model Detail Page
 
 #### Purpose
+
 Display detailed information about a single 3D model with comprehensive tag management interface.
 
 #### Location
+
 `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx`
 
 #### Route
+
 `/models/:modelId`
 
 #### Key Features
 
 **Display Capabilities:**
+
 - Full model thumbnail preview
 - File metadata (name, size, type, upload date)
 - Dimensions and properties
@@ -266,6 +271,7 @@ Display detailed information about a single 3D model with comprehensive tag mana
 - Model statistics and history
 
 **Editing Capabilities:**
+
 - View mode (read-only display)
 - Edit mode (tag selection interface)
 - Add tags from available pool
@@ -274,6 +280,7 @@ Display detailed information about a single 3D model with comprehensive tag mana
 - Real-time API synchronization
 
 **UI Components:**
+
 - Back button for navigation
 - Edit/Save mode toggle
 - Tag list with color swatches
@@ -282,17 +289,20 @@ Display detailed information about a single 3D model with comprehensive tag mana
 - Error messages and feedback
 
 #### API Endpoints Used
+
 - `GET /api/3d-models/{id}/details` - Fetch model with full tag information
 - `GET /api/3d-models/tags` - List all available tags
 - `POST /api/3d-models/{id}/tags` - Update tags for model
 
 #### React Query Integration
+
 - Query key: `['model-detail', modelId]`
 - Stale time: 5 minutes
 - Cache invalidation: On tag mutation
 - Auto-retry: 2 attempts
 
 #### Code Example
+
 ```tsx
 // Access via route parameter
 const { modelId } = useParams<{ modelId: string }>();
@@ -318,12 +328,15 @@ const { mutate: updateTags } = useMutation({
 ### Feature 2: Bulk Tag Assignment Modal
 
 #### Purpose
+
 Efficiently assign the same tags to multiple models in a single operation.
 
 #### Location
+
 `/src/Web/ReactApp/src/components/modals/BulkTagAssignmentModal.tsx`
 
 #### Integration
+
 - Modal state managed in `ModelsPage.tsx`
 - Triggered by "Bulk Tag" button in toolbar
 - Fully reusable, independent component
@@ -331,6 +344,7 @@ Efficiently assign the same tags to multiple models in a single operation.
 #### Key Features
 
 **Model Selection:**
+
 - Multi-select checkbox interface
 - Scrollable list of all available models
 - Select All / Deselect All buttons
@@ -338,6 +352,7 @@ Efficiently assign the same tags to multiple models in a single operation.
 - Model names and filenames for clarity
 
 **Tag Selection:**
+
 - Multi-select checkbox interface
 - Color preview for each tag
 - Select All / Deselect All buttons
@@ -345,6 +360,7 @@ Efficiently assign the same tags to multiple models in a single operation.
 - Tag descriptions if available
 
 **Bulk Operation:**
+
 - Single API call with all selections
 - Progress indication during operation
 - Success message with count of affected models
@@ -353,14 +369,17 @@ Efficiently assign the same tags to multiple models in a single operation.
 - Modal auto-closes on success
 
 **Performance:**
+
 - Assign tags to 100s of models in one API call
 - Efficient batch processing
 - Minimal network overhead
 
 #### API Endpoint Used
+
 - `POST /api/3d-models/bulk/assign-tags` - Bulk assign tags to multiple models
 
 #### Props
+
 ```typescript
 interface BulkTagAssignmentModalProps {
   isOpen: boolean;
@@ -370,6 +389,7 @@ interface BulkTagAssignmentModalProps {
 ```
 
 #### Code Example
+
 ```tsx
 // Usage in ModelsPage
 const [showBulkTagModal, setShowBulkTagModal] = useState(false);
@@ -392,15 +412,19 @@ return (
 ### Feature 3: Tag Management Admin Page
 
 #### Purpose
+
 Centralized hub for managing all tags in the system with statistics and control.
 
 #### Location
+
 `/src/Web/ReactApp/src/pages/TagAdminPage.tsx`
 
 #### Route
+
 `/admin/tags`
 
 #### Access Control
+
 - Requires `farm_admin` role
 - Protected via `ProtectedRoute` component
 - Admin-only access
@@ -408,6 +432,7 @@ Centralized hub for managing all tags in the system with statistics and control.
 #### Key Features
 
 **Create Tags:**
+
 - Form with required name field
 - Optional color picker (default: #6366f1)
 - Optional description field
@@ -415,6 +440,7 @@ Centralized hub for managing all tags in the system with statistics and control.
 - Immediate reflection in all UI components
 
 **Manage Tags (Table View):**
+
 - List of all tags with comprehensive information
 - Color swatch for visual identification
 - Tag name and description
@@ -423,6 +449,7 @@ Centralized hub for managing all tags in the system with statistics and control.
 - Delete button (disabled for tags in use)
 
 **Edit Tags (Inline):**
+
 - Click edit icon to make fields editable
 - Modify name and description
 - Color picker for customization
@@ -431,6 +458,7 @@ Centralized hub for managing all tags in the system with statistics and control.
 - Cache invalidation
 
 **Delete Tags:**
+
 - One-click deletion interface
 - Disabled for tags currently in use
 - Shows usage count when disabled
@@ -438,6 +466,7 @@ Centralized hub for managing all tags in the system with statistics and control.
 - Cascade delete support
 
 **Statistics Dashboard:**
+
 - Total number of tags created
 - Total number of tagged models
 - Most used tag identification
@@ -445,12 +474,14 @@ Centralized hub for managing all tags in the system with statistics and control.
 - Useful for administration and monitoring
 
 #### API Endpoints Used
+
 - `GET /api/3d-models/tags` - List all tags
 - `POST /api/3d-models/tags` - Create new tag
 - `DELETE /api/3d-models/tags/{tagId}` - Delete tag
 - `GET /api/3d-models` - Fetch models for usage calculation
 
 #### Code Example
+
 ```tsx
 // Create new tag
 const { mutate: createTag } = useMutation({
@@ -475,15 +506,19 @@ const { mutate: deleteTag } = useMutation({
 ### Feature 4: Tag Suggestions System
 
 #### Purpose
+
 Intelligently suggest relevant tags for models using multiple analysis techniques.
 
 #### Status
+
 API Foundation Complete - Ready for UI Integration
 
 #### Location
+
 Backend: `/src/api/Controllers/ModelController.cs`
 
 #### API Endpoint
+
 `GET /api/3d-models/{id}/tag-suggestions`
 
 #### Suggestion Algorithm
@@ -491,37 +526,44 @@ Backend: `/src/api/Controllers/ModelController.cs`
 The system uses multiple heuristics to generate suggestions:
 
 **1. Dimension Analysis**
+
 - Analyzes model size (X, Y, Z dimensions)
 - Suggests size-related tags (Tiny, Small, Medium, Large, Huge)
 - Confidence based on dimension consistency
 
 **2. Complexity Analysis**
+
 - Counts model triangles/vertices
 - Suggests complexity tags (Simple, Moderate, Complex, Detailed)
 - Higher triangle count = more detailed
 
 **3. File Format Tags**
+
 - Automatically identifies file format (STL, 3MF, OBJ, PLY)
 - Suggests format-specific tags
 - 100% confidence for format detection
 
 **4. Collaborative Filtering**
+
 - Finds similar models based on dimension similarity
 - Suggests tags from similar models
 - Confidence based on similarity metric
 
 **5. Text Analysis**
+
 - Extracts keywords from model name
 - Extracts keywords from description
 - Suggests tags matching keywords
 - Fuzzy matching for variations
 
 **6. Confidence Scoring**
+
 - Each suggestion includes 0-100 confidence score
 - Top suggestions ranked by confidence
 - Helps users prioritize recommendations
 
 #### Sample Response
+
 ```json
 {
   "suggestions": [
@@ -545,6 +587,7 @@ The system uses multiple heuristics to generate suggestions:
 ```
 
 #### Ready for UI Integration
+
 - Backend implementation complete
 - Can be integrated into ModelDetailPage
 - Add "Suggest Tags" button to fetch suggestions
@@ -574,6 +617,7 @@ public class Model3DTag
 ```
 
 **Constraints:**
+
 - Primary key: `Id` (Guid)
 - Unique index: `Name` (no duplicate tag names)
 - Required: `Name`, `CreatedAt`
@@ -599,6 +643,7 @@ public class Model3DTagMapping
 ```
 
 **Constraints:**
+
 - Primary key: `Id` (Guid)
 - Foreign keys: `Model3DId`, `TagId`
 - Cascade delete: Both relations configured
@@ -606,6 +651,7 @@ public class Model3DTagMapping
 - Required: All fields
 
 **Relationships:**
+
 - Model3D → Model3DTagMapping (one-to-many)
 - Model3DTag → Model3DTagMapping (one-to-many)
 - Many-to-many: Model3D ↔ Model3DTag
@@ -673,11 +719,13 @@ modelBuilder.Entity<Model3DTagMapping>(entity =>
 ### Tag CRUD Operations
 
 #### Get All Tags
+
 ```
 GET /api/3d-models/tags
 ```
 
 **Response:**
+
 ```json
 [
   {
@@ -700,6 +748,7 @@ GET /api/3d-models/tags
 **Usage:** Fetch all tags for dropdowns and lists
 
 #### Create New Tag
+
 ```
 POST /api/3d-models/tags
 Content-Type: application/json
@@ -712,6 +761,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -723,12 +773,14 @@ Content-Type: application/json
 ```
 
 **Validation:**
+
 - Name is required
 - Name must be unique
 - Color must be valid hex (if provided)
 - Max length: 100 characters
 
 #### Delete Tag
+
 ```
 DELETE /api/3d-models/tags/{tagId}
 ```
@@ -736,6 +788,7 @@ DELETE /api/3d-models/tags/{tagId}
 **Response:** `204 No Content`
 
 **Behavior:**
+
 - Cascade deletes all mappings
 - Models keep other tags
 - Tag removed from database
@@ -745,11 +798,13 @@ DELETE /api/3d-models/tags/{tagId}
 ### Single Model Tag Operations
 
 #### Get Model Details with Tags
+
 ```
 GET /api/3d-models/{id}/details
 ```
 
 **Response:**
+
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440100",
@@ -771,6 +826,7 @@ GET /api/3d-models/{id}/details
 **Usage:** Fetch single model with all tag information
 
 #### Assign Tags to Model
+
 ```
 POST /api/3d-models/{id}/tags
 Content-Type: application/json
@@ -784,6 +840,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
   "model": { /* model details */ },
@@ -793,11 +850,13 @@ Content-Type: application/json
 ```
 
 **Behavior:**
+
 - Replaces all tags for model
 - Can add or remove tags
 - Idempotent operation
 
 #### Remove Tag from Model
+
 ```
 DELETE /api/3d-models/{id}/tags/{tagId}
 ```
@@ -805,6 +864,7 @@ DELETE /api/3d-models/{id}/tags/{tagId}
 **Response:** `204 No Content`
 
 **Behavior:**
+
 - Removes specific tag from model
 - Model keeps other tags
 - Mapping deleted from database
@@ -814,6 +874,7 @@ DELETE /api/3d-models/{id}/tags/{tagId}
 ### Bulk Operations
 
 #### Bulk Assign Tags to Multiple Models
+
 ```
 POST /api/3d-models/bulk/assign-tags
 Content-Type: application/json
@@ -832,6 +893,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
   "successCount": 3,
@@ -848,12 +910,14 @@ Content-Type: application/json
 ```
 
 **Performance:**
+
 - Single database transaction
 - Batch processing
 - Minimal network overhead
 - Assign to 100s of models in one call
 
 #### Bulk Remove Tags from Multiple Models
+
 ```
 POST /api/3d-models/bulk/remove-tags
 Content-Type: application/json
@@ -871,15 +935,18 @@ Content-Type: application/json
 ### Search & Intelligence
 
 #### Get Tag Suggestions for Model
+
 ```
 GET /api/3d-models/{id}/tag-suggestions
 ```
 
 **Query Parameters:**
+
 - `limit` (optional): Maximum number of suggestions (default: 5)
 - `minConfidence` (optional): Minimum confidence threshold 0-100 (default: 50)
 
 **Response:**
+
 ```json
 {
   "suggestions": [
@@ -898,6 +965,7 @@ GET /api/3d-models/{id}/tag-suggestions
 ```
 
 **Algorithms Used:**
+
 - Dimension analysis
 - Complexity analysis
 - File format detection
@@ -1031,6 +1099,7 @@ This section provides step-by-step guides for common tagging operations.
    - Navigate to any model to verify tags applied
 
 **Performance:**
+
 - Single API call for all models
 - Efficiently assigns 100s of models
 - Typical time: <1 second for 100 models
@@ -1044,11 +1113,13 @@ This section provides step-by-step guides for common tagging operations.
 **Goal:** Create, edit, delete, and monitor tags
 
 **Create New Tag:**
+
 1. Admin → Tag Management → Management tab
 2. Fill form (Name, Color, Description)
 3. Click "Create Tag"
 
 **Edit Existing Tag:**
+
 1. Find tag in table
 2. Click edit (pencil) icon in row
 3. Row becomes editable
@@ -1057,6 +1128,7 @@ This section provides step-by-step guides for common tagging operations.
 6. Changes applied immediately
 
 **Delete Tag:**
+
 1. Find tag in table
 2. Check usage count in row
 3. If in use (count > 0): Delete button disabled, shows "In use by N models"
@@ -1065,6 +1137,7 @@ This section provides step-by-step guides for common tagging operations.
 6. Existing model tags unaffected
 
 **View Statistics:**
+
 - Top of page shows dashboard:
   - "Total Tags: 15"
   - "Tagged Models: 247"
@@ -1114,12 +1187,14 @@ This section provides step-by-step guides for common tagging operations.
    - Filter jobs by gcode file tags
 
 **API Endpoints for GcodeFile Tagging:**
+
 - `POST /api/gcode-files/{gcodeFileId}/tags/{tagId}` - Add tag to file
 - `DELETE /api/gcode-files/{gcodeFileId}/tags/{tagId}` - Remove tag from file
 - `GET /api/gcode-files/{gcodeFileId}/tags` - Get all tags for a file
 - `POST /api/gcode-files/tags/analytics` - Get gcode file tagging analytics
 
 **Example Use Cases:**
+
 1. Tag files that work well on specific printers
 2. Mark files that need post-processing or support
 3. Organize files by print time (quick vs long prints)
@@ -1135,6 +1210,7 @@ This section provides step-by-step guides for common tagging operations.
 **Goal:** Get intelligent recommendations for model tags
 
 **Current Status:**
+
 - ✅ API endpoint ready: `GET /api/3d-models/{id}/tag-suggestions`
 - ✅ 6 different suggestion algorithms implemented
 - ✅ Confidence scoring working
@@ -1165,6 +1241,7 @@ This section provides step-by-step guides for common tagging operations.
    - Can accept all or just some suggestions
 
 **Suggestion Algorithm:**
+
 - Analyzes model dimensions
 - Checks complexity metrics
 - Detects file format characteristics
@@ -1182,6 +1259,7 @@ This section provides step-by-step guides for common tagging operations.
 **Architecture Overview:**
 
 The tagging system uses a **polymorphic pattern** where:
+
 - One `Tag` entity is shared across all object types
 - Each object type has its own mapping table (Model3DTag, GcodeFileTag, etc.)
 - New object types can be added with minimal code changes
@@ -1222,6 +1300,7 @@ Tag (Shared Entity)
    - Add integration tests
 
 **Benefits of Polymorphic Design:**
+
 - Single tag namespace (one "PrintReady" tag used everywhere)
 - Shared tag management interface
 - Efficient querying (no join across multiple tables)
@@ -1230,11 +1309,10 @@ Tag (Shared Entity)
 
 **Time:** ~6-8 hours to add a new object type (follow existing pattern)
 
-
-
 **Goal:** Get intelligent recommendations for model tags
 
 **Current Status:**
+
 - ✅ API endpoint ready: `GET /api/3d-models/{id}/tag-suggestions`
 - ✅ 6 different suggestion algorithms implemented
 - ✅ Confidence scoring working
@@ -1265,6 +1343,7 @@ Tag (Shared Entity)
    - Can accept all or just some suggestions
 
 **Suggestion Algorithm:**
+
 - Analyzes model dimensions
 - Checks complexity metrics
 - Detects file format characteristics
@@ -1284,12 +1363,14 @@ Tag (Shared Entity)
 **Size:** ~450 lines
 
 **Dependencies:**
+
 - React Router (useParams, useNavigate)
 - React Query (useQuery, useMutation)
 - Lucide Icons (ArrowLeft, Edit2, Save, X, Tag)
 - Custom hooks and API clients
 
 **State Management:**
+
 - `editMode`: Boolean toggle for edit mode
 - `selectedTags`: Set of selected tag IDs during edit
 - React Query for server state
@@ -1320,6 +1401,7 @@ const { mutate: updateTags } = useMutation({
 ```
 
 **UI Sections:**
+
 1. Header with back button
 2. Model thumbnail preview
 3. Model information (name, size, type, date)
@@ -1335,6 +1417,7 @@ const { mutate: updateTags } = useMutation({
 **Size:** ~350 lines
 
 **Props:**
+
 ```typescript
 interface BulkTagAssignmentModalProps {
   isOpen: boolean;
@@ -1344,6 +1427,7 @@ interface BulkTagAssignmentModalProps {
 ```
 
 **State Management:**
+
 - `selectedModelIds`: Set of selected model IDs
 - `selectedTagIds`: Set of selected tag IDs
 - `isLoading`: Loading state during assignment
@@ -1374,6 +1458,7 @@ const { mutate: bulkAssignTags } = useMutation({
 ```
 
 **UI Sections:**
+
 1. Modal header with close button
 2. Model selection list with checkboxes
    - Select All / Deselect All button
@@ -1393,10 +1478,12 @@ const { mutate: bulkAssignTags } = useMutation({
 **Size:** ~500 lines
 
 **Access Control:**
+
 - Requires `farm_admin` role
 - Protected by ProtectedRoute wrapper
 
 **State Management:**
+
 - `editingTagId`: ID of tag being edited
 - `tagData`: Form data for creating/editing tags
 - React Query for server state
@@ -1429,6 +1516,7 @@ const { mutate: deleteTag } = useMutation({
 ```
 
 **UI Sections:**
+
 1. Statistics dashboard
    - Total tags
    - Total tagged models
@@ -1447,16 +1535,17 @@ const { mutate: deleteTag } = useMutation({
    - Editable name and description
    - Save/Cancel buttons
 
-
 ### Critical Fixes & Implementation Details (November 7, 2025)
 
 **Issue 1: JSON Serialization Mismatch**
+
 - **Problem:** Frontend was sending PascalCase properties (`Name`, `Color`, `Description`, `TagIds`) but API configured for camelCase
 - **Solution:** Updated React to send camelCase: `name`, `color`, `description`, `tagIds`
 - **File:** `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx` (Lines 110-115, 144)
 - **Result:** ✅ Tag creation requests now properly deserialized
 
 **Issue 2: Tag Creation Routing Error**
+
 - **Problem:** `CreatedAtAction(nameof(GetTagsAsync), new { id = result.Id })` tried to generate route for endpoint with no `id` parameter
 - **Error:** "No route matches the supplied values" (InvalidOperationException)
 - **Solution:** Changed to explicit URL: `Created($"/api/3d-models/tags/{result.Id}", result)`
@@ -1464,12 +1553,14 @@ const { mutate: deleteTag } = useMutation({
 - **Result:** ✅ Tag creation now returns 201 Created with proper Location header
 
 **Issue 3: Inadequate Error Reporting**
+
 - **Problem:** GlobalExceptionMiddleware was returning `null` in error details field
 - **Solution:** Enhanced to include full exception chain: `"{ExceptionType}: {Message}" + InnerException details`
 - **File:** `/src/api/Middleware/GlobalExceptionMiddleware.cs` (Line 95)
 - **Result:** ✅ Developers now see actual error causes, not generic messages
 
 **Files Modified:**
+
 1. `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx` - Fixed JSON property names
 2. `/src/api/Controllers/ModelController.cs` - Fixed CreatedAtAction routing, added error details
 3. `/src/api/Middleware/GlobalExceptionMiddleware.cs` - Enhanced error responses
@@ -1477,6 +1568,7 @@ const { mutate: deleteTag } = useMutation({
 5. `/src/api/Controllers/ModelController.cs` - Enhanced AssignTagsAsync error handling
 
 **Verification:**
+
 - ✅ Tag creation returns 201 with normalized tag object
 - ✅ Tag assignment works without errors
 - ✅ Tags persist in database after creation
@@ -1627,6 +1719,7 @@ The global exception middleware provides comprehensive error responses with full
 ```
 
 **Key Implementation Details:**
+
 - All unhandled exceptions caught by global middleware
 - Error responses include full exception type chain
 - Details field shows: `{ExceptionType}: {Message} -> {InnerExceptionType}: {InnerMessage}`
@@ -1809,11 +1902,12 @@ if (model == null)
 - **.NET SDK:** 10.0.101 or later
 - **Node.js:** 18+ with npm
 - **Database:** SQLite (default) or other supported provider
-- **API Running:** http://localhost:5245
+- **API Running:** <http://localhost:5245>
 
 ### Starting the Application
 
 **Terminal 1 - Start API Server:**
+
 ```bash
 cd /Users/jpapiez/s/PFarm1/src
 dotnet run --project ./api/Farm.Web.Api.csproj
@@ -1821,6 +1915,7 @@ dotnet run --project ./api/Farm.Web.Api.csproj
 ```
 
 **Terminal 2 - Start React Dev Server:**
+
 ```bash
 cd /Users/jpapiez/s/PFarm1/src/Web/ReactApp
 npm run dev
@@ -1828,6 +1923,7 @@ npm run dev
 ```
 
 **Access Application:**
+
 ```
 http://localhost:3000
 ```
@@ -1859,7 +1955,7 @@ curl http://localhost:3000/
 
 ### Creating Your First Tag
 
-1. Navigate to http://localhost:3000/admin/tags
+1. Navigate to <http://localhost:3000/admin/tags>
 2. Login with admin credentials
 3. Fill in tag form:
    - Name: "Mechanical"
@@ -1870,7 +1966,7 @@ curl http://localhost:3000/
 
 ### Tagging a Model
 
-1. Go to http://localhost:3000/models
+1. Go to <http://localhost:3000/models>
 2. Find any model
 3. Click "Details" button
 4. Click "Edit Tags"
@@ -1881,7 +1977,7 @@ curl http://localhost:3000/
 
 ### Using Bulk Tagging
 
-1. Go to http://localhost:3000/models
+1. Go to <http://localhost:3000/models>
 2. Click "Bulk Tag" button
 3. Click "Select All" for models
 4. Click "Select All" for tags
@@ -1953,6 +2049,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 **Example: Implement Tag Update Endpoint**
 
 1. **Update Backend:**
+
    ```csharp
    // Add to ModelController
    [HttpPut("tags/{tagId}")]
@@ -1971,6 +2068,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
    ```
 
 2. **Update Frontend:**
+
    ```typescript
    // Add to API service
    export const updateTag = async (tagId: string, tag: Partial<Tag>) => {
@@ -1980,6 +2078,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
    ```
 
 3. **Update Component:**
+
    ```typescript
    // In TagAdminPage
    const { mutate: updateTag } = useMutation({
@@ -1991,6 +2090,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
    ```
 
 4. **Test:**
+
    ```bash
    # API test
    curl -X PUT http://localhost:5245/api/3d-models/tags/{tagId} \
@@ -2001,18 +2101,21 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 ### Debugging Tips
 
 **React Components:**
+
 - Use React Query DevTools (Ctrl+Shift+D)
 - Check browser Network tab for API calls
 - Use browser Console for JavaScript errors
 - Add `console.log()` in components
 
 **API Endpoints:**
-- Use Swagger/OpenAPI at http://localhost:5245/swagger
+
+- Use Swagger/OpenAPI at <http://localhost:5245/swagger>
 - Use curl commands to test endpoints
 - Check API logs for errors
 - Use Postman for complex requests
 
 **Database:**
+
 - Inspect SQLite: Use DB Browser or `sqlite3 farm.db`
 - Check EF Core migrations: `dotnet ef migrations list`
 - View query logs: Enable EF Core logging
@@ -2020,18 +2123,21 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 ### Code Standards
 
 **TypeScript:**
+
 - Use strict mode (`tsconfig.json`: strict: true)
 - Always define component prop types
 - Use `interface` for objects, `type` for unions
 - Export named components
 
 **C# / .NET:**
+
 - Use PascalCase for public members
 - Add XML documentation comments
 - Use async/await for database operations
 - Add proper error handling and logging
 
 **React:**
+
 - Use functional components with hooks
 - Lift state to parent when needed
 - Use React Query for server state
@@ -2048,12 +2154,14 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 **Problem:** Created a tag but it doesn't show in the UI
 
 **Solutions:**
+
 1. **Check React Query Cache:**
    - Open React Query DevTools (Ctrl+Shift+D)
    - Look for `['model-tags']` query
    - Check if stale
 
 2. **Manual Cache Invalidation:**
+
    ```typescript
    queryClient.invalidateQueries(['model-tags']);
    ```
@@ -2063,6 +2171,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
    - Check network tab to see API call
 
 4. **Check API Response:**
+
    ```bash
    curl http://localhost:5245/api/3d-models/tags
    # Verify tag is in response
@@ -2073,6 +2182,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 **Problem:** Bulk Tag modal button doesn't work
 
 **Solutions:**
+
 1. **Check Console for Errors:**
    - Open browser DevTools
    - Go to Console tab
@@ -2091,7 +2201,9 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 **Problem:** "Failed to fetch" or 404 errors
 
 **Solutions:**
+
 1. **Check API is Running:**
+
    ```bash
    curl http://localhost:5245/healthz
    ```
@@ -2114,6 +2226,7 @@ curl -X DELETE http://localhost:5245/api/3d-models/tags/{tagId}
 **Problem:** `npm run build` fails with TypeScript errors
 
 **Solution:** This is expected. Use development mode instead:
+
 ```bash
 npm run dev  # Development server works fine
 npm run build  # Production build has 97 TS errors
@@ -2122,6 +2235,7 @@ npm run build  # Production build has 97 TS errors
 ### Getting Help
 
 **Debugging Checklist:**
+
 - [ ] Check browser console for errors
 - [ ] Check API logs for server errors
 - [ ] Verify API is running on correct port
@@ -2131,12 +2245,14 @@ npm run build  # Production build has 97 TS errors
 - [ ] Restart API and React servers
 
 **Documentation to Review:**
+
 - [API Endpoints](#api-endpoints) - For REST endpoint details
 - [React Components Guide](#react-components-guide) - For component structure
 - [Database Schema](#database-schema) - For data relationships
 - [User Workflows](#user-workflows) - For expected behavior
 
 **Contact Points:**
+
 - Review copilot instructions: `/copilot-instructions.md`
 - Check issue tracker for similar problems
 - Enable verbose logging for detailed debugging
@@ -2164,39 +2280,39 @@ npm run build  # Production build has 97 TS errors
 
 ### Phase 3 Enhancements
 
-4. **Tag Hierarchy** (8 hours)
+1. **Tag Hierarchy** (8 hours)
    - Parent-child relationships
    - Tag categorization
    - Nested tag display
 
-5. **Tag Analytics** (6 hours)
+2. **Tag Analytics** (6 hours)
    - Usage trends over time
    - Most/least used tags
    - Tag adoption metrics
 
-6. **Bulk Tag Operations** (4 hours)
+3. **Bulk Tag Operations** (4 hours)
    - Bulk delete tags
    - Bulk rename tags
    - Bulk move to category
 
 ### Phase 4 Enhancements
 
-7. **Tag Templates** (5 hours)
+1. **Tag Templates** (5 hours)
    - Pre-defined tag sets by category
    - One-click apply templates
    - Custom template creation
 
-8. **Tag Import/Export** (4 hours)
+2. **Tag Import/Export** (4 hours)
    - Export tags to CSV/JSON
    - Import tags from file
    - Backup/restore functionality
 
-9. **Tag Autocomplete** (3 hours)
+3. **Tag Autocomplete** (3 hours)
    - Search-as-you-type
    - Fuzzy matching
    - Keyboard navigation
 
-10. **Advanced Filtering** (6 hours)
+4. **Advanced Filtering** (6 hours)
     - Multi-tag AND/OR filtering
     - Tag exclusion filters
     - Complex search queries
@@ -2289,6 +2405,7 @@ The PrintFarmer 3D Model Tagging System is production-ready with:
 ---
 
 *For detailed component source code, see:*
+
 - `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx`
 - `/src/Web/ReactApp/src/pages/TagAdminPage.tsx`
 - `/src/Web/ReactApp/src/components/modals/BulkTagAssignmentModal.tsx`

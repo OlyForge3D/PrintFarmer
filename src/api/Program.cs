@@ -177,7 +177,7 @@ builder.Services.AddCors(options =>
         });
         _ = policy.AllowCredentials();
         _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
-        _ = policy.WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+        _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     });
 });
 
@@ -351,8 +351,9 @@ builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOpera
 // 3MF to STL Conversion Service
 builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
 
-// Print Queue Service
-builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintQueueService, Farm.Api.Services.PrintQueue.PrintQueueService>();
+// Print Job Management Service (renamed from PrintQueueService)
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
+builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
 
 // Job Scheduling Service (Phase 4.1)
 builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();

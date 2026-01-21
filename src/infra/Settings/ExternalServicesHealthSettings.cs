@@ -5,7 +5,7 @@ using Farm.Infrastructure.Settings;
 namespace Farm.Infrastructure.Settings;
 
 [AppSetting("ExternalServicesHealth")]
-[SettingDisplay(Name = "External Services Health", Description = "Settings that control health checks against external printer backends.")]
+[SettingDisplay(Name = "External Services Health", Description = "Settings that control health checks against external printer backends.", Icon = "pf-icon-health", Group = "System", Order = 20)]
 public class ExternalServicesHealthSettings : IAppSetting, IValidatableSetting
 {
     // SectionKey required by the IAppSetting static abstract - kept for reflection/consistency

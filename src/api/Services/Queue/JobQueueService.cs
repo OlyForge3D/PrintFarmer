@@ -53,18 +53,29 @@ namespace Farm.Web.Api.Services.Queue
         }
 
         /// <summary>
-        /// Retrieves a comprehensive overview of the print job queue across all available printers.
+        /// Retrieves a comprehensive overview of the print job queue across available printers.
+        /// When a required model is specified, only returns printers compatible with that model
+        /// (matching either the canonical model name or a slicer-specific alias like "COREONEL").
         /// </summary>
+        /// <param name="requiredModel">Optional printer model name or alias to filter by</param>
         /// <param name="ct">Cancellation token for async operation</param>
-        /// <returns>Read-only list of QueueOverviewDto objects, one per printer, containing queue statistics and job information</returns>
+        /// <returns>Read-only list of QueueOverviewDto objects, one per compatible printer</returns>
         /// <remarks>
-        /// This method provides a high-level view of queue status across the entire fleet of printers.
+        /// This method provides a high-level view of queue status across the fleet of printers.
         /// For each available printer, it includes queue count, currently printing job information, and
         /// estimated completion time. Used for dashboard displays and queue status monitoring.
+        ///
+        /// When requiredModel is specified (e.g., "COREONEL", "Prusa MK4"), only printers whose
+        /// model name or aliases match will be returned. This enables efficient server-side filtering
+        /// for large printer fleets instead of loading all printers client-side.
         /// </remarks>
-        public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)
+        public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, CancellationToken ct)
         {
-            List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
+            // Get printers - either all available or filtered by model compatibility
+            List<Printer> printers = string.IsNullOrWhiteSpace(requiredModel)
+                ? await _dataService.GetAvailablePrintersAsync(ct)
+                : await _dataService.GetCompatiblePrintersAsync(requiredModel, ct);
+
             List<QueueOverviewDto> overview = [];
 
             foreach (Printer printer in printers)
@@ -83,11 +94,18 @@ namespace Farm.Web.Api.Services.Queue
                     .Distinct()
                     .ToList();
 
+                // Collect model aliases for compatibility matching (e.g., "COREONEL" -> "Prusa CORE One L")
+                var modelAliases = printer.Model?.Aliases?
+                    .Select(a => a.SlicerModelName)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList();
+
                 overview.Add(new QueueOverviewDto
                 {
                     PrinterId = printer.Id,
                     PrinterName = printer.Name,
                     PrinterModel = printer.Model?.Name ?? "Unknown",
+                    ModelAliases = modelAliases,
                     IsAvailable = printer.IsAvailable,
                     QueuedJobsCount = queuedJobs.Count,
                     CurrentJobId = currentJob?.Id,

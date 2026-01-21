@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// Fast executing (~5-6 seconds for 18 tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection("Integration")]
+[Collection(IntegrationTestCollection.Name)]
 public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

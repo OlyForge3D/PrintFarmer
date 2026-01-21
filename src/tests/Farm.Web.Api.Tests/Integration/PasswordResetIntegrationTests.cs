@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http.Json;
@@ -13,6 +14,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
 
+[Collection(IntegrationTestCollection.Name)]
 public class PasswordResetIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

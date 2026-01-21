@@ -171,7 +171,8 @@ check_api_basic_health() {
     local response
     response=$(curl -s -m "$timeout" "$api_url/healthz" 2>/dev/null)
     
-    if [[ -n "$response" ]] && (echo "$response" | grep -q '"status":"ok"' || echo "$response" | grep -q '^OK$'); then
+    # Handle JSON with or without spaces after colon
+    if [[ -n "$response" ]] && (echo "$response" | grep -qE '"status":\s*"ok"' || echo "$response" | grep -q '^OK$'); then
         return 0  # Success
     else
         return 1  # Failed
@@ -186,7 +187,8 @@ check_discovery_health() {
     local response
     response=$(curl -s -m "$timeout" "$discovery_url/api/discovery/health" 2>/dev/null)
     
-    if [[ -n "$response" ]] && echo "$response" | grep -q '"status":"healthy"'; then
+    # Handle JSON with or without spaces after colon (ASP.NET Core uses space)
+    if [[ -n "$response" ]] && echo "$response" | grep -qE '"status":\s*"healthy"'; then
         return 0  # Success
     else
         return 1  # Failed
@@ -204,8 +206,8 @@ check_api_comprehensive_health() {
     if [[ -n "$response" ]]; then
         # Check if it's JSON
         if echo "$response" | grep -q '^{'; then
-            # JSON response - check for Healthy status
-            if echo "$response" | grep -q '"status":"Healthy"'; then
+            # JSON response - check for Healthy status (handle spaces after colon)
+            if echo "$response" | grep -qE '"status":\s*"Healthy"'; then
                 return 0  # Healthy
             else
                 return 1  # Not healthy

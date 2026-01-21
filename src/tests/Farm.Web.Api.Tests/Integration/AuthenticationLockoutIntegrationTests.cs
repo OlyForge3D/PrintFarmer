@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http.Json;
@@ -13,6 +14,7 @@ using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 
 namespace Farm.Web.Api.Tests.Integration;
 
+[Collection(IntegrationTestCollection.Name)]
 public class AuthenticationLockoutIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

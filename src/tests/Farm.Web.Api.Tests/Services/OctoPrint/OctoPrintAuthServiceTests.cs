@@ -2,12 +2,13 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.OctoPrint;
@@ -26,14 +27,21 @@ public class OctoPrintAuthServiceTests
         return ctx;
     }
 
+    private static ISettingsService CreateMockSettingsService(OctoPrintSettings settings)
+    {
+        var mock = new Mock<ISettingsService>();
+        mock.Setup(s => s.Get<OctoPrintSettings>()).Returns(settings);
+        return mock.Object;
+    }
+
     [Fact]
     public async Task ValidateApiKeyAsync_AllowsWhenRequireDisabled()
     {
         using AppDbContext ctx = CreateInMemoryContext();
-        IOptions<OctoPrintSettings> settings = Options.Create(new OctoPrintSettings { RequireApiKey = false });
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = false });
         var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
-        var svc = new OctoPrintAuthService(settings, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
 
         bool ok = await svc.ValidateApiKeyAsync(null);
         Assert.True(ok);
@@ -43,11 +51,11 @@ public class OctoPrintAuthServiceTests
     public async Task ValidateApiKeyAsync_GlobalKeyWorks()
     {
         using AppDbContext ctx = CreateInMemoryContext();
-        IOptions<OctoPrintSettings> settings = Options.Create(new OctoPrintSettings { RequireApiKey = true });
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
         var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
         var inMemory = new Dictionary<string, string?> { ["OctoPrint:GlobalApiKey"] = "supersecret" };
         IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
-        var svc = new OctoPrintAuthService(settings, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
 
         bool ok = await svc.ValidateApiKeyAsync("supersecret");
         Assert.True(ok);
@@ -57,7 +65,7 @@ public class OctoPrintAuthServiceTests
     public async Task ValidateApiKeyAsync_DbStoredKeyWorks()
     {
         using AppDbContext ctx = CreateInMemoryContext();
-        IOptions<OctoPrintSettings> settings = Options.Create(new OctoPrintSettings { RequireApiKey = true });
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = true });
         var repo = new Farm.Web.Api.Data.Repositories.EfApiKeyRepositoryAdapter(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         // create key
@@ -66,7 +74,7 @@ public class OctoPrintAuthServiceTests
         var ak = new ApiKey { KeyHash = hash, UserId = Guid.NewGuid(), Name = "test" };
         await repo.AddAsync(ak);
 
-        var svc = new OctoPrintAuthService(settings, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
         bool ok = await svc.ValidateApiKeyAsync(raw);
         Assert.True(ok);
     }

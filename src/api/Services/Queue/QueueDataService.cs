@@ -45,6 +45,16 @@ public class QueueDataService(
     }
 
     /// <summary>
+    /// Gets all printers that are available and compatible with the specified model name or alias.
+    /// </summary>
+    /// <param name="modelNameOrAlias">The printer model name or slicer alias to match</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    public async Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct)
+    {
+        return await _unitOfWork.Queue.GetCompatiblePrintersAsync(modelNameOrAlias, ct);
+    }
+
+    /// <summary>
     /// Gets all print jobs assigned to a specific printer, ordered by priority and queue time.
     /// </summary>
     /// <param name="printerId">The unique identifier of the printer.</param>

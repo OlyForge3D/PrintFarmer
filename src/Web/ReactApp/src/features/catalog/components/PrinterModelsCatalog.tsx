@@ -1,5 +1,14 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Button, FormField, Alert } from '@/common/components/ui';
+import { 
+  Button, 
+  FormField, 
+  Alert,
+  Badge,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { PrinterModelCard, type PrinterModelCardData } from '@/common/components/PrinterModelCard';
 import { useManufacturers, useModels } from '@/common/hooks/useApi';
@@ -7,7 +16,8 @@ import { EditModelModal } from '@/features/models3d/components/EditModelModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { apiClient } from '@/services/api';
 import { CatalogContext, type PrinterModelDto, type ManufacturerDto } from '@/types/api';
-import { PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -56,6 +66,64 @@ export function PrinterModelsCatalog() {
   const [modelToEdit, setModelToEdit] = useState<PrinterModelDto | null>(null);
   const [isCloneMode, setIsCloneMode] = useState(false);
   const [deletingModel, setDeletingModel] = useState<PrinterModelCardData | null>(null);
+
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('printer-models');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<PrinterModelCardData>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'manufacturer',
+      header: 'Manufacturer',
+      sortable: true,
+      sort: (a, b) => (a.manufacturerName ?? '').localeCompare(b.manufacturerName ?? ''),
+      render: (item) => item.manufacturerName ?? '—',
+    },
+    {
+      key: 'motionType',
+      header: 'Motion Type',
+      sortable: true,
+      sort: (a, b) => (a.motionType ?? '').localeCompare(b.motionType ?? ''),
+      render: (item) => item.motionType ?? '—',
+    },
+    {
+      key: 'buildVolume',
+      header: 'Build Volume',
+      sortable: true,
+      sort: (a, b) => ((a.maxX ?? 0) * (a.maxY ?? 0) * (a.maxZ ?? 0)) - ((b.maxX ?? 0) * (b.maxY ?? 0) * (b.maxZ ?? 0)),
+      render: (item) => item.maxX && item.maxY && item.maxZ 
+        ? `${item.maxX}×${item.maxY}×${item.maxZ} mm` 
+        : '—',
+    },
+    {
+      key: 'features',
+      header: 'Features',
+      sortable: true,
+      sort: (a, b) => {
+        const aFeatures = (a.hasHeatedBed ? 1 : 0) + (a.hasEnclosure ? 1 : 0) + (a.multiMaterial ? 1 : 0) + (a.supportsAutoLeveling ? 1 : 0);
+        const bFeatures = (b.hasHeatedBed ? 1 : 0) + (b.hasEnclosure ? 1 : 0) + (b.multiMaterial ? 1 : 0) + (b.supportsAutoLeveling ? 1 : 0);
+        return aFeatures - bFeatures;
+      },
+      render: (item) => (
+        <div className="flex flex-wrap gap-1">
+          {item.hasHeatedBed && <Badge variant="info" size="sm">Heated Bed</Badge>}
+          {item.hasEnclosure && <Badge variant="info" size="sm">Enclosure</Badge>}
+          {item.multiMaterial && <Badge variant="success" size="sm">Multi-Material</Badge>}
+          {item.supportsAutoLeveling && <Badge variant="success" size="sm">Auto-Level</Badge>}
+          {!item.hasHeatedBed && !item.hasEnclosure && !item.multiMaterial && !item.supportsAutoLeveling && (
+            <span className="text-sm text-pf-text-muted">Basic</span>
+          )}
+        </div>
+      ),
+    },
+  ], []);
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -202,14 +270,17 @@ export function PrinterModelsCatalog() {
           </FormField>
         </div>
 
-        <Button
-          onClick={handleAddClick}
-          title="Add new printer model"
-          size="sm"
-          iconLeft={<PlusIcon className="h-4 w-4 mr-2" />}
-        >
-          Add
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleAddClick}
+            title="Add new printer model"
+            size="sm"
+            iconLeft={<PlusIcon className="h-4 w-4 mr-2" />}
+          >
+            Add
+          </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
+        </div>
       </div>
 
       {/* Helpful hint when no manufacturer selected */}
@@ -219,7 +290,7 @@ export function PrinterModelsCatalog() {
         </p>
       )}
 
-      {/* Grid of printer model cards */}
+      {/* Grid or Table view of printer model cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           {selectedManufacturerId ? (
@@ -231,7 +302,7 @@ export function PrinterModelsCatalog() {
             <p>No printer models in the catalog yet.</p>
           )}
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cards.map(card => (
             <PrinterModelCard
@@ -244,6 +315,35 @@ export function PrinterModelsCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={cards}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingModel?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Edit/Add Printer Model Modal */}

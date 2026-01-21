@@ -352,8 +352,8 @@ export function Layout() {
       {/* Live region for accessibility announcements */}
       <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
-      <header className="bg-pf-bg-1 border-b border-pf-border h-16 flex-shrink-0 z-50">
-        <div className="flex items-center justify-between h-16 px-4">
+      <header className="bg-pf-bg-1 border-b border-pf-border h-12 flex-shrink-0 z-50">
+        <div className="flex items-center justify-between h-12 px-3">
           {/* Left side - App branding */}
           <div className="flex items-center space-x-4">
             {/* Mobile menu button */}
@@ -370,18 +370,18 @@ export function Layout() {
             </Button>
 
             {/* App logo and name */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
               <img 
                 src="/printfarmer-logo.svg" 
                 alt="PrintFarmer Logo" 
-                className="w-8 h-8" 
+                className="w-7 h-7" 
               />
-              <h1 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+              <h1 className="text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
             </div>
           </div>
 
           {/* Right side - Status and user */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
             {/* Theme toggle */}
             <ThemeToggle size="sm" />
 
@@ -585,13 +585,13 @@ export function Layout() {
         )}
 
         {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
-        <aside className={`hidden lg:flex lg:flex-shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-20' : 'w-64'}`}>
-          <div className={`flex flex-col ${navbarCollapsed ? 'w-20' : 'w-64'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
-            <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto min-h-0">
+        <aside className={`hidden lg:flex lg:flex-shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
+          <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
+            <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
               {filteredNavigation.map(item => {
                 if (isDivider(item)) {
                   return (
-                    <div key={`divider-${item.name || Math.random()}`} className="my-2">
+                    <div key={`divider-${item.name || Math.random()}`} className="my-1.5">
                       <div className="border-t border-pf-border"></div>
                     </div>
                   );
@@ -613,7 +613,7 @@ export function Layout() {
                     {hasChildren ? (
                       <details open={isExpanded} className="group">
                         <summary
-                          className={`flex items-center ${navbarCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-2'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                          className={`flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
                           title={navbarCollapsed ? item.name : undefined}
                           onClick={e => {
                             e.preventDefault(); // Prevent native toggle
@@ -631,7 +631,7 @@ export function Layout() {
                           )}
                         </summary>
                         {!navbarCollapsed && (
-                          <div className="ml-8 space-y-1 mt-1">
+                          <div className="ml-6 space-y-0.5 mt-0.5">
                           {item.children!.map(child => {
                             const ChildIcon = child.icon;
                             return (
@@ -660,7 +660,7 @@ export function Layout() {
                         to={navItem.href}
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
-                          `group flex items-center ${navbarCollapsed ? 'px-2 py-2 justify-center' : 'px-3 py-2'} text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                          `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                             ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`

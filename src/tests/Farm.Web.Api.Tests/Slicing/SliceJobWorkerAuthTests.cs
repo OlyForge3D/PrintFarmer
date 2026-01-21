@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http;
@@ -19,6 +20,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests worker authentication enforcement on protected slicing endpoints.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class SliceJobWorkerAuthTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

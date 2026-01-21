@@ -257,8 +257,8 @@ public static class ServiceCollectionExtensions
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
-        // New PrintJobQueue adapter service (DB-backed via existing JobQueueService)
-        _ = services.AddScoped<Farm.Web.Api.Services.PrintJobQueue.IPrintJobQueueService, Farm.Web.Api.Services.PrintJobQueue.PrintJobQueueAdapter>();
+        // Print approval repository
+        _ = services.AddScoped<Farm.Web.Api.Data.Repositories.IPrintApprovalRepository, Farm.Web.Api.Data.Repositories.EfPrintApprovalRepository>();
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
@@ -584,9 +584,9 @@ public static class ServiceCollectionExtensions
             _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
         }
 
-        // Gcode upload settings and quota
-        _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
-        _ = services.AddSingleton<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
+        // Gcode upload settings and quota - use persisted settings from ISettingsService
+        _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
+        _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
     }
 
     #endregion

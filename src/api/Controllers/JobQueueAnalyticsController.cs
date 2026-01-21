@@ -13,10 +13,10 @@ namespace Farm.Api.Controllers;
 [Authorize]
 [Produces("application/json")]
 public class JobQueueAnalyticsController(
-    IPrintQueueService printQueueService,
+    IPrintJobManagementService printJobManagementService,
     ILogger<JobQueueAnalyticsController> logger) : ControllerBase
 {
-    private readonly IPrintQueueService _printQueueService = printQueueService ?? throw new ArgumentNullException(nameof(printQueueService));
+    private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
@@ -53,7 +53,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Offset must be >= 0" });
             }
 
-            List<QueuedPrintJobWithFileMetaDto> jobs = await _printQueueService.GetAllQueuedJobsAsync(
+            List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
                 filterStatus, filterModel, filterMaterial, limit, offset, cancellationToken);
 
             return Ok(jobs);
@@ -87,7 +87,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Printer ID is required" });
             }
 
-            List<QueuedPrintJobDto> jobs = await _printQueueService.GetPrinterQueueAsync(printerId, limit, cancellationToken);
+            List<QueuedPrintJobDto> jobs = await _printJobManagementService.GetPrinterQueueAsync(printerId, limit, cancellationToken);
             return Ok(jobs);
         }
         catch (Exception ex)
@@ -109,7 +109,7 @@ public class JobQueueAnalyticsController(
     {
         try
         {
-            QueueStatsDto stats = await _printQueueService.GetQueueStatsAsync(cancellationToken);
+            QueueStatsDto stats = await _printJobManagementService.GetQueueStatsAsync(cancellationToken);
             return Ok(stats);
         }
         catch (Exception ex)
@@ -131,7 +131,7 @@ public class JobQueueAnalyticsController(
     {
         try
         {
-            List<QueuePrinterModelStatsDto> stats = await _printQueueService.GetModelStatsAsync(cancellationToken);
+            List<QueuePrinterModelStatsDto> stats = await _printJobManagementService.GetModelStatsAsync(cancellationToken);
             return Ok(stats);
         }
         catch (Exception ex)
@@ -165,7 +165,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Limit must be between 1 and 1000" });
             }
 
-            QueueHistoryPageDto history = await _printQueueService.GetQueueHistoryAsync(limit, offset, sortBy, cancellationToken);
+            QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(limit, offset, sortBy, cancellationToken);
             return Ok(history);
         }
         catch (Exception ex)
@@ -204,7 +204,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printQueueService.EnqueueJobAsync(request, userId, cancellationToken);
+            QueuedPrintJobDto job = await _printJobManagementService.EnqueueJobAsync(request, userId, cancellationToken);
 
             return CreatedAtAction(nameof(GetAllQueueAsync), new { id = job.Id }, job);
         }
@@ -248,7 +248,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printQueueService.UpdateJobPriorityAsync(jobId, request.NewPriority, userId, cancellationToken);
+            QueuedPrintJobDto job = await _printJobManagementService.UpdateJobPriorityAsync(jobId, request.NewPriority, userId, cancellationToken);
 
             return Ok(job);
         }
@@ -286,7 +286,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printQueueService.PauseJobAsync(jobId, userId, cancellationToken);
+            QueuedPrintJobDto job = await _printJobManagementService.PauseJobAsync(jobId, userId, cancellationToken);
 
             return Ok(job);
         }
@@ -324,7 +324,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printQueueService.ResumeJobAsync(jobId, userId, cancellationToken);
+            QueuedPrintJobDto job = await _printJobManagementService.ResumeJobAsync(jobId, userId, cancellationToken);
 
             return Ok(job);
         }
@@ -362,7 +362,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            await _printQueueService.CancelJobAsync(jobId, userId, cancellationToken);
+            await _printJobManagementService.CancelJobAsync(jobId, userId, cancellationToken);
 
             return NoContent();
         }
@@ -400,7 +400,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printQueueService.RerunJobAsync(jobId, userId, cancellationToken);
+            QueuedPrintJobDto job = await _printJobManagementService.RerunJobAsync(jobId, userId, cancellationToken);
 
             return Ok(job);
         }
@@ -439,7 +439,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueueBulkOperationResultDto result = await _printQueueService.BulkCancelJobsAsync(request.JobIds, userId, cancellationToken);
+            QueueBulkOperationResultDto result = await _printJobManagementService.BulkCancelJobsAsync(request.JobIds, userId, cancellationToken);
 
             return Ok(result);
         }
@@ -472,7 +472,7 @@ public class JobQueueAnalyticsController(
             }
 
             string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueueBulkOperationResultDto result = await _printQueueService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
+            QueueBulkOperationResultDto result = await _printJobManagementService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
 
             return Ok(result);
         }
@@ -504,7 +504,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            QueuedPrintJobDto? job = await _printQueueService.GetJobByIdAsync(jobId, cancellationToken);
+            QueuedPrintJobDto? job = await _printJobManagementService.GetJobByIdAsync(jobId, cancellationToken);
 
             return job == null ? NotFound(new { error = $"Job '{jobId}' not found" }) : Ok(job);
         }
@@ -544,7 +544,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Update data is required" });
             }
 
-            QueuedPrintJobDto? updatedJob = await _printQueueService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
+            QueuedPrintJobDto? updatedJob = await _printJobManagementService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
 
             if (updatedJob == null)
             {
@@ -600,7 +600,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Notes must be 500 characters or less" });
             }
 
-            bool success = await _printQueueService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
+            bool success = await _printJobManagementService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
 
             if (!success)
             {
@@ -636,7 +636,7 @@ public class JobQueueAnalyticsController(
             List<string>? printerIds = request?.PrinterIds;
             int daysBack = request?.DaysBack ?? 30;
 
-            await _printQueueService.SeedHistoryFromPrintersAsync(printerIds, daysBack, cancellationToken);
+            await _printJobManagementService.SeedHistoryFromPrintersAsync(printerIds, daysBack, cancellationToken);
 
             return Accepted();
         }
@@ -684,7 +684,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "dateFrom must be before dateTo" });
             }
 
-            IEnumerable<TimelineEventDto> events = await _printQueueService.GetTimelineAsync(
+            IEnumerable<TimelineEventDto> events = await _printJobManagementService.GetTimelineAsync(
                 dateFrom, dateTo, printerId, filterStatus, limit, cancellationToken);
 
             _logger.LogInformation("Retrieved timeline with {Count} events", events.Count());
@@ -719,7 +719,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            JobStateHistoryDto history = await _printQueueService.GetJobStateHistoryAsync(jobId, cancellationToken);
+            JobStateHistoryDto history = await _printJobManagementService.GetJobStateHistoryAsync(jobId, cancellationToken);
 
             _logger.LogInformation("Retrieved state history for job {JobId}", jobId);
             return Ok(history);
@@ -762,7 +762,7 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "dateFrom must be before dateTo" });
             }
 
-            DurationAnalyticsDto analytics = await _printQueueService.GetDurationAnalyticsAsync(
+            DurationAnalyticsDto analytics = await _printJobManagementService.GetDurationAnalyticsAsync(
                 printerId, dateFrom, dateTo, cancellationToken);
 
             _logger.LogInformation("Retrieved duration analytics for {TotalJobs} jobs", analytics.TotalJobs);

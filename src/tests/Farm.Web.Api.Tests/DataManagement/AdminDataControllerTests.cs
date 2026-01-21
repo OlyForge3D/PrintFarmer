@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Domain;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.DataManagement;
 
+[Collection(IntegrationTestCollection.Name)]
 public class AdminDataControllerTests : IAsyncLifetime
 {
     private CustomWebApplicationFactory? _factory;

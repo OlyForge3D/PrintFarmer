@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
@@ -14,7 +15,8 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Artifacts
 {
-    public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
+    [Collection(IntegrationTestCollection.Name)]
+public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
     {
         private readonly CustomWebApplicationFactory _factory = factory;
 

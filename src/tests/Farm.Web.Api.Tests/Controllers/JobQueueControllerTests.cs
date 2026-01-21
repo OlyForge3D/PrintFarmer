@@ -48,14 +48,14 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueOverview);
 
         // Act
-        ActionResult<IEnumerable<JobQueuePrintJobDto>> result = await _controller.GetQueueAsync();
+        ActionResult<IEnumerable<QueueOverviewDto>> result = await _controller.GetQueueAsync();
 
         // Assert
-        ActionResult<IEnumerable<JobQueuePrintJobDto>> okResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
+        ActionResult<IEnumerable<QueueOverviewDto>> okResult = Assert.IsType<ActionResult<IEnumerable<QueueOverviewDto>>>(result);
         OkObjectResult okValue = Assert.IsType<OkObjectResult>(okResult.Result);
         Assert.Equal(queueOverview, okValue.Value);
     }
@@ -65,14 +65,14 @@ public class JobQueueControllerTests
     {
         // Arrange
         _queueServiceMock
-            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act
-        ActionResult<IEnumerable<JobQueuePrintJobDto>> result = await _controller.GetQueueAsync();
+        ActionResult<IEnumerable<QueueOverviewDto>> result = await _controller.GetQueueAsync();
 
         // Assert
-        ActionResult<IEnumerable<JobQueuePrintJobDto>> actionResult = Assert.IsType<ActionResult<IEnumerable<JobQueuePrintJobDto>>>(result);
+        ActionResult<IEnumerable<QueueOverviewDto>> actionResult = Assert.IsType<ActionResult<IEnumerable<QueueOverviewDto>>>(result);
         ObjectResult problemResult = Assert.IsType<ObjectResult>(actionResult.Result);
         Assert.Equal(500, problemResult.StatusCode);
     }

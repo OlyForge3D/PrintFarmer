@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Net;
@@ -19,6 +20,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// Tests for OrcaSlicer preset mapping accuracy and fuzzy matching logic.
 /// Validates that the mapping service correctly matches Orca presets to PrintFarmer entities.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class OrcaMappingAccuracyTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

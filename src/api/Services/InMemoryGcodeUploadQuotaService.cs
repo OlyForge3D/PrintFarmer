@@ -1,15 +1,31 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Settings;
 
 namespace Farm.Web.Api.Services;
 
-public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 1024 * 1024) : IGcodeUploadQuotaService
+/// <summary>
+/// Tracks per-user daily upload quota usage in memory.
+/// Reads the daily limit from the persisted GcodeUploadSettings.
+/// </summary>
+public class InMemoryGcodeUploadQuotaService : IGcodeUploadQuotaService
 {
-    private readonly long _dailyLimitBytes = dailyLimitBytes;
+    private readonly ISettingsService _settingsService;
     private readonly ConcurrentDictionary<string, (DateOnly Day, long Bytes)> _usage = new();
+
+    public InMemoryGcodeUploadQuotaService(ISettingsService settingsService)
+    {
+        _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+    }
+
+    private long GetDailyLimitBytes()
+    {
+        GcodeUploadSettings? settings = _settingsService.Get<GcodeUploadSettings>();
+        return settings?.DailyUploadLimitBytes ?? 2L * 1024 * 1024 * 1024; // Default 2GB
+    }
 
     public bool TryAddUsage(string userId, long bytes, out long usedBytes, out long limitBytes)
     {
-        limitBytes = _dailyLimitBytes;
+        limitBytes = GetDailyLimitBytes();
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
         string key = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId;
         while (true)
@@ -20,7 +36,7 @@ public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 
                 if (_usage.TryUpdate(key, (today, bytes), current))
                 {
                     usedBytes = bytes;
-                    return usedBytes <= _dailyLimitBytes;
+                    return usedBytes <= limitBytes;
                 }
 
                 continue;
@@ -30,7 +46,7 @@ public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 
             if (_usage.TryUpdate(key, (today, newTotal), current))
             {
                 usedBytes = newTotal;
-                return newTotal <= _dailyLimitBytes;
+                return newTotal <= limitBytes;
             }
         }
     }

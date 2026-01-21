@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
@@ -26,7 +27,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// Fast executing (~6-7 seconds for 20+ tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection("Integration")]
+[Collection(IntegrationTestCollection.Name)]
 public class ModelServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

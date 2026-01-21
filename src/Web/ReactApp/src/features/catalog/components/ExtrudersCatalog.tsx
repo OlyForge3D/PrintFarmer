@@ -1,11 +1,23 @@
-import React, { useState, useCallback } from 'react';
-import { Button, Input, FormField, Checkbox, Textarea } from '@/common/components/ui';
+import React, { useState, useCallback, useMemo } from 'react';
+import { 
+  Button, 
+  Input, 
+  FormField, 
+  Checkbox, 
+  Textarea,
+  Badge,
+  DataTable,
+  type DataTableColumn,
+  ViewToggle,
+  gridTableOptions,
+} from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ExtruderModelCardData } from '@/common/components/ComponentModelCard';
 import { useExtruderModels, useCreateExtruderModel, useUpdateExtruderModel, useDeleteExtruderModel } from '@/common/hooks/useApi';
 import { CatalogContext, type ExtruderModelDefinition, type CreateExtruderModelDto, type UpdateExtruderModelDto } from '@/types/api';
-import { PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
  * Converts an ExtruderModelDefinition to the card display format
@@ -70,6 +82,45 @@ export function ExtrudersCatalog() {
   const [deletingModel, setDeletingModel] = useState<ExtruderModelDefinition | null>(null);
   const [formState, setFormState] = useState<ExtruderFormState>(emptyForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ExtruderFormState, string>>>({});
+
+  // View toggle state (grid vs table) - persisted per tab
+  const [view, setView] = useCatalogViewMode('extruders');
+
+  // Define columns for DataTable with built-in sorting
+  const columns = useMemo<DataTableColumn<ExtruderModelCardData>[]>(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      render: (item) => <span className="font-medium">{item.name}</span>,
+    },
+    {
+      key: 'manufacturer',
+      header: 'Manufacturer',
+      sortable: true,
+      sort: (a, b) => (a.manufacturerName ?? '').localeCompare(b.manufacturerName ?? ''),
+      render: (item) => item.manufacturerName ?? '—',
+    },
+    {
+      key: 'gearRatio',
+      header: 'Gear Ratio',
+      sortable: true,
+      sort: (a, b) => parseFloat(a.gearRatio ?? '0') - parseFloat(b.gearRatio ?? '0'),
+      render: (item) => item.gearRatio ?? '—',
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: true,
+      sort: (a, b) => (a.isDirectDrive ? 1 : 0) - (b.isDirectDrive ? 1 : 0),
+      render: (item) => (
+        <Badge variant={item.isDirectDrive ? 'info' : 'default'} size="sm">
+          {item.isDirectDrive ? 'Direct Drive' : 'Bowden'}
+        </Badge>
+      ),
+    },
+  ], []);
 
   // Open add modal
   const handleAddClick = useCallback(() => {
@@ -236,23 +287,26 @@ export function ExtrudersCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Extruder Models ({cards.length})
         </h2>
-        <Button 
-          onClick={handleAddClick} 
-          title="Add new extruder model"
-          size="sm"
-          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
-        >
-          Add
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleAddClick} 
+            title="Add new extruder model"
+            size="sm"
+            iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+          >
+            Add
+          </Button>
+          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
+        </div>
       </div>
 
-      {/* Grid of extruder cards */}
+      {/* Grid or Table view of extruder cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No extruder models defined yet.</p>
           <p className="mt-2">Click "Add Extruder" to create your first one.</p>
         </div>
-      ) : (
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cards.map(card => (
             <ComponentModelCard
@@ -264,6 +318,35 @@ export function ExtrudersCatalog() {
             />
           ))}
         </div>
+      ) : (
+        <DataTable
+          data={cards}
+          columns={columns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          defaultSortColumn="name"
+          renderActions={(item) => (
+            <div className="flex gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleEditClick(item)}
+                title={`Edit ${item.name}`}
+              >
+                <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleDeleteClick(item)}
+                title={`Delete ${item.name}`}
+                disabled={deleteMutation.isPending && deletingModel?.id === item.id}
+              >
+                <DeleteIcon className="w-4 h-4 text-red-500" />
+              </Button>
+            </div>
+          )}
+        />
       )}
 
       {/* Add Extruder Modal */}

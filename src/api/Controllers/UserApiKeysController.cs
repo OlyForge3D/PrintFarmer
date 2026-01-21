@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,10 +15,14 @@ namespace Farm.Web.Api.Controllers
     public class UserApiKeysController : ControllerBase
     {
         private readonly Farm.Web.Api.Data.Repositories.IApiKeyRepository _repo;
+        private readonly ISettingsService _settingsService;
 
-        public UserApiKeysController(Farm.Web.Api.Data.Repositories.IApiKeyRepository repo)
+        public UserApiKeysController(
+            Farm.Web.Api.Data.Repositories.IApiKeyRepository repo,
+            ISettingsService settingsService)
         {
             _repo = repo;
+            _settingsService = settingsService;
         }
 
         [HttpGet]
@@ -39,14 +45,15 @@ namespace Farm.Web.Api.Controllers
         public async Task<IActionResult> CreateApiKeyAsync([FromRoute] Guid userId, [FromBody] CreateApiKeyRequest req)
         {
             // TODO: verify caller is same user or admin
+            OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
             string rawKey = GenerateKey();
-            string hash = ComputeSha256Hash(rawKey);
+            string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
 
             var key = new Farm.Infrastructure.Domain.ApiKey
             {
                 UserId = userId,
                 Name = req?.Name ?? "user-generated",
-                KeyHash = hash,
+                KeyHash = storedValue,
                 IsActive = true
             };
 
@@ -99,13 +106,48 @@ namespace Farm.Web.Api.Controllers
             }
 
             // Generate new key
+            OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
             string rawKey = GenerateKey();
-            string hash = ComputeSha256Hash(rawKey);
+            string storedValue = settings.HashStoredApiKeys ? ComputeSha256Hash(rawKey) : rawKey;
 
-            oldKey.KeyHash = hash;
+            oldKey.KeyHash = storedValue;
             await _repo.UpdateAsync(oldKey);
 
             return Ok(new { key = rawKey, id = oldKey.Id });
+        }
+
+        /// <summary>
+        /// Reveal the raw API key. Only works when HashStoredApiKeys is disabled.
+        /// </summary>
+        [HttpGet("{keyId:guid}/reveal")]
+        [Authorize]
+        public async Task<IActionResult> RevealApiKeyAsync([FromRoute] Guid userId, [FromRoute] Guid keyId)
+        {
+            OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+            if (settings.HashStoredApiKeys)
+            {
+                return BadRequest(new { error = "Cannot reveal API key when hashing is enabled. Keys are stored as one-way hashes." });
+            }
+
+            ApiKey? key = await _repo.GetByIdAsync(keyId);
+            if (key == null || key.UserId != userId)
+            {
+                return NotFound();
+            }
+
+            // When hashing is disabled, KeyHash contains the raw key
+            return Ok(new { key = key.KeyHash });
+        }
+
+        /// <summary>
+        /// Get the current API key settings (whether hashing is enabled).
+        /// </summary>
+        [HttpGet("/api/apikeys/settings")]
+        [Authorize]
+        public IActionResult GetApiKeySettings()
+        {
+            OctoPrintSettings settings = _settingsService.Get<OctoPrintSettings>();
+            return Ok(new { hashingEnabled = settings.HashStoredApiKeys });
         }
 
         private static string GenerateKey()

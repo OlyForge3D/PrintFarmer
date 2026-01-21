@@ -1,9 +1,11 @@
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.OctoPrint;
-using Farm.Web.Api.Services.PrintJobQueue;
+using Farm.Web.Api.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,45 +14,45 @@ using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Controllers
 {
+    /// <summary>
+    /// OctoPrint-compatible API endpoints for slicer integration (PrusaSlicer, OrcaSlicer, etc.)
+    /// Endpoints follow the standard OctoPrint API paths: /api/version, /api/files/local, /api/server
+    /// </summary>
     [ApiController]
-    [Route("api/octoprint")]
+    [Route("api")]
+    [AllowAnonymous]
+    [OctoPrintApiKey] // Validates API key based on OctoPrintSettings.RequireApiKey
     public class OctoPrintCompatController : ControllerBase
     {
         private readonly ILogger<OctoPrintCompatController> _logger;
         private readonly IOctoPrintAuthService _authService;
         private readonly OctoPrintSettings _settings;
         private readonly IGcodeFilesService _gcodeFilesService;
-        private readonly IPrintJobQueueService _printJobQueueService;
+        private readonly IJobQueueService _jobQueueService;
 
         public OctoPrintCompatController(
             ILogger<OctoPrintCompatController> logger,
             IOctoPrintAuthService authService,
             IOptions<OctoPrintSettings> settings,
             IGcodeFilesService gcodeFilesService,
-            IPrintJobQueueService printJobQueueService)
+            IJobQueueService jobQueueService)
         {
             _logger = logger;
             _authService = authService;
             _settings = settings.Value;
             _gcodeFilesService = gcodeFilesService;
-            _printJobQueueService = printJobQueueService;
+            _jobQueueService = jobQueueService;
         }
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
         [HttpPost("files/local")]
-        [AllowAnonymous]
         [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
         public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId, [FromQuery] bool print = false)
         {
-            var apiKey = Request.Headers["X-Api-Key"].ToString();
-
-            var allowed = await _authService.ValidateApiKeyAsync(string.IsNullOrWhiteSpace(apiKey) ? null : apiKey, printerId, null);
-            if (!allowed)
-            {
-                return Unauthorized(new { message = "Invalid API key" });
-            }
+            // API key validation handled by [OctoPrintApiKey] filter at controller level
 
             // Rate limiting: key by apiKey if present otherwise by remote IP
+            var apiKey = Request.Headers["X-Api-Key"].ToString();
             var rateLimiter = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Middleware.SimpleRateLimitService)) as Farm.Web.Api.Middleware.SimpleRateLimitService;
             OctoPrintSettings octoSettings = _settings;
             string rateKey = !string.IsNullOrWhiteSpace(apiKey) ? $"apikey:{apiKey}" : $"ip:{HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
@@ -92,8 +94,16 @@ namespace Farm.Web.Api.Controllers
                         return StatusCode(500, new { message = "Uploaded file not indexed yet" });
                     }
 
-                    var enqueueReq = new EnqueuePrintJobRequest(gcodeFileGuid, printerId, null, uploadDto.ExtractedNozzleDiameter, uploadDto.RequiredMaterial);
-                    Services.PrintJobQueue.PrintJobDto? job = await _printJobQueueService.EnqueueAsync(enqueueReq, HttpContext.RequestAborted);
+                    var enqueueReq = new QueuePrintJobDto
+                    {
+                        GcodeFileId = gcodeFileGuid,
+                        AssignedPrinterId = printerId,
+                        Priority = PrintJobPriority.Normal,
+                        RequiredNozzleDiameter = (decimal?)uploadDto.ExtractedNozzleDiameter,
+                        RequiredMaterialType = uploadDto.RequiredMaterial
+                    };
+
+                    JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, HttpContext.RequestAborted);
                     if (job is null)
                     {
                         return StatusCode(500, new { message = "Failed to create print job" });
@@ -121,14 +131,14 @@ namespace Farm.Web.Api.Controllers
         /// Slicers use this to verify OctoPrint compatibility
         /// </summary>
         [HttpGet("version")]
-        [AllowAnonymous]
         public IActionResult GetVersion()
         {
+            // API key validation handled by [OctoPrintApiKey] filter at controller level
             return Ok(new
             {
                 api = "0.1",
-                server = "1.9.3", // Mimics OctoPrint 1.9.3 for slicer compatibility
-                text = "PrintFarmer OctoPrint-Compatible API"
+                server = "1.9.3",
+                text = "OctoPrint 1.9.3" // Must say "OctoPrint" for slicer compatibility
             });
         }
 
@@ -136,9 +146,9 @@ namespace Farm.Web.Api.Controllers
         /// OctoPrint API: Get server status
         /// </summary>
         [HttpGet("server")]
-        [AllowAnonymous]
         public IActionResult GetServer()
         {
+            // API key validation handled by [OctoPrintApiKey] filter at controller level
             return Ok(new
             {
                 version = "1.9.3",

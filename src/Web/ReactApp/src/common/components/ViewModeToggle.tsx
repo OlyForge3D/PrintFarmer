@@ -11,7 +11,7 @@ import {
   mdiFlipToBack,
   mdiArrowExpandDown,
 } from '@mdi/js';
-import { Button } from '@/common/components/ui';
+import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
 
 export type ViewMode = 
   | 'compact' 
@@ -30,70 +30,57 @@ interface ViewModeToggleProps {
   onChange: (mode: ViewMode) => void;
 }
 
-function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
-  return (
-    <svg
-      className={size}
-      viewBox="0 0 24 24"
-      role="img"
-    >
-      <path fill="currentColor" d={path} />
-    </svg>
-  );
-}
+/**
+ * Core view mode options for Printers page
+ */
+const coreViewModes: ViewModeOption<ViewMode>[] = [
+  { mode: 'compact', icon: mdiViewGrid, title: 'Compact Cards' },
+  { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
+  { mode: 'expandable', icon: mdiViewComfy, title: 'Expandable Cards' },
+  { mode: 'table', icon: mdiViewQuilt, title: 'Table View' },
+];
 
+/**
+ * Experimental view mode options for Printers page
+ */
+const experimentalViewModes: ViewModeOption<ViewMode>[] = [
+  { mode: 'glass', icon: mdiBlur, title: '✨ Glassmorphism' },
+  { mode: 'segmented', icon: mdiViewSequential, title: '📂 Segmented Sections' },
+  { mode: 'statusGlow', icon: mdiLightbulbOn, title: '🔆 Status Glow' },
+  { mode: 'dashboard', icon: mdiGauge, title: '📊 Dashboard Gauges' },
+  { mode: 'flip', icon: mdiFlipToBack, title: '🔄 Flip Card' },
+  { mode: 'drawer', icon: mdiArrowExpandDown, title: '📥 Expandable Drawer' },
+];
+
+/**
+ * ViewModeToggle - Printers page view mode selector
+ * 
+ * Uses the generic ViewToggle component with two rows of options:
+ * - Core modes (compact, collapsed, expandable, table)
+ * - Experimental modes (glass, segmented, statusGlow, dashboard, flip, drawer)
+ */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
-  const coreModesRow: Array<{ mode: ViewMode; icon: string; title: string }> = [
-    { mode: 'compact', icon: mdiViewGrid, title: 'Compact Cards' },
-    { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
-    { mode: 'expandable', icon: mdiViewComfy, title: 'Expandable Cards' },
-    { mode: 'table', icon: mdiViewQuilt, title: 'Table View' },
-  ];
-
-  const experimentalModesRow: Array<{ mode: ViewMode; icon: string; title: string }> = [
-    { mode: 'glass', icon: mdiBlur, title: '✨ Glassmorphism' },
-    { mode: 'segmented', icon: mdiViewSequential, title: '📂 Segmented Sections' },
-    { mode: 'statusGlow', icon: mdiLightbulbOn, title: '🔆 Status Glow' },
-    { mode: 'dashboard', icon: mdiGauge, title: '📊 Dashboard Gauges' },
-    { mode: 'flip', icon: mdiFlipToBack, title: '🔄 Flip Card' },
-    { mode: 'drawer', icon: mdiArrowExpandDown, title: '📥 Expandable Drawer' },
-  ];
-
   return (
     <div className="flex flex-col gap-1">
       {/* Core view modes */}
-      <div className="inline-flex gap-0 p-1">
-        {coreModesRow.map((item) => (
-          <Button
-            key={item.mode}
-            onClick={() => onChange(item.mode)}
-            variant={viewMode === item.mode ? 'primary' : 'secondary'}
-            size="md"
-            title={item.title}
-            type="button"
-            className="px-3"
-          >
-            <MdiIcon path={item.icon} />
-          </Button>
-        ))}
-      </div>
+      <ViewToggle
+        value={viewMode}
+        onChange={onChange}
+        options={coreViewModes}
+        size="md"
+        className="p-1"
+        ariaLabel="Core view modes"
+      />
       
       {/* Experimental view modes */}
-      <div className="inline-flex gap-0 p-1">
-        {experimentalModesRow.map((item) => (
-          <Button
-            key={item.mode}
-            onClick={() => onChange(item.mode)}
-            variant={viewMode === item.mode ? 'primary' : 'secondary'}
-            size="sm"
-            title={item.title}
-            type="button"
-            className="px-2 text-xs"
-          >
-            <MdiIcon path={item.icon} size="w-3 h-3" />
-          </Button>
-        ))}
-      </div>
+      <ViewToggle
+        value={viewMode}
+        onChange={onChange}
+        options={experimentalViewModes}
+        size="sm"
+        className="p-1"
+        ariaLabel="Experimental view modes"
+      />
     </div>
   );
 }

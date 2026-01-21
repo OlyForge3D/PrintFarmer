@@ -448,7 +448,15 @@ log_info "Starting React dev server on 0.0.0.0:3000..."
 # This allows the React app to find the API regardless of access method (localhost vs network IP)
 # IMPORTANT: Do NOT include /api in VITE_API_BASE_URL - it should be the base server URL only
 # The getApiBaseUrl() and getHubUrl() utility functions will construct the full paths
-CURRENT_HOST=$(hostname -I | awk '{print $1}' || echo "127.0.0.1")
+
+# Detect current host IP (cross-platform: macOS and Linux)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # macOS: use ipconfig getifaddr for primary interface
+  CURRENT_HOST=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "127.0.0.1")
+else
+  # Linux: use hostname -I
+  CURRENT_HOST=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+fi
 VITE_API_BASE_URL="http://${CURRENT_HOST}:5245"
 
 # Regenerate React .env file for local development (remove Docker-generated config)

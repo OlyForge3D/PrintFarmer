@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Net.Http;
@@ -21,7 +22,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
     /// and that the dispatcher can select the worker for a capability-constrained job.
     /// </summary>
     [Trait("Category", "Integration")]
-    public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
+    [Collection(IntegrationTestCollection.Name)]
+public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
     {
         private readonly CustomWebApplicationFactory _factory;
 

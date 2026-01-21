@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Threading;
@@ -11,6 +12,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Slicing;
 
+[Collection(IntegrationTestCollection.Name)]
 public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

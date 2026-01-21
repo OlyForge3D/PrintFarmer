@@ -9,6 +9,11 @@ namespace Farm.Web.Api.Data.Repositories
     {
         Task<ApiKey?> GetByKeyHashAsync(string keyHash);
 
+        /// <summary>
+        /// Find an API key by its raw (unhashed) value. Used when hashing is disabled.
+        /// </summary>
+        Task<ApiKey?> GetByRawKeyAsync(string rawKey);
+
         Task<IEnumerable<ApiKey>> GetByUserIdAsync(Guid userId);
 
         Task<ApiKey?> GetByIdAsync(Guid id);

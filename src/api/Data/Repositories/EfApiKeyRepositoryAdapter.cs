@@ -29,6 +29,12 @@ namespace Farm.Web.Api.Data.Repositories
             return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == keyHash && a.IsActive);
         }
 
+        public async Task<ApiKey?> GetByRawKeyAsync(string rawKey)
+        {
+            // When hashing is disabled, the raw key is stored in KeyHash field
+            return await _db.Set<ApiKey>().FirstOrDefaultAsync(a => a.KeyHash == rawKey && a.IsActive);
+        }
+
         public async Task<IEnumerable<ApiKey>> GetByUserIdAsync(Guid userId)
         {
             return await _db.Set<ApiKey>().Where(k => k.UserId == userId).ToArrayAsync();

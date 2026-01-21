@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button } from '@/common/components/ui';
+import { Button, Toggle } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -10,6 +10,8 @@ import {
   toggleApiKey,
   deleteApiKey,
   rotateApiKey,
+  revealApiKey,
+  getApiKeySettings,
   type ApiKeyDto,
 } from '@/services/apiKeysService';
 
@@ -20,8 +22,17 @@ export function ApiKeysPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ key: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [revealedKeys, setRevealedKeys] = useState<Record<string, string>>({});
 
   const userId = user?.id;
+
+  // Fetch API key settings (whether hashing is enabled)
+  const { data: settings } = useQuery({
+    queryKey: ['apiKeySettings'],
+    queryFn: getApiKeySettings,
+  });
+
+  const canRevealKeys = settings?.hashingEnabled === false;
 
   // Fetch API keys
   const { data: apiKeys = [], isLoading, error: fetchError } = useQuery({
@@ -115,6 +126,28 @@ export function ApiKeysPage() {
   const handleRotate = (keyId: string, keyName: string) => {
     if (confirm(`Are you sure you want to rotate API key "${keyName}"? The old key will stop working immediately.`)) {
       rotateMutation.mutate({ keyId });
+    }
+  };
+
+  const handleReveal = async (keyId: string) => {
+    if (!userId) return;
+    
+    // If already revealed, hide it
+    if (revealedKeys[keyId]) {
+      setRevealedKeys(prev => {
+        const next = { ...prev };
+        delete next[keyId];
+        return next;
+      });
+      return;
+    }
+
+    // Fetch and reveal the key
+    try {
+      const response = await revealApiKey(userId, keyId);
+      setRevealedKeys(prev => ({ ...prev, [keyId]: response.key }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reveal API key');
     }
   };
 
@@ -241,49 +274,76 @@ export function ApiKeysPage() {
               {apiKeys.map((apiKey: ApiKeyDto) => (
                 <div
                   key={apiKey.id}
-                  className="flex items-center justify-between p-4 bg-pf-bg-2 rounded border border-pf-border"
+                  className="p-4 bg-pf-bg-2 rounded border border-pf-border"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-semibold text-pf-text-primary">{apiKey.name}</h3>
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          apiKey.isActive
-                            ? 'bg-pf-success/20 text-pf-success'
-                            : 'bg-pf-text-secondary/20 text-pf-text-secondary'
-                        }`}
-                      >
-                        {apiKey.isActive ? 'Active' : 'Disabled'}
-                      </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <h3 className="font-semibold text-pf-text-primary">{apiKey.name}</h3>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            apiKey.isActive
+                              ? 'bg-pf-success/20 text-pf-success'
+                              : 'bg-pf-text-secondary/20 text-pf-text-secondary'
+                          }`}
+                        >
+                          {apiKey.isActive ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                      <p className="text-sm text-pf-text-secondary mt-1">
+                        Created: {formatDate(apiKey.createdAt)}
+                        {apiKey.expiresAt && ` • Expires: ${formatDate(apiKey.expiresAt)}`}
+                      </p>
                     </div>
-                    <p className="text-sm text-pf-text-secondary mt-1">
-                      Created: {formatDate(apiKey.createdAt)}
-                      {apiKey.expiresAt && ` • Expires: ${formatDate(apiKey.expiresAt)}`}
-                    </p>
+                    <div className="flex gap-2 items-center">
+                      <Toggle
+                        checked={apiKey.isActive}
+                        onChange={() => handleToggle(apiKey.id)}
+                        disabled={toggleMutation.isPending}
+                        size="sm"
+                        aria-label={apiKey.isActive ? 'Disable API key' : 'Enable API key'}
+                      />
+                      {canRevealKeys && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleReveal(apiKey.id)}
+                          iconLeft={revealedKeys[apiKey.id] ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                          title={revealedKeys[apiKey.id] ? 'Hide API key' : 'Reveal API key'}
+                        />
+                      )}
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleRotate(apiKey.id, apiKey.name)}
+                        disabled={rotateMutation.isPending}
+                        iconLeft={<RefreshIcon className="w-4 h-4" />}
+                        title="Rotate (generate new key)"
+                      />
+                      <Button
+                        variant="danger"
+                        onClick={() => handleDelete(apiKey.id, apiKey.name)}
+                        disabled={deleteMutation.isPending}
+                        iconLeft={<DeleteIcon className="w-4 h-4" />}
+                        title="Delete"
+                      />
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleToggle(apiKey.id)}
-                      disabled={toggleMutation.isPending}
-                      iconLeft={apiKey.isActive ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                      title={apiKey.isActive ? 'Disable' : 'Enable'}
-                    />
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleRotate(apiKey.id, apiKey.name)}
-                      disabled={rotateMutation.isPending}
-                      iconLeft={<RefreshIcon className="w-4 h-4" />}
-                      title="Rotate (generate new key)"
-                    />
-                    <Button
-                      variant="danger"
-                      onClick={() => handleDelete(apiKey.id, apiKey.name)}
-                      disabled={deleteMutation.isPending}
-                      iconLeft={<DeleteIcon className="w-4 h-4" />}
-                      title="Delete"
-                    />
-                  </div>
+                  {/* Revealed Key Display */}
+                  {revealedKeys[apiKey.id] && (
+                    <div className="mt-3 pt-3 border-t border-pf-border">
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-pf-bg-1 px-3 py-2 rounded border border-pf-border font-mono text-sm break-all text-pf-text-primary">
+                          {revealedKeys[apiKey.id]}
+                        </code>
+                        <Button
+                          variant="secondary"
+                          onClick={() => copyToClipboard(revealedKeys[apiKey.id])}
+                          title="Copy to clipboard"
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

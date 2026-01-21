@@ -1,3 +1,4 @@
+using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,6 +25,7 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for file consistency audit, verification, and health status endpoints.
 /// Tests the full stack: database persistence, audit service, API endpoints, and health checks.
 /// </summary>
+[Collection(IntegrationTestCollection.Name)]
 public class FileConsistencyIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
