@@ -1,6 +1,12 @@
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.Queue;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -75,6 +81,7 @@ public class PrintStatsSyncHostedService(
             using IServiceScope scope = _serviceProvider.CreateScope();
             IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
             IPrinterStatisticsRepository statsRepo = scope.ServiceProvider.GetRequiredService<IPrinterStatisticsRepository>();
+            IPrintJobStatisticsRepository jobStatsRepo = scope.ServiceProvider.GetRequiredService<IPrintJobStatisticsRepository>();
 
             // Get all printers
             List<Printer> printers = await printersRepo.GetAllAsync(ct);
@@ -93,29 +100,241 @@ public class PrintStatsSyncHostedService(
                 printersToSync,
                 printers.Count);
 
-            // TODO: Phase 2 - Implement actual statistics sync from printer APIs
-            // This is a stub that will be implemented in the next iteration
-            // For now, we just log that we would sync statistics
+            // Process each printer
             for (int i = 0; i < printersToSync; i++)
             {
                 Printer printer = printers[i];
-                _logger.LogDebug(
-                    "Would sync statistics for printer '{Name}' (ID: {Id}, Backend: {Backend})",
-                    printer.Name,
-                    printer.Id,
-                    (PrinterBackend)printer.Backend);
 
-                // Placeholder: In Phase 2, we'll:
-                // 1. Check printer backend type (Moonraker/PrusaLink/OctoPrint/SDCP)
-                // 2. Call appropriate backend API to get statistics
-                // 3. Parse response and extract cumulative hours, job counts, filament usage
-                // 4. Update or create PrinterStatistics record
-                // 5. Handle errors gracefully (printer offline, API errors, etc.)
+                try
+                {
+                    await SyncPrinterStatisticsAsync(printer, settings, statsRepo, jobStatsRepo, scope.ServiceProvider, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to sync statistics for printer '{Name}' (ID: {Id}, Backend: {Backend})",
+                        printer.Name,
+                        printer.Id,
+                        (PrinterBackend)printer.Backend);
+                }
             }
+
+            // Save all changes
+            await statsRepo.SaveChangesAsync(ct);
+
+            _logger.LogDebug("Print statistics sync completed successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during printer statistics sync scan");
+        }
+    }
+
+    private async Task SyncPrinterStatisticsAsync(
+        Printer printer,
+        PrintStatsSyncSettings settings,
+        IPrinterStatisticsRepository statsRepo,
+        IPrintJobStatisticsRepository jobStatsRepo,
+        IServiceProvider serviceProvider,
+        CancellationToken ct)
+    {
+        _logger.LogDebug(
+            "Syncing statistics for printer '{Name}' (ID: {Id}, Backend: {Backend})",
+            printer.Name,
+            printer.Id,
+            (PrinterBackend)printer.Backend);
+
+        // Get or create printer statistics
+        PrinterStatistics? stats = await statsRepo.GetByPrinterIdAsync(printer.Id, ct);
+        if (stats == null)
+        {
+            stats = new PrinterStatistics
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id
+            };
+        }
+
+        // Sync from external printer API
+        bool externalSyncSuccess = await SyncExternalPrinterStatisticsAsync(
+            printer,
+            stats,
+            settings,
+            serviceProvider,
+            ct);
+
+        // Sync from PrintFarmer job history
+        if (settings.IncludePrintFarmerJobs)
+        {
+            await SyncPrintFarmerJobStatisticsAsync(printer, stats, jobStatsRepo, ct);
+        }
+
+        // Update statistics in database
+        if (externalSyncSuccess || settings.IncludePrintFarmerJobs)
+        {
+            stats.LastSyncTime = DateTime.UtcNow;
+            await statsRepo.UpsertAsync(stats, ct);
+        }
+    }
+
+    private async Task<bool> SyncExternalPrinterStatisticsAsync(
+        Printer printer,
+        PrinterStatistics stats,
+        PrintStatsSyncSettings settings,
+        IServiceProvider serviceProvider,
+        CancellationToken ct)
+    {
+        try
+        {
+            PrinterBackend backend = (PrinterBackend)printer.Backend;
+
+            switch (backend)
+            {
+                case PrinterBackend.Moonraker:
+                    return await SyncMoonrakerStatisticsAsync(printer, stats, serviceProvider, settings, ct);
+
+                case PrinterBackend.PrusaLink:
+                    // PrusaLink doesn't have built-in history statistics API
+                    // Statistics would come from PrintFarmer job history only
+                    _logger.LogDebug("PrusaLink printer '{Name}' - using PrintFarmer job history only", printer.Name);
+                    return false;
+
+                case PrinterBackend.OctoPrint:
+                    // OctoPrint statistics would come from plugin data or PrintFarmer history
+                    _logger.LogDebug("OctoPrint printer '{Name}' - using PrintFarmer job history only", printer.Name);
+                    return false;
+
+                case PrinterBackend.SDCP:
+                    // SDCP statistics would come from PrintFarmer job history
+                    _logger.LogDebug("SDCP printer '{Name}' - using PrintFarmer job history only", printer.Name);
+                    return false;
+
+                default:
+                    _logger.LogWarning("Unsupported backend type {Backend} for printer '{Name}'", backend, printer.Name);
+                    return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to sync external statistics for printer '{Name}'",
+                printer.Name);
+            return false;
+        }
+    }
+
+    private async Task<bool> SyncMoonrakerStatisticsAsync(
+        Printer printer,
+        PrinterStatistics stats,
+        IServiceProvider serviceProvider,
+        PrintStatsSyncSettings settings,
+        CancellationToken ct)
+    {
+        try
+        {
+            IMoonrakerClient moonrakerClient = serviceProvider.GetRequiredService<IMoonrakerClient>();
+
+            // Use timeout from settings
+            using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(settings.ApiTimeoutSeconds));
+            using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            // Get history totals from Moonraker
+            HistoryTotals? historyTotals = await moonrakerClient.GetHistoryTotalsAsync(
+                printer.ServerUrl,
+                linkedCts.Token);
+
+            if (historyTotals == null || historyTotals.JobTotals == null)
+            {
+                _logger.LogDebug("No history totals available from Moonraker for printer '{Name}'", printer.Name);
+                return false;
+            }
+
+            // Extract statistics
+            JobTotals jobTotals = historyTotals.JobTotals;
+
+            // Update statistics
+            // Moonraker TotalTime is in seconds, convert to hours
+            stats.TotalPrintHours = jobTotals.TotalPrintTime / 3600.0;
+            stats.TotalJobsCompleted = jobTotals.TotalJobs;
+
+            // Moonraker TotalFilamentUsed is in mm, convert to grams (approximate: 1mm³ = 0.00125g for PLA at 1.75mm)
+            // More accurate: for 1.75mm filament, 1mm length ≈ 0.00237g for PLA
+            double filamentMm = jobTotals.TotalFilamentUsed;
+            stats.TotalFilamentUsedMeters = filamentMm / 1000.0; // mm to meters
+            stats.TotalFilamentUsedGrams = filamentMm * 0.00237; // Approximate grams for PLA 1.75mm
+
+            _logger.LogDebug(
+                "Synced Moonraker statistics for '{Name}': {Hours}h, {Jobs} jobs, {Filament}m",
+                printer.Name,
+                stats.TotalPrintHours,
+                stats.TotalJobsCompleted,
+                stats.TotalFilamentUsedMeters);
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Moonraker statistics sync timed out for printer '{Name}'", printer.Name);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Failed to sync Moonraker statistics for printer '{Name}'",
+                printer.Name);
+            return false;
+        }
+    }
+
+    private async Task SyncPrintFarmerJobStatisticsAsync(
+        Printer printer,
+        PrinterStatistics stats,
+        IPrintJobStatisticsRepository jobStatsRepo,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Get all successful jobs for this printer from PrintFarmer history
+            // Note: PrintJobStatistics doesn't have PrinterId directly, so we query by printer model
+            List<PrintJobStatistics> printerJobs = await jobStatsRepo.GetByPrinterModelAsync(
+                printer.ModelId,
+                successfulOnly: true,
+                fromDate: null,
+                cancellationToken: ct);
+
+            if (printerJobs.Count == 0)
+            {
+                _logger.LogDebug(
+                    "No PrintFarmer job statistics found for printer model of '{Name}'",
+                    printer.Name);
+                return;
+            }
+
+            // Aggregate PrintFarmer job data
+            int totalJobs = printerJobs.Count;
+            double totalHours = printerJobs
+                .Where(j => j.ActualDurationMs.HasValue)
+                .Sum(j => j.ActualDurationMs!.Value / 1000.0 / 3600.0); // ms to hours
+
+            // Add to existing statistics (combining external and PrintFarmer data)
+            stats.TotalJobsCompleted += totalJobs;
+            stats.TotalPrintHours += totalHours;
+
+            _logger.LogDebug(
+                "Added PrintFarmer statistics for '{Name}': +{Jobs} jobs, +{Hours}h",
+                printer.Name,
+                totalJobs,
+                totalHours);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to sync PrintFarmer job statistics for printer '{Name}'",
+                printer.Name);
         }
     }
 }
