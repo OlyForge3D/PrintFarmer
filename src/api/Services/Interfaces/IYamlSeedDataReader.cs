@@ -41,4 +41,9 @@ public interface IYamlSeedDataReader
     /// Read nozzle models from YAML file
     /// </summary>
     Task<List<NozzleModelSeedDto>> ReadNozzlesAsync();
+
+    /// <summary>
+    /// Read maintenance schedules from YAML file
+    /// </summary>
+    Task<List<MaintenanceScheduleSeedDto>> ReadMaintenanceSchedulesAsync();
 }

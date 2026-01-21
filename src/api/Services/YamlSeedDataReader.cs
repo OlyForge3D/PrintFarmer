@@ -71,6 +71,12 @@ public class YamlSeedDataReader : IYamlSeedDataReader
         return await ReadYamlFileAsync<List<NozzleModelSeedDto>>(filePath, "nozzles");
     }
 
+    public async Task<List<MaintenanceScheduleSeedDto>> ReadMaintenanceSchedulesAsync()
+    {
+        string filePath = Path.Combine(_seedDataPath, "maintenance-schedules.yaml");
+        return await ReadYamlFileAsync<List<MaintenanceScheduleSeedDto>>(filePath, "maintenance schedules");
+    }
+
     private async Task<T> ReadYamlFileAsync<T>(string filePath, string dataType)
         where T : new()
     {
