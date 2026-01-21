@@ -131,6 +131,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<NozzleModelDefinition> NozzleModelDefinitions => Set<NozzleModelDefinition>();
 
+    // Printer Maintenance Module
+    public DbSet<PrinterStatistics> PrinterStatisticsSet => Set<PrinterStatistics>();
+
+    public DbSet<MaintenanceSchedule> MaintenanceSchedules => Set<MaintenanceSchedule>();
+
+    public DbSet<MaintenanceLog> MaintenanceLogs => Set<MaintenanceLog>();
+
+    public DbSet<MaintenanceAlert> MaintenanceAlerts => Set<MaintenanceAlert>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // AppSettingsEntity Entity Configuration
@@ -310,6 +319,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         ConfigureExtruderModelDefinition(modelBuilder);
         ConfigureToolheadModelDefinition(modelBuilder);
         ConfigureNozzleModelDefinition(modelBuilder);
+
+        // Maintenance Module Configuration
+        ConfigurePrinterStatistics(modelBuilder);
+        ConfigureMaintenanceSchedule(modelBuilder);
+        ConfigureMaintenanceLog(modelBuilder);
+        ConfigureMaintenanceAlert(modelBuilder);
 
         // Location Entity Configuration
         _ = modelBuilder.Entity<Location>(b =>
@@ -1548,6 +1563,125 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(n => n.Name);
         });
     }
+
+    #region Maintenance Module Configuration
+
+    private void ConfigurePrinterStatistics(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<PrinterStatistics>(b =>
+        {
+            _ = b.HasKey(s => s.Id);
+
+            // One-to-one with Printer (PrinterId should match Id)
+            _ = b.HasOne(s => s.Printer)
+             .WithOne()
+             .HasForeignKey<PrinterStatistics>(s => s.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Index for efficient queries
+            _ = b.HasIndex(s => s.PrinterId).IsUnique();
+            _ = b.HasIndex(s => s.LastSyncTime);
+        });
+    }
+
+    private void ConfigureMaintenanceSchedule(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<MaintenanceSchedule>(b =>
+        {
+            _ = b.HasKey(s => s.Id);
+            _ = b.Property(s => s.TaskName).IsRequired().HasMaxLength(128);
+            _ = b.Property(s => s.Description).HasMaxLength(512);
+            _ = b.Property(s => s.Component).HasMaxLength(64);
+
+            // Relationship with Printer (optional - null for model-wide defaults)
+            _ = b.HasOne(s => s.Printer)
+             .WithMany()
+             .HasForeignKey(s => s.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Relationship with PrinterModel (optional - for model-wide defaults)
+            _ = b.HasOne(s => s.PrinterModel)
+             .WithMany()
+             .HasForeignKey(s => s.PrinterModelId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for efficient queries
+            _ = b.HasIndex(s => s.PrinterId);
+            _ = b.HasIndex(s => s.PrinterModelId);
+            _ = b.HasIndex(s => new { s.IsActive, s.IsDefault });
+        });
+    }
+
+    private void ConfigureMaintenanceLog(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<MaintenanceLog>(b =>
+        {
+            _ = b.HasKey(l => l.Id);
+            _ = b.Property(l => l.TaskName).IsRequired().HasMaxLength(128);
+            _ = b.Property(l => l.Notes).HasMaxLength(2000);
+            _ = b.Property(l => l.Component).HasMaxLength(64);
+            _ = b.Property(l => l.PerformedBy).HasMaxLength(128);
+            _ = b.Property(l => l.PartsReplaced).HasMaxLength(512);
+
+            // Relationship with Printer (required)
+            _ = b.HasOne(l => l.Printer)
+             .WithMany()
+             .HasForeignKey(l => l.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Relationship with MaintenanceSchedule (optional)
+            _ = b.HasOne(l => l.MaintenanceSchedule)
+             .WithMany()
+             .HasForeignKey(l => l.MaintenanceScheduleId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Relationship with MaintenanceAlert (optional)
+            _ = b.HasOne(l => l.ResolvedAlert)
+             .WithMany()
+             .HasForeignKey(l => l.ResolvedAlertId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes for efficient queries
+            _ = b.HasIndex(l => l.PrinterId);
+            _ = b.HasIndex(l => l.MaintenanceScheduleId);
+            _ = b.HasIndex(l => l.ResolvedAlertId);
+            _ = b.HasIndex(l => l.PerformedAt);
+        });
+    }
+
+    private void ConfigureMaintenanceAlert(ModelBuilder modelBuilder)
+    {
+        _ = modelBuilder.Entity<MaintenanceAlert>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.Title).IsRequired().HasMaxLength(128);
+            _ = b.Property(a => a.Message).IsRequired().HasMaxLength(512);
+            _ = b.Property(a => a.AcknowledgedBy).HasMaxLength(128);
+            _ = b.Property(a => a.ResolvedBy).HasMaxLength(128);
+            _ = b.Property(a => a.DismissedBy).HasMaxLength(128);
+            _ = b.Property(a => a.DismissalReason).HasMaxLength(512);
+
+            // Relationship with Printer (required)
+            _ = b.HasOne(a => a.Printer)
+             .WithMany()
+             .HasForeignKey(a => a.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Relationship with MaintenanceSchedule (required)
+            _ = b.HasOne(a => a.MaintenanceSchedule)
+             .WithMany()
+             .HasForeignKey(a => a.MaintenanceScheduleId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for efficient queries
+            _ = b.HasIndex(a => a.PrinterId);
+            _ = b.HasIndex(a => a.MaintenanceScheduleId);
+            _ = b.HasIndex(a => new { a.Status, a.Severity });
+            _ = b.HasIndex(a => a.CreatedAt);
+        });
+    }
+
+    #endregion
 
     #endregion
 }
