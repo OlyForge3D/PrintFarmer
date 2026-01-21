@@ -8,6 +8,7 @@
 # Field Descriptions:
 # - name: Nozzle model name (must be unique per manufacturer)
 # - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
+# - diameter: Nozzle diameter in mm (default: 0.4)
 # - maxTemp: Maximum operating temperature in °C
 # - nozzleType: Material type (Brass, HardenedSteel, StainlessSteel, Abrasive, TungstenCarbide)
 # - nozzleInterface: Thread/mount type (V6, Volcano, Revo, Proprietary)
@@ -17,6 +18,7 @@
 # Generic Nozzles - V6 Interface (standard E3D-style thread)
 - name: Brass Nozzle
   manufacturer: Generic
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -24,6 +26,7 @@
 
 - name: Hardened Steel Nozzle
   manufacturer: Generic
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -31,6 +34,7 @@
 
 - name: Stainless Steel Nozzle
   manufacturer: Generic
+  diameter: 0.4
   maxTemp: 300
   nozzleType: StainlessSteel
   nozzleInterface: V6
@@ -39,6 +43,7 @@
 # Generic Nozzles - Volcano Interface (extended melt zone)
 - name: Volcano Brass Nozzle
   manufacturer: Generic
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Volcano
@@ -46,6 +51,7 @@
 
 - name: Volcano Hardened Steel Nozzle
   manufacturer: Generic
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -54,6 +60,7 @@
 # Slice Engineering Nozzles (V6 interface)
 - name: Vanadium
   manufacturer: Slice Engineering
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -62,6 +69,7 @@
 
 - name: BridgeMaster
   manufacturer: Slice Engineering
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -70,6 +78,7 @@
 
 - name: GammaMaster
   manufacturer: Slice Engineering
+  diameter: 0.4
   maxTemp: 300
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -79,6 +88,7 @@
 # West3D Nozzles
 - name: Undertaker
   manufacturer: West3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -87,6 +97,7 @@
 
 - name: Undertaker Volcano
   manufacturer: West3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -96,6 +107,7 @@
 # E3D V6/Volcano Threaded Nozzles
 - name: V6 Brass
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -104,6 +116,7 @@
 
 - name: V6 Hardened Steel
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -112,6 +125,7 @@
 
 - name: V6 Plated Copper
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: Brass
   nozzleInterface: V6
@@ -120,6 +134,7 @@
 
 - name: Volcano Brass
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Volcano
@@ -128,6 +143,7 @@
 
 - name: Volcano Hardened Steel
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -136,6 +152,7 @@
 
 - name: NozzleX
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -144,6 +161,7 @@
 
 - name: NozzleX Volcano
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -153,6 +171,7 @@
 # E3D Revo Quick-Swap Nozzles (RapidChange system)
 - name: Revo Brass
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Revo
@@ -161,6 +180,7 @@
 
 - name: Revo High Flow
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Revo
@@ -169,6 +189,7 @@
 
 - name: Revo ObXidian
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Revo
@@ -177,6 +198,7 @@
 
 - name: Revo Micro
   manufacturer: E3D
+  diameter: 0.4
   maxTemp: 250
   nozzleType: Brass
   nozzleInterface: Revo
@@ -186,6 +208,7 @@
 # TriangleLabs Hardened Nozzles
 - name: ZS Nozzle
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -194,6 +217,7 @@
 
 - name: ZS Volcano
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -202,6 +226,7 @@
 
 - name: Ruby Nozzle
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: Abrasive
   nozzleInterface: V6
@@ -210,6 +235,7 @@
 
 - name: Tungsten Carbide
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: TungstenCarbide
   nozzleInterface: V6
@@ -219,6 +245,7 @@
 # TriangleLabs CHC Nozzles (CHC uses V6 thread)
 - name: CHC Nozzle
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: Brass
   nozzleInterface: V6
@@ -227,6 +254,7 @@
 
 - name: CHC Hardened
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -236,6 +264,7 @@
 # TriangleLabs Standard Nozzles
 - name: V6 Brass
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -244,6 +273,7 @@
 
 - name: V6 Hardened Steel
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -252,6 +282,7 @@
 
 - name: Volcano Brass
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Volcano
@@ -260,6 +291,7 @@
 
 - name: Volcano Hardened Steel
   manufacturer: TriangleLabs
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -269,6 +301,7 @@
 # Phaetus Dragon/V6 Compatible Nozzles
 - name: PS Nozzle
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 300
   nozzleType: StainlessSteel
   nozzleInterface: V6
@@ -277,6 +310,7 @@
 
 - name: Hardened Steel
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -285,6 +319,7 @@
 
 - name: Tungsten Carbide
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 500
   nozzleType: TungstenCarbide
   nozzleInterface: V6
@@ -293,6 +328,7 @@
 
 - name: Brass Nozzle
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -302,6 +338,7 @@
 # Phaetus Rapido-Specific Nozzles (Rapido uses V6 thread)
 - name: Rapido Brass
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -310,6 +347,7 @@
 
 - name: Rapido Hardened Steel
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -318,6 +356,7 @@
 
 - name: Rapido Tungsten Carbide
   manufacturer: Phaetus
+  diameter: 0.4
   maxTemp: 500
   nozzleType: TungstenCarbide
   nozzleInterface: V6
@@ -327,6 +366,7 @@
 # Bondtech CHT (Clone Hotend Technology) High Flow Nozzles
 - name: CHT Brass
   manufacturer: Bondtech
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -335,6 +375,7 @@
 
 - name: CHT Coated
   manufacturer: Bondtech
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -343,6 +384,7 @@
 
 - name: CHT BiMetal
   manufacturer: Bondtech
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -351,6 +393,7 @@
 
 - name: CHT Volcano
   manufacturer: Bondtech
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Volcano
@@ -359,6 +402,7 @@
 
 - name: CHT Volcano Coated
   manufacturer: Bondtech
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Volcano
@@ -368,6 +412,7 @@
 # Bambu Lab Model-Specific Nozzles (proprietary quick-swap system)
 - name: Bambu Brass Nozzle
   manufacturer: Bambu Lab
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Proprietary
@@ -376,6 +421,7 @@
 
 - name: Bambu Hardened Steel Nozzle
   manufacturer: Bambu Lab
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Proprietary
@@ -384,15 +430,36 @@
 
 - name: Bambu Stainless Steel Nozzle
   manufacturer: Bambu Lab
+  diameter: 0.4
   maxTemp: 300
   nozzleType: StainlessSteel
   nozzleInterface: Proprietary
   description: Stainless steel nozzle for corrosion resistance
   url: https://bambulab.com
 
+# Elegoo Model-Specific Nozzles (Centauri series)
+- name: Centauri Brass Nozzle
+  manufacturer: Elegoo
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Stock brass nozzle for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+- name: Centauri Hardened Steel Nozzle
+  manufacturer: Elegoo
+  diameter: 0.4
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Proprietary
+  description: Hardened steel nozzle for Elegoo Centauri Carbon, designed for abrasive filaments
+  url: https://www.elegoo.com
+
 # Prusa Model-Specific Nozzles
 - name: Prusa V6 Brass Nozzle
   manufacturer: Prusa
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: V6
@@ -401,6 +468,7 @@
 
 - name: Prusa Hardened Steel Nozzle
   manufacturer: Prusa
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: V6
@@ -409,6 +477,7 @@
 
 - name: Nextruder Brass Nozzle
   manufacturer: Prusa
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Proprietary
@@ -417,6 +486,7 @@
 
 - name: Nextruder Hardened Steel Nozzle
   manufacturer: Prusa
+  diameter: 0.4
   maxTemp: 500
   nozzleType: HardenedSteel
   nozzleInterface: Proprietary
@@ -425,8 +495,67 @@
 
 - name: Nextruder High Flow Nozzle
   manufacturer: Prusa
+  diameter: 0.4
   maxTemp: 300
   nozzleType: Brass
   nozzleInterface: Proprietary
   description: High flow nozzle for Nextruder, extended melt zone
   url: https://www.prusa3d.com
+
+# Stock/Generic Nozzles (for unknown or generic printer models)
+- name: Stock Nozzle
+  manufacturer: Generic
+  diameter: 0.4
+  maxTemp: 280
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: Generic stock nozzle for unspecified or unknown printer models
+
+# Sovol Nozzles (Proprietary interface)
+- name: Sovol Brass Nozzle
+  manufacturer: Sovol
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Proprietary brass nozzle for Sovol SV08 series
+  url: https://sovol3d.com
+
+- name: Sovol Hardened Steel Nozzle
+  manufacturer: Sovol
+  diameter: 0.4
+  maxTemp: 500
+  nozzleType: HardenedSteel
+  nozzleInterface: Proprietary
+  description: Proprietary hardened steel nozzle for Sovol SV08 series
+  url: https://sovol3d.com
+
+# Eryone Nozzles (Volcano interface for X400)
+- name: Eryone Volcano Brass Nozzle
+  manufacturer: Eryone
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Volcano
+  description: Volcano-style brass nozzle for Eryone Thinker X400
+  url: https://www.eryone.com
+
+# Flashforge Nozzles
+- name: Flashforge Brass Nozzle
+  manufacturer: Flashforge
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: Proprietary
+  description: Proprietary brass nozzle for Flashforge printers
+  url: https://www.flashforge.com
+
+# Phrozen Nozzles
+- name: Phrozen Brass Nozzle
+  manufacturer: Phrozen
+  diameter: 0.4
+  maxTemp: 300
+  nozzleType: Brass
+  nozzleInterface: V6
+  description: V6-style brass nozzle for Phrozen Arco
+  url: https://www.phrozen3d.com

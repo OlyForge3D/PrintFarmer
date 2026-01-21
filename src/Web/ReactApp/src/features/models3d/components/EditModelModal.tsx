@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import type { PrinterModelDto, UpdateModelRequest, MotionTypeString, PrinterModelToolheadDto } from '@/types/api';
+import { NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { ModelAliasEditor, ModelAliasEditorRef } from '@/features/catalog/components/ModelAliasEditor';
@@ -91,7 +92,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
         hasHeatedBed: model.hasHeatedBed,
         hasEnclosure: model.hasEnclosure,
         multiMaterial: model.multiMaterial,
-        numberOfExtruders: model.numberOfExtruders,
         supportsAutoLeveling: model.supportsAutoLeveling,
         
         // Temperature ranges
@@ -143,7 +143,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
     const fields: (keyof UpdateModelRequest)[] = [
       'name', 'motionType', 'maxX', 'maxY', 'maxZ', 'defaultBackend',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
-      'numberOfExtruders', 'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed'
+      'supportsAutoLeveling', 'maxBedTemp', 'maxPrintSpeed'
     ];
     
     for (const field of fields) {
@@ -178,9 +178,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
       if (current.name !== original.name) return true;
       if (current.index !== original.index) return true;
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
-      if (current.maxHotendTemp !== original.maxHotendTemp) return true;
-      if (current.maxFlowRate !== original.maxFlowRate) return true;
-      if (current.toolheadType !== original.toolheadType) return true;
       // Component model IDs (database-backed) - nozzle type comes from nozzle model
       if (current.hotendModelId !== original.hotendModelId) return true;
       if (current.extruderModelId !== original.extruderModelId) return true;
@@ -293,7 +290,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
       name: `Toolhead ${newIndex + 1}`,
       index: newIndex,
       nozzleDiameter: 0.4,
-      maxHotendTemp: 300,
       supportedMaterials: ['PLA', 'PETG'],
       isPrimary: newIndex === 0, // First toolhead is primary by default
     };
@@ -528,19 +524,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
         <div className="border-t pt-5">
           <h4 className="text-lg font-medium text-pf-text-primary mb-4">Printer Capabilities</h4>
           
-          {/* Number of Extruders */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <FormField label="Number of Extruders">
-              <Input
-                type="number"
-                min="1"
-                max="8"
-                value={formData.numberOfExtruders || 1}
-                onChange={e => handleInputChange('numberOfExtruders', parseInt(e.target.value) || 1)}
-              />
-            </FormField>
-          </div>
-
           {/* Capability Checkboxes */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <Checkbox
@@ -661,7 +644,9 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                     }
                     summary={[
                       toolhead.nozzleDiameter && `Ø${toolhead.nozzleDiameter}mm`,
-                      toolhead.maxHotendTemp && `Max ${toolhead.maxHotendTemp}°C`,
+                      toolhead.nozzleType && NozzleTypeStringLabels[String(toolhead.nozzleType)],
+                      toolhead.maxTemp && `${toolhead.maxTemp}°C`,
+                      toolhead.maxFlowRate && `${toolhead.maxFlowRate}mm³/s`,
                     ].filter(Boolean).join(' • ') || undefined}
                     actions={
                       <Button
@@ -793,29 +778,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                             value={toolhead.nozzleDiameter?.toString() || ''}
                             onChange={e => handleToolheadChange(toolhead.id, 'nozzleDiameter', e.target.value ? parseFloat(e.target.value) : undefined)}
                             placeholder="0.4"
-                          />
-                        </FormField>
-                      </div>
-
-                      {/* Performance Specs */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField label="Max Hotend Temp (°C)" htmlFor={`toolhead-max-temp-${index}`}>
-                          <Input
-                            id={`toolhead-max-temp-${index}`}
-                            type="number"
-                            value={toolhead.maxHotendTemp?.toString() || ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'maxHotendTemp', e.target.value ? parseInt(e.target.value, 10) : undefined)}
-                            placeholder="300"
-                          />
-                        </FormField>
-                        <FormField label="Max Flow Rate (mm³/s)" htmlFor={`toolhead-max-flow-${index}`}>
-                          <Input
-                            id={`toolhead-max-flow-${index}`}
-                            type="number"
-                            step="0.1"
-                            value={toolhead.maxFlowRate?.toString() || ''}
-                            onChange={e => handleToolheadChange(toolhead.id, 'maxFlowRate', e.target.value ? parseFloat(e.target.value) : undefined)}
-                            placeholder="15"
                           />
                         </FormField>
                       </div>

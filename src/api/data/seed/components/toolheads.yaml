@@ -10,139 +10,285 @@
 # - manufacturer: Manufacturer name (must match entry in manufacturers.yaml, or null for community designs)
 # - description: Brief description of the toolhead model and its characteristics
 # - url: Product or information URL (optional)
+# - defaultHotend: Name of the default hotend component (must match entry in hotends.yaml)
+# - defaultExtruder: Name of the default extruder component (must match entry in extruders.yaml)
+# - defaultNozzle: Name of the default nozzle component (must match entry in nozzles.yaml)
 
 # Prusa Toolheads
 - name: MK3S Toolhead
   manufacturer: Prusa
   description: Stock toolhead for Prusa MK3S/MK3S+ with E3D V6-style hotend
   url: https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/
+  defaultHotend: MK3S Hotend
+  defaultExtruder: MK3S Extruder
+  defaultNozzle: Prusa V6 Brass Nozzle
 
 - name: Mini Toolhead
   manufacturer: Prusa
   description: Stock bowden toolhead for Prusa Mini/Mini+
   url: https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/
+  defaultHotend: Mini Hotend
+  defaultExtruder: Mini Extruder
+  defaultNozzle: Prusa V6 Brass Nozzle
 
 - name: Nextruder
   manufacturer: Prusa
   description: Integrated direct drive toolhead for MK3.9S, MK4, MK4S, CORE One
   url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
+  defaultHotend: Nextruder Hotend
+  defaultExtruder: Nextruder Extruder
+  defaultNozzle: Nextruder Brass Nozzle
 
 - name: XL Toolhead
   manufacturer: Prusa
   description: Toolchanger-compatible toolhead for Prusa XL
   url: https://www.prusa3d.com/product/original-prusa-xl/
+  defaultHotend: XL Hotend
+  defaultExtruder: Nextruder Extruder
+  defaultNozzle: Nextruder Brass Nozzle
 
 # Bambu Lab Toolheads
 - name: X1 Series Toolhead
   manufacturer: Bambu Lab
   description: Stock toolhead for Bambu Lab X1, X1C, X1E series
   url: https://bambulab.com/en/x1
+  defaultHotend: X1 Series Hotend
+  defaultExtruder: X1 Series Extruder
+  defaultNozzle: Bambu Brass Nozzle
 
 - name: P1 Series Toolhead
   manufacturer: Bambu Lab
   description: Stock toolhead for Bambu Lab P1P, P1S series
   url: https://bambulab.com/en/p1
+  defaultHotend: P1 Series Hotend
+  defaultExtruder: P1 Series Extruder
+  defaultNozzle: Bambu Brass Nozzle
 
 - name: A1 Toolhead
   manufacturer: Bambu Lab
   description: Stock toolhead for Bambu Lab A1 series
   url: https://bambulab.com/en/a1
+  defaultHotend: A1 Hotend
+  defaultExtruder: A1 Extruder
+  defaultNozzle: Bambu Brass Nozzle
 
 - name: A1 Mini Toolhead
   manufacturer: Bambu Lab
   description: Compact toolhead for Bambu Lab A1 Mini
   url: https://bambulab.com/en/a1-mini
+  defaultHotend: A1 Mini Hotend
+  defaultExtruder: A1 Mini Extruder
+  defaultNozzle: Bambu Brass Nozzle
 
 # Creality Toolheads
 - name: Sprite Pro Toolhead
   manufacturer: Creality
   description: Sprite Pro toolhead for Ender-3 S1 and derivatives
   url: https://www.creality.com
+  defaultHotend: Sprite Hotend
+  defaultExtruder: Sprite Pro
+  defaultNozzle: Brass Nozzle
 
 - name: K1 Toolhead
   manufacturer: Creality
   description: High-speed toolhead for K1 series
   url: https://www.creality.com
+  defaultHotend: K1 Hotend
+  defaultExtruder: K1 Extruder
+  defaultNozzle: Brass Nozzle
 
 # Qidi Toolheads
 - name: X-Plus 4 Toolhead
   manufacturer: Qidi
   description: High-speed toolhead for Qidi X-Plus 4
   url: https://www.qidi3d.com
+  defaultHotend: X-Plus 4 Hotend
+  defaultExtruder: X-Plus 4 Extruder
+  defaultNozzle: Brass Nozzle
 
 # Elegoo Toolheads
 - name: Centauri Toolhead
   manufacturer: Elegoo
   description: Stock toolhead for Elegoo Centauri series
   url: https://www.elegoo.com
+  defaultHotend: Centauri Hotend
+  defaultExtruder: Centauri Extruder
+  defaultNozzle: Centauri Brass Nozzle
+
+- name: Centauri Carbon Toolhead
+  manufacturer: Elegoo
+  description: Stock toolhead for Elegoo Centauri series
+  url: https://www.elegoo.com
+  defaultHotend: Centauri Carbon Hotend
+  defaultExtruder: Centauri Carbon Extruder
+  defaultNozzle: Centauri Hardened Steel Nozzle
 
 # Sovol Toolheads
 - name: SV08 Toolhead
   manufacturer: Sovol
   description: Stock toolhead for Sovol SV08
   url: https://sovol3d.com
+  defaultHotend: SV08 Hotend
+  defaultExtruder: SV08 Extruder
+  defaultNozzle: Sovol Brass Nozzle
 
 # Voron Official Toolheads
 - name: StealthBurner
   manufacturer: Voron
   description: Enclosed direct drive toolhead for Voron
   url: https://github.com/VoronDesign/Voron-Stealthburner
+  defaultHotend: Rapido HF
+  defaultExtruder: Clockwork 2
+  defaultNozzle: Brass Nozzle
 
 - name: Mini StealthBurner
   manufacturer: Voron
   description: Compact StealthBurner for V0
   url: https://github.com/VoronDesign/Voron-0
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Mini StealthBurner Extruder
+  defaultNozzle: Brass Nozzle
 
 # Community Toolheads (PrintersForAnts)
 - name: DragonBurner
   manufacturer: PrintersForAnts
   description: Popular community toolhead design
   url: https://github.com/chirpy2605/voron/tree/main/V0/Dragon_Burner
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Orbiter 2.0
+  defaultNozzle: Brass Nozzle
 
 - name: AntHead
   manufacturer: PrintersForAnts
   description: Compact design for Micron and other mini printers
   url: https://github.com/PrintersForAnts/AntHead
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Orbiter 2.5
+  defaultNozzle: Brass Nozzle
 
 - name: MiniAB
   manufacturer: PrintersForAnts
   description: Afterburner-based mini toolhead
   url: https://github.com/PrintersForAnts/Mini-AfterSherpa
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Sherpa Mini
+  defaultNozzle: Brass Nozzle
 
 # Community Toolheads (Various)
 - name: Xol
   manufacturer: Community
   description: High performance community toolhead
   url: https://github.com/Armchair-Heavy-Industries/Xol-Toolhead
+  defaultHotend: Rapido HF
+  defaultExtruder: Orbiter 2.0
+  defaultNozzle: Brass Nozzle
 
 - name: Archetype
   manufacturer: Community
   description: Modern community toolhead
   url: https://github.com/Armchair-Heavy-Industries/Archetype
+  defaultHotend: Rapido HF
+  defaultExtruder: Orbiter 2.0
+  defaultNozzle: Brass Nozzle
 
 - name: Jabberwocky
   manufacturer: Community
   description: Community toolhead for V0
   url: https://github.com/Diyshift/Jabberwocky
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Jabberwocky Extruder
+  defaultNozzle: Brass Nozzle
 
 # RatRig Toolheads
 - name: EVA
   manufacturer: Ratrig
   description: Universal toolhead system
   url: https://github.com/EVA-3D/eva-main
+  defaultHotend: Dragon Standard Flow
+  defaultExtruder: Orbiter 1.5
+  defaultNozzle: Brass Nozzle
 
 - name: EVA 3
   manufacturer: Ratrig
   description: Latest EVA revision
   url: https://github.com/EVA-3D/eva-main
+  defaultHotend: Rapido HF
+  defaultExtruder: Orbiter 2.0
+  defaultNozzle: Brass Nozzle
+
+- name: V-Core 4 Toolhead
+  manufacturer: Ratrig
+  description: Stock toolhead for RatRig V-Core 4 with Rapido 2 and Orbiter 2.5
+  url: https://ratrig.com/v-core-4
+  defaultHotend: Rapido 2
+  defaultExtruder: Orbiter 2.5
+  defaultNozzle: Brass Nozzle
 
 # E3D Toolheads
 - name: Hemera Toolhead
   manufacturer: E3D
   description: Official Hemera mounting
   url: https://e3d-online.com/products/e3d-hemera
+  defaultHotend: Hemera Hotend
+  defaultExtruder: Hemera Extruder
+  defaultNozzle: Brass Nozzle
 
 - name: Revo Toolhead
   manufacturer: E3D
   description: Quick-swap capable toolhead
   url: https://e3d-online.com/products/revo-voron
+  defaultHotend: Revo Hotend
+  defaultExtruder: Revo Extruder
+  defaultNozzle: Brass Nozzle
+
+# Stock/Generic Toolheads (for unknown or generic printer models)
+- name: Stock Toolhead
+  manufacturer: Generic
+  description: Generic stock toolhead for unspecified or unknown printer models
+  defaultHotend: Stock Hotend
+  defaultExtruder: Stock Extruder
+  defaultNozzle: Stock Nozzle
+
+# Sovol Toolheads
+- name: SV08 MAX Toolhead
+  manufacturer: Sovol
+  description: Stock toolhead for Sovol SV08 MAX
+  url: https://sovol3d.com
+  defaultHotend: SV08 MAX Hotend
+  defaultExtruder: SV08 MAX Extruder
+  defaultNozzle: Sovol Brass Nozzle
+
+- name: Sovol Zero Toolhead
+  manufacturer: Sovol
+  description: Compact toolhead for Sovol Zero
+  url: https://sovol3d.com
+  defaultHotend: Sovol Zero Hotend
+  defaultExtruder: Sovol Zero Extruder
+  defaultNozzle: Sovol Brass Nozzle
+
+# Eryone Toolheads
+- name: Thinker X400 Toolhead
+  manufacturer: Eryone
+  description: Proprietary toolhead for Eryone Thinker X400 with Volcano-style hotend
+  url: https://www.eryone.com
+  defaultHotend: Thinker X400 Hotend
+  defaultExtruder: Thinker X400 Extruder
+  defaultNozzle: Eryone Volcano Brass Nozzle
+
+# Flashforge Toolheads
+- name: AD5X Toolhead
+  manufacturer: Flashforge
+  description: Proprietary toolhead for Flashforge Adventurer 5X
+  url: https://www.flashforge.com
+  defaultHotend: AD5X Hotend
+  defaultExtruder: AD5X Extruder
+  defaultNozzle: Flashforge Brass Nozzle
+
+# Phrozen Toolheads
+- name: Arco Toolhead
+  manufacturer: Phrozen
+  description: Proprietary toolhead for Phrozen Arco
+  url: https://www.phrozen3d.com
+  defaultHotend: Arco Hotend
+  defaultExtruder: Arco Extruder
+  defaultNozzle: Phrozen Brass Nozzle

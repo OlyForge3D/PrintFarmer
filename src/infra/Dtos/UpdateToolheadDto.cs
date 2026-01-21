@@ -14,9 +14,6 @@ public record UpdateToolheadDto(
     Guid Id,
     string? Name = null,
     int? Index = null,
-    int? MaxHotendTemp = null,
-    double? MaxFlowRate = null,
-    ToolheadType? ToolheadType = null,
 
     // Component model references
     Guid? HotendModelId = null,

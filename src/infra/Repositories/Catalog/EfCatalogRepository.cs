@@ -94,9 +94,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 PrinterModelId = modelId,
                 Name = th.Name,
                 Index = th.Index,
-                MaxHotendTemp = th.MaxHotendTemp,
-                MaxFlowRate = th.MaxFlowRate,
-                ToolheadType = th.ToolheadType.HasValue ? (int)th.ToolheadType.Value : null,
 
                 // Component model references - nozzle diameter is derived from NozzleModel.Diameter
                 HotendModelId = th.HotendModelId,
@@ -131,7 +128,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             m.HasHeatedBed,
             m.HasEnclosure,
             m.MultiMaterial,
-            m.NumberOfExtruders,
             m.SupportsAutoLeveling,
             m.MaxBedTemp,
             m.MaxPrintSpeed)).ToList();
@@ -163,7 +159,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 model.HasHeatedBed,
                 model.HasEnclosure,
                 model.MultiMaterial,
-                model.NumberOfExtruders,
                 model.SupportsAutoLeveling,
                 model.MaxBedTemp,
                 model.MaxPrintSpeed,
@@ -171,11 +166,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.Id,
                     t.Name,
                     t.Index,
-                    t.MaxHotendTemp,
-                    t.MaxFlowRate,
-                    t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
-                    // Component model references - nozzle diameter comes from NozzleModel.Diameter
+                    // Component model references - derived values from related models
                     t.HotendModelId,
                     t.HotendModel?.Name,
                     t.ExtruderModelId,
@@ -184,7 +176,10 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.ToolheadModelDef?.Name,
                     t.NozzleModelId,
                     t.NozzleModel?.Name,
-                    t.NozzleModel?.Diameter,
+                    t.NozzleModel?.Diameter,      // Derived from NozzleModel
+                    t.NozzleModel?.NozzleType,    // Derived from NozzleModel
+                    t.HotendModel?.MaxFlowRate,   // Derived from HotendModel
+                    t.HotendModel?.MaxTemp,       // Derived from HotendModel
                     t.SupportedMaterials,
                     t.IsPrimary)).OrderBy(t => t.Index).ToArray());
     }

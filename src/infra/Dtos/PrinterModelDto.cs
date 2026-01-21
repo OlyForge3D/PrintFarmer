@@ -24,7 +24,6 @@ public record PrinterModelDto(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
-    int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
 
     // Temperature ranges

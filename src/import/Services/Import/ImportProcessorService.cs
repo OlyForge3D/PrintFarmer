@@ -55,8 +55,8 @@ public class ImportProcessorService : IImportProcessorService
                     }
                     else if (duplicateHandling.Equals("update", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Find existing printer to update
-                        var allPrinters = await _unitOfWork.Printers.GetAllAsync(ct);
+                        // Find existing printer to update - use tracked query for updates
+                        var allPrinters = await _unitOfWork.Printers.GetAllForTemplateUpdateAsync(ct);
                         var existing = allPrinters.FirstOrDefault(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl);
                         if (existing != null)
                         {
@@ -256,9 +256,6 @@ public class ImportProcessorService : IImportProcessorService
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? dto.MaxHotendTemp,
-                    MaxFlowRate = toolheadDto.MaxFlowRate,
-                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
                     HotendModelId = toolheadDto.HotendModelId,
                     ExtruderModelId = toolheadDto.ExtruderModelId,
                     ToolheadModelDefId = toolheadDto.ToolheadModelDefId,
@@ -283,7 +280,6 @@ public class ImportProcessorService : IImportProcessorService
 
                 // NozzleDiameter is now derived from NozzleModelId - use default nozzle model if needed
                 SupportedMaterials = dto.SupportedMaterials,
-                MaxHotendTemp = dto.MaxHotendTemp,
                 UpdatedAt = DateTime.UtcNow
             };
             p.Toolheads.Add(defaultToolhead);

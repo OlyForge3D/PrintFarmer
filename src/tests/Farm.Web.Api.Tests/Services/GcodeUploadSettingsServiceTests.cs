@@ -132,7 +132,7 @@ public class InMemoryGcodeUploadQuotaServiceTests
         // Arrange
         _mockSettingsService
             .Setup(s => s.Get<GcodeUploadSettings>())
-            .Returns((GcodeUploadSettings?)null);
+            .Returns((GcodeUploadSettings?)null!);
         var quota = new InMemoryGcodeUploadQuotaService(_mockSettingsService.Object);
 
         // Act

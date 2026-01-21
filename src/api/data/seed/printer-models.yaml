@@ -17,11 +17,11 @@
 # - hasHeatedBed: true if printer has a heated bed
 # - hasEnclosure: true if printer has an enclosure
 # - multiMaterial: true if printer supports multi-material printing
-# - numberOfExtruders: Number of extruders/toolheads
 # - supportsAutoLeveling: true if printer has automatic bed leveling
 # - maxBedTemp: Maximum bed temperature in °C (optional)
 # - maxPrintSpeed: Maximum print speed in mm/s (optional)
 # - supportedMaterials: List of compatible filament types (references filament-types.yaml)
+# - toolheads: List of toolhead configurations (defines number of extruders)
 # - aliases: List of slicer-specific model names for compatibility
 #   - slicerModelName: Model name as it appears in slicer
 #   - slicerType: Slicer software name (OrcaSlicer, PrusaSlicer, etc.)
@@ -38,7 +38,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: false
   maxBedTemp: 120
   maxPrintSpeed: 100
@@ -46,6 +45,9 @@
     - PLA
     - PETG
     - ABS
+  toolheads:
+    - name: Primary
+      toolhead: Stock Toolhead
 
 # Flashforge Models
 - name: Flashforge AD5X
@@ -59,7 +61,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -69,6 +70,12 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: AD5X Toolhead
+  aliases:
+    - slicerModelName: Flashforge AD5X
+      slicerType: OrcaSlicer
 
 # Sovol Models
 - name: Sovol SV08
@@ -82,7 +89,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -92,6 +98,12 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: SV08 Toolhead
+  aliases:
+    - slicerModelName: Sovol SV08
+      slicerType: OrcaSlicer
 
 - name: Sovol SV08 MAX
   manufacturer: Sovol
@@ -104,7 +116,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -114,6 +125,12 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: SV08 MAX Toolhead
+  aliases:
+    - slicerModelName: Sovol SV08 MAX
+      slicerType: OrcaSlicer
 
 - name: Sovol Zero
   manufacturer: Sovol
@@ -124,16 +141,21 @@
   defaultBackend: Moonraker
   motionType: CoreXY
   hasHeatedBed: true
-  hasEnclosure: false
+  hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 100
-  maxPrintSpeed: 150
+  maxPrintSpeed: 1000
   supportedMaterials:
     - PLA
     - PETG
     - ABS
+  toolheads:
+    - name: Primary
+      toolhead: Sovol Zero Toolhead
+  aliases:
+    - slicerModelName: Sovol Zero
+      slicerType: OrcaSlicer
 
 # Eryone Models
 - name: Thinker X400
@@ -145,18 +167,23 @@
   defaultBackend: Moonraker
   motionType: CoreXY
   hasHeatedBed: true
-  hasEnclosure: false
+  hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
-  maxPrintSpeed: 200
+  maxPrintSpeed: 600
   supportedMaterials:
     - PLA
     - PETG
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: Thinker X400 Toolhead
+  aliases:
+    - slicerModelName: Thinker X400
+      slicerType: OrcaSlicer
 
 # Elegoo Models
 - name: Elegoo Centauri
@@ -170,7 +197,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -179,6 +205,12 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: Centauri Toolhead
+  aliases:
+    - slicerModelName: Elegoo Centauri
+      slicerType: OrcaSlicer
 
 - name: Elegoo Centauri Carbon
   manufacturer: Elegoo
@@ -189,9 +221,8 @@
   defaultBackend: SDCP
   motionType: CoreXY
   hasHeatedBed: true
-  hasEnclosure: false
+  hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -200,6 +231,12 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: Centauri Carbon Toolhead
+  aliases:
+    - slicerModelName: Elegoo Centauri Carbon
+      slicerType: OrcaSlicer
 
 # PrintersForAnts Models (Community Voron derivatives)
 - name: SaladFork 120
@@ -213,7 +250,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -222,6 +258,9 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: DragonBurner
 
 - name: SaladFork 180
   manufacturer: PrintersForAnts
@@ -234,7 +273,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -243,6 +281,9 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: DragonBurner
 
 - name: Micron 120
   manufacturer: PrintersForAnts
@@ -255,7 +296,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -264,6 +304,9 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: AntHead
 
 - name: Micron 180
   manufacturer: PrintersForAnts
@@ -276,7 +319,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -285,6 +327,9 @@
     - PETG
     - ABS
     - ASA
+  toolheads:
+    - name: Primary
+      toolhead: AntHead
 
 # Voron Models
 - name: Voron 0.1
@@ -298,7 +343,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -308,9 +352,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: Mini StealthBurner
   aliases:
     - slicerModelName: Voron 0.1
       slicerType: OrcaSlicer
+    - slicerModelName: Voron_v0_120
+      slicerType: PrusaSlicer
 
 - name: Voron 2.4 250
   manufacturer: Voron
@@ -323,7 +372,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -333,9 +381,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron 2.4 250
       slicerType: OrcaSlicer
+    - slicerModelName: Voron_v2_250
+      slicerType: PrusaSlicer
 
 - name: Voron 2.4 300
   manufacturer: Voron
@@ -348,7 +401,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -358,9 +410,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron 2.4 300
       slicerType: OrcaSlicer
+    - slicerModelName: Voron_v2_300
+      slicerType: PrusaSlicer
 
 - name: Voron 2.4 350
   manufacturer: Voron
@@ -373,7 +430,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -383,9 +439,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron 2.4 350
       slicerType: OrcaSlicer
+    - slicerModelName: Voron_v2_350
+      slicerType: PrusaSlicer
 
 - name: Voron Switchwire 250
   manufacturer: Voron
@@ -398,7 +459,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -408,9 +468,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron Switchwire 250
       slicerType: OrcaSlicer
+    - slicerModelName: Voron_Switchwire
+      slicerType: PrusaSlicer
 
 - name: Voron Trident 250
   manufacturer: Voron
@@ -423,7 +488,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -433,6 +497,9 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron Trident 250
       slicerType: OrcaSlicer
@@ -448,7 +515,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -458,6 +524,9 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron Trident 300
       slicerType: OrcaSlicer
@@ -473,7 +542,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -483,6 +551,9 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: StealthBurner
   aliases:
     - slicerModelName: Voron Trident 350
       slicerType: OrcaSlicer
@@ -499,7 +570,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -509,6 +579,11 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Dragon Standard Flow
+      extruder: BMG
   aliases:
     - slicerModelName: RatRig V-Core 3 200
       slicerType: OrcaSlicer
@@ -524,7 +599,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -534,9 +608,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Dragon Standard Flow
+      extruder: BMG
   aliases:
     - slicerModelName: RatRig V-Core 3 300
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-3.1-300
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 3 400
   manufacturer: Ratrig
@@ -549,7 +630,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -559,9 +639,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Dragon Standard Flow
+      extruder: BMG
   aliases:
     - slicerModelName: RatRig V-Core 3 400
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-3.1-400
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 3 500
   manufacturer: Ratrig
@@ -574,7 +661,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -584,9 +670,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Dragon Standard Flow
+      extruder: BMG
   aliases:
     - slicerModelName: RatRig V-Core 3 500
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-3.1-500
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 300
   manufacturer: Ratrig
@@ -599,7 +692,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -609,9 +701,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 300
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_CoreXY-300
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 400
   manufacturer: Ratrig
@@ -624,7 +723,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -634,9 +732,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 400
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_CoreXY-400
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 500
   manufacturer: Ratrig
@@ -649,7 +754,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -659,9 +763,16 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 500
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_CoreXY-500
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 HYBRID 300
   manufacturer: Ratrig
@@ -674,7 +785,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -684,9 +794,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 HYBRID 300
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_HYBRID-300
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 HYBRID 400
   manufacturer: Ratrig
@@ -699,7 +820,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -709,9 +829,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 HYBRID 400
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_HYBRID-400
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 HYBRID 500
   manufacturer: Ratrig
@@ -724,7 +855,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -734,9 +864,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 HYBRID 500
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_HYBRID-500
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 IDEX 300
   manufacturer: Ratrig
@@ -749,7 +890,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -759,9 +899,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 IDEX 300
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_IDEX-300
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 IDEX 400
   manufacturer: Ratrig
@@ -774,7 +925,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -784,9 +934,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 IDEX 400
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_IDEX-400
+      slicerType: PrusaSlicer
 
 - name: RatRig V-Core 4 IDEX 500
   manufacturer: Ratrig
@@ -799,7 +960,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -809,9 +969,20 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: T0
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
+    - name: T1
+      toolhead: EVA 3
+      hotend: Rapido HF
+      extruder: LGX Lite
   aliases:
     - slicerModelName: RatRig V-Core 4 IDEX 500
       slicerType: OrcaSlicer
+    - slicerModelName: RatRig V-Core-4.0_IDEX-500
+      slicerType: PrusaSlicer
 
 # Phrozen Models
 - name: Phrozen Arco
@@ -825,7 +996,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -835,6 +1005,12 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: Arco Toolhead
+  aliases:
+    - slicerModelName: Phrozen Arco
+      slicerType: OrcaSlicer
 
 # Qidi Models
 - name: QIDI X-Plus 4
@@ -848,7 +1024,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 110
   maxPrintSpeed: 600
@@ -860,6 +1035,14 @@
     - PC
     - TPU
     - Nylon
+  toolheads:
+    - name: Primary
+      toolhead: X-Plus 4 Toolhead
+  aliases:
+    - slicerModelName: QIDI X-Plus 4
+      slicerType: OrcaSlicer
+    - slicerModelName: X-Plus 4
+      slicerType: PrusaSlicer
 
 # Prusa Models
 - name: Prusa MINI
@@ -873,7 +1056,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 180
@@ -883,9 +1065,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: Mini Toolhead
   aliases:
     - slicerModelName: Prusa MINI
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa MINI & MINI+
+      slicerType: PrusaSlicer
 
 - name: Prusa MK3S
   manufacturer: Prusa
@@ -898,7 +1085,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -908,9 +1094,14 @@
     - ABS
     - ASA
     - PC
+  toolheads:
+    - name: Primary
+      toolhead: MK3S Toolhead
   aliases:
     - slicerModelName: Prusa MK3S
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa i3 MK3S & MK3S+
+      slicerType: PrusaSlicer
 
 - name: Prusa MK3.5
   manufacturer: Prusa
@@ -923,7 +1114,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -934,9 +1124,14 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: Primary
+      toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa MK3.5
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa MK3.5 & MK3.5S
+      slicerType: PrusaSlicer
 
 - name: Prusa MK4
   manufacturer: Prusa
@@ -949,7 +1144,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -960,9 +1154,14 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: Primary
+      toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa MK4
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa MK4
+      slicerType: PrusaSlicer
 
 - name: Prusa MK4S
   manufacturer: Prusa
@@ -975,7 +1174,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -986,9 +1184,14 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: Primary
+      toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa MK4S
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa MK4S
+      slicerType: PrusaSlicer
 
 - name: Prusa CORE One
   manufacturer: Prusa
@@ -1001,7 +1204,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -1012,9 +1214,14 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: Primary
+      toolhead: Nextruder
   aliases:
     - slicerModelName: Prusa CORE One
       slicerType: OrcaSlicer
+    - slicerModelName: Prusa CORE One
+      slicerType: PrusaSlicer
 
 - name: Prusa CORE One L
   manufacturer: Prusa
@@ -1027,7 +1234,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -1038,6 +1244,14 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: Primary
+      toolhead: Nextruder
+  aliases:
+    - slicerModelName: Prusa CORE One L
+      slicerType: OrcaSlicer
+    - slicerModelName: Prusa CORE One L
+      slicerType: PrusaSlicer
 
 - name: Prusa XL
   manufacturer: Prusa
@@ -1050,7 +1264,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: true
-  numberOfExtruders: 5
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1061,6 +1274,19 @@
     - ASA
     - PC
     - TPU
+  toolheads:
+    - name: T0
+      toolhead: XL Toolhead
+    - name: T1
+      toolhead: XL Toolhead
+    - name: T2
+      toolhead: XL Toolhead
+    - name: T3
+      toolhead: XL Toolhead
+    - name: T4
+      toolhead: XL Toolhead
   aliases:
     - slicerModelName: Prusa XL
       slicerType: OrcaSlicer
+    - slicerModelName: Original Prusa XL
+      slicerType: PrusaSlicer

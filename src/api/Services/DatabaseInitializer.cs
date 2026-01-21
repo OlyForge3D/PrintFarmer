@@ -159,22 +159,28 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     // === BEGIN: Seeding logic merged from DatabaseSeeder ===
     public virtual async Task SeedAllAsync()
     {
+        // Seed these from existing methods
+        await SeedAuthenticationDataAsync();
+        await SeedRootFoldersAsync();
+
         // Try loading from YAML files first (new approach)
         // If YAML files don't exist or fail to load, fall back to hardcoded seed data
         try
         {
             _logger.LogInformation("[DB] Attempting to seed from YAML files");
+
             await _dataSeedService.SeedFilamentTypesAsync();
             await _dataSeedService.SeedManufacturersAsync();
-            await _dataSeedService.SeedPrinterModelsAsync();
-            await _dataSeedService.SeedComponentModelsAsync();
+            await _dataSeedService.SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
+            await _dataSeedService.SeedPrinterModelsAsync();    // Now includes toolhead seeding
 
-            // Still need to seed these from existing methods (not yet externalized)
-            await SeedAuthenticationDataAsync();
-            await SeedRootFoldersAsync();
+            // Note: Toolhead default components are now resolved within SeedComponentModelsAsync
+            // via ResolveToolheadDefaultComponentsFromYamlAsync which reads defaults from toolheads.yaml
+
+            // Fallback: fill in any printer models not covered by YAML with hardcoded mappings
+            await SeedPrinterModelToolheadsAsync();
 
             _logger.LogInformation("[DB] Successfully seeded from YAML files");
-            return;
         }
         catch (Exception ex)
         {
@@ -182,14 +188,15 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
 
         // Fallback to original hardcoded seeding
-        await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
-        await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
-        await SeedComponentModelsAsync(); // Seed hotend, extruder, toolhead, nozzle models
-        await SeedPrinterModelToolheadsAsync(); // Link printer models to OEM hotends/extruders
-        await SeedAuthenticationDataAsync();
-        await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
+        // await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
+        // await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
+        // await SeedComponentModelsAsync(); // Seed hotend, extruder, toolhead, nozzle models
+        // await SeedPrinterModelToolheadsAsync(); // Link printer models to OEM hotends/extruders
+        // await SeedAuthenticationDataAsync();
+        // await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
 
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedCatalogDataAsync()
     {
         try
@@ -342,7 +349,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         HasHeatedBed = hasBed,
                         HasEnclosure = hasEnclosure,
                         MultiMaterial = multiMaterial,
-                        NumberOfExtruders = extruders,
                         SupportsAutoLeveling = autoLevel,
                         MaxBedTemp = maxBed,
                         MaxPrintSpeed = maxSpeed
@@ -582,6 +588,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
     }
 
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedFilamentTypesAsync()
     {
         // (Name, HotendTemp, BedTemp, IsAbrasive, NeedsEnclosure)
@@ -682,6 +689,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     /// Seeds component model definitions (hotends, extruders, toolheads, nozzles) with manufacturer references.
     /// These are extensible tables that allow adding new components without code changes.
     /// </summary>
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedComponentModelsAsync()
     {
         try
@@ -1321,7 +1329,8 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
             foreach (PrinterModel model in modelsWithoutToolheads)
             {
-                int numExtruders = model.NumberOfExtruders;
+                // Default to 1 toolhead if not specified (number of extruders is now computed from toolheads)
+                int numExtruders = model.Toolheads?.Count > 0 ? model.Toolheads.Count : 1;
                 string modelName = model.Name;
                 string mfgName = model.Manufacturer?.Name ?? "Unknown";
                 Guid mfgId = model.ManufacturerId;
@@ -1532,9 +1541,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         Name = numExtruders == 1 ? "Primary" : $"Extruder {i + 1}",
                         Index = i,
                         IsPrimary = i == 0,
-                        MaxHotendTemp = model.MaxBedTemp,  // Use bed temp as conservative proxy; user can override
-                        MaxFlowRate = null,    // Will be populated when user specifies
-                        ToolheadType = (int)ToolheadType.Stock,
                         HotendModelId = hotendId,
                         ExtruderModelId = extruderId,
                         ToolheadModelDefId = toolheadId,

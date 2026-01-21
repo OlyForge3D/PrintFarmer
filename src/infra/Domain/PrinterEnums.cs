@@ -132,17 +132,4 @@ public enum NozzleType
     Unknown = 99
 }
 
-/// <summary>
-/// Toolhead configuration type - stock vs aftermarket/custom.
-/// Used to track whether a printer has been modified from factory configuration.
-/// </summary>
-public enum ToolheadType
-{
-    /// <summary>Stock/original toolhead from manufacturer.</summary>
-    Stock = 0,
-
-    /// <summary>Aftermarket or custom toolhead modification.</summary>
-    Custom = 1
-}
-
 #endregion

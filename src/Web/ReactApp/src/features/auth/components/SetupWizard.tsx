@@ -1,7 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect, useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, NetworkIcon, ServerIcon, ThermometerIcon, LayersIcon, InfoIcon, WiFiIcon, SearchIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
+import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, NetworkIcon, ServerIcon, LayersIcon, InfoIcon, WiFiIcon, SearchIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button } from '@/common/components/ui';
@@ -98,7 +98,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const { login } = useAuth();
-  const [step, setStep] = useState(0); // 0 Account, 1 Network, 2 Spoolman, 3 Filament Presets, 4 Summary
+  const [step, setStep] = useState(0); // 0 Account, 1 Network, 2 Spoolman, 3 Summary
   const [adminCreated, setAdminCreated] = useState(false);
 
   // Check initialization status
@@ -143,17 +143,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         });
       });
   }, []);
-  // --- Material Types (for Filament step) ---
-  const materialTypes = [
-    'PLA', 'ABS', 'PETG', 'TPU', 'Nylon', 'PC', 'ASA', 'HIPS', 'PVA', 'Other'
-  ];
-  const [selectedMaterialTypes, setSelectedMaterialTypes] = useState<string[]>([...materialTypes]);
-  const handleMaterialTypeToggle = (type: string) => {
-    setSelectedMaterialTypes(prev => prev.includes(type)
-      ? prev.filter(t => t !== type)
-      : [...prev, type]
-    );
-  };
   // Additional UI state for advanced fields (if needed)
   // (Removed unused discoveryTimeout, maxConcurrentScans, scanPorts)
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
@@ -201,42 +190,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     unknown: { label: 'Unknown error', hint: 'An unexpected error occurred. Verify the URL and try again.' }
   };
 
-  // Step: Filament Presets
-  interface FilamentPresetEditable { id?: string; name: string; hotend: number; bed: number; enabled: boolean; }
-  const [filamentPresets, setFilamentPresets] = useState<FilamentPresetEditable[]>([]);
-  const [loadingPresets, setLoadingPresets] = useState(false);
-  const [presetError, setPresetError] = useState<string | null>(null);
-
-  // Load filament types from API when entering Filament step for the first time
-  useEffect(() => {
-    if (step === 3 && filamentPresets.length === 0 && !loadingPresets) {
-      setLoadingPresets(true);
-      setPresetError(null);
-      apiClient.getFilamentTypes()
-        .then((types: FilamentType[]) => {
-          setFilamentPresets(
-            types.map(t => ({
-              id: t.id,
-              name: t.name,
-              hotend: t.hotend ?? 200,
-              bed: t.bed ?? 60,
-              enabled: true
-            }))
-          );
-        })
-        .catch(e => setPresetError(e?.message || 'Failed to load filament types'))
-        .finally(() => setLoadingPresets(false));
-
-  // Type for API result
-  interface FilamentType {
-    id?: string;
-    name: string;
-    hotend?: number;
-    bed?: number;
-  }
-    }
-  }, [step, filamentPresets.length, loadingPresets]);
-
   useEffect(() => { checkSetupStatus(); }, []);
 
   // Returns a friendly label for a Spoolman error category
@@ -267,7 +220,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }, [healthStatus, healthLoading, refetchHealth]);
 
-  // Load filament types when entering presets step first time
   const addNetworkRange = () => {
     if (!networkDiscoverySettings) return;
     setNetworkDiscoverySettings(prev => prev ? { ...prev, discoverySubnets: [...prev.discoverySubnets, ""] } : prev);
@@ -421,14 +373,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setStep(3);
   };
 
-  // Filament presets
-  // (Removed unused loadFilamentTypes)
-
-  const togglePreset = (name: string) => setFilamentPresets(p => p.map(f => f.name === name ? { ...f, enabled: !f.enabled } : f));
-  const updatePresetTemp = (name: string, field: 'hotend' | 'bed', value: number) => setFilamentPresets(p => p.map(f => f.name === name ? { ...f, [field]: value } : f));
-
-  const nextFromPresets = () => { setStep(4); };
-
   const goBack = () => setStep(s => Math.max(0, s - 1));
 
   // Final submission orchestrating all steps
@@ -472,18 +416,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         await apiClient.saveSpoolmanConfig({ baseUrl: normalized });
         // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
         localStorage.setItem('spoolman-base-url', normalized);
-      }
-
-      // 4. Filament presets (create/update & delete unselected)
-      if (filamentPresets.length) {
-        const enabled = filamentPresets.filter(f => f.enabled);
-        const payload: Record<string, { hotend: number; bed: number }> = {};
-        enabled.forEach(f => { payload[f.name] = { hotend: f.hotend, bed: f.bed }; });
-        await apiClient.getFilamentTypePresets();
-        const disabledIds = filamentPresets.filter(f => !f.enabled && f.id).map(f => f.id!);
-        for (const id of disabledIds) {
-          try { await apiClient.deleteFilamentType(id); } catch {/* ignore individual failures */}
-        }
       }
 
       onComplete();
@@ -808,62 +740,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     </div>
   );
 
-  const renderFilamentStep = () => (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2"><ThermometerIcon className="h-5 w-5"/>Filament Presets</h2>
-        <p className="text-sm text-pf-text-secondary">Select which material presets to enable. You can edit temperatures or manage later.</p>
-      </div>
-      {/* Material Types Selection */}
-      <div className="mb-4">
-        <h3 className="text-base font-semibold mb-1">Material Types</h3>
-        <div className="flex flex-wrap gap-2">
-          {materialTypes.map(type => (
-            <label key={type} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={selectedMaterialTypes.includes(type)}
-                onChange={() => handleMaterialTypeToggle(type)}
-              />
-              <span>{type}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-      {loadingPresets && <div className="text-sm text-pf-text-secondary">Loading presets...</div>}
-      {presetError && <div className="text-sm text-red-500" role="alert">{presetError}</div>}
-      <div className="space-y-2 max-h-64 overflow-auto pr-1">
-        {filamentPresets.map(fp => (
-          <div key={fp.name} className={`flex items-center gap-3 p-2 border border-pf-border rounded bg-pf-bg-2 ${!fp.enabled ? 'opacity-60':''}`}> 
-            <input type="checkbox" checked={fp.enabled} onChange={() => togglePreset(fp.name)} aria-label={`Enable ${fp.name}`} />
-            <span className="w-20 font-medium">{fp.name}</span>
-            <label className="text-xs text-pf-text-secondary">Hotend</label>
-            <input type="number" value={fp.hotend} aria-label={`${fp.name} hotend temperature`} placeholder="Hotend" onChange={e => updatePresetTemp(fp.name,'hotend',Number(e.target.value))} className="w-20 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded" />
-            <label className="text-xs text-pf-text-secondary">Bed</label>
-            <input type="number" value={fp.bed} aria-label={`${fp.name} bed temperature`} placeholder="Bed" onChange={e => updatePresetTemp(fp.name,'bed',Number(e.target.value))} className="w-20 px-2 py-1 bg-pf-bg-1 border border-pf-border rounded" />
-          </div>
-        ))}
-        {filamentPresets.length === 0 && !loadingPresets && (
-          <div className="text-sm text-pf-text-secondary">No presets found.</div>
-        )}
-      </div>
-      <div className="flex justify-between">
-        <Button type="button" onClick={goBack} variant="secondary">
-          Back
-        </Button>
-        <Button
-          type="button"
-          onClick={nextFromPresets}
-          variant="primary"
-        >
-          Next
-        </Button>
-      </div>
-    </div>
-  );
-
   const renderSummaryStep = () => {
-    const enabledPresets = filamentPresets.filter(f => f.enabled).length;
     return (
       <div className="space-y-6">
         <div>
@@ -890,7 +767,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               )}
             </span>
           ) : 'Not configured'}</div>
-          <div><strong>Filament Presets Enabled:</strong> {enabledPresets}</div>
         </div>
         {globalError && <div className="text-sm text-red-500" role="alert">{globalError}</div>}
         <div className="flex justify-between">
@@ -973,16 +849,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
             </div>
             <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
-              {['Account','Network','Spoolman','Filament','Summary'].map((label, idx) => (
+              {['Account','Network','Spoolman','Summary'].map((label, idx) => (
                 <div key={label} className={`px-2 py-1 rounded ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
               ))}
             </div>
-            {globalError && step !== 4 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}
+            {globalError && step !== 3 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}
             {step === 0 && renderAccountStep()}
             {step === 1 && renderNetworkStep()}
             {step === 2 && renderSpoolmanStep()}
-            {step === 3 && renderFilamentStep()}
-            {step === 4 && renderSummaryStep()}
+            {step === 3 && renderSummaryStep()}
             <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
           </>)
         )}

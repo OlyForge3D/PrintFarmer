@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Importing.Services.Import;
 using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -35,8 +36,9 @@ public class ImportProcessorServiceTests
         db.Printers.Add(existing);
         await db.SaveChangesAsync();
 
-        // For the sake of test inject minimal dependencies via nulls where not used
-        var processor = new ImportProcessorService(db, new DummyCreatePrinterDtoValidator(), null!, null!);
+        // Wrap DbContext in UnitOfWork for service dependency
+        using var unitOfWork = new AppUnitOfWork(db);
+        var processor = new ImportProcessorService(unitOfWork, null!, new DummyCreatePrinterDtoValidator());
 
         var dtos = new[] { new CreatePrinterDto { Name = "P1", ServerUrl = "http://p1" } };
         var results = await processor.ProcessAsync(dtos, "skip", default);
@@ -54,7 +56,9 @@ public class ImportProcessorServiceTests
         db.Printers.Add(existing);
         await db.SaveChangesAsync();
 
-        var processor = new ImportProcessorService(db, new DummyCreatePrinterDtoValidator(), null!, null!);
+        // Wrap DbContext in UnitOfWork for service dependency
+        using var unitOfWork = new AppUnitOfWork(db);
+        var processor = new ImportProcessorService(unitOfWork, null!, new DummyCreatePrinterDtoValidator());
         var dtos = new[] { new CreatePrinterDto { Name = "P1", ServerUrl = "http://p1", Notes = "new" } };
         var results = await processor.ProcessAsync(dtos, "update", default);
         Assert.Single(results);

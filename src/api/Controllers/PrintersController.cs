@@ -715,8 +715,7 @@ public class PrintersController(
             p.HasEnclosure,
             p.MultiMaterial,
             p.SupportsAutoLeveling,
-            p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
-            primaryToolhead?.MaxHotendTemp,
+            primaryToolhead?.HotendModel?.MaxTemp,  // MaxHotendTemp from primary toolhead's HotendModel
             p.MaxBedTemp,
             p.MaxPrintSpeed,
             p.CurrentMaterial,
@@ -730,9 +729,9 @@ public class PrintersController(
             t.Name,
             t.Index,
             t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
-            t.MaxHotendTemp,
-            t.MaxFlowRate,
-            t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
+            t.NozzleModel?.NozzleType,  // Nozzle type from NozzleModel
+            t.HotendModel?.MaxFlowRate,  // Max flow rate from HotendModel
+            t.HotendModel?.MaxTemp,      // Max temp from HotendModel
 
             // Component model references - nozzle diameter comes from NozzleModel.Diameter
             t.HotendModelId,
@@ -1289,9 +1288,6 @@ public class PrintersController(
                     }
 
                     // Nozzle diameter is derived from NozzleModel, update NozzleModelId instead
-                    toolhead.MaxHotendTemp = toolheadDto.MaxHotendTemp ?? toolhead.MaxHotendTemp;
-                    toolhead.MaxFlowRate = toolheadDto.MaxFlowRate ?? toolhead.MaxFlowRate;
-                    toolhead.ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : toolhead.ToolheadType;
 
                     // Component model references
                     toolhead.HotendModelId = toolheadDto.HotendModelId ?? toolhead.HotendModelId;
@@ -1316,7 +1312,6 @@ public class PrintersController(
             {
                 // Nozzle diameter is derived from NozzleModel, can't update directly
                 primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
-                primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
                 primaryToolhead.UpdatedAt = DateTime.UtcNow;
             }
         }
@@ -1429,13 +1424,13 @@ public class PrintersController(
 
         // Map modelDto to a lightweight shape consistent with previous behavior
         // Note: modelDto contains ManufacturerName, SupportedFilamentTypes and capability fields
-        // Nozzle diameter and max hotend temp are now on toolheads
+        // Nozzle diameter and max hotend temp are derived from toolhead component models
         try
         {
-            // Get nozzle diameter and max hotend temp from the primary toolhead (or first toolhead)
+            // Get derived values from the primary toolhead (or first toolhead)
             PrinterModelToolheadDto? primaryToolhead = modelDto.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? modelDto.Toolheads?.FirstOrDefault();
             double? nozzleDiameter = primaryToolhead?.NozzleDiameter;
-            int? maxHotendTemp = primaryToolhead?.MaxHotendTemp;
+            int? maxHotendTemp = primaryToolhead?.MaxTemp;  // Derived from HotendModel
 
             bool hasCapabilityData = modelDto.MaxX.HasValue || modelDto.MaxY.HasValue || modelDto.MaxZ.HasValue ||
                                      nozzleDiameter.HasValue || maxHotendTemp.HasValue ||
@@ -1458,8 +1453,7 @@ public class PrintersController(
                 HasHeatedBed: modelDto.HasHeatedBed,
                 HasEnclosure: modelDto.HasEnclosure,
                 MultiMaterial: modelDto.MultiMaterial,
-                NumberOfExtruders: modelDto.NumberOfExtruders,
-                MaxHotendTemp: maxHotendTemp,
+                MaxHotendTemp: maxHotendTemp,  // Derived from primary toolhead's HotendModel.MaxTemp
                 MaxBedTemp: modelDto.MaxBedTemp,
                 CurrentMaterial: null,
                 CurrentSpoolId: null,

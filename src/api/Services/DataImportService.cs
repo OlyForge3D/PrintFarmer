@@ -279,7 +279,6 @@ public class DataImportService : IDataImportService
                         HasHeatedBed = dto.HasHeatedBed,
                         HasEnclosure = dto.HasEnclosure,
                         MultiMaterial = dto.MultiMaterial,
-                        NumberOfExtruders = dto.NumberOfExtruders,
                         SupportsAutoLeveling = dto.SupportsAutoLeveling,
                         MaxBedTemp = dto.MaxBedTemp,
                         MaxPrintSpeed = dto.MaxPrintSpeed,
@@ -311,7 +310,6 @@ public class DataImportService : IDataImportService
                     existing.HasHeatedBed = dto.HasHeatedBed;
                     existing.HasEnclosure = dto.HasEnclosure;
                     existing.MultiMaterial = dto.MultiMaterial;
-                    existing.NumberOfExtruders = dto.NumberOfExtruders;
                     existing.SupportsAutoLeveling = dto.SupportsAutoLeveling;
                     existing.MaxBedTemp = dto.MaxBedTemp;
                     existing.MaxPrintSpeed = dto.MaxPrintSpeed;
@@ -373,6 +371,7 @@ public class DataImportService : IDataImportService
                         ManufacturerId = manufacturer.Id,
                         MaxTemp = dto.MaxTemp,
                         IsHighFlow = dto.IsHighFlow,
+                        MaxFlowRate = dto.MaxFlowRate,
                         Description = dto.Description,
                         Url = dto.Url
                     });
@@ -382,6 +381,7 @@ public class DataImportService : IDataImportService
                 {
                     existing.MaxTemp = dto.MaxTemp;
                     existing.IsHighFlow = dto.IsHighFlow;
+                    existing.MaxFlowRate = dto.MaxFlowRate;
                     existing.Description = dto.Description;
                     existing.Url = dto.Url;
                     imported++;

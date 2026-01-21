@@ -23,21 +23,6 @@ public class CreateToolheadDto
     /// </summary>
     public int Index { get; set; }
 
-    /// <summary>
-    /// Maximum hotend temperature in °C.
-    /// </summary>
-    public int? MaxHotendTemp { get; set; }
-
-    /// <summary>
-    /// Maximum volumetric flow rate in mm³/s for this toolhead.
-    /// </summary>
-    public double? MaxFlowRate { get; set; }
-
-    /// <summary>
-    /// Whether this is a stock or custom/aftermarket toolhead.
-    /// </summary>
-    public ToolheadType? ToolheadType { get; set; }
-
     #region Component Model References
 
     /// <summary>
@@ -96,16 +81,17 @@ public class CreateToolheadDto
 /// <summary>
 /// Toolhead data for reading/display purposes.
 /// Includes resolved component model names for display.
-/// Nozzle diameter is now derived from NozzleModel.Diameter, not stored on toolhead.
+/// Nozzle diameter is derived from NozzleModel.Diameter.
+/// MaxFlowRate and MaxTemp are derived from HotendModel.
 /// </summary>
 public record ToolheadDto(
     Guid Id,
     string? Name,
     int Index,
     double? NozzleDiameter,  // Derived from NozzleModel.Diameter
-    int? MaxHotendTemp,
-    double? MaxFlowRate,
-    ToolheadType? ToolheadType,
+    NozzleType? NozzleType,  // Derived from NozzleModel.NozzleType
+    double? MaxFlowRate,     // Derived from HotendModel.MaxFlowRate
+    int? MaxTemp,            // Derived from HotendModel.MaxTemp
 
     // Component model references (IDs and resolved names)
     Guid? HotendModelId,

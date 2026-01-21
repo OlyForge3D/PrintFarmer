@@ -10,6 +10,7 @@
 # - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
 # - maxTemp: Maximum operating temperature in °C
 # - isHighFlow: true if hotend is optimized for high volumetric flow rates
+# - maxFlowRate: Maximum volumetric flow rate in mm³/s (optional)
 # - description: Brief description of the hotend model and its characteristics
 # - url: Product or information URL (optional)
 
@@ -18,6 +19,7 @@
   manufacturer: Bambu Lab
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 32
   description: Stock hotend for Bambu Lab X1, X1C, X1E series with ceramic heater
   url: https://bambulab.com/en/x1
 
@@ -25,6 +27,7 @@
   manufacturer: Bambu Lab
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 32
   description: Stock hotend for Bambu Lab P1P, P1S series
   url: https://bambulab.com/en/p1
 
@@ -32,6 +35,7 @@
   manufacturer: Bambu Lab
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 28
   description: Stock hotend for Bambu Lab A1 series, commonly adapted to other printers
   url: https://bambulab.com/en/a1
 
@@ -39,6 +43,7 @@
   manufacturer: Bambu Lab
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 21
   description: Compact hotend for Bambu Lab A1 Mini
   url: https://bambulab.com/en/a1-mini
 
@@ -47,6 +52,7 @@
   manufacturer: Prusa
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 11.5
   description: V6-style hotend for MK3S/MK3S+ with PTFE-lined heatbreak
   url: https://www.prusa3d.com/product/original-prusa-i3-mk3s-3d-printer-3/
 
@@ -54,6 +60,7 @@
   manufacturer: Prusa
   maxTemp: 280
   isHighFlow: false
+  maxFlowRate: 9
   description: Compact hotend for Prusa Mini/Mini+
   url: https://www.prusa3d.com/product/original-prusa-mini-semi-assembled-3d-printer/
 
@@ -61,20 +68,15 @@
   manufacturer: Prusa
   maxTemp: 300
   isHighFlow: true
-  description: Integrated hotend in Nextruder toolhead for MK3.9S, MK4, MK4S
+  maxFlowRate: 24
+  description: Integrated hotend in Nextruder toolhead for MK3.9S, MK4, MK4S, CORE One, CORE One L
   url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
-
-- name: CORE One Hotend
-  manufacturer: Prusa
-  maxTemp: 300
-  isHighFlow: true
-  description: High-flow hotend for Prusa CORE One, based on Nextruder
-  url: https://www.prusa3d.com/product/prusa-core-one/
 
 - name: XL Hotend
   manufacturer: Prusa
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 24
   description: Toolchanger-compatible hotend for Prusa XL
   url: https://www.prusa3d.com/product/original-prusa-xl/
 
@@ -83,6 +85,7 @@
   manufacturer: Creality
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 12
   description: All-metal hotend in Sprite Pro extruder for Ender-3 S1, K1
   url: https://www.creality.com
 
@@ -90,6 +93,7 @@
   manufacturer: Creality
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 32
   description: High-speed ceramic heater hotend for K1 series
   url: https://www.creality.com
 
@@ -97,6 +101,7 @@
   manufacturer: Creality
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 32
   description: Large format high-speed hotend for K1 Max
   url: https://www.creality.com
 
@@ -105,6 +110,7 @@
   manufacturer: Qidi
   maxTemp: 350
   isHighFlow: true
+  maxFlowRate: 35
   description: High-temp ceramic heater hotend for X-Plus 4
   url: https://www.qidi3d.com
 
@@ -112,6 +118,7 @@
   manufacturer: Qidi
   maxTemp: 350
   isHighFlow: true
+  maxFlowRate: 35
   description: High-temp hotend for Q1 Pro
   url: https://www.qidi3d.com
 
@@ -120,7 +127,16 @@
   manufacturer: Elegoo
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 30
   description: Stock hotend for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+- name: Centauri Carbon Hotend
+  manufacturer: Elegoo
+  maxTemp: 300
+  isHighFlow: true
+  maxFlowRate: 30
+  description: Stock hotend for Elegoo Centauri Carbon series
   url: https://www.elegoo.com
 
 # Sovol Hotends
@@ -128,6 +144,7 @@
   manufacturer: Sovol
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 30
   description: Stock hotend for Sovol SV08
   url: https://sovol3d.com
 
@@ -136,6 +153,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 15
   description: Popular all-metal hotend with precision bi-metal heat break
   url: https://www.phaetus.com/products/dragon-hotend-standard-flow
 
@@ -143,6 +161,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 25
   description: High flow variant with larger melt zone for faster prints
   url: https://www.phaetus.com/products/dragon-hotend-high-flow
 
@@ -150,6 +169,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 15
   description: Dragon with integrated ADXL345 accelerometer for input shaping
   url: https://www.phaetus.com/products/dragon-ace
 
@@ -157,6 +177,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 40
   description: Ultra high flow Dragon for maximum extrusion rates
   url: https://www.phaetus.com/products/dragon-uhf
 
@@ -165,6 +186,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: Compact bi-metal hotend, V6-compatible mounting
   url: https://www.phaetus.com/products/dragonfly-bmo
 
@@ -172,6 +194,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: Bi-metal hotend with shorter profile for tight spaces
   url: https://www.phaetus.com/products/dragonfly-bms
 
@@ -179,6 +202,7 @@
   manufacturer: Phaetus
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: High-performance integrated cooling variant
   url: https://www.phaetus.com/products/dragonfly-hic
 
@@ -187,6 +211,7 @@
   manufacturer: Phaetus
   maxTemp: 450
   isHighFlow: false
+  maxFlowRate: 20
   description: Compact volcano-style hotend with 115W ceramic heater
   url: https://www.phaetus.com/products/rapido-hotend
 
@@ -194,6 +219,7 @@
   manufacturer: Phaetus
   maxTemp: 450
   isHighFlow: true
+  maxFlowRate: 35
   description: High flow Rapido variant for faster printing
   url: https://www.phaetus.com/products/rapido-hotend
 
@@ -201,6 +227,7 @@
   manufacturer: Phaetus
   maxTemp: 450
   isHighFlow: true
+  maxFlowRate: 35
   description: Updated Rapido with improved heater and flow
   url: https://www.phaetus.com/products/rapido-2-hotend
 
@@ -208,6 +235,7 @@
   manufacturer: Phaetus
   maxTemp: 450
   isHighFlow: true
+  maxFlowRate: 60
   description: Large format high flow hotend for big printers
   url: https://www.phaetus.com/products/rapido-2-plus
 
@@ -216,6 +244,7 @@
   manufacturer: Slice Engineering
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 15
   description: Premium all-metal hotend
   url: https://www.sliceengineering.com/products/mosquito-hotend
 
@@ -223,6 +252,7 @@
   manufacturer: Slice Engineering
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 35
   description: High flow Mosquito
   url: https://www.sliceengineering.com/products/mosquito-magnum-hotend
 
@@ -230,6 +260,7 @@
   manufacturer: Slice Engineering
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 50
   description: Enhanced Magnum with better cooling
   url: https://www.sliceengineering.com/products/mosquito-magnum-plus-hotend
 
@@ -237,6 +268,7 @@
   manufacturer: Slice Engineering
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: Bi-metal heat break with copper block
   url: https://www.sliceengineering.com/products/copperhead-heat-break
 
@@ -244,6 +276,7 @@
   manufacturer: Slice Engineering
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 45
   description: Compact high flow hotend
   url: https://www.sliceengineering.com/products/mako-hotend
 
@@ -252,6 +285,7 @@
   manufacturer: E3D
   maxTemp: 285
   isHighFlow: false
+  maxFlowRate: 11.5
   description: Classic all-metal hotend, industry standard
   url: https://e3d-online.com/products/v6-all-metal-hotend
 
@@ -259,6 +293,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 30
   description: High flow V6 variant with extended melt zone
   url: https://e3d-online.com/products/volcano-hotend
 
@@ -266,6 +301,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 60
   description: Maximum flow for large format printing
   url: https://e3d-online.com/products/supervolcano-hotend
 
@@ -274,6 +310,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Standard Revo with quick-swap nozzles, 24V heater
   url: https://e3d-online.com/products/revo-six
 
@@ -281,6 +318,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Revo optimized for Voron with shorter melt zone
   url: https://e3d-online.com/products/revo-voron
 
@@ -288,6 +326,7 @@
   manufacturer: E3D
   maxTemp: 250
   isHighFlow: false
+  maxFlowRate: 8
   description: Compact lightweight Revo for small printers and bowden setups
   url: https://e3d-online.com/products/revo-micro
 
@@ -295,6 +334,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Drop-in Revo replacement for Creality printers
   url: https://e3d-online.com/products/revo-cr
 
@@ -302,6 +342,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Integrated direct drive extruder with Revo hotend
   url: https://e3d-online.com/products/revo-hemera
 
@@ -309,6 +350,7 @@
   manufacturer: E3D
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Compact version of Revo Hemera for tight spaces
   url: https://e3d-online.com/products/revo-hemera-xs
 
@@ -317,6 +359,7 @@
   manufacturer: E3D
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: Direct drive extruder with all-metal V6 hotend
   url: https://e3d-online.com/products/hemera
 
@@ -324,6 +367,7 @@
   manufacturer: E3D
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 12
   description: Compact direct drive for confined spaces
   url: https://e3d-online.com/products/hemera-xs
 
@@ -332,6 +376,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 30
   description: High quality ceramic heater core hotend
   url: https://www.aliexpress.com/item/1005004566533274.html
 
@@ -339,6 +384,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 40
   description: High flow ceramic heater core variant
   url: https://www.aliexpress.com/item/1005004566533274.html
 
@@ -347,6 +393,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 15
   description: Compact all-metal hotend with bi-metal heat break
   url: https://www.aliexpress.com/item/1005005159949561.html
 
@@ -354,6 +401,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 28
   description: High flow TD6S variant
   url: https://www.aliexpress.com/item/1005005159949561.html
 
@@ -362,6 +410,7 @@
   manufacturer: TriangleLabs
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 33
   description: V6-compatible hotend with titanium alloy bi-metal heatbreak, 33mm³/s max flow
   url: https://www.aliexpress.com/item/1005003582802382.html
 
@@ -370,6 +419,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: false
+  maxFlowRate: 15
   description: Dragon Standard Flow compatible hotend
   url: https://www.aliexpress.com/item/1005001892537591.html
 
@@ -377,6 +427,7 @@
   manufacturer: TriangleLabs
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 25
   description: Dragon High Flow compatible hotend
   url: https://www.aliexpress.com/item/1005001892537591.html
 
@@ -385,6 +436,7 @@
   manufacturer: TriangleLabs
   maxTemp: 450
   isHighFlow: true
+  maxFlowRate: 35
   description: Rapido-compatible high flow hotend
   url: https://www.aliexpress.com/item/1005003738382019.html
 
@@ -392,6 +444,7 @@
   manufacturer: TriangleLabs
   maxTemp: 450
   isHighFlow: true
+  maxFlowRate: 50
   description: Ultra high flow Rapido-compatible hotend
   url: https://www.aliexpress.com/item/1005003738382019.html
 
@@ -400,6 +453,7 @@
   manufacturer: Microswiss
   maxTemp: 285
   isHighFlow: false
+  maxFlowRate: 12
   description: Direct replacement for Creality/Ender printers
   url: https://store.micro-swiss.com/collections/all-metal-hotend
 
@@ -407,14 +461,16 @@
   manufacturer: Microswiss
   maxTemp: 300
   isHighFlow: true
+  maxFlowRate: 40
   description: High flow bi-metal design
-  url: https://store.micro-swiss.com/products/flowtech-hotend
+  url: https://store.micro-swiss.com/collections/micro-swiss-flowtech
 
 # DropEffect
 - name: NextG
   manufacturer: DropEffect
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 85
   description: Ultra high flow hotend
   url: https://www.dropeffect.com/products/nextg-hotend
 
@@ -422,6 +478,7 @@
   manufacturer: DropEffect
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 100
   description: Extra large format
   url: https://www.dropeffect.com/products/xg-hotend
 
@@ -430,6 +487,7 @@
   manufacturer: BIQU
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 12
   description: Integrated extruder and hotend
   url: https://biqu.equipment/products/biqu-h2-extruder
 
@@ -437,6 +495,7 @@
   manufacturer: BIQU
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Updated H2 design
   url: https://biqu.equipment/products/biqu-h2-v2s-extruder
 
@@ -444,6 +503,7 @@
   manufacturer: BIQU
   maxTemp: 300
   isHighFlow: false
+  maxFlowRate: 15
   description: Revo-compatible hotend with quick-swap nozzles
   url: https://biqu.equipment/products/panda-revo-hotend
 
@@ -452,6 +512,7 @@
   manufacturer: Bondtech
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 25
   description: Core Heating Technology V6 hotend
   url: https://www.bondtech.se/product/bondtech-cht-nozzle/
 
@@ -459,5 +520,58 @@
   manufacturer: Bondtech
   maxTemp: 500
   isHighFlow: true
+  maxFlowRate: 45
   description: CHT technology for volcano-style hotends
   url: https://www.bondtech.se/product/bondtech-cht-nozzle/
+
+# Stock/Generic Hotends (for unknown or generic printer models)
+- name: Stock Hotend
+  manufacturer: Generic
+  maxTemp: 280
+  isHighFlow: false
+  maxFlowRate: 10
+  description: Generic stock hotend for unspecified or unknown printer models
+
+# Additional Sovol Hotends (SV08 MAX and Zero)
+- name: SV08 MAX Hotend
+  manufacturer: Sovol
+  maxTemp: 300
+  isHighFlow: true
+  maxFlowRate: 35
+  description: Proprietary high-flow hotend for Sovol SV08 MAX
+  url: https://sovol3d.com
+
+- name: Sovol Zero Hotend
+  manufacturer: Sovol
+  maxTemp: 280
+  isHighFlow: false
+  maxFlowRate: 10
+  description: Compact hotend for Sovol Zero
+  url: https://sovol3d.com
+
+# Eryone Hotends
+- name: Thinker X400 Hotend
+  manufacturer: Eryone
+  maxTemp: 300
+  isHighFlow: true
+  maxFlowRate: 30
+  description: Proprietary volcano-style hotend for Eryone Thinker X400
+  url: https://www.eryone.com
+
+# Flashforge Hotends
+- name: AD5X Hotend
+  manufacturer: Flashforge
+  maxTemp: 300
+  isHighFlow: false
+  maxFlowRate: 15
+  description: Proprietary hotend for Flashforge Adventurer 5X
+  url: https://www.flashforge.com
+
+# Phrozen Hotends
+- name: Arco Hotend
+  manufacturer: Phrozen
+  maxTemp: 300
+  isHighFlow: false
+  maxFlowRate: 15
+  description: Proprietary hotend for Phrozen Arco
+  url: https://www.phrozen3d.com

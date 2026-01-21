@@ -225,7 +225,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(t => t.Id);
             _ = b.Property(t => t.Name).HasMaxLength(128);
             _ = b.Property(t => t.Index).IsRequired();
-            _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
             _ = b.Property(t => t.UpdatedAt).IsRequired();
 
@@ -273,7 +272,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(t => t.Id);
             _ = b.Property(t => t.Name).HasMaxLength(128);
             _ = b.Property(t => t.Index).IsRequired();
-            _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
 
             // JSON array properties
@@ -401,7 +399,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
             _ = b.Property(m => m.HasEnclosure).HasDefaultValue(false);
             _ = b.Property(m => m.MultiMaterial).HasDefaultValue(false);
-            _ = b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
             _ = b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
             _ = b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
             _ = b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
