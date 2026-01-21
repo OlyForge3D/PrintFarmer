@@ -181,9 +181,19 @@ public class Printer
     /// <summary>
     /// Collection of toolheads (hotends/nozzles) for this printer.
     /// For single-toolhead printers, this will have one entry.
-    /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), this will have multiple entries.
+    /// For multi-toolhead printers (Prusa XL, etc.), this will have multiple entries.
     /// </summary>
     public ICollection<Toolhead> Toolheads { get; set; } = new List<Toolhead>();
+
+    /// <summary>
+    /// Collection of maintenance logs for this printer.
+    /// </summary>
+    public ICollection<MaintenanceLog> MaintenanceLogs { get; set; } = new List<MaintenanceLog>();
+
+    /// <summary>
+    /// Cumulative statistics for this printer (one-to-one relationship).
+    /// </summary>
+    public PrinterStatistics? Statistics { get; set; }
 
     public bool InMaintenance { get; set; } = false;
 

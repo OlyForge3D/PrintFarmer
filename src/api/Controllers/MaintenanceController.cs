@@ -543,6 +543,124 @@ public class MaintenanceController(
     }
 
     #endregion
+
+    #region Analytics
+
+    /// <summary>
+    /// Gets maintenance trends within a date range.
+    /// </summary>
+    [HttpGet("analytics/trends")]
+    [ProducesResponseType(typeof(List<MaintenanceTrendResponse>), 200)]
+    public async Task<ActionResult<List<MaintenanceTrendResponse>>> GetTrendsAsync(
+        [FromQuery] DateTime? startDate,
+        [FromQuery] DateTime? endDate,
+        CancellationToken ct)
+    {
+        try
+        {
+            DateTime start = startDate ?? DateTime.UtcNow.AddMonths(-6);
+            DateTime end = endDate ?? DateTime.UtcNow;
+
+            var trends = await _logRepository.GetTrendsAsync(start, end, ct);
+
+            var response = trends.Select(t => new MaintenanceTrendResponse(
+                t.Date,
+                t.PrinterName,
+                t.Component,
+                t.Action,
+                t.Cost)).ToList();
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting maintenance trends");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets component lifespan analytics (average hours between replacements).
+    /// </summary>
+    [HttpGet("analytics/component-lifespan")]
+    [ProducesResponseType(typeof(List<ComponentLifespanResponse>), 200)]
+    public async Task<ActionResult<List<ComponentLifespanResponse>>> GetComponentLifespanAsync(CancellationToken ct)
+    {
+        try
+        {
+            var lifespans = await _logRepository.GetComponentLifespanAsync(ct);
+
+            var response = lifespans.Select(l => new ComponentLifespanResponse(
+                l.Component,
+                l.AvgLifespanHours,
+                l.Replacements
+            )).ToList();
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting component lifespan data");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets monthly maintenance cost analysis.
+    /// </summary>
+    [HttpGet("analytics/cost")]
+    [ProducesResponseType(typeof(List<MaintenanceCostResponse>), 200)]
+    public async Task<ActionResult<List<MaintenanceCostResponse>>> GetCostAnalysisAsync(
+        [FromQuery] int months = 12,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var costs = await _logRepository.GetCostAnalysisAsync(months, ct);
+
+            var response = costs.Select(c => new MaintenanceCostResponse(
+                c.Month,
+                c.TotalCost
+            )).ToList();
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting cost analysis data");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets printer uptime percentages and maintenance metrics.
+    /// </summary>
+    [HttpGet("analytics/uptime")]
+    [ProducesResponseType(typeof(List<PrinterUptimeResponse>), 200)]
+    public async Task<ActionResult<List<PrinterUptimeResponse>>> GetPrinterUptimeAsync(CancellationToken ct)
+    {
+        try
+        {
+            var uptimes = await _logRepository.GetPrinterUptimeAsync(ct);
+
+            var response = uptimes.Select(u => new PrinterUptimeResponse(
+                u.PrinterName,
+                u.PrinterId,
+                u.UptimePercent,
+                u.MaintenanceCount,
+                u.TotalDowntimeMinutes
+            )).ToList();
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting printer uptime data");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    #endregion
 }
 
 #region Request/Response DTOs
@@ -593,5 +711,32 @@ public record UpdateMaintenanceScheduleRequest(
     bool? IsActive);
 
 public record UpdateMaintenanceModeRequest(bool InMaintenance);
+
+#endregion
+
+#region Analytics DTOs
+
+public record MaintenanceTrendResponse(
+    DateTime Date,
+    string PrinterName,
+    string? Component,
+    string Action,
+    decimal Cost);
+
+public record ComponentLifespanResponse(
+    string Component,
+    double AvgLifespanHours,
+    int Replacements);
+
+public record MaintenanceCostResponse(
+    string Month,
+    decimal TotalCost);
+
+public record PrinterUptimeResponse(
+    string PrinterName,
+    Guid PrinterId,
+    double UptimePercent,
+    int MaintenanceCount,
+    int TotalDowntimeMinutes);
 
 #endregion

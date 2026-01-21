@@ -2,8 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { maintenanceService } from '@/services/maintenanceService';
 
 export function useMaintenanceTrends() {
-  return useQuery(['maintenance', 'trends'], async () => {
-    // Example API call, replace with real endpoint
-    return maintenanceService.getTrends();
+  return useQuery<Array<{ date: string; printer: string; component: string; action: string; cost: number }>>({
+    queryKey: ['maintenance', 'trends'],
+    queryFn: async () => {
+      return maintenanceService.getTrends();
+    },
   });
 }

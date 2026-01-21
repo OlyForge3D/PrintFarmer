@@ -23,12 +23,14 @@ import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { useComponentMaintenance } from '../hooks/useComponentMaintenance';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
+
 import {
   MaintenanceTrendsChart,
   ComponentLifespanChart,
   MaintenanceCostAnalysis,
   PrinterUptimeChart
 } from '../components';
+import { MaintenanceReport } from '../components/MaintenanceReport';
 
 /**
  * Main maintenance dashboard page component
@@ -305,6 +307,9 @@ export function MaintenanceDashboardPage() {
             </div>
           </div>
         </section>
+
+        {/* Maintenance Report Section */}
+        <MaintenanceReport />
 
         {/* Component Tracking Section */}
         <section aria-labelledby="component-tracking-heading">

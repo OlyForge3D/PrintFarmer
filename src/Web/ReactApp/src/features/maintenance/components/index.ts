@@ -1,3 +1,4 @@
+export { MaintenanceReport } from './MaintenanceReport';
 /**
  * Maintenance Components Module
  */
