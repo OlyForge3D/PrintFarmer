@@ -100,7 +100,6 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.Index,
                     t.MaxHotendTemp,
                     t.MaxFlowRate,
-                    t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
                     // Component model references - nozzle diameter comes from NozzleModel.Diameter
                     t.HotendModelId,

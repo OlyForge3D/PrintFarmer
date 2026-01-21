@@ -61,15 +61,8 @@
   manufacturer: Prusa
   maxTemp: 300
   isHighFlow: true
-  description: Integrated hotend in Nextruder toolhead for MK3.9S, MK4, MK4S
+  description: Integrated hotend in Nextruder toolhead for MK3.9S, MK4, MK4S, CORE One, CORE One L
   url: https://www.prusa3d.com/product/original-prusa-mk4-3d-printer/
-
-- name: CORE One Hotend
-  manufacturer: Prusa
-  maxTemp: 300
-  isHighFlow: true
-  description: High-flow hotend for Prusa CORE One, based on Nextruder
-  url: https://www.prusa3d.com/product/prusa-core-one/
 
 - name: XL Hotend
   manufacturer: Prusa
@@ -121,6 +114,13 @@
   maxTemp: 300
   isHighFlow: true
   description: Stock hotend for Elegoo Centauri series
+  url: https://www.elegoo.com
+
+- name: Centauri Carbon Hotend
+  manufacturer: Elegoo
+  maxTemp: 300
+  isHighFlow: true
+  description: Stock hotend for Elegoo Centauri Carbon series
   url: https://www.elegoo.com
 
 # Sovol Hotends
@@ -461,3 +461,49 @@
   isHighFlow: true
   description: CHT technology for volcano-style hotends
   url: https://www.bondtech.se/product/bondtech-cht-nozzle/
+
+# Stock/Generic Hotends (for unknown or generic printer models)
+- name: Stock Hotend
+  manufacturer: Generic
+  maxTemp: 280
+  isHighFlow: false
+  description: Generic stock hotend for unspecified or unknown printer models
+
+# Additional Sovol Hotends (SV08 MAX and Zero)
+- name: SV08 MAX Hotend
+  manufacturer: Sovol
+  maxTemp: 300
+  isHighFlow: true
+  description: Proprietary high-flow hotend for Sovol SV08 MAX
+  url: https://sovol3d.com
+
+- name: Sovol Zero Hotend
+  manufacturer: Sovol
+  maxTemp: 280
+  isHighFlow: false
+  description: Compact hotend for Sovol Zero
+  url: https://sovol3d.com
+
+# Eryone Hotends
+- name: Thinker X400 Hotend
+  manufacturer: Eryone
+  maxTemp: 300
+  isHighFlow: true
+  description: Proprietary volcano-style hotend for Eryone Thinker X400
+  url: https://www.eryone.com
+
+# Flashforge Hotends
+- name: AD5X Hotend
+  manufacturer: Flashforge
+  maxTemp: 300
+  isHighFlow: false
+  description: Proprietary hotend for Flashforge Adventurer 5X
+  url: https://www.flashforge.com
+
+# Phrozen Hotends
+- name: Arco Hotend
+  manufacturer: Phrozen
+  maxTemp: 300
+  isHighFlow: false
+  description: Proprietary hotend for Phrozen Arco
+  url: https://www.phrozen3d.com

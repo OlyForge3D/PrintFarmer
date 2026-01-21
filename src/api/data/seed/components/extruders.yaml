@@ -95,6 +95,14 @@
   description: Stock extruder for Elegoo Centauri series
   url: https://www.elegoo.com
 
+# Elegoo Extruders
+- name: Centauri Carbon Extruder
+  manufacturer: Elegoo
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Stock extruder for Elegoo Centauri Carbon series
+  url: https://www.elegoo.com
+
 # Sovol Extruders
 - name: SV08 Extruder
   manufacturer: Sovol
@@ -193,6 +201,13 @@
   description: Improved filament path
   url: https://www.orbiterprojects.com/orbiter-v2-0/
 
+- name: Orbiter 2.5
+  manufacturer: Orbiter
+  gearRatio: "7.5:1"
+  isDirectDrive: true
+  description: Improved filament path
+  url: https://www.orbiterprojects.com/orbiter-v2-5/
+
 # Sherpa Mini / Sherpa Micro
 - name: Sherpa Mini
   manufacturer: Annex Engineering
@@ -290,6 +305,13 @@
   description: Updated Voron extruder with improved filament path
   url: https://github.com/VoronDesign/Voron-Stealthburner
 
+- name: Mini StealthBurner Extruder
+  manufacturer: Voron
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Compact direct drive extruder for Voron V0 Mini StealthBurner toolhead
+  url: https://github.com/VoronDesign/Voron-0
+
 - name: Mini Clockwork
   manufacturer: Voron
   gearRatio: "4:1"
@@ -327,3 +349,85 @@
   isDirectDrive: true
   description: Standard size extruder with integrated CAN toolboard
   url: https://www.aliexpress.com/item/1005003809591240.html
+
+# West3D / West Wings Community Extruders
+- name: WWBMG
+  manufacturer: Community
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: WristWatch BMG - community remix of BMG extruder with improved filament path
+  url: https://github.com/bythorsthunder/Voron_Mods/tree/main/Wristwatch_Extruder_BMG
+
+- name: WWG2
+  manufacturer: Community
+  gearRatio: "9:1"
+  isDirectDrive: true
+  description: WristWatch G2 - community dual-gear extruder design optimized for Voron toolheads
+  url: https://github.com/tetsu97/WristWatch-G2-Extruder
+
+- name: G2E
+  manufacturer: Community
+  gearRatio: "9:1"
+  isDirectDrive: true
+  description: Voron Stealthburner drop-in Extruder based on the G2 extruder.
+  url: https://github.com/JaredC01/Galileo2
+
+- name: G2SA
+  manufacturer: Community
+  gearRatio: "9:1"
+  isDirectDrive: true
+  description: Standalone Extruder (G2SA) with mounting options for Orbiter-2.0-style or Sherpa-Mini-style mounts.
+  url: https://github.com/JaredC01/Galileo2
+
+- name: Jabberwocky Extruder
+  manufacturer: Community
+  gearRatio: "4:1"
+  isDirectDrive: true
+  description: Compact extruder designed for the Jabberwocky V0 toolhead
+  url: https://github.com/Diyshift/Jabberwocky
+
+# Stock/Generic Extruders (for unknown or generic printer models)
+- name: Stock Extruder
+  manufacturer: Generic
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Generic stock extruder for unspecified or unknown printer models
+
+# Additional Sovol Extruders (SV08 MAX and Zero)
+- name: SV08 MAX Extruder
+  manufacturer: Sovol
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Proprietary direct drive extruder for Sovol SV08 MAX
+  url: https://sovol3d.com
+
+- name: Sovol Zero Extruder
+  manufacturer: Sovol
+  gearRatio: "3:1"
+  isDirectDrive: true
+  description: Compact extruder for Sovol Zero
+  url: https://sovol3d.com
+
+# Eryone Extruders
+- name: Thinker X400 Extruder
+  manufacturer: Eryone
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Proprietary extruder for Eryone Thinker X400
+  url: https://www.eryone.com
+
+# Flashforge Extruders
+- name: AD5X Extruder
+  manufacturer: Flashforge
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Proprietary extruder for Flashforge Adventurer 5X
+  url: https://www.flashforge.com
+
+# Phrozen Extruders
+- name: Arco Extruder
+  manufacturer: Phrozen
+  gearRatio: "3.5:1"
+  isDirectDrive: true
+  description: Proprietary extruder for Phrozen Arco
+  url: https://www.phrozen3d.com

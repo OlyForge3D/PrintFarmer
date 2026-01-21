@@ -180,7 +180,6 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
       if (current.maxHotendTemp !== original.maxHotendTemp) return true;
       if (current.maxFlowRate !== original.maxFlowRate) return true;
-      if (current.toolheadType !== original.toolheadType) return true;
       // Component model IDs (database-backed) - nozzle type comes from nozzle model
       if (current.hotendModelId !== original.hotendModelId) return true;
       if (current.extruderModelId !== original.extruderModelId) return true;

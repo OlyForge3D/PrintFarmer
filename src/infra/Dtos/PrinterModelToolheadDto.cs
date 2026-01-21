@@ -2,7 +2,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Annotations;
-using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -16,7 +15,6 @@ public record PrinterModelToolheadDto(
     int Index,
     int? MaxHotendTemp = null,
     double? MaxFlowRate = null,
-    ToolheadType? ToolheadType = null,
 
     // Component references - IDs for saving, Names for display
     Guid? HotendModelId = null,

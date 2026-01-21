@@ -92,6 +92,13 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           index: th.index,
           nozzleDiameter: th.nozzleDiameter,
           maxHotendTemp: th.maxHotendTemp,
+          maxFlowRate: th.maxFlowRate,
+          toolheadType: th.toolheadType as ToolheadType | undefined,
+          // Component model references
+          hotendModelId: th.hotendModelId,
+          extruderModelId: th.extruderModelId,
+          toolheadModelDefId: th.toolheadModelDefId,
+          nozzleModelId: th.nozzleModelId,
           supportedMaterials: th.supportedMaterials,
           isPrimary: th.isPrimary,
         }));

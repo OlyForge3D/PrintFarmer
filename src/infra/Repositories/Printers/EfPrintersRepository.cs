@@ -25,7 +25,15 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Toolheads).AsSplitQuery().FirstOrDefaultAsync(p => p.Id == id, ct);
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers
+        .Include(p => p.Manufacturer)
+        .Include(p => p.Model)
+        .Include(p => p.Toolheads).ThenInclude(t => t.HotendModel)
+        .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
+        .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
+        .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
+        .AsSplitQuery()
+        .FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {

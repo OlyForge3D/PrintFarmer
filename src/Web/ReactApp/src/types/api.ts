@@ -731,7 +731,6 @@ export interface PrinterModelToolheadDto {
   nozzleDiameter?: number;
   maxHotendTemp?: number;
   maxFlowRate?: number;
-  toolheadType?: ToolheadType | string;
   // Component model references (IDs and resolved names from database)
   hotendModelId?: string;
   hotendModelName?: string;

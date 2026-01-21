@@ -1299,7 +1299,7 @@ public class PrintersService(
                     Index = toolheadDto.Index,
                     MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
                     MaxFlowRate = toolheadDto.MaxFlowRate ?? primaryModelToolhead?.MaxFlowRate,
-                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : primaryModelToolhead?.ToolheadType.HasValue == true ? (int)primaryModelToolhead.ToolheadType!.Value : null,
+                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
 
                     // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = toolheadDto.HotendModelId ?? primaryModelToolhead?.HotendModelId,
@@ -1332,7 +1332,6 @@ public class PrintersService(
                     IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
                     MaxHotendTemp = templateToolhead?.MaxHotendTemp,
                     MaxFlowRate = templateToolhead?.MaxFlowRate,
-                    ToolheadType = templateToolhead?.ToolheadType.HasValue == true ? (int)templateToolhead.ToolheadType!.Value : null,
 
                     // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = templateToolhead?.HotendModelId,

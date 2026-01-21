@@ -96,7 +96,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                 Index = th.Index,
                 MaxHotendTemp = th.MaxHotendTemp,
                 MaxFlowRate = th.MaxFlowRate,
-                ToolheadType = th.ToolheadType.HasValue ? (int)th.ToolheadType.Value : null,
 
                 // Component model references - nozzle diameter is derived from NozzleModel.Diameter
                 HotendModelId = th.HotendModelId,
@@ -173,7 +172,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.Index,
                     t.MaxHotendTemp,
                     t.MaxFlowRate,
-                    t.ToolheadType.HasValue ? (ToolheadType)t.ToolheadType.Value : null,
 
                     // Component model references - nozzle diameter comes from NozzleModel.Diameter
                     t.HotendModelId,

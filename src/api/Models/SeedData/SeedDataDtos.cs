@@ -188,6 +188,8 @@ public class NozzleModelSeedDto
     [Required]
     public string Manufacturer { get; set; } = string.Empty;
 
+    public double Diameter { get; set; } = 0.4;
+
     public int MaxTemp { get; set; } = 300;
 
     public string NozzleType { get; set; } = "Brass";

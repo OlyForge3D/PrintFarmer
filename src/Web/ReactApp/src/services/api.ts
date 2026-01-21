@@ -183,6 +183,42 @@ export class ApiClient {
     );
   }
 
+  // ===== Generic HTTP methods for ad-hoc API calls =====
+  /**
+   * Perform a GET request
+   */
+  async get<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, config);
+  }
+
+  /**
+   * Perform a POST request
+   */
+  async post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.post<T>(url, data, config);
+  }
+
+  /**
+   * Perform a PUT request
+   */
+  async put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.put<T>(url, data, config);
+  }
+
+  /**
+   * Perform a PATCH request
+   */
+  async patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.patch<T>(url, data, config);
+  }
+
+  /**
+   * Perform a DELETE request
+   */
+  async delete<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url, config);
+  }
+
   // ===== Harvest/discovered file API methods =====
   // Get discovered G-code files for a harvest operation
   async getDiscoveredGcodeFiles(

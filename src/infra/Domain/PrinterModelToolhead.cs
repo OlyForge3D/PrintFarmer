@@ -42,12 +42,6 @@ public class PrinterModelToolhead
     /// </summary>
     public double? MaxFlowRate { get; set; }
 
-    /// <summary>
-    /// Whether this is a stock or custom/aftermarket toolhead.
-    /// Stored as int; cast to ToolheadType enum.
-    /// </summary>
-    public int? ToolheadType { get; set; }
-
     #region Component Model References (database-backed, extensible)
 
     /// <summary>

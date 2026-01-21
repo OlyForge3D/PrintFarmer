@@ -34,8 +34,8 @@ public class DataSeedService : IDataSeedService
 
         await SeedManufacturersAsync();
         await SeedFilamentTypesAsync();
+        await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
-        await SeedComponentModelsAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
     }
@@ -191,10 +191,196 @@ public class DataSeedService : IDataSeedService
             // Seed aliases and filament type associations
             await SeedPrinterModelAliasesAsync(modelsData);
             await SeedModelFilamentTypesAsync(modelsData);
+
+            // Seed printer model toolheads (components are already seeded before printer models)
+            await SeedPrinterModelToolheadsAsync(modelsData, manufacturers);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding printer models: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Seeds printer model toolheads from already-loaded YAML data.
+    /// </summary>
+    private async Task SeedPrinterModelToolheadsAsync(
+        List<PrinterModelSeedDto> modelsData,
+        Dictionary<string, Guid> manufacturers)
+    {
+        try
+        {
+            int toolheadCount = modelsData.Count(m => m.Toolheads?.Count > 0);
+
+            if (toolheadCount == 0)
+            {
+                _logger.LogInformation("[SeedData] No printer model toolheads found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation($"[SeedData] Seeding toolheads for {toolheadCount} printer model(s) from YAML");
+
+            // Build lookups for component resolution using composite key (name:manufacturer)
+            // This allows different manufacturers to have components with the same name
+            Dictionary<string, Guid> hotendsByKey = await _context.HotendModelDefinitions
+                .Include(h => h.Manufacturer)
+                .ToDictionaryAsync(
+                    h => $"{h.Name}:{h.Manufacturer?.Name ?? "Unknown"}",
+                    h => h.Id,
+                    StringComparer.OrdinalIgnoreCase);
+
+            // Also build name-only lookup for backward compatibility (first match wins)
+            Dictionary<string, Guid> hotendsByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in await _context.HotendModelDefinitions.ToListAsync())
+            {
+                hotendsByName.TryAdd(h.Name, h.Id);
+            }
+
+            Dictionary<string, Guid> extrudersByKey = await _context.ExtruderModelDefinitions
+                .Include(e => e.Manufacturer)
+                .ToDictionaryAsync(
+                    e => $"{e.Name}:{e.Manufacturer?.Name ?? "Unknown"}",
+                    e => e.Id,
+                    StringComparer.OrdinalIgnoreCase);
+
+            Dictionary<string, Guid> extrudersByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in await _context.ExtruderModelDefinitions.ToListAsync())
+            {
+                extrudersByName.TryAdd(e.Name, e.Id);
+            }
+
+            Dictionary<string, Guid> nozzlesByKey = await _context.NozzleModelDefinitions
+                .Include(n => n.Manufacturer)
+                .ToDictionaryAsync(
+                    n => $"{n.Name}:{n.Manufacturer?.Name ?? "Unknown"}",
+                    n => n.Id,
+                    StringComparer.OrdinalIgnoreCase);
+
+            Dictionary<string, Guid> nozzlesByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var n in await _context.NozzleModelDefinitions.ToListAsync())
+            {
+                nozzlesByName.TryAdd(n.Name, n.Id);
+            }
+
+            // Build toolhead model lookup with composite key
+            Dictionary<string, ToolheadModelDefinition> toolheadsByKey = await _context.ToolheadModelDefinitions
+                .Include(t => t.Manufacturer)
+                .ToDictionaryAsync(
+                    t => $"{t.Name}:{t.Manufacturer?.Name ?? "Unknown"}",
+                    t => t,
+                    StringComparer.OrdinalIgnoreCase);
+
+            Dictionary<string, ToolheadModelDefinition> toolheadsByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in await _context.ToolheadModelDefinitions.ToListAsync())
+            {
+                toolheadsByName.TryAdd(t.Name, t);
+            }
+
+            int seededCount = 0;
+
+            foreach (PrinterModelSeedDto dto in modelsData.Where(m => m.Toolheads?.Count > 0))
+            {
+                if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
+                {
+                    continue;
+                }
+
+                // Find the printer model
+                PrinterModel? printerModel = await _context.PrinterModels
+                    .Include(pm => pm.Toolheads)
+                    .FirstOrDefaultAsync(pm => pm.Name == dto.Name && pm.ManufacturerId == manufacturerId);
+
+                if (printerModel == null)
+                {
+                    _logger.LogWarning("[SeedData] Printer model '{Name}' not found for toolhead seeding", dto.Name);
+                    continue;
+                }
+
+                // Skip if already has toolheads
+                if (printerModel.Toolheads?.Any() == true)
+                {
+                    continue;
+                }
+
+                int index = 0;
+                foreach (ToolheadAssignmentDto toolheadDto in dto.Toolheads!)
+                {
+                    var printerModelToolhead = new PrinterModelToolhead
+                    {
+                        Id = Guid.NewGuid(),
+                        PrinterModelId = printerModel.Id,
+                        Name = toolheadDto.Name ?? $"Toolhead {index}",
+                        Index = index,
+                        IsPrimary = index == 0
+                    };
+
+                    // Resolve toolhead model and get its defaults
+                    ToolheadModelDefinition? toolheadModel = null;
+                    if (!string.IsNullOrEmpty(toolheadDto.Toolhead))
+                    {
+                        // Try composite key first (Name:Manufacturer), fall back to name-only
+                        string compositeKey = $"{toolheadDto.Toolhead}:{dto.Manufacturer}";
+                        if (!toolheadsByKey.TryGetValue(compositeKey, out toolheadModel))
+                        {
+                            toolheadsByName.TryGetValue(toolheadDto.Toolhead, out toolheadModel);
+                        }
+
+                        if (toolheadModel != null)
+                        {
+                            printerModelToolhead.ToolheadModelDefId = toolheadModel.Id;
+                        }
+                    }
+
+                    // Resolve hotend model - use explicit value or fall back to toolhead default
+                    if (!string.IsNullOrEmpty(toolheadDto.Hotend) &&
+                        hotendsByName.TryGetValue(toolheadDto.Hotend, out Guid hotendId))
+                    {
+                        printerModelToolhead.HotendModelId = hotendId;
+                    }
+                    else if (toolheadModel?.DefaultHotendId != null)
+                    {
+                        printerModelToolhead.HotendModelId = toolheadModel.DefaultHotendId;
+                    }
+
+                    // Resolve extruder model - use explicit value or fall back to toolhead default
+                    if (!string.IsNullOrEmpty(toolheadDto.Extruder) &&
+                        extrudersByName.TryGetValue(toolheadDto.Extruder, out Guid extruderId))
+                    {
+                        printerModelToolhead.ExtruderModelId = extruderId;
+                    }
+                    else if (toolheadModel?.DefaultExtruderId != null)
+                    {
+                        printerModelToolhead.ExtruderModelId = toolheadModel.DefaultExtruderId;
+                    }
+
+                    // Resolve nozzle model - use explicit value or fall back to toolhead default
+                    if (!string.IsNullOrEmpty(toolheadDto.Nozzle) &&
+                        nozzlesByName.TryGetValue(toolheadDto.Nozzle, out Guid nozzleId))
+                    {
+                        printerModelToolhead.NozzleModelId = nozzleId;
+                    }
+                    else if (toolheadModel?.DefaultNozzleId != null)
+                    {
+                        printerModelToolhead.NozzleModelId = toolheadModel.DefaultNozzleId;
+                    }
+
+                    _context.PrinterModelToolheads.Add(printerModelToolhead);
+                    index++;
+                }
+
+                seededCount++;
+            }
+
+            if (seededCount > 0)
+            {
+                await _context.SaveChangesAsync();
+                _logger.LogInformation($"[SeedData] Seeded toolheads for {seededCount} printer model(s)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding printer model toolheads: {Message}", ex.Message);
             throw;
         }
     }
@@ -215,11 +401,14 @@ public class DataSeedService : IDataSeedService
             // Seed extruders
             await SeedExtrudersAsync(manufacturers);
 
-            // Seed toolheads
+            // Seed toolheads (creates records without default components)
             await SeedToolheadsAsync(manufacturers);
 
             // Seed nozzles
             await SeedNozzlesAsync(manufacturers);
+
+            // Resolve toolhead default components (must run after all components are seeded)
+            await ResolveToolheadDefaultComponentsFromYamlAsync(manufacturers);
 
             _logger.LogInformation("[SeedData] Component models seeded successfully");
         }
@@ -363,6 +552,178 @@ public class DataSeedService : IDataSeedService
         await _context.SaveChangesAsync();
     }
 
+    private async Task ResolveToolheadDefaultComponentsFromYamlAsync(Dictionary<string, Guid> manufacturers)
+    {
+        List<ToolheadModelSeedDto> toolheads = await _yamlReader.ReadToolheadsAsync();
+
+        if (toolheads.Count == 0)
+        {
+            return;
+        }
+
+        _logger.LogInformation("[SeedData] Resolving toolhead default components from YAML");
+
+        // Build component lookups using composite key (name:manufacturer)
+        // This allows different manufacturers to have components with the same name
+        Dictionary<string, Guid> hotendsByKey = await _context.HotendModelDefinitions
+            .Include(h => h.Manufacturer)
+            .ToDictionaryAsync(
+                h => $"{h.Name}:{h.Manufacturer?.Name ?? "Unknown"}",
+                h => h.Id,
+                StringComparer.OrdinalIgnoreCase);
+
+        // Also build name-only lookup for backward compatibility (first match wins)
+        Dictionary<string, Guid> hotendsByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in await _context.HotendModelDefinitions.ToListAsync())
+        {
+            hotendsByName.TryAdd(h.Name, h.Id);
+        }
+
+        Dictionary<string, Guid> extrudersByKey = await _context.ExtruderModelDefinitions
+            .Include(e => e.Manufacturer)
+            .ToDictionaryAsync(
+                e => $"{e.Name}:{e.Manufacturer?.Name ?? "Unknown"}",
+                e => e.Id,
+                StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, Guid> extrudersByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in await _context.ExtruderModelDefinitions.ToListAsync())
+        {
+            extrudersByName.TryAdd(e.Name, e.Id);
+        }
+
+        Dictionary<string, Guid> nozzlesByKey = await _context.NozzleModelDefinitions
+            .Include(n => n.Manufacturer)
+            .ToDictionaryAsync(
+                n => $"{n.Name}:{n.Manufacturer?.Name ?? "Unknown"}",
+                n => n.Id,
+                StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, Guid> nozzlesByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in await _context.NozzleModelDefinitions.ToListAsync())
+        {
+            nozzlesByName.TryAdd(n.Name, n.Id);
+        }
+
+        int updatedCount = 0;
+
+        foreach (ToolheadModelSeedDto dto in toolheads)
+        {
+            // Skip if no defaults specified
+            if (string.IsNullOrEmpty(dto.DefaultHotend) &&
+                string.IsNullOrEmpty(dto.DefaultExtruder) &&
+                string.IsNullOrEmpty(dto.DefaultNozzle))
+            {
+                continue;
+            }
+
+            if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
+            {
+                continue;
+            }
+
+            // Find the toolhead definition
+            ToolheadModelDefinition? toolhead = await _context.ToolheadModelDefinitions
+                .FirstOrDefaultAsync(t => t.Name == dto.Name && t.ManufacturerId == manufacturerId);
+
+            if (toolhead == null)
+            {
+                _logger.LogWarning(
+                    "[SeedData] Toolhead '{Name}' not found for resolving default components",
+                    dto.Name);
+                continue;
+            }
+
+            bool needsUpdate = false;
+
+            // Resolve default hotend - try toolhead's manufacturer first, then name-only
+            if (!string.IsNullOrEmpty(dto.DefaultHotend))
+            {
+                string compositeKey = $"{dto.DefaultHotend}:{dto.Manufacturer}";
+                if (!hotendsByKey.TryGetValue(compositeKey, out Guid hotendId))
+                {
+                    hotendsByName.TryGetValue(dto.DefaultHotend, out hotendId);
+                }
+
+                if (hotendId != Guid.Empty)
+                {
+                    if (toolhead.DefaultHotendId != hotendId)
+                    {
+                        toolhead.DefaultHotendId = hotendId;
+                        needsUpdate = true;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[SeedData] Default hotend '{Hotend}' not found for toolhead '{Toolhead}'",
+                        dto.DefaultHotend, dto.Name);
+                }
+            }
+
+            // Resolve default extruder - try toolhead's manufacturer first, then name-only
+            if (!string.IsNullOrEmpty(dto.DefaultExtruder))
+            {
+                string compositeKey = $"{dto.DefaultExtruder}:{dto.Manufacturer}";
+                if (!extrudersByKey.TryGetValue(compositeKey, out Guid extruderId))
+                {
+                    extrudersByName.TryGetValue(dto.DefaultExtruder, out extruderId);
+                }
+
+                if (extruderId != Guid.Empty)
+                {
+                    if (toolhead.DefaultExtruderId != extruderId)
+                    {
+                        toolhead.DefaultExtruderId = extruderId;
+                        needsUpdate = true;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[SeedData] Default extruder '{Extruder}' not found for toolhead '{Toolhead}'",
+                        dto.DefaultExtruder, dto.Name);
+                }
+            }
+
+            // Resolve default nozzle - try toolhead's manufacturer first, then name-only
+            if (!string.IsNullOrEmpty(dto.DefaultNozzle))
+            {
+                string compositeKey = $"{dto.DefaultNozzle}:{dto.Manufacturer}";
+                if (!nozzlesByKey.TryGetValue(compositeKey, out Guid nozzleId))
+                {
+                    nozzlesByName.TryGetValue(dto.DefaultNozzle, out nozzleId);
+                }
+
+                if (nozzleId != Guid.Empty)
+                {
+                    if (toolhead.DefaultNozzleId != nozzleId)
+                    {
+                        toolhead.DefaultNozzleId = nozzleId;
+                        needsUpdate = true;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[SeedData] Default nozzle '{Nozzle}' not found for toolhead '{Toolhead}'",
+                        dto.DefaultNozzle, dto.Name);
+                }
+            }
+
+            if (needsUpdate)
+            {
+                updatedCount++;
+            }
+        }
+
+        if (updatedCount > 0)
+        {
+            await _context.SaveChangesAsync();
+            _logger.LogInformation($"[SeedData] Resolved default components for {updatedCount} toolhead(s)");
+        }
+    }
+
     private async Task SeedNozzlesAsync(Dictionary<string, Guid> manufacturers)
     {
         List<NozzleModelSeedDto> nozzles = await _yamlReader.ReadNozzlesAsync();
@@ -403,6 +764,7 @@ public class DataSeedService : IDataSeedService
                     Id = Guid.NewGuid(),
                     Name = dto.Name,
                     ManufacturerId = manufacturerId,
+                    Diameter = dto.Diameter,
                     MaxTemp = dto.MaxTemp,
                     NozzleType = nozzleType,
                     Description = dto.Description,
