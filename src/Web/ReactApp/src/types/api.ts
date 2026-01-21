@@ -368,7 +368,6 @@ export interface UpdatePrinterDto {
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
-  numberOfExtruders?: number;
   maxHotendTemp?: number;
   maxBedTemp?: number;
   supportsAutoLeveling?: boolean;
@@ -386,9 +385,6 @@ export interface UpdateToolheadDto {
   name?: string;
   index?: number;
   nozzleDiameter?: number;
-  maxHotendTemp?: number;
-  maxFlowRate?: number;
-  toolheadType?: ToolheadType;
   // Component model references
   hotendModelId?: string;
   extruderModelId?: string;
@@ -451,28 +447,6 @@ export const NozzleTypeStringLabels: Record<string, string> = {
   'Unknown': 'Unknown'
 };
 
-/**
- * Toolhead type - stock vs custom/aftermarket
- */
-export enum ToolheadType {
-  Stock = 0,
-  Custom = 1
-}
-
-export const ToolheadTypeLabels: Record<ToolheadType, string> = {
-  [ToolheadType.Stock]: 'Stock',
-  [ToolheadType.Custom]: 'Custom'
-};
-
-/**
- * String-keyed toolhead type labels for use with JSON string enum serialization.
- * Backend sends ToolheadType as string ("Stock", "Custom")
- */
-export const ToolheadTypeStringLabels: Record<string, string> = {
-  'Stock': 'Stock',
-  'Custom': 'Custom'
-};
-
 // ============== Nozzle Interface Types ==============
 /**
  * Defines the nozzle thread/interface type that determines compatibility between hotends and nozzles.
@@ -526,6 +500,8 @@ export interface HotendModelDefinition {
   manufacturerName?: string;
   maxTemp?: number;
   isHighFlow: boolean;
+  /** Maximum volumetric flow rate in mm³/s */
+  maxFlowRate?: number;
   /** Nozzle interface type determines which nozzles are compatible with this hotend */
   nozzleInterface: NozzleInterfaceType;
   description?: string;
@@ -723,14 +699,16 @@ export interface ManufacturersByContext {
 
 /**
  * Toolhead template for a printer model
+ * Derived values: nozzleDiameter from NozzleModel, maxFlowRate/maxTemp from HotendModel
  */
 export interface PrinterModelToolheadDto {
   id: string;
   name: string;
   index: number;
-  nozzleDiameter?: number;
-  maxHotendTemp?: number;
-  maxFlowRate?: number;
+  nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
+  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleType
+  maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
+  maxTemp?: number;            // Derived from HotendModel.MaxTemp
   // Component model references (IDs and resolved names from database)
   hotendModelId?: string;
   hotendModelName?: string;
@@ -759,7 +737,6 @@ export interface PrinterModelDto {
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
-  numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
@@ -780,7 +757,6 @@ export interface PrinterCapabilitiesExportDto {
   hasEnclosure: boolean;
   multiMaterial: boolean;
   supportsAutoLeveling: boolean;
-  numberOfExtruders: number;
   maxHotendTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
@@ -801,7 +777,6 @@ export interface PrinterCapabilitiesDto {
   hasHeatedBed: boolean;
   hasEnclosure: boolean;
   multiMaterial: boolean;
-  numberOfExtruders: number;
   maxHotendTemp?: number;
   maxBedTemp?: number;
   currentMaterial?: string;
@@ -817,10 +792,10 @@ export interface ToolheadDto {
   id: string;
   name?: string;
   index: number;
-  nozzleDiameter?: number;
-  maxHotendTemp?: number;
-  maxFlowRate?: number;
-  toolheadType?: ToolheadType | string;
+  nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
+  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleType
+  maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
+  maxTemp?: number;            // Derived from HotendModel.MaxTemp
   // Component model references (IDs and resolved names from database)
   hotendModelId?: string;
   hotendModelName?: string;
@@ -990,7 +965,6 @@ export interface UpdateModelRequest {
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
-  numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;
@@ -1013,7 +987,6 @@ export interface CreateModelRequest {
   hasHeatedBed?: boolean;
   hasEnclosure?: boolean;
   multiMaterial?: boolean;
-  numberOfExtruders?: number;
   supportsAutoLeveling?: boolean;
   maxBedTemp?: number;
   maxPrintSpeed?: number;

@@ -84,7 +84,6 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                 m.HasHeatedBed,
                 m.HasEnclosure,
                 m.MultiMaterial,
-                m.NumberOfExtruders,
                 m.SupportsAutoLeveling,
 
                 // Temperature ranges
@@ -98,10 +97,8 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.Id,
                     t.Name,
                     t.Index,
-                    t.MaxHotendTemp,
-                    t.MaxFlowRate,
 
-                    // Component model references - nozzle diameter comes from NozzleModel.Diameter
+                    // Component model references - derived values from related models
                     t.HotendModelId,
                     t.HotendModel != null ? t.HotendModel.Name : null,
                     t.ExtruderModelId,
@@ -110,7 +107,10 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                     t.ToolheadModelDef != null ? t.ToolheadModelDef.Name : null,
                     t.NozzleModelId,
                     t.NozzleModel != null ? t.NozzleModel.Name : null,
-                    t.NozzleModel != null ? t.NozzleModel.Diameter : null,
+                    t.NozzleModel != null ? t.NozzleModel.Diameter : null,      // Derived from NozzleModel
+                    t.NozzleModel != null ? t.NozzleModel.NozzleType : null,    // Derived from NozzleModel
+                    t.HotendModel != null ? t.HotendModel.MaxFlowRate : null,   // Derived from HotendModel
+                    t.HotendModel != null ? t.HotendModel.MaxTemp : null,       // Derived from HotendModel
                     t.SupportedMaterials,
                     t.IsPrimary)).ToArray())).ToListAsync(ct);
 

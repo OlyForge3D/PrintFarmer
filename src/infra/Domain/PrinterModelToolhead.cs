@@ -31,17 +31,6 @@ public class PrinterModelToolhead
     /// </summary>
     public int Index { get; set; }
 
-    /// <summary>
-    /// Maximum hotend temperature in °C for this toolhead.
-    /// </summary>
-    public int? MaxHotendTemp { get; set; }
-
-    /// <summary>
-    /// Maximum volumetric flow rate in mm³/s for this toolhead.
-    /// Depends on hotend, nozzle size, and material.
-    /// </summary>
-    public double? MaxFlowRate { get; set; }
-
     #region Component Model References (database-backed, extensible)
 
     /// <summary>

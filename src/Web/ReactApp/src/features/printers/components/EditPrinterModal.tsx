@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, ToolheadType, ToolheadTypeLabels } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -10,6 +10,7 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionButton } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
+import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -58,7 +59,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         newManufacturerName: undefined,
         newModelName: undefined,
         dateAcquired: printerDetails.dateAcquired ? new Date(printerDetails.dateAcquired) : undefined,
-        backend: printerDetails.backend,
+        // Backend comes from API as string enum ("Moonraker"), convert to numeric for frontend
+        backend: typeof printerDetails.backend === 'string'
+          ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
+          : printerDetails.backend,
         apiKey: printerDetails.apiKey,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
@@ -71,7 +75,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         hasHeatedBed: printerDetails.capabilities?.hasHeatedBed,
         hasEnclosure: printerDetails.capabilities?.hasEnclosure,
         multiMaterial: printerDetails.capabilities?.multiMaterial,
-        numberOfExtruders: printerDetails.capabilities?.numberOfExtruders,
         maxHotendTemp: printerDetails.capabilities?.maxHotendTemp,
         maxBedTemp: printerDetails.capabilities?.maxBedTemp,
         supportsAutoLeveling: printerDetails.capabilities?.supportsAutoLeveling,
@@ -91,9 +94,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           name: th.name,
           index: th.index,
           nozzleDiameter: th.nozzleDiameter,
-          maxHotendTemp: th.maxHotendTemp,
-          maxFlowRate: th.maxFlowRate,
-          toolheadType: th.toolheadType as ToolheadType | undefined,
           // Component model references
           hotendModelId: th.hotendModelId,
           extruderModelId: th.extruderModelId,
@@ -155,7 +155,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'newManufacturerName', 'newModelName', 'backend', 'apiKey',
       'cameraStreamUrl', 'cameraSnapshotUrl', 'nozzleDiameter',
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
-      'hasHeatedBed', 'hasEnclosure', 'multiMaterial', 'numberOfExtruders',
+      'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
       'backendPort', 'frontendPort'
     ];
@@ -182,9 +182,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       if (current.name !== original.name) return true;
       if (current.index !== original.index) return true;
       if (current.nozzleDiameter !== original.nozzleDiameter) return true;
-      if (current.maxHotendTemp !== original.maxHotendTemp) return true;
-      if (current.maxFlowRate !== original.maxFlowRate) return true;
-      if (current.toolheadType !== original.toolheadType) return true;
       // Component model IDs (database-backed) - nozzle type comes from nozzle model
       if (current.hotendModelId !== original.hotendModelId) return true;
       if (current.extruderModelId !== original.extruderModelId) return true;
@@ -230,7 +227,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           hasHeatedBed: defaultCapabilities.hasHeatedBed,
           hasEnclosure: defaultCapabilities.hasEnclosure,
           multiMaterial: defaultCapabilities.multiMaterial,
-          numberOfExtruders: defaultCapabilities.numberOfExtruders,
           maxHotendTemp: defaultCapabilities.maxHotendTemp ?? prev.maxHotendTemp,
           maxBedTemp: defaultCapabilities.maxBedTemp ?? prev.maxBedTemp,
           supportsAutoLeveling: defaultCapabilities.supportsAutoLeveling,
@@ -274,7 +270,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       name: `Toolhead ${newIndex + 1}`,
       index: newIndex,
       nozzleDiameter: 0.4,
-      maxHotendTemp: 300,
       supportedMaterials: ['PLA', 'PETG'],
       isPrimary: newIndex === 0, // First toolhead is primary by default
     };
@@ -650,7 +645,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 <>
                   <p className="text-xs text-pf-text-secondary mb-3">Click to expand individual toolhead settings</p>
                   <div className="space-y-3">
-                    {toolheads.map((toolhead, index) => (
+                    {toolheads.map((toolhead, index) => {
+                      // Get derived values from original ToolheadDto for display
+                      const originalToolhead = printerDetails?.toolheads?.find((th: ToolheadDto) => th.id === toolhead.id);
+                      return (
                     <div 
                       key={toolhead.id} 
                       className="border border-pf-border rounded-lg overflow-hidden"
@@ -663,7 +661,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                         badge={toolhead.isPrimary ? 'Primary' : undefined}
                         summary={[
                           toolhead.nozzleDiameter && `Ø${toolhead.nozzleDiameter}mm`,
-                          toolhead.maxHotendTemp && `Max ${toolhead.maxHotendTemp}°C`,
+                          originalToolhead?.nozzleType && NozzleTypeStringLabels[String(originalToolhead.nozzleType)],
+                          originalToolhead?.maxTemp && `${originalToolhead.maxTemp}°C`,
+                          originalToolhead?.maxFlowRate && `${originalToolhead.maxFlowRate}mm³/s`,
                         ].filter(Boolean).join(' • ') || undefined}
                         actions={
                           <Button
@@ -684,7 +684,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       {expandedToolheads.has(toolhead.id!) && (
                         <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
                           {/* Basic Info */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <FormField label="Name" htmlFor={`toolhead-name-${index}`}>
                               <Input
                                 id={`toolhead-name-${index}`}
@@ -692,18 +692,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                                 onChange={e => handleToolheadChange(toolhead.id!, 'name', e.target.value || undefined)}
                                 placeholder={`Toolhead ${index + 1}`}
                               />
-                            </FormField>
-                            <FormField label="Toolhead Type" htmlFor={`toolhead-type-${index}`}>
-                              <Select
-                                id={`toolhead-type-${index}`}
-                                value={toolhead.toolheadType?.toString() ?? ''}
-                                onChange={e => handleToolheadChange(toolhead.id!, 'toolheadType', e.target.value ? parseInt(e.target.value, 10) as ToolheadType : undefined)}
-                              >
-                                <option value="">Select type...</option>
-                                {Object.entries(ToolheadTypeLabels).map(([value, label]) => (
-                                  <option key={value} value={value}>{label}</option>
-                                ))}
-                              </Select>
                             </FormField>
                             <FormField label="Toolhead Model" htmlFor={`toolhead-model-${index}`}>
                               <Select
@@ -784,29 +772,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                             </FormField>
                           </div>
 
-                          {/* Performance */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <FormField label="Max Hotend Temp (°C)" htmlFor={`toolhead-max-temp-${index}`}>
-                              <Input
-                                id={`toolhead-max-temp-${index}`}
-                                type="number"
-                                value={toolhead.maxHotendTemp?.toString() || ''}
-                                onChange={e => handleToolheadChange(toolhead.id!, 'maxHotendTemp', e.target.value ? parseInt(e.target.value, 10) : undefined)}
-                                placeholder="300"
-                              />
-                            </FormField>
-                            <FormField label="Max Flow Rate (mm³/s)" htmlFor={`toolhead-max-flow-${index}`}>
-                              <Input
-                                id={`toolhead-max-flow-${index}`}
-                                type="number"
-                                step="0.1"
-                                value={toolhead.maxFlowRate?.toString() || ''}
-                                onChange={e => handleToolheadChange(toolhead.id!, 'maxFlowRate', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                placeholder="15"
-                              />
-                            </FormField>
-                          </div>
-
                           {/* Supported Materials */}
                           <div>
                             <label className="block text-sm font-medium text-pf-text-secondary mb-1">
@@ -853,7 +818,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                         </div>
                       )}
                     </div>
-                  ))}
+                      );
+                    })}
                   </div>
                 </>
               )}

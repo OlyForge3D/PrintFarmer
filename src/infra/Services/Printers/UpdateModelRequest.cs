@@ -19,7 +19,6 @@ public record UpdateModelRequest(
     bool? HasHeatedBed = null,
     bool? HasEnclosure = null,
     bool? MultiMaterial = null,
-    int? NumberOfExtruders = null,
     bool? SupportsAutoLeveling = null,
 
     // Temperature ranges

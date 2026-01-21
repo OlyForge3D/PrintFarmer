@@ -558,7 +558,7 @@ npm run lint 2>&1 | head -20
   - Do NOT use `parseInt()` when parsing enum values from API responses - they're already strings
   - Select `<option value={}>` should use string enum names: `"Brass"`, `"HardenedSteel"`, etc.
 - **Common mistake**: Assuming `nozzleType: 1` when backend actually sends `nozzleType: "HardenedSteel"`
-- **Affected enums**: NozzleType, ToolheadType, PrinterBackend, MotionType, PrintJobStatus, etc.
+- **Affected enums**: NozzleType, PrinterBackend, MotionType, PrintJobStatus, etc.
 - **Location**: See `JsonStringEnumConverter` in `src/api/Program.cs` line ~148
 
 **Documentation Standards:**

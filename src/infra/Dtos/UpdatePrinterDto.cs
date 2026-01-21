@@ -33,7 +33,6 @@ public record UpdatePrinterDto(
     bool? HasHeatedBed = null,
     bool? HasEnclosure = null,
     bool? MultiMaterial = null,
-    int? NumberOfExtruders = null,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
     bool? SupportsAutoLeveling = null,

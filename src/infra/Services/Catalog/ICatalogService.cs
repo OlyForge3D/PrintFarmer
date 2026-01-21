@@ -48,7 +48,6 @@ public interface ICatalogService
     /// <param name="hasHeatedBed">Optional flag indicating heated bed support.</param>
     /// <param name="hasEnclosure">Optional flag indicating enclosure presence.</param>
     /// <param name="multiMaterial">Optional flag indicating multi-material capability.</param>
-    /// <param name="numberOfExtruders">Optional number of extruders.</param>
     /// <param name="supportsAutoLeveling">Optional flag indicating auto-leveling support.</param>
     /// <param name="maxBedTemp">Optional maximum bed temperature in Celsius.</param>
     /// <param name="maxPrintSpeed">Optional maximum print speed in mm/s.</param>
@@ -65,7 +64,6 @@ public interface ICatalogService
         bool? hasHeatedBed,
         bool? hasEnclosure,
         bool? multiMaterial,
-        int? numberOfExtruders,
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,
@@ -83,7 +81,6 @@ public interface ICatalogService
     /// <param name="hasHeatedBed">Optional flag indicating heated bed support.</param>
     /// <param name="hasEnclosure">Optional flag indicating enclosure presence.</param>
     /// <param name="multiMaterial">Optional flag indicating multi-material capability.</param>
-    /// <param name="numberOfExtruders">Optional number of extruders.</param>
     /// <param name="supportsAutoLeveling">Optional flag indicating auto-leveling support.</param>
     /// <param name="maxBedTemp">Optional maximum bed temperature in Celsius.</param>
     /// <param name="maxPrintSpeed">Optional maximum print speed in mm/s.</param>
@@ -101,7 +98,6 @@ public interface ICatalogService
         bool? hasHeatedBed,
         bool? hasEnclosure,
         bool? multiMaterial,
-        int? numberOfExtruders,
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,

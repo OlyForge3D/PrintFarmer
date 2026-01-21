@@ -48,7 +48,6 @@ All YAML files use camelCase for property names and follow these conventions:
   hasEnclosure: false
   supportsAutoLeveling: true
   multiMaterial: false
-  numberOfExtruders: 1
   maxHotendTemp: 300
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -56,7 +55,7 @@ All YAML files use camelCase for property names and follow these conventions:
     - PLA
     - PETG
     - ABS
-  toolheads:
+  toolheads:                   # Number of extruders is derived from toolheads count
     - name: Primary
       toolhead: Stock Toolhead
       hotend: Stock Hotend

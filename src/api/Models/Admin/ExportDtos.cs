@@ -104,8 +104,6 @@ public class PrinterModelExportDto
 
     public bool MultiMaterial { get; set; }
 
-    public int NumberOfExtruders { get; set; }
-
     public bool SupportsAutoLeveling { get; set; }
 
     public int? MaxBedTemp { get; set; }
@@ -131,6 +129,8 @@ public class HotendModelExportDto
     public int MaxTemp { get; set; }
 
     public bool IsHighFlow { get; set; }
+
+    public double? MaxFlowRate { get; set; }
 
     public string? Description { get; set; }
 

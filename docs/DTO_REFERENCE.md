@@ -194,7 +194,6 @@ public record UpdatePrinterDto(
     bool? HasHeatedBed = null,
     bool? HasEnclosure = null,
     bool? MultiMaterial = null,
-    int? NumberOfExtruders = null,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
     bool? SupportsAutoLeveling = null,
@@ -301,7 +300,6 @@ public record PrinterCapabilitiesDto(
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     bool SupportsAutoLeveling = false,
-    int NumberOfExtruders = 1,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
     int? MaxPrintSpeed = null,
@@ -314,7 +312,7 @@ public record PrinterCapabilitiesDto(
 **Key Points**:
 - Used in PrinterDetailsDto for backward compatibility
 - Primary toolhead values are used for `NozzleDiameter`, `MaxHotendTemp`, `SupportedMaterials`
-- `NumberOfExtruders` comes from Toolheads collection count
+- Number of extruders can be derived from Toolheads collection count
 
 ---
 

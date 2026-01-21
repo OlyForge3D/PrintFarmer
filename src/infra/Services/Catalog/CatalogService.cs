@@ -125,7 +125,6 @@ public class CatalogService(
         bool? hasHeatedBed,
         bool? hasEnclosure,
         bool? multiMaterial,
-        int? numberOfExtruders,
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,
@@ -170,7 +169,6 @@ public class CatalogService(
             HasHeatedBed = hasHeatedBed ?? true,
             HasEnclosure = hasEnclosure ?? false,
             MultiMaterial = multiMaterial ?? false,
-            NumberOfExtruders = numberOfExtruders ?? 1,
             SupportsAutoLeveling = supportsAutoLeveling ?? false,
             MaxBedTemp = maxBedTemp,
             MaxPrintSpeed = maxPrintSpeed
@@ -233,7 +231,6 @@ public class CatalogService(
         bool? hasHeatedBed,
         bool? hasEnclosure,
         bool? multiMaterial,
-        int? numberOfExtruders,
         bool? supportsAutoLeveling,
         int? maxBedTemp,
         int? maxPrintSpeed,
@@ -274,11 +271,6 @@ public class CatalogService(
         if (multiMaterial.HasValue)
         {
             model.MultiMaterial = multiMaterial.Value;
-        }
-
-        if (numberOfExtruders.HasValue)
-        {
-            model.NumberOfExtruders = numberOfExtruders.Value;
         }
 
         if (supportsAutoLeveling.HasValue)

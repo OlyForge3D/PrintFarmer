@@ -11,7 +11,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
     public const string SectionName = "GcodeUpload";
 
     private static readonly List<string> _defaultExtensions = new() { ".gcode" };
-    private IList<string> _allowedExtensions = new List<string>(_defaultExtensions);
+    private List<string> _allowedExtensions = new List<string>(_defaultExtensions);
 
     public static string SectionKey => SectionName;
 
@@ -31,7 +31,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
     /// <summary>
     /// Normalizes extensions: trims whitespace, ensures dot prefix, lowercases, and removes duplicates.
     /// </summary>
-    private static IList<string> NormalizeExtensions(IList<string>? extensions)
+    private static List<string> NormalizeExtensions(IList<string>? extensions)
     {
         if (extensions == null || extensions.Count == 0)
         {

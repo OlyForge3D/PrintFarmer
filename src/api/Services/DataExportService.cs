@@ -163,7 +163,6 @@ public class DataExportService : IDataExportService
             HasHeatedBed = pm.HasHeatedBed,
             HasEnclosure = pm.HasEnclosure,
             MultiMaterial = pm.MultiMaterial,
-            NumberOfExtruders = pm.NumberOfExtruders,
             SupportsAutoLeveling = pm.SupportsAutoLeveling,
             MaxBedTemp = pm.MaxBedTemp,
             MaxPrintSpeed = pm.MaxPrintSpeed,
@@ -187,6 +186,7 @@ public class DataExportService : IDataExportService
             ManufacturerName = h.Manufacturer?.Name ?? "Unknown",
             MaxTemp = h.MaxTemp ?? 0,
             IsHighFlow = h.IsHighFlow,
+            MaxFlowRate = h.MaxFlowRate,
             Description = h.Description,
             Url = h.Url
         }).ToList();

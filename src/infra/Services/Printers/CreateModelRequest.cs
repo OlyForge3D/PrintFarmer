@@ -23,7 +23,6 @@ public record CreateModelRequest(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
-    int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
 
     // Temperature ranges (nozzle/hotend temps are on toolheads)

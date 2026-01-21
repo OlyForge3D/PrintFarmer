@@ -17,11 +17,11 @@
 # - hasHeatedBed: true if printer has a heated bed
 # - hasEnclosure: true if printer has an enclosure
 # - multiMaterial: true if printer supports multi-material printing
-# - numberOfExtruders: Number of extruders/toolheads
 # - supportsAutoLeveling: true if printer has automatic bed leveling
 # - maxBedTemp: Maximum bed temperature in °C (optional)
 # - maxPrintSpeed: Maximum print speed in mm/s (optional)
 # - supportedMaterials: List of compatible filament types (references filament-types.yaml)
+# - toolheads: List of toolhead configurations (defines number of extruders)
 # - aliases: List of slicer-specific model names for compatibility
 #   - slicerModelName: Model name as it appears in slicer
 #   - slicerType: Slicer software name (OrcaSlicer, PrusaSlicer, etc.)
@@ -38,7 +38,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: false
   maxBedTemp: 120
   maxPrintSpeed: 100
@@ -62,7 +61,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -91,7 +89,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -119,7 +116,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -147,7 +143,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 1000
@@ -174,7 +169,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 600
@@ -203,7 +197,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -230,7 +223,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -258,7 +250,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -282,7 +273,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -306,7 +296,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -330,7 +319,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -355,7 +343,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -385,7 +372,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -415,7 +401,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -445,7 +430,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -475,7 +459,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -505,7 +488,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -533,7 +515,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -561,7 +542,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -590,7 +570,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -620,7 +599,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -652,7 +630,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -684,7 +661,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -716,7 +692,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -748,7 +723,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -780,7 +754,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -812,7 +785,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -848,7 +820,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -884,7 +855,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -920,7 +890,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -956,7 +925,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -992,7 +960,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: true
-  numberOfExtruders: 2
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 300
@@ -1029,7 +996,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1058,7 +1024,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 110
   maxPrintSpeed: 600
@@ -1091,7 +1056,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 100
   maxPrintSpeed: 180
@@ -1121,7 +1085,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1151,7 +1114,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1182,7 +1144,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1213,7 +1174,6 @@
   hasHeatedBed: true
   hasEnclosure: false
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200
@@ -1244,7 +1204,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -1275,7 +1234,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: false
-  numberOfExtruders: 1
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 250
@@ -1306,7 +1264,6 @@
   hasHeatedBed: true
   hasEnclosure: true
   multiMaterial: true
-  numberOfExtruders: 5
   supportsAutoLeveling: true
   maxBedTemp: 120
   maxPrintSpeed: 200

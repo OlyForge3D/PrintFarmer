@@ -21,7 +21,6 @@ public record PrinterCapabilitiesDto(
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     bool SupportsAutoLeveling = false,
-    int NumberOfExtruders = 1,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
     int? MaxPrintSpeed = null,
@@ -43,7 +42,6 @@ public record CreatePrinterCapabilitiesDto(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
-    int NumberOfExtruders = 1,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null);
 
@@ -59,7 +57,6 @@ public record UpdatePrinterCapabilitiesDto(
     bool HasHeatedBed = true,
     bool HasEnclosure = false,
     bool MultiMaterial = false,
-    int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
     int? MaxHotendTemp = null,
     int? MaxBedTemp = null,
@@ -127,8 +124,6 @@ public class PrinterCapabilitiesExportDto
     public bool MultiMaterial { get; set; } = false;
 
     public bool SupportsAutoLeveling { get; set; } = false;
-
-    public int NumberOfExtruders { get; set; } = 1;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxHotendTemp { get; set; }

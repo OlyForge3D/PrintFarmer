@@ -974,6 +974,7 @@ public class PrintersService(
                 Notes = p.Notes,
 
                 // Export hardware specs from Printer instance (populated at creation time from PrinterModel)
+                // NozzleDiameter and MaxHotendTemp are derived from the primary toolhead's component models
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
@@ -986,8 +987,7 @@ public class PrintersService(
                     HasEnclosure = p.HasEnclosure,
                     MultiMaterial = p.MultiMaterial,
                     SupportsAutoLeveling = p.SupportsAutoLeveling,
-                    NumberOfExtruders = p.Toolheads?.Count ?? 1,
-                    MaxHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MaxHotendTemp,
+                    MaxHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.HotendModel?.MaxTemp,
                     MaxBedTemp = p.MaxBedTemp,
                     CurrentMaterial = p.CurrentMaterial,
                     CurrentSpoolId = p.CurrentSpoolId,
@@ -1054,9 +1054,6 @@ public class PrintersService(
                 ["name"] = t.Name,
                 ["index"] = t.Index,
                 ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
-                ["maxHotendTemp"] = t.MaxHotendTemp,
-                ["maxFlowRate"] = t.MaxFlowRate,
-                ["toolheadType"] = t.ToolheadType,
 
                 // Component model references - nozzle type comes from NozzleModel.NozzleType
                 ["hotendModelId"] = t.HotendModelId,
@@ -1297,9 +1294,6 @@ public class PrintersService(
                     PrinterId = p.Id,
                     Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
                     Index = toolheadDto.Index,
-                    MaxHotendTemp = toolheadDto.MaxHotendTemp ?? primaryModelToolhead?.MaxHotendTemp,
-                    MaxFlowRate = toolheadDto.MaxFlowRate ?? primaryModelToolhead?.MaxFlowRate,
-                    ToolheadType = toolheadDto.ToolheadType.HasValue ? (int)toolheadDto.ToolheadType.Value : null,
 
                     // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = toolheadDto.HotendModelId ?? primaryModelToolhead?.HotendModelId,
@@ -1317,7 +1311,12 @@ public class PrintersService(
         else
         {
             // Create toolheads based on model template or defaults
-            int numExtruders = modelTemplate?.NumberOfExtruders ?? 1;
+            int numExtruders = modelTemplate?.Toolheads?.Length ?? 1;
+            if (numExtruders < 1)
+            {
+                numExtruders = 1;
+            }
+
             for (int i = 0; i < numExtruders; i++)
             {
                 // Try to find a matching toolhead template by index, otherwise use primary
@@ -1330,8 +1329,6 @@ public class PrintersService(
                     Name = templateToolhead?.Name ?? $"Extruder {i + 1}",
                     Index = i,
                     IsPrimary = templateToolhead?.IsPrimary ?? (i == 0),
-                    MaxHotendTemp = templateToolhead?.MaxHotendTemp,
-                    MaxFlowRate = templateToolhead?.MaxFlowRate,
 
                     // Component model references - nozzle type is derived from NozzleModelId
                     HotendModelId = templateToolhead?.HotendModelId,
@@ -1464,13 +1461,6 @@ public class PrintersService(
                 if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
                 {
                     toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
-                    toolhead.UpdatedAt = DateTime.UtcNow;
-                    updated = true;
-                }
-
-                if (matchingTemplate?.MaxHotendTemp != null && (forceOverwrite || toolhead.MaxHotendTemp == null))
-                {
-                    toolhead.MaxHotendTemp = matchingTemplate.MaxHotendTemp;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }

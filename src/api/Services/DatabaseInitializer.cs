@@ -159,7 +159,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     // === BEGIN: Seeding logic merged from DatabaseSeeder ===
     public virtual async Task SeedAllAsync()
     {
-
         // Seed these from existing methods
         await SeedAuthenticationDataAsync();
         await SeedRootFoldersAsync();
@@ -197,6 +196,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         // await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
 
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedCatalogDataAsync()
     {
         try
@@ -349,7 +349,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         HasHeatedBed = hasBed,
                         HasEnclosure = hasEnclosure,
                         MultiMaterial = multiMaterial,
-                        NumberOfExtruders = extruders,
                         SupportsAutoLeveling = autoLevel,
                         MaxBedTemp = maxBed,
                         MaxPrintSpeed = maxSpeed
@@ -589,6 +588,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
     }
 
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedFilamentTypesAsync()
     {
         // (Name, HotendTemp, BedTemp, IsAbrasive, NeedsEnclosure)
@@ -689,6 +689,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     /// Seeds component model definitions (hotends, extruders, toolheads, nozzles) with manufacturer references.
     /// These are extensible tables that allow adding new components without code changes.
     /// </summary>
+#pragma warning disable S1144 // Unused private method - kept as fallback if YAML seeding fails
     private async Task SeedComponentModelsAsync()
     {
         try
@@ -1328,7 +1329,8 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
 
             foreach (PrinterModel model in modelsWithoutToolheads)
             {
-                int numExtruders = model.NumberOfExtruders;
+                // Default to 1 toolhead if not specified (number of extruders is now computed from toolheads)
+                int numExtruders = model.Toolheads?.Count > 0 ? model.Toolheads.Count : 1;
                 string modelName = model.Name;
                 string mfgName = model.Manufacturer?.Name ?? "Unknown";
                 Guid mfgId = model.ManufacturerId;
@@ -1539,8 +1541,6 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         Name = numExtruders == 1 ? "Primary" : $"Extruder {i + 1}",
                         Index = i,
                         IsPrimary = i == 0,
-                        MaxHotendTemp = model.MaxBedTemp,  // Use bed temp as conservative proxy; user can override
-                        MaxFlowRate = null,    // Will be populated when user specifies
                         HotendModelId = hotendId,
                         ExtruderModelId = extruderId,
                         ToolheadModelDefId = toolheadId,

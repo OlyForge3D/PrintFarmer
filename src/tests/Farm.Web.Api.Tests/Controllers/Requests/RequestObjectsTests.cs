@@ -317,7 +317,6 @@ public class UpdateModelRequestTests
             HasHeatedBed: true,
             HasEnclosure: false,
             MultiMaterial: false,
-            NumberOfExtruders: 1,
             SupportsAutoLeveling: true,
             MaxBedTemp: 120,
             MaxPrintSpeed: 200);
@@ -331,7 +330,6 @@ public class UpdateModelRequestTests
         request.SupportedFilamentTypeIds.Should().HaveCount(2);
         request.HasHeatedBed.Should().BeTrue();
         request.HasEnclosure.Should().BeFalse();
-        request.NumberOfExtruders.Should().Be(1);
         request.MaxBedTemp.Should().Be(120);
         request.MaxPrintSpeed.Should().Be(200);
     }
@@ -386,7 +384,6 @@ public class UpdateModelRequestTests
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
-            NumberOfExtruders: null,
             SupportsAutoLeveling: null,
             MaxBedTemp: 140,
             MaxPrintSpeed: 250);
@@ -438,7 +435,6 @@ public class UpdateModelRequestTests
             HasHeatedBed: null,
             HasEnclosure: null,
             MultiMaterial: null,
-            NumberOfExtruders: null,
             SupportsAutoLeveling: null,
             MaxBedTemp: 0,
             MaxPrintSpeed: 0);

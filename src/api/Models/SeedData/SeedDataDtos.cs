@@ -36,8 +36,6 @@ public class PrinterModelSeedDto
 
     public bool MultiMaterial { get; set; }
 
-    public int NumberOfExtruders { get; set; } = 1;
-
     public int? MinHotendTemp { get; set; }
 
     public int? MaxHotendTemp { get; set; }
@@ -129,6 +127,11 @@ public class HotendModelSeedDto
     public int MaxTemp { get; set; } = 300;
 
     public bool IsHighFlow { get; set; }
+
+    /// <summary>
+    /// Maximum volumetric flow rate in mm³/s.
+    /// </summary>
+    public double? MaxFlowRate { get; set; }
 
     public string? Description { get; set; }
 

@@ -163,7 +163,6 @@ public class DataSeedService : IDataSeedService
                         HasEnclosure = dto.HasEnclosure,
                         SupportsAutoLeveling = dto.SupportsAutoLeveling,
                         MultiMaterial = dto.MultiMaterial,
-                        NumberOfExtruders = dto.NumberOfExtruders,
                         MaxBedTemp = dto.MaxBedTemp,
                         MaxPrintSpeed = dto.MaxPrintSpeed
                     };
@@ -459,6 +458,7 @@ public class DataSeedService : IDataSeedService
                     ManufacturerId = manufacturerId,
                     MaxTemp = dto.MaxTemp,
                     IsHighFlow = dto.IsHighFlow,
+                    MaxFlowRate = dto.MaxFlowRate,
                     Description = dto.Description,
                     Url = dto.Url
                 });

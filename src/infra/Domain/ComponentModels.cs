@@ -81,6 +81,11 @@ public class HotendModelDefinition : HardwareModel
     public bool IsHighFlow { get; set; }
 
     /// <summary>
+    /// Maximum volumetric flow rate in mm³/s.
+    /// </summary>
+    public double? MaxFlowRate { get; set; }
+
+    /// <summary>
     /// The nozzle interface type this hotend uses (determines compatible nozzles).
     /// </summary>
     public NozzleInterfaceType NozzleInterface { get; set; } = NozzleInterfaceType.V6;

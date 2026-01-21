@@ -35,8 +35,6 @@ public class PrinterModel
 
     public bool MultiMaterial { get; set; }
 
-    public int NumberOfExtruders { get; set; } = 1;
-
     public bool SupportsAutoLeveling { get; set; }
 
     public int? MaxBedTemp { get; set; } = 120;

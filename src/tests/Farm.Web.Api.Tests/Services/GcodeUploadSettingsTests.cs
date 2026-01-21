@@ -49,7 +49,7 @@ public class PersistedGcodeUploadSettingsAdapterTests
         // Arrange - when settings service returns null, adapter uses defaults
         _mockSettingsService
             .Setup(s => s.Get<GcodeUploadSettings>())
-            .Returns((GcodeUploadSettings?)null);
+            .Returns((GcodeUploadSettings?)null!);
 
         // Act
         IReadOnlyCollection<string> extensions = _adapter.GetAllowedExtensions();

@@ -262,9 +262,9 @@ export function PrinterModelCard({
               📐 Auto-Level
             </Badge>
           )}
-          {(model.numberOfExtruders ?? 0) > 1 && (
+          {toolheadCount > 1 && (
             <Badge variant="warning" size="sm">
-              {model.numberOfExtruders} Extruders
+              {toolheadCount} Toolheads
             </Badge>
           )}
         </div>
