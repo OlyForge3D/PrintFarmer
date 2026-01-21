@@ -29,6 +29,7 @@ using Farm.Web.Api.Infrastructure.Database;
 using Farm.Web.Api.Infrastructure.Filters;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Temp;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Artifacts;
@@ -365,8 +366,13 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
 // Retry Service (Phase 4.4)
 builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infrastructure.Services.RetryService>();
 
-// Maintenance Module - Printer Statistics Repository
+// Maintenance Module - Repositories
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceScheduleRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceScheduleRepository>();
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
+
+// Maintenance Module - Services
+builder.Services.AddScoped<Farm.Web.Api.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
 
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
@@ -439,6 +445,10 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerClean
 // Maintenance Module - Print Statistics Sync Service
 builder.Services.Configure<Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.PrintStatsSyncSettings.SectionName));
 builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
+
+// Maintenance Module - Maintenance Alert Engine
+builder.Services.Configure<Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceAlertHostedService>();
 
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
@@ -716,6 +726,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
+app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
 // Slicer registry events hub (worker registration, heartbeat, deregistration)
 // app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
