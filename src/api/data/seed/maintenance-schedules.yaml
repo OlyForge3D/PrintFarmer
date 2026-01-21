@@ -1,0 +1,237 @@
+# ============================================================================
+# Default Maintenance Schedules
+# Model-wide maintenance schedules seeded into database on first run
+# ============================================================================
+#
+# Maintenance Schedule Fields:
+# - taskName: Display name of the maintenance task
+# - description: Detailed description of what needs to be done
+# - component: Component being maintained (Hotend, Nozzle, Bed, Belts, etc.)
+# - intervalHours: Hour-based interval (e.g., 1000 hours for hotend replacement)
+# - intervalDays: Day-based interval (e.g., 90 days for filter replacement)
+# - estimatedDurationMinutes: How long the task typically takes
+# - isActive: Whether the schedule is enabled
+# - printerModel: Optional - if specified, only applies to this model
+# - manufacturer: Optional - if specified, only applies to this manufacturer
+#
+# Note: If both intervalHours and intervalDays are null, schedule is disabled
+# If both are specified, system will use whichever threshold is reached first
+#
+# ============================================================================
+
+# Universal Maintenance Tasks (apply to all printer types)
+# ============================================================================
+
+- taskName: "Hotend Replacement"
+  description: "Replace the hotend assembly. Signs include inconsistent extrusion, temperature fluctuations, or visible wear/damage to heating block or heat break."
+  component: "Hotend"
+  intervalHours: 1500
+  intervalDays: null
+  estimatedDurationMinutes: 45
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Nozzle Replacement"
+  description: "Replace the nozzle. Required when experiencing clogs, poor layer adhesion, or visible nozzle wear/deformation. More frequent for abrasive filaments."
+  component: "Nozzle"
+  intervalHours: 750
+  intervalDays: null
+  estimatedDurationMinutes: 15
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Bed Surface Cleaning"
+  description: "Deep clean the print bed surface. Remove residue, oils, and buildup using isopropyl alcohol and appropriate cleaning solution for bed type (PEI, glass, etc.)."
+  component: "Bed"
+  intervalHours: 100
+  intervalDays: null
+  estimatedDurationMinutes: 10
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Bed Leveling & Calibration"
+  description: "Perform manual or automatic bed leveling/tramming. Ensure first layer consistency across entire build surface. Adjust Z-offset if needed."
+  component: "Bed"
+  intervalHours: 250
+  intervalDays: null
+  estimatedDurationMinutes: 20
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Belt Tension Check"
+  description: "Inspect and adjust belt tension on X/Y/Z axes. Belts should have slight tension without being overly tight. Check for fraying or wear."
+  component: "Belts"
+  intervalHours: 500
+  intervalDays: null
+  estimatedDurationMinutes: 15
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Lubrication - Linear Rails/Rods"
+  description: "Lubricate linear rails, rods, and lead screws. Use appropriate lubricant (PTFE-based for rails, white lithium grease for lead screws). Remove old lubricant first."
+  component: "Motion System"
+  intervalHours: 200
+  intervalDays: null
+  estimatedDurationMinutes: 30
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Cooling Fan Inspection"
+  description: "Inspect part cooling fans, hotend fan, and electronics cooling fans. Clean dust/debris, check for bearing noise, verify proper airflow. Replace if failing."
+  component: "Cooling System"
+  intervalHours: 500
+  intervalDays: null
+  estimatedDurationMinutes: 20
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Power Supply Inspection"
+  description: "Inspect power supply connections, check for loose wires, verify proper ventilation. Listen for abnormal fan noise. Check voltage output if issues suspected."
+  component: "Electronics"
+  intervalHours: 1000
+  intervalDays: null
+  estimatedDurationMinutes: 15
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Firmware Update Check"
+  description: "Check for available firmware updates from manufacturer. Review changelog for bug fixes, new features, or critical updates. Backup settings before updating."
+  component: "Software"
+  intervalHours: null
+  intervalDays: 90
+  estimatedDurationMinutes: 30
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "HEPA/Carbon Filter Replacement"
+  description: "Replace HEPA and/or activated carbon filters in enclosure or air filtration system. Critical for removing VOCs and particulates, especially with ABS/ASA printing."
+  component: "Air Filtration"
+  intervalHours: null
+  intervalDays: 180
+  estimatedDurationMinutes: 10
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Extruder Gear Cleaning"
+  description: "Clean extruder drive gear/hobbed bolt. Remove filament dust and debris that can cause inconsistent extrusion. Inspect for wear on gear teeth."
+  component: "Extruder"
+  intervalHours: 250
+  intervalDays: null
+  estimatedDurationMinutes: 10
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+- taskName: "Full Mechanical Inspection"
+  description: "Comprehensive inspection of all mechanical components. Check frame for loose bolts, inspect wiring for damage, verify all connections are secure. Look for signs of wear."
+  component: "Frame"
+  intervalHours: null
+  intervalDays: 180
+  estimatedDurationMinutes: 60
+  isActive: true
+  printerModel: null
+  manufacturer: null
+
+# ============================================================================
+# Manufacturer-Specific Maintenance Tasks
+# ============================================================================
+
+# Prusa-specific tasks
+- taskName: "Prusa Bondtech Gear Inspection"
+  description: "Inspect Bondtech extruder gears for wear. Prusa printers use dual-drive gears that can wear over time, especially with abrasive filaments."
+  component: "Extruder"
+  intervalHours: 1000
+  intervalDays: null
+  estimatedDurationMinutes: 15
+  isActive: true
+  printerModel: null
+  manufacturer: "Prusa Research"
+
+- taskName: "Prusa Steel Sheet Replacement"
+  description: "Replace PEI-coated steel sheet when surface shows significant wear, scratches, or loss of adhesion. Have spare sheet available."
+  component: "Bed"
+  intervalHours: 2000
+  intervalDays: null
+  estimatedDurationMinutes: 5
+  isActive: true
+  printerModel: null
+  manufacturer: "Prusa Research"
+
+# Bambu Lab specific tasks
+- taskName: "Bambu Lab AMS Maintenance"
+  description: "Clean AMS (Automatic Material System) filament path, inspect PTFE tubes for wear, lubricate AMS gears if needed. Check filament sensors for dust."
+  component: "AMS"
+  intervalHours: 500
+  intervalDays: null
+  estimatedDurationMinutes: 30
+  isActive: true
+  printerModel: null
+  manufacturer: "Bambu Lab"
+
+- taskName: "Bambu Lab Carbon Filter Replacement"
+  description: "Replace activated carbon filter in Bambu Lab enclosure. Critical for ABS/ASA printing to remove VOCs."
+  component: "Air Filtration"
+  intervalHours: null
+  intervalDays: 90
+  estimatedDurationMinutes: 5
+  isActive: true
+  printerModel: null
+  manufacturer: "Bambu Lab"
+
+# Voron-specific tasks (typically CoreXY with higher speeds)
+- taskName: "Voron High-Speed Belt Inspection"
+  description: "Inspect Gates 2GT belts for wear/fraying. CoreXY printers with high acceleration put more stress on belts. Check belt clips/tensioners."
+  component: "Belts"
+  intervalHours: 300
+  intervalDays: null
+  estimatedDurationMinutes: 20
+  isActive: true
+  printerModel: null
+  manufacturer: "Voron Design"
+
+- taskName: "Voron MGN Rail Lubrication"
+  description: "Lubricate MGN linear rails with PTFE-based lubricant. Voron printers use precision rails that require regular maintenance for smooth motion."
+  component: "Motion System"
+  intervalHours: 150
+  intervalDays: null
+  estimatedDurationMinutes: 45
+  isActive: true
+  printerModel: null
+  manufacturer: "Voron Design"
+
+# ============================================================================
+# Model-Specific Maintenance Tasks (Examples)
+# ============================================================================
+
+# These would be expanded based on specific printer models in the database
+# Format: manufacturer/model combinations
+
+- taskName: "Prusa MK4 Nextruder Belt Tension"
+  description: "Check Nextruder belt tension. The MK4's new extruder design requires specific belt tension for optimal performance."
+  component: "Extruder"
+  intervalHours: 400
+  intervalDays: null
+  estimatedDurationMinutes: 10
+  isActive: true
+  printerModel: "Prusa MK4"
+  manufacturer: "Prusa Research"
+
+- taskName: "Prusa XL Tool Dock Alignment"
+  description: "Verify tool dock alignment and parking accuracy. Critical for multi-tool printing on Prusa XL. Check magnets and electrical contacts."
+  component: "Toolchanger"
+  intervalHours: 500
+  intervalDays: null
+  estimatedDurationMinutes: 30
+  isActive: true
+  printerModel: "Prusa XL"
+  manufacturer: "Prusa Research"

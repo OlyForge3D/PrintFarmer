@@ -36,6 +36,7 @@ public class DataSeedService : IDataSeedService
         await SeedFilamentTypesAsync();
         await SeedPrinterModelsAsync();
         await SeedComponentModelsAsync();
+        await SeedMaintenanceSchedulesAsync();
 
         _logger.LogInformation("[SeedData] Completed seed data load from YAML files");
     }
@@ -500,5 +501,85 @@ public class DataSeedService : IDataSeedService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    public async Task SeedMaintenanceSchedulesAsync()
+    {
+        try
+        {
+            List<MaintenanceScheduleSeedDto> schedulesData = await _yamlReader.ReadMaintenanceSchedulesAsync();
+
+            if (schedulesData.Count == 0)
+            {
+                _logger.LogInformation("[SeedData] No maintenance schedules found in YAML, skipping");
+                return;
+            }
+
+            _logger.LogInformation($"[SeedData] Seeding {schedulesData.Count} maintenance schedules from YAML");
+
+            // Build manufacturer lookup
+            Dictionary<string, Guid> manufacturers = await _context.Manufacturers
+                .AsNoTracking()
+                .ToDictionaryAsync(m => m.Name, m => m.Id);
+
+            // Build printer model lookup
+            Dictionary<string, Guid> printerModels = await _context.PrinterModels
+                .AsNoTracking()
+                .ToDictionaryAsync(pm => pm.Name, pm => pm.Id);
+
+            foreach (MaintenanceScheduleSeedDto dto in schedulesData)
+            {
+                // Resolve optional FK references
+                Guid? printerId = null;
+                Guid? printerModelId = null;
+                Guid? manufacturerId = null;
+
+                if (!string.IsNullOrEmpty(dto.PrinterModel) && printerModels.TryGetValue(dto.PrinterModel, out Guid modelId))
+                {
+                    printerModelId = modelId;
+                }
+
+                if (!string.IsNullOrEmpty(dto.Manufacturer) && manufacturers.TryGetValue(dto.Manufacturer, out Guid mfgId))
+                {
+                    manufacturerId = mfgId;
+                }
+
+                // Check if schedule already exists (match on TaskName + optional FKs)
+                bool exists = await _context.MaintenanceSchedules
+                    .AnyAsync(ms =>
+                        ms.TaskName == dto.TaskName &&
+                        ms.PrinterId == printerId &&
+                        ms.PrinterModelId == printerModelId &&
+                        ms.ManufacturerId == manufacturerId);
+
+                if (!exists)
+                {
+                    _context.MaintenanceSchedules.Add(new MaintenanceSchedule
+                    {
+                        Id = Guid.NewGuid(),
+                        TaskName = dto.TaskName,
+                        Description = dto.Description,
+                        Component = dto.Component,
+                        IntervalHours = dto.IntervalHours,
+                        IntervalDays = dto.IntervalDays,
+                        EstimatedDurationMinutes = dto.EstimatedDurationMinutes,
+                        IsActive = dto.IsActive,
+                        PrinterId = printerId,
+                        PrinterModelId = printerModelId,
+                        ManufacturerId = manufacturerId,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Maintenance schedules seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding maintenance schedules: {Message}", ex.Message);
+            throw;
+        }
     }
 }

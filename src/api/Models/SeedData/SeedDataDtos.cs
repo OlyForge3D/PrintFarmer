@@ -196,3 +196,30 @@ public class NozzleModelSeedDto
 
     public string? Url { get; set; }
 }
+
+/// <summary>
+/// DTO for maintenance schedule seed data from YAML
+/// </summary>
+public class MaintenanceScheduleSeedDto
+{
+    [Required]
+    public string TaskName { get; set; } = string.Empty;
+
+    [Required]
+    public string Description { get; set; } = string.Empty;
+
+    [Required]
+    public string Component { get; set; } = string.Empty;
+
+    public double? IntervalHours { get; set; }
+
+    public int? IntervalDays { get; set; }
+
+    public int EstimatedDurationMinutes { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public string? PrinterModel { get; set; }
+
+    public string? Manufacturer { get; set; }
+}
