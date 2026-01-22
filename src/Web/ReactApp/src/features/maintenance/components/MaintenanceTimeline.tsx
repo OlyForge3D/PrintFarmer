@@ -236,7 +236,6 @@ export function MaintenanceTimeline({
 
   // Calculate visible tasks count
   const totalTasks = tasks.length;
-  const visibleTasks = showAll ? tasks : tasks.slice(0, maxVisible);
 
   if (isLoading) {
     return (

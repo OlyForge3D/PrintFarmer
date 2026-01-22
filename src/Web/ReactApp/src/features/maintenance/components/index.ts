@@ -33,3 +33,8 @@ export { MaintenanceTrendsChart } from './MaintenanceTrendsChart';
 export { ComponentLifespanChart } from './ComponentLifespanChart';
 export { MaintenanceCostAnalysis } from './MaintenanceCostAnalysis';
 export { PrinterUptimeChart } from './PrinterUptimeChart';
+export { FleetStatisticsTable } from './FleetStatisticsTable';
+export type { FleetStatisticsTableProps } from './FleetStatisticsTable';
+
+export { LogMaintenanceModal } from './LogMaintenanceModal';
+export { CreateScheduleModal } from './CreateScheduleModal';

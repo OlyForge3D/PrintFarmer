@@ -16,7 +16,7 @@ import { EditModelModal } from '@/features/models3d/components/EditModelModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { apiClient } from '@/services/api';
 import { CatalogContext, type PrinterModelDto, type ManufacturerDto } from '@/types/api';
-import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -331,6 +331,14 @@ export function PrinterModelsCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"

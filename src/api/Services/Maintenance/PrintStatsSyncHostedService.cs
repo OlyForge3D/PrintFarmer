@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Web.Api.Services.Background;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,22 +21,37 @@ namespace Farm.Web.Api.Services.Maintenance;
 public class PrintStatsSyncHostedService(
     IServiceProvider serviceProvider,
     ILogger<PrintStatsSyncHostedService> logger,
-    IOptionsMonitor<PrintStatsSyncSettings> settingsMonitor) : BackgroundService
+    IOptionsMonitor<PrintStatsSyncSettings> settingsMonitor,
+    IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
+    private const string ServiceId = "PrintStatsSyncService";
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<PrintStatsSyncHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<PrintStatsSyncSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+    private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         PrintStatsSyncSettings settings = _settingsMonitor.CurrentValue;
 
+        // Register with the service monitor
+        _serviceMonitor.Register(
+            ServiceId,
+            "Print Statistics Sync",
+            "Synchronizes printer statistics from backends for maintenance tracking",
+            "Maintenance",
+            "pf-icon-stats",
+            settings.IntervalSeconds);
+        _serviceMonitor.ReportStarted(ServiceId);
+
         if (!settings.Enabled)
         {
             _logger.LogInformation("Print statistics sync service is disabled");
+            _serviceMonitor.ReportEnabled(ServiceId, false);
             return;
         }
 
+        _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
             "Print statistics sync service started. Interval: {Interval}s, Max printers per iteration: {MaxPrinters}",
             settings.IntervalSeconds,
@@ -56,10 +72,13 @@ public class PrintStatsSyncHostedService(
                 if (!settings.Enabled)
                 {
                     _logger.LogInformation("Print statistics sync disabled, pausing service");
+                    _serviceMonitor.ReportEnabled(ServiceId, false);
                     continue;
                 }
 
+                _serviceMonitor.ReportEnabled(ServiceId, true);
                 await SyncPrinterStatisticsAsync(settings, stoppingToken);
+                _serviceMonitor.ReportSuccess(ServiceId, settings.IntervalSeconds);
             }
             catch (OperationCanceledException)
             {
@@ -69,8 +88,11 @@ public class PrintStatsSyncHostedService(
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during print statistics sync");
+                _serviceMonitor.ReportError(ServiceId, ex.Message);
             }
         }
+
+        _serviceMonitor.ReportStopped(ServiceId);
     }
 
     private async Task SyncPrinterStatisticsAsync(PrintStatsSyncSettings settings, CancellationToken ct)
@@ -201,9 +223,7 @@ public class PrintStatsSyncHostedService(
                     return false;
 
                 case PrinterBackend.OctoPrint:
-                    // OctoPrint statistics would come from plugin data or PrintFarmer history
-                    _logger.LogDebug("OctoPrint printer '{Name}' - using PrintFarmer job history only", printer.Name);
-                    return false;
+                    return await SyncOctoPrintStatisticsAsync(printer, stats, serviceProvider, settings, ct);
 
                 case PrinterBackend.SDCP:
                     // SDCP statistics would come from PrintFarmer job history
@@ -240,14 +260,23 @@ public class PrintStatsSyncHostedService(
             using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(settings.ApiTimeoutSeconds));
             using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
-            // Get history totals from Moonraker
+            _logger.LogInformation(
+                "Fetching history totals from Moonraker for printer '{Name}' at {Url}",
+                printer.Name,
+                printer.BackendUrl);
+
+            // Get history totals from Moonraker using BackendUrl (includes port)
             HistoryTotals? historyTotals = await moonrakerClient.GetHistoryTotalsAsync(
-                printer.ServerUrl,
+                printer.BackendUrl,
                 linkedCts.Token);
 
             if (historyTotals == null || historyTotals.JobTotals == null)
             {
-                _logger.LogDebug("No history totals available from Moonraker for printer '{Name}'", printer.Name);
+                _logger.LogWarning(
+                    "No history totals available from Moonraker for printer '{Name}' (historyTotals={HasTotals}, jobTotals={HasJobTotals})",
+                    printer.Name,
+                    historyTotals != null,
+                    historyTotals?.JobTotals != null);
                 return false;
             }
 
@@ -257,7 +286,7 @@ public class PrintStatsSyncHostedService(
             // Update statistics
             // Moonraker TotalTime is in seconds, convert to hours
             stats.TotalPrintHours = jobTotals.TotalPrintTime / 3600.0;
-            stats.TotalJobsCompleted = jobTotals.TotalJobs;
+            stats.TotalJobsCompleted = (int)jobTotals.TotalJobs; // Cast to int as stats expects integer
 
             // Moonraker TotalFilamentUsed is in mm, convert to grams (approximate: 1mm³ = 0.00125g for PLA at 1.75mm)
             // More accurate: for 1.75mm filament, 1mm length ≈ 0.00237g for PLA
@@ -265,8 +294,8 @@ public class PrintStatsSyncHostedService(
             stats.TotalFilamentUsedMeters = filamentMm / 1000.0; // mm to meters
             stats.TotalFilamentUsedGrams = filamentMm * 0.00237; // Approximate grams for PLA 1.75mm
 
-            _logger.LogDebug(
-                "Synced Moonraker statistics for '{Name}': {Hours}h, {Jobs} jobs, {Filament}m",
+            _logger.LogInformation(
+                "Synced Moonraker statistics for '{Name}': {Hours:F1}h, {Jobs} jobs, {Filament:F1}m filament",
                 printer.Name,
                 stats.TotalPrintHours,
                 stats.TotalJobsCompleted,
@@ -276,14 +305,86 @@ public class PrintStatsSyncHostedService(
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("Moonraker statistics sync timed out for printer '{Name}'", printer.Name);
+            _logger.LogWarning("Moonraker statistics sync timed out for printer '{Name}'", printer.Name);
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(
+            _logger.LogWarning(
                 ex,
                 "Failed to sync Moonraker statistics for printer '{Name}'",
+                printer.Name);
+            return false;
+        }
+    }
+
+    private async Task<bool> SyncOctoPrintStatisticsAsync(
+        Printer printer,
+        PrinterStatistics stats,
+        IServiceProvider serviceProvider,
+        PrintStatsSyncSettings settings,
+        CancellationToken ct)
+    {
+        try
+        {
+            IOctoPrintClient octoPrintClient = serviceProvider.GetRequiredService<IOctoPrintClient>();
+
+            // Use timeout from settings
+            using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(settings.ApiTimeoutSeconds));
+            using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            _logger.LogInformation(
+                "Fetching history totals from OctoPrint for printer '{Name}' at {Url}",
+                printer.Name,
+                printer.BackendUrl);
+
+            // Get history totals from OctoPrint using BackendUrl and ApiKey
+            HistoryTotals? historyTotals = await octoPrintClient.GetHistoryTotalsAsync(
+                printer.BackendUrl,
+                printer.ApiKey ?? "");
+
+            if (historyTotals == null || historyTotals.JobTotals == null)
+            {
+                _logger.LogWarning(
+                    "No history totals available from OctoPrint for printer '{Name}' (historyTotals={HasTotals}, jobTotals={HasJobTotals})",
+                    printer.Name,
+                    historyTotals != null,
+                    historyTotals?.JobTotals != null);
+                return false;
+            }
+
+            // Extract statistics
+            JobTotals jobTotals = historyTotals.JobTotals;
+
+            // Update statistics
+            // OctoPrint PrintDuration is in seconds, convert to hours
+            stats.TotalPrintHours = jobTotals.TotalPrintTime / 3600.0;
+            stats.TotalJobsCompleted = (int)jobTotals.TotalJobs;
+
+            // OctoPrint FilamentUsed is in mm, convert to grams (approximate for PLA 1.75mm)
+            double filamentMm = jobTotals.TotalFilamentUsed;
+            stats.TotalFilamentUsedMeters = filamentMm / 1000.0; // mm to meters
+            stats.TotalFilamentUsedGrams = filamentMm * 0.00237; // Approximate grams for PLA 1.75mm
+
+            _logger.LogInformation(
+                "Synced OctoPrint statistics for '{Name}': {Hours:F1}h, {Jobs} jobs, {Filament:F1}m filament",
+                printer.Name,
+                stats.TotalPrintHours,
+                stats.TotalJobsCompleted,
+                stats.TotalFilamentUsedMeters);
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("OctoPrint statistics sync timed out for printer '{Name}'", printer.Name);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to sync OctoPrint statistics for printer '{Name}'",
                 printer.Name);
             return false;
         }

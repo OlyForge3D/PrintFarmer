@@ -8,8 +8,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { usePrinters } from '@/common/hooks/useApi';
 import { maintenanceService } from '@/services/maintenanceService';
-import { addDays, addHours, differenceInDays, differenceInHours, isPast, isFuture, isToday } from 'date-fns';
-import type { MaintenanceSchedule, MaintenanceLog } from '@/types/maintenance';
+import { addDays, differenceInDays, isPast, isToday } from 'date-fns';
+import type { MaintenanceSchedule } from '@/types/maintenance';
 
 export interface UpcomingMaintenanceTask {
   id: string;

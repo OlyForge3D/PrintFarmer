@@ -16,7 +16,7 @@ import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type HotendModelCardData } from '@/common/components/ComponentModelCard';
 import { useHotendModels, useCreateHotendModel, useUpdateHotendModel, useDeleteHotendModel } from '@/common/hooks/useApi';
 import { CatalogContext, type HotendModelDefinition, type CreateHotendModelDto, type UpdateHotendModelDto } from '@/types/api';
-import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
@@ -143,6 +143,24 @@ export function HotendsCatalog() {
     });
     setFormErrors({});
     setEditingModel(model);
+  }, [hotendModels]);
+
+  // Clone an existing hotend model
+  const handleCloneClick = useCallback((card: HotendModelCardData) => {
+    const model = hotendModels?.find(m => m.id === card.id);
+    if (!model) return;
+
+    setFormState({
+      name: `${model.name} - Copy`,
+      manufacturerId: model.manufacturerId,
+      manufacturerName: model.manufacturerName,
+      maxTemp: model.maxTemp?.toString() ?? '',
+      isHighFlow: model.isHighFlow,
+      description: model.description ?? '',
+      url: model.url ?? '',
+    });
+    setFormErrors({});
+    setIsAddModalOpen(true);
   }, [hotendModels]);
 
   // Open delete confirmation
@@ -314,6 +332,7 @@ export function HotendsCatalog() {
               key={card.id}
               model={card}
               onEdit={handleEditClick}
+              onClone={handleCloneClick}
               onDelete={handleDeleteClick}
               isLoading={deleteMutation.isPending && deletingModel?.id === card.id}
             />
@@ -335,6 +354,14 @@ export function HotendsCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"

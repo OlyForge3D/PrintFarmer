@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Web.Api.Services.Background;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -11,22 +12,37 @@ namespace Farm.Web.Api.Services.Workers;
 public class StaleWorkerCleanupHostedService(
     IServiceProvider serviceProvider,
     ILogger<StaleWorkerCleanupHostedService> logger,
-    IOptionsMonitor<StaleWorkerCleanupSettings> settingsMonitor) : BackgroundService
+    IOptionsMonitor<StaleWorkerCleanupSettings> settingsMonitor,
+    IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
+    private const string ServiceId = "StaleWorkerCleanupService";
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<StaleWorkerCleanupHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<StaleWorkerCleanupSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+    private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         StaleWorkerCleanupSettings settings = _settingsMonitor.CurrentValue;
 
+        // Register with the service monitor
+        _serviceMonitor.Register(
+            ServiceId,
+            "Stale Worker Cleanup",
+            "Removes inactive slicer workers that haven't sent heartbeats",
+            "Slicing",
+            "pf-icon-worker",
+            settings.IntervalSeconds);
+        _serviceMonitor.ReportStarted(ServiceId);
+
         if (!settings.Enabled)
         {
             _logger.LogInformation("Stale worker cleanup is disabled");
+            _serviceMonitor.ReportEnabled(ServiceId, false);
             return;
         }
 
+        _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
             "Stale worker cleanup service started. Interval: {Interval}s, Stale threshold: {Threshold}min, AutoDelete: {AutoDelete}",
             settings.IntervalSeconds,
@@ -48,10 +64,13 @@ public class StaleWorkerCleanupHostedService(
                 if (!settings.Enabled)
                 {
                     _logger.LogInformation("Stale worker cleanup disabled, pausing cleanup service");
+                    _serviceMonitor.ReportEnabled(ServiceId, false);
                     continue;
                 }
 
+                _serviceMonitor.ReportEnabled(ServiceId, true);
                 await CleanupStaleWorkersAsync(settings);
+                _serviceMonitor.ReportSuccess(ServiceId, settings.IntervalSeconds);
             }
             catch (OperationCanceledException)
             {
@@ -61,8 +80,11 @@ public class StaleWorkerCleanupHostedService(
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during stale worker cleanup");
+                _serviceMonitor.ReportError(ServiceId, ex.Message);
             }
         }
+
+        _serviceMonitor.ReportStopped(ServiceId);
     }
 
     private async Task CleanupStaleWorkersAsync(StaleWorkerCleanupSettings settings)

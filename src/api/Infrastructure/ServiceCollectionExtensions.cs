@@ -651,6 +651,9 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterBackgroundServices(IServiceCollection services, bool disableBackgroundServices)
     {
+        // Background service monitor - always register as it's used for status reporting
+        _ = services.AddSingleton<Services.Background.IBackgroundServiceMonitor, Services.Background.BackgroundServiceMonitor>();
+
         if (!disableBackgroundServices)
         {
             // System log cleanup (common service, not plugin-specific)

@@ -9,6 +9,7 @@ import type {
   MaintenanceLog,
   MaintenanceSchedule,
   PrinterStatistics,
+  FleetPrinterStatistics,
   AcknowledgeAlertRequest,
   DismissAlertRequest,
   ResolveAlertRequest,
@@ -251,6 +252,15 @@ export class MaintenanceService {
    */
   async getPrinterStatistics(printerId: string): Promise<PrinterStatistics> {
     const response = await apiClient.get<PrinterStatistics>(`/maintenance/printers/${printerId}/statistics`);
+    return response.data;
+  }
+
+  /**
+   * Gets fleet-wide statistics for all printers with maintenance projections.
+   * Includes days until next maintenance and next maintenance task.
+   */
+  async getFleetStatistics(): Promise<FleetPrinterStatistics[]> {
+    const response = await apiClient.get<FleetPrinterStatistics[]>('/maintenance/statistics/fleet');
     return response.data;
   }
 

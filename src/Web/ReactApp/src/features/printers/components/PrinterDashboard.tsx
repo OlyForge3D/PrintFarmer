@@ -5,6 +5,7 @@ import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircle
 import { DetailedSystemHealth } from '@/features/printers/components/SystemHealth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
+import { BackgroundServicesWidget } from '@/features/admin/components';
 
 interface StatsCardProps {
   title: string;
@@ -211,8 +212,9 @@ export const PrinterDashboard: React.FC = () => {
               <MaintenanceOverviewWidget maxUpcoming={3} />
             </div>
 
-            {/* System Health */}
-            <div className="mt-8">
+            {/* System Health and Services */}
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <BackgroundServicesWidget maxServices={5} />
               <DetailedSystemHealth />
             </div>
           </div>

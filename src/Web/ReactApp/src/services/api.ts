@@ -128,6 +128,32 @@ export class ApiClient {
     await this.client.post("/settings", settings);
   }
 
+  // ========== Background Services API ==========
+
+  /**
+   * Get status of all background services
+   */
+  async getBackgroundServices(): Promise<import("@/types/api").BackgroundServiceStatus[]> {
+    const res = await this.client.get("/services");
+    return res.data;
+  }
+
+  /**
+   * Get summary of background services status
+   */
+  async getBackgroundServicesSummary(): Promise<import("@/types/api").BackgroundServicesSummary> {
+    const res = await this.client.get("/services/summary");
+    return res.data;
+  }
+
+  /**
+   * Get status of a specific background service
+   */
+  async getBackgroundServiceStatus(serviceId: string): Promise<import("@/types/api").BackgroundServiceStatus> {
+    const res = await this.client.get(`/services/${serviceId}`);
+    return res.data;
+  }
+
   private client: AxiosInstance;
 
   constructor() {
@@ -2376,10 +2402,12 @@ export class ApiClient {
   }
 
   /**
-   * Set printer maintenance
+   * Set printer maintenance mode
+   * @param printerId - The printer ID
+   * @param inMaintenance - Boolean indicating if printer should be in maintenance mode
    */
-  async setPrinterMaintenance(printerId: string, maintenanceData: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.put(`/printers/${printerId}/maintenance`, maintenanceData);
+  async setPrinterMaintenance(printerId: string, inMaintenance: boolean): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/printers/${printerId}/maintenance`, inMaintenance);
     return response.data;
   }
 

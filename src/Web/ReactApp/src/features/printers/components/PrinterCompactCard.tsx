@@ -1,12 +1,33 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Printer } from '@/types/api';
-import { EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { EditIcon, DeleteIcon, ClockIcon, CheckCircleIcon, PackageIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { maintenanceService } from '@/services/maintenanceService';
 
 interface PrinterCompactCardProps {
   printer: Printer;
   onEdit: (printer: Printer) => void;
   onDelete: (printer: Printer) => void;
+}
+
+/**
+ * Formats hours into a human-readable string (e.g., "12.5h" or "1,234h")
+ */
+function formatHours(hours: number | undefined | null): string {
+  const h = hours ?? 0;
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 100) return `${h.toFixed(1)}h`;
+  return `${Math.round(h).toLocaleString()}h`;
+}
+
+/**
+ * Formats filament usage (grams or kg)
+ */
+function formatFilament(grams: number | undefined | null): string {
+  const g = grams ?? 0;
+  if (g < 1000) return `${Math.round(g)}g`;
+  return `${(g / 1000).toFixed(1)}kg`;
 }
 
 export function PrinterCompactCard({
@@ -18,6 +39,16 @@ export function PrinterCompactCard({
   const isOnline = p.isOnline ?? false;
   const state = p.state ?? '';
   const isPrinting = state.toLowerCase().includes('printing');
+
+  // Fetch printer statistics (cached, stale time 5 minutes)
+  const { data: stats } = useQuery({
+    queryKey: ['printerStatistics', p.id],
+    queryFn: () => maintenanceService.getPrinterStatistics(p.id),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: false, // Don't retry on failure (printer may not have stats yet)
+  });
+
+  const hasStats = stats && (stats.totalPrintHours > 0 || stats.totalJobsCompleted > 0 || stats.totalFilamentUsedGrams > 0);
 
   return (
     <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors overflow-hidden flex flex-col min-h-0">
@@ -46,7 +77,26 @@ export function PrinterCompactCard({
         </span>
         {isPrinting && <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning text-pf-text-primary">Printing</span>}
       </div>
-      <div className="flex gap-2">
+
+      {/* Print Statistics Section */}
+      {hasStats && stats && (
+        <div className="grid grid-cols-3 gap-1 mb-3 py-2 px-1 bg-pf-bg-2 rounded text-center">
+          <div className="flex flex-col items-center" title="Total print time">
+            <ClockIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+            <span className="text-xs font-medium text-pf-text-primary">{formatHours(stats.totalPrintHours ?? 0)}</span>
+          </div>
+          <div className="flex flex-col items-center" title="Jobs completed">
+            <CheckCircleIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+            <span className="text-xs font-medium text-pf-text-primary">{(stats.totalJobsCompleted ?? 0).toLocaleString()}</span>
+          </div>
+          <div className="flex flex-col items-center" title="Filament used">
+            <PackageIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+            <span className="text-xs font-medium text-pf-text-primary">{formatFilament(stats.totalFilamentUsedGrams ?? 0)}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-auto">
         <Button
           aria-label={`Edit ${p.name}`}
           title="Edit"

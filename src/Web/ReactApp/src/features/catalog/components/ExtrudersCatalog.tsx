@@ -16,7 +16,7 @@ import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ExtruderModelCardData } from '@/common/components/ComponentModelCard';
 import { useExtruderModels, useCreateExtruderModel, useUpdateExtruderModel, useDeleteExtruderModel } from '@/common/hooks/useApi';
 import { CatalogContext, type ExtruderModelDefinition, type CreateExtruderModelDto, type UpdateExtruderModelDto } from '@/types/api';
-import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
@@ -145,6 +145,24 @@ export function ExtrudersCatalog() {
     });
     setFormErrors({});
     setEditingModel(model);
+  }, [extruderModels]);
+
+  // Clone an existing extruder model
+  const handleCloneClick = useCallback((card: ExtruderModelCardData) => {
+    const model = extruderModels?.find(m => m.id === card.id);
+    if (!model) return;
+
+    setFormState({
+      name: `${model.name} - Copy`,
+      manufacturerId: model.manufacturerId,
+      manufacturerName: model.manufacturerName,
+      gearRatio: model.gearRatio ?? '',
+      isDirectDrive: model.isDirectDrive,
+      description: model.description ?? '',
+      url: model.url ?? '',
+    });
+    setFormErrors({});
+    setIsAddModalOpen(true);
   }, [extruderModels]);
 
   // Open delete confirmation
@@ -313,6 +331,7 @@ export function ExtrudersCatalog() {
               key={card.id}
               model={card}
               onEdit={handleEditClick}
+              onClone={handleCloneClick}
               onDelete={handleDeleteClick}
               isLoading={deleteMutation.isPending && deletingModel?.id === card.id}
             />
@@ -334,6 +353,14 @@ export function ExtrudersCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"

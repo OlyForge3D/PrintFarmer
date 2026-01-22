@@ -10,7 +10,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { maintenanceService } from '@/services/maintenanceService';
 import type { MaintenanceSchedule, MaintenanceLog } from '@/types/maintenance';
-import { differenceInDays, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
 
 /**
  * Represents maintenance data for a specific component type
@@ -143,7 +143,9 @@ export function useComponentMaintenance(
   // Process data into component-centric view
   const result = useMemo(() => {
     const schedules = schedulesQuery.data || [];
-    const alerts = alertsQuery.data || [];
+    // alerts data is used to trigger re-computation when alerts change
+    const _alerts = alertsQuery.data || [];
+    void _alerts; // Suppress unused variable warning - used for dependency tracking
 
     // Group schedules by component
     const componentMap = new Map<string, {

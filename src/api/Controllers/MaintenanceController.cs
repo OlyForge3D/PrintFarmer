@@ -479,6 +479,115 @@ public class MaintenanceController(
     #region Printer Statistics
 
     /// <summary>
+    /// Gets cumulative statistics for all printers with upcoming maintenance info.
+    /// </summary>
+    [HttpGet("statistics/fleet")]
+    [ProducesResponseType(typeof(List<FleetPrinterStatisticsDto>), 200)]
+    public async Task<ActionResult<List<FleetPrinterStatisticsDto>>> GetFleetStatisticsAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Get all statistics with printer info
+            var allStats = await _statisticsRepository.GetAllAsync(ct);
+
+            // Get all printers with includes for manufacturer/model names
+            var allPrinters = await _printersService.GetAllWithIncludesAsync(ct);
+
+            // Get all schedules to calculate next maintenance date
+            var allSchedules = await _scheduleRepository.GetAllAsync(ct);
+
+            // Get recent logs to determine last performed dates (last 2 years)
+            var twoYearsAgo = DateTime.UtcNow.AddYears(-2);
+            var logs = await _logRepository.GetAllAsync(twoYearsAgo, null, ct);
+            var logsByPrinter = logs.GroupBy(l => l.PrinterId).ToDictionary(g => g.Key, g => g.ToList());
+
+            // Handle nullable PrinterId by filtering out null values
+            var schedulesByPrinter = allSchedules
+                .Where(s => s.PrinterId.HasValue)
+                .GroupBy(s => s.PrinterId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var result = new List<FleetPrinterStatisticsDto>();
+
+            foreach (var printer in allPrinters)
+            {
+                var stats = allStats.FirstOrDefault(s => s.PrinterId == printer.Id);
+                var printerSchedules = schedulesByPrinter.GetValueOrDefault(printer.Id, []);
+                var printerLogs = logsByPrinter.GetValueOrDefault(printer.Id, []);
+
+                // Calculate days until next maintenance
+                int? daysUntilNextMaintenance = null;
+                string? nextMaintenanceTask = null;
+
+                foreach (var schedule in printerSchedules.Where(s => s.IsActive))
+                {
+                    // Find the last log for this schedule's task name
+                    var lastLog = printerLogs
+                        .Where(l => l.TaskName == schedule.TaskName)
+                        .OrderByDescending(l => l.PerformedAt)
+                        .FirstOrDefault();
+
+                    DateTime lastPerformed = lastLog?.PerformedAt ?? schedule.CreatedAt;
+                    DateTime nextDue;
+
+                    if (schedule.IntervalHours.HasValue)
+                    {
+                        // For hours-based, use print hours if available
+                        double hoursSinceLastMaintenance = stats?.TotalPrintHours ?? 0;
+                        double hoursRemaining = schedule.IntervalHours.Value - hoursSinceLastMaintenance;
+
+                        // Estimate based on average 8 hours/day printing
+                        nextDue = DateTime.UtcNow.AddDays(hoursRemaining / 8.0);
+                    }
+                    else if (schedule.IntervalDays.HasValue)
+                    {
+                        // Days-based interval
+                        nextDue = lastPerformed.AddDays(schedule.IntervalDays.Value);
+                    }
+                    else
+                    {
+                        // No interval set, skip this schedule
+                        continue;
+                    }
+
+                    int daysTillDue = (int)(nextDue - DateTime.UtcNow).TotalDays;
+
+                    if (daysUntilNextMaintenance == null || daysTillDue < daysUntilNextMaintenance)
+                    {
+                        daysUntilNextMaintenance = daysTillDue;
+                        nextMaintenanceTask = schedule.TaskName;
+                    }
+                }
+
+                result.Add(new FleetPrinterStatisticsDto
+                {
+                    PrinterId = printer.Id,
+                    PrinterName = printer.Name,
+                    ManufacturerName = printer.Manufacturer?.Name,
+                    ModelName = printer.Model?.Name,
+                    IsOnline = printer.IsAvailable, // Use IsAvailable as proxy for online status
+                    InMaintenance = printer.InMaintenance,
+                    TotalPrintHours = stats?.TotalPrintHours ?? 0,
+                    TotalJobsCompleted = stats?.TotalJobsCompleted ?? 0,
+                    TotalJobsFailed = stats?.TotalJobsFailed ?? 0,
+                    TotalFilamentUsedGrams = stats?.TotalFilamentUsedGrams ?? 0,
+                    TotalFilamentUsedMeters = stats?.TotalFilamentUsedMeters ?? 0,
+                    LastSyncTime = stats?.LastSyncTime,
+                    DaysUntilNextMaintenance = daysUntilNextMaintenance,
+                    NextMaintenanceTask = nextMaintenanceTask
+                });
+            }
+
+            return Ok(result.OrderBy(r => r.DaysUntilNextMaintenance ?? int.MaxValue).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting fleet statistics");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Gets cumulative statistics for a specific printer.
     /// </summary>
     [HttpGet("printers/{printerId:guid}/statistics")]
@@ -711,6 +820,33 @@ public record UpdateMaintenanceScheduleRequest(
     bool? IsActive);
 
 public record UpdateMaintenanceModeRequest(bool InMaintenance);
+
+#endregion
+
+#region Fleet Statistics DTOs
+
+/// <summary>
+/// DTO for fleet-wide printer statistics including maintenance projections.
+/// </summary>
+public record FleetPrinterStatisticsDto
+{
+    public Guid PrinterId { get; init; }
+    public string PrinterName { get; init; } = string.Empty;
+    public string? ManufacturerName { get; init; }
+    public string? ModelName { get; init; }
+    public bool IsOnline { get; init; }
+    public bool InMaintenance { get; init; }
+    public double TotalPrintHours { get; init; }
+    public int TotalJobsCompleted { get; init; }
+    public int TotalJobsFailed { get; init; }
+    public double TotalFilamentUsedGrams { get; init; }
+    public double TotalFilamentUsedMeters { get; init; }
+    public DateTime? LastSyncTime { get; init; }
+    /// <summary>Days until next maintenance task is due (negative = overdue)</summary>
+    public int? DaysUntilNextMaintenance { get; init; }
+    /// <summary>Name of the next maintenance task due</summary>
+    public string? NextMaintenanceTask { get; init; }
+}
 
 #endregion
 

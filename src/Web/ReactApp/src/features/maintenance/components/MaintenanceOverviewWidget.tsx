@@ -9,11 +9,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
   WrenchIcon, 
-  AlertIcon, 
-  CalendarIcon,
   CheckCircleIcon,
   ChevronRightIcon,
-  ClockIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';

@@ -96,7 +96,7 @@ function DayCell({ date, tasks, isCurrentMonth, isSelected, onClick }: DayCellPr
       {/* Task indicators */}
       {hasTasks && (
         <div className="absolute bottom-1 left-1 right-1 flex flex-wrap gap-0.5 justify-center">
-          {tasks.slice(0, 3).map((task, idx) => (
+          {tasks.slice(0, 3).map((task) => (
             <span
               key={task.id}
               className={`w-1.5 h-1.5 rounded-full ${getPriorityColor(task)}`}

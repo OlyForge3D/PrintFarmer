@@ -4,10 +4,18 @@ import { CSVLink } from 'react-csv';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+interface MaintenanceReportRow {
+  date: string;
+  printer: string;
+  component: string;
+  action: string;
+  cost: number | string;
+}
+
 export const MaintenanceReport: React.FC = () => {
   const { data, isLoading, error } = useMaintenanceTrends();
-  const rows = Array.isArray(data) ? data : [];
-  const csvLinkRef = useRef<any>(null);
+  const rows: MaintenanceReportRow[] = Array.isArray(data) ? data : [];
+  const csvLinkRef = useRef<HTMLAnchorElement>(null);
 
   if (isLoading) return <div>Loading report...</div>;
   if (error) return <div>Error loading report.</div>;
@@ -24,10 +32,10 @@ export const MaintenanceReport: React.FC = () => {
   const exportPDF = () => {
     const doc = new jsPDF();
     doc.text('Maintenance Report', 14, 16);
-    // @ts-ignore
+    // @ts-expect-error jspdf-autotable adds autoTable to jsPDF prototype
     doc.autoTable({
       head: [headers.map(h => h.label)],
-      body: rows.map((row: any) => headers.map(h => row[h.key])),
+      body: rows.map((row: MaintenanceReportRow) => headers.map(h => row[h.key as keyof MaintenanceReportRow])),
       startY: 22,
     });
     doc.save('maintenance-report.pdf');
@@ -65,10 +73,10 @@ export const MaintenanceReport: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row: any, i: number) => (
+            {rows.map((row: MaintenanceReportRow, i: number) => (
               <tr key={i}>
                 {headers.map(h => (
-                  <td key={h.key} className="border px-2 py-1">{row[h.key]}</td>
+                  <td key={h.key} className="border px-2 py-1">{row[h.key as keyof MaintenanceReportRow]}</td>
                 ))}
               </tr>
             ))}

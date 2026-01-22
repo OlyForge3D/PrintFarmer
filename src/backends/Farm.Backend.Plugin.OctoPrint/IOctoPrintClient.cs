@@ -49,6 +49,14 @@ namespace Farm.Backend.Plugin.OctoPrint
         Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId);
 
         /// <summary>
+        /// Gets aggregated print job statistics (totals) from OctoPrint history.
+        /// Returns total print time, filament used, and job count for completed jobs.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, string apiKey);
+
+        /// <summary>
         /// Creates a PrinterDto from OctoPrint printer entity and status information.
         /// Encapsulates OctoPrint-specific DTO creation logic.
         /// </summary>

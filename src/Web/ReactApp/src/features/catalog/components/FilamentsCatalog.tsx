@@ -12,7 +12,7 @@ import {
   gridTableOptions,
 } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { 
   useFilamentTypes, 
@@ -29,11 +29,12 @@ import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequ
 interface FilamentTypeCardProps {
   filament: FilamentTypeDto;
   onEdit: (filament: FilamentTypeDto) => void;
+  onClone: (filament: FilamentTypeDto) => void;
   onDelete: (filament: FilamentTypeDto) => void;
   isDeleting?: boolean;
 }
 
-function FilamentTypeCard({ filament, onEdit, onDelete, isDeleting }: FilamentTypeCardProps) {
+function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: FilamentTypeCardProps) {
   return (
     <Card className="h-full flex flex-col">
       <div className="p-4 flex-1">
@@ -66,6 +67,29 @@ function FilamentTypeCard({ filament, onEdit, onDelete, isDeleting }: FilamentTy
                   strokeLinejoin="round"
                   strokeWidth={2}
                   d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => onClone(filament)}
+              disabled={isDeleting}
+              aria-label={`Clone ${filament.name}`}
+              title={`Clone ${filament.name}`}
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                 />
               </svg>
             </Button>
@@ -247,6 +271,19 @@ export function FilamentsCatalog() {
     setEditingFilament(filament);
   }, []);
 
+  // Clone an existing filament type
+  const handleCloneClick = useCallback((filament: FilamentTypeDto) => {
+    setFormState({
+      name: `${filament.name} - Copy`,
+      hotendTemp: filament.defaultTemperatures?.hotend?.toString() ?? '',
+      bedTemp: filament.defaultTemperatures?.bed?.toString() ?? '',
+      isAbrasive: filament.isAbrasive,
+      needsEnclosure: filament.needsEnclosure,
+    });
+    setFormErrors({});
+    setIsAddModalOpen(true);
+  }, []);
+
   // Open delete confirmation
   const handleDeleteClick = useCallback((filament: FilamentTypeDto) => {
     setDeletingFilament(filament);
@@ -424,6 +461,7 @@ export function FilamentsCatalog() {
               key={filament.id}
               filament={filament}
               onEdit={handleEditClick}
+              onClone={handleCloneClick}
               onDelete={handleDeleteClick}
               isDeleting={deleteMutation.isPending && deletingFilament?.id === filament.id}
             />
@@ -445,6 +483,14 @@ export function FilamentsCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"

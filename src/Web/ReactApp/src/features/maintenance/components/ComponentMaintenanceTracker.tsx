@@ -15,7 +15,7 @@ import {
   ClockIcon,
   TagIcon
 } from '@/common/components/icons/MdiIcons';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge } from '@/common/components/ui';
 import type { ComponentMaintenanceData } from '../hooks/useComponentMaintenance';
 
 export interface ComponentMaintenanceTrackerProps {
@@ -34,7 +34,7 @@ export interface ComponentMaintenanceTrackerProps {
 /**
  * Get icon for component type
  */
-function getComponentIcon(component: string): React.ReactNode {
+function getComponentIcon(): React.ReactNode {
   // All use GearIcon for now, could be customized per component
   return <GearIcon className="h-5 w-5" />;
 }
@@ -73,7 +73,7 @@ function ComponentCard({ data, isSelected, onSelect }: ComponentCardProps) {
       <div className="flex items-start gap-3">
         {/* Icon */}
         <div className={`p-2 rounded-lg bg-pf-bg-2 ${colorClass}`}>
-          {getComponentIcon(data.component)}
+          {getComponentIcon()}
         </div>
 
         {/* Content */}
@@ -144,7 +144,7 @@ function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
     <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-5">
       <div className="flex items-center gap-3 mb-4">
         <div className={`p-2 rounded-lg bg-pf-bg-2 ${getComponentColor(data)}`}>
-          {getComponentIcon(data.component)}
+          {getComponentIcon()}
         </div>
         <div>
           <h3 className="font-semibold text-pf-text-primary text-lg">
