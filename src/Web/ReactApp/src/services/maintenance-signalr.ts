@@ -4,7 +4,7 @@
 // ============================================================================
 
 import * as signalR from '@microsoft/signalr';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import type {
   AlertCreatedEvent,
   AlertStatusChangedEvent,
@@ -33,8 +33,7 @@ export class MaintenanceSignalRService {
   private maintenanceCompletedHandlers = new Set<MaintenanceCompletedHandler>();
 
   constructor() {
-    const baseUrl = getApiBaseUrl();
-    this.hubUrl = `${baseUrl}/hubs/maintenance`;
+    this.hubUrl = getHubUrl('/hubs/maintenance');
   }
 
   /**

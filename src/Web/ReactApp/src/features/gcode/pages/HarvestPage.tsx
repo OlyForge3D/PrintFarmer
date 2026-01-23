@@ -5,7 +5,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
 import { Button } from '@/common/components/ui';
 // Sparkles icon - using ActivityIcon as close substitute
-import { ActivityIcon } from '@/common/components/icons/MdiIcons';
+import { ActivityIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import {
   GcodeHarvestStatus,
   GcodeHarvestOperation,
@@ -15,13 +15,13 @@ import { usePrinters, useCancelHarvestOperation, useRestartHarvestDiscovery } fr
 import { signalRService } from '@/services/harvest-signalr';
 import { apiClient } from '@/services/api';
 import { HarvestOperationDetails } from '@/features/gcode/components/harvest/HarvestOperationDetails';
-import { HarvestWizard } from '@/features/gcode/components/harvest/HarvestWizard';
+import { HarvestWizardModal } from '@/features/gcode/components/harvest/HarvestWizardModal';
 import { AccessDenied } from '@/features/auth/components/AccessDenied';
 
 export const HarvestPage: React.FC = () => {
   // State management
   const [selectedOperation, setSelectedOperation] = useState<GcodeHarvestOperation | null>(null);
-  const [wizardStep, setWizardStep] = useState<'wizard' | 'operations'>('wizard');
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const perFileProgressMapRef = React.useRef<Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>>({});
   const queryClient = useQueryClient();
   const cancelHarvestMutation = useCancelHarvestOperation();
@@ -34,8 +34,6 @@ export const HarvestPage: React.FC = () => {
     queryFn: () => apiClient.getHarvestOperations(),
     refetchInterval: 2000,
   });
-  // Printers already have merged realtime status from API
-  const printersWithLive = printers || [];
 
   // All hooks must be called before any return (including useEffect)
 
@@ -107,15 +105,9 @@ export const HarvestPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [harvestOperations]);
 
-  // Redirect to wizard when all active operations are cancelled/completed
+  // Invalidate gcode-files queries when any operation completes
   useEffect(() => {
     if (harvestOperations) {
-      const activeOps = harvestOperations.filter(op => op.status === GcodeHarvestStatus.Running);
-      if (activeOps.length === 0 && wizardStep === 'operations') {
-        setWizardStep('wizard');
-      }
-
-      // Invalidate gcode-files queries when any operation completes (status changed from Running)
       const completedOps = harvestOperations.filter(op =>
         op.status === GcodeHarvestStatus.Completed ||
         op.status === GcodeHarvestStatus.Cancelled ||
@@ -129,7 +121,7 @@ export const HarvestPage: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['gcode-files-all-folders'] });
       }
     }
-  }, [harvestOperations, wizardStep, queryClient]);
+  }, [harvestOperations, queryClient]);
 
   // Early return for permission check (must be after all hooks)
   if (!hasPermission('gcode_harvest', 'execute')) {
@@ -140,10 +132,16 @@ export const HarvestPage: React.FC = () => {
     op.status === GcodeHarvestStatus.Running
   ) || [];
 
+  const completedOperations = harvestOperations?.filter(op =>
+    op.status === GcodeHarvestStatus.Completed ||
+    op.status === GcodeHarvestStatus.Cancelled ||
+    op.status === GcodeHarvestStatus.Failed
+  ) || [];
+
   return (
     <PageTemplate
       title="G-code Harvest"
-      subtitle="Start harvesting G-code files from your printers"
+      subtitle="Harvest G-code files from your printers"
       icon={ActivityIcon}
     >
       {/* Breadcrumbs */}
@@ -156,6 +154,18 @@ export const HarvestPage: React.FC = () => {
         className="mb-4"
       />
 
+      {/* Harvest Wizard Modal */}
+      <HarvestWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        printers={printers || []}
+        activeHarvests={activeOperations}
+        onComplete={() => {
+          refetchOperations();
+          toast.success('Harvest operation completed');
+        }}
+      />
+
       {/* Details panel overlay */}
       {selectedOperation && (
         <HarvestOperationDetails
@@ -164,65 +174,37 @@ export const HarvestPage: React.FC = () => {
         />
       )}
 
-      {/* Tab-like switcher between wizard and active operations */}
-      {activeOperations.length > 0 && (
-        <div className="mb-6 flex gap-2 border-b border-pf-border">
-          <Button
-            type="button"
-            variant={wizardStep === 'wizard' ? 'primary' : 'subtle'}
-            onClick={() => setWizardStep('wizard')}
-            className="px-4 py-2 !justify-start"
-          >
-            Start New Harvest
-          </Button>
-          <Button
-            type="button"
-            variant={wizardStep === 'operations' ? 'primary' : 'subtle'}
-            onClick={() => setWizardStep('operations')}
-            className="px-4 py-2 !justify-start"
-          >
-            Active Operations ({activeOperations.length})
-          </Button>
-        </div>
-      )}
-
-      {/* Main content area */}
-      {wizardStep === 'wizard' ? (
-        // Harvest Wizard - main interface
+      {/* Header with Start Harvest button */}
+      <div className="flex items-center justify-between mb-6">
         <div>
-          {printersLoading ? (
-            <div className="text-center py-16">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent mx-auto mb-4" />
-              <p className="text-pf-text-secondary">Loading printers...</p>
-            </div>
-          ) : (
-            <HarvestWizard
-              printers={printersWithLive}
-              onClose={() => {
-                // Show operations tab if there are active ones
-                if (activeOperations.length > 0) {
-                  setWizardStep('operations');
-                }
-              }}
-              onComplete={() => {
-                toast.success('Harvest operation started');
-                refetchOperations();
-                // Switch to operations view if there are active ones
-                if (activeOperations.length > 0) {
-                  setWizardStep('operations');
-                }
-              }}
-            />
-          )}
+          <h2 className="text-lg font-semibold text-pf-text-primary">
+            Harvest Operations
+          </h2>
+          <p className="text-sm text-pf-text-secondary">
+            {activeOperations.length > 0
+              ? `${activeOperations.length} active operation${activeOperations.length > 1 ? 's' : ''}`
+              : 'No active harvest operations'}
+          </p>
         </div>
-      ) : (
-        // Active Operations - view and manage running harvests
-        <div className="space-y-4">
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => setIsWizardOpen(true)}
+          disabled={printersLoading}
+        >
+          <PlusIcon className="w-4 h-4 mr-2" />
+          Start Harvest
+        </Button>
+      </div>
+
+      {/* Active Operations */}
+      {activeOperations.length > 0 && (
+        <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-pf-text-primary">
+            <h3 className="text-md font-semibold text-pf-text-primary">
               Active Operations ({activeOperations.length})
-            </h2>
-            {activeOperations.length > 0 && (
+            </h3>
+            {activeOperations.length > 1 && (
               <Button
                 type="button"
                 variant="danger"
@@ -265,7 +247,7 @@ export const HarvestPage: React.FC = () => {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <h3 className="font-semibold text-pf-text-primary">{op.printerName}</h3>
+                    <h4 className="font-semibold text-pf-text-primary">{op.printerName}</h4>
                     <div className="flex gap-4 mt-2 text-sm text-pf-text-secondary">
                       <span>Found: {op.filesFound}</span>
                       <span>Processed: {op.filesProcessed}</span>
@@ -273,8 +255,6 @@ export const HarvestPage: React.FC = () => {
                       <span>Skipped: {op.filesSkipped}</span>
                     </div>
                     <div className="mt-2 w-full bg-pf-background rounded-full h-2 overflow-hidden">
-                      {/* CSS Variable Progress Bar: Uses --progress CSS variable for dynamic width */}
-                      {/* See styles/components.css for the width rule: [style*="--progress"] { width: var(--progress); } */}
                       <div
                         className="bg-pf-success h-2 rounded-full transition-all"
                         style={{
@@ -283,7 +263,7 @@ export const HarvestPage: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2 flex-shrink-0">
+                  <div className="flex gap-2 flex-shrink-0 ml-4">
                     <Button
                       type="button"
                       variant="secondary"
@@ -302,7 +282,7 @@ export const HarvestPage: React.FC = () => {
                       disabled={restartHarvestDiscoveryMutation.isPending}
                       title="Restart file discovery for this harvest"
                     >
-                      {restartHarvestDiscoveryMutation.isPending ? 'Restarting...' : 'Restart Discovery'}
+                      Restart
                     </Button>
                     <Button
                       type="button"
@@ -321,13 +301,77 @@ export const HarvestPage: React.FC = () => {
                       }}
                       disabled={cancelHarvestMutation.isPending}
                     >
-                      {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel'}
+                      Cancel
                     </Button>
                   </div>
                 </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Recent Operations */}
+      {completedOperations.length > 0 && (
+        <div>
+          <h3 className="text-md font-semibold text-pf-text-primary mb-4">
+            Recent Operations ({completedOperations.length})
+          </h3>
+          <div className="space-y-3">
+            {completedOperations.slice(0, 5).map(op => (
+              <div
+                key={op.id}
+                onClick={() => setSelectedOperation(op)}
+                className="bg-pf-panel border border-pf-border rounded-lg p-4 cursor-pointer hover:border-pf-accent transition-colors opacity-80"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-semibold text-pf-text-primary">{op.printerName}</h4>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        op.status === GcodeHarvestStatus.Completed
+                          ? 'bg-pf-success-bg text-pf-success-text'
+                          : op.status === GcodeHarvestStatus.Failed
+                            ? 'bg-pf-error-bg text-pf-error-text'
+                            : 'bg-pf-warning-bg text-pf-warning-text'
+                      }`}>
+                        {op.status}
+                      </span>
+                    </div>
+                    <div className="flex gap-4 mt-2 text-sm text-pf-text-secondary">
+                      <span>Found: {op.filesFound}</span>
+                      <span>Added: {op.filesAdded}</span>
+                      <span>Skipped: {op.filesSkipped}</span>
+                      {op.filesErrored > 0 && <span className="text-pf-error-text">Errors: {op.filesErrored}</span>}
+                    </div>
+                  </div>
+                  <div className="text-sm text-pf-text-secondary">
+                    {op.completedAt && new Date(op.completedAt).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {activeOperations.length === 0 && completedOperations.length === 0 && (
+        <div className="text-center py-16">
+          <ActivityIcon className="w-16 h-16 text-pf-text-secondary mx-auto mb-4 opacity-50" />
+          <h3 className="text-lg font-semibold text-pf-text-primary mb-2">No harvest operations</h3>
+          <p className="text-pf-text-secondary mb-6">
+            Start a harvest to import G-code files from your printers
+          </p>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setIsWizardOpen(true)}
+            disabled={printersLoading}
+          >
+            <PlusIcon className="w-4 h-4 mr-2" />
+            Start Harvest
+          </Button>
         </div>
       )}
     </PageTemplate>

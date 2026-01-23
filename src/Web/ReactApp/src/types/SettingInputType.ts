@@ -3,6 +3,7 @@
 
 export enum SettingInputType {
   Text = "Text",
+  TextArea = "TextArea",
   Number = "Number",
   Boolean = "Boolean",
   Password = "Password",

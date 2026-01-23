@@ -790,6 +790,17 @@ generate_slicer_api_key() {
     fi
 }
 
+# Helper: generate a secure JWT signing key
+# Returns a Base64-encoded 256-bit (32-byte) key suitable for HMAC-SHA256
+generate_jwt_key() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -base64 32
+    else
+        # Fallback: use /dev/urandom
+        head -c 32 /dev/urandom 2>/dev/null | base64 || echo "PrintFarmer_Fallback_JWT_Key_$(date +%s)"
+    fi
+}
+
 generate_deployment_config() {
     local architecture="$1"
     local include_monitoring="${2:-false}"
@@ -2654,6 +2665,18 @@ EOF
         done
     fi
 
+    # Save JWT signing key to preserve user sessions across deployments
+    if [ -n "${Jwt__Key:-}" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# JWT Authentication (preserved to maintain user sessions)
+# Changing this key will invalidate all existing user sessions
+Jwt__Key=$Jwt__Key
+Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
+Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
+    fi
+
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
 
@@ -3862,6 +3885,28 @@ generate_env_file() {
     # Set default env file if not already set
     ENV_FILE="${ENV_FILE:-.env}"
     
+    # Preserve existing secrets before overwriting .env file
+    # This ensures JWT key and other secrets persist across redeploys
+    # Check both .env and .deploy-config (config takes precedence as source of truth)
+    if [ -z "${Jwt__Key:-}" ]; then
+        # Try .deploy-config first (canonical source)
+        if [ -f "$CONFIG_FILE" ]; then
+            local config_jwt_key
+            config_jwt_key=$(get_kv_from_file "$CONFIG_FILE" "Jwt__Key" || true)
+            if [ -n "$config_jwt_key" ]; then
+                Jwt__Key="$config_jwt_key"
+            fi
+        fi
+        # Fallback to .env if not in config
+        if [ -z "${Jwt__Key:-}" ] && [ -f "$ENV_FILE" ]; then
+            local env_jwt_key
+            env_jwt_key=$(get_kv_from_file "$ENV_FILE" "Jwt__Key" || true)
+            if [ -n "$env_jwt_key" ]; then
+                Jwt__Key="$env_jwt_key"
+            fi
+        fi
+    fi
+    
     print_info "Creating environment file: $ENV_FILE"
     
     # Generate dynamic CORS origins based on configured ports
@@ -4158,6 +4203,26 @@ MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-$DB_PASSWORD}
 MYSQL_DATABASE=${MYSQL_DB:-printfarmer}
 EOF
     fi
+    
+    # Generate JWT signing key (only if not already set - preserves existing key on redeploy)
+    # This prevents user sessions from being invalidated on every deployment
+    if [ -z "${Jwt__Key:-}" ]; then
+        Jwt__Key=$(generate_jwt_key)
+        print_info "Generated new JWT signing key for authentication"
+    else
+        print_info "Using existing JWT signing key (sessions preserved)"
+    fi
+    
+    # Write JWT configuration to env file
+    cat >> "$ENV_FILE" << EOF
+
+# JWT Authentication Configuration
+# Key is auto-generated on first deploy and preserved on subsequent deploys
+# Changing this key will invalidate all existing user sessions
+Jwt__Key=$Jwt__Key
+Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
+Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
     
     # Generate and export slicer worker API keys (if workers are enabled)
     # This ensures workers can authenticate with the API during registration

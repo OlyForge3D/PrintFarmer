@@ -59,16 +59,19 @@ export type HarvestFileDiscoveredEvent = {
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
 // Harvest file updated event type (includes status and error information)
+// NOTE: Property names must match C# DTO camelCase serialization
 export type HarvestFileUpdatedEvent = {
   id: string;
-  operationId: string;
+  harvestOperationId: string;  // C# DTO: HarvestOperationId -> harvestOperationId
+  printerPath: string;         // C# DTO: PrinterPath -> printerPath
   fileName: string;
-  filePath: string;
-  fileSize: number;
-  status: string;
-  error?: string;
-  completedAt?: string;
+  fileSizeBytes: number;       // C# DTO: FileSizeBytes -> fileSizeBytes
+  status?: string;             // C# DTO: Status -> status (HarvestFileStatus enum)
+  errorMessage?: string;       // C# DTO: ErrorMessage -> errorMessage
+  modifiedAt?: string;
   thumbnailUrl?: string;
+  alreadyInLibrary?: boolean;
+  processingFailed?: boolean;
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;
   extractedMaterial?: string;

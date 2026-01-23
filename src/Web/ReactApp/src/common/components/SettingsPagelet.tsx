@@ -128,12 +128,13 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                   />
                   {err && <div className="text-pf-error text-sm mt-1">{err}</div>}
                 </div>
-              ) : prop.display?.inputType === SettingInputType.Text ? (
+              ) : prop.display?.inputType === SettingInputType.TextArea ? (
                 <div>
                   <textarea
                     id={prop.name}
                     name={prop.name}
-                    className="border border-pf-border rounded px-3 py-2 w-full text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-2 focus:ring-pf-accent/30 transition"
+                    className="border border-pf-border rounded px-3 py-2 w-full text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-2 focus:ring-pf-accent/30 transition resize-none"
+                    rows={3}
                     value={String(getInputValue(values[prop.name] as SettingValue))}
                     onChange={e => onChange(prop.name, e.currentTarget.value)}
                     placeholder={prop.display?.description || displayName}
@@ -142,7 +143,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                   />
                   {err && <div className="text-pf-error text-sm mt-1">{err}</div>}
                 </div>
-              ) : prop.display?.inputType === SettingInputType.Number || prop.type === 'number' || prop.type === 'Number' ? (
+              ) : prop.display?.inputType === SettingInputType.Number || prop.type === 'number' || prop.type === 'Number' || prop.type === 'Int32' || prop.type === 'Int64' || prop.type === 'Double' || prop.type === 'Single' || prop.type === 'Decimal' ? (
                 <div>
                   <input
                     id={prop.name}
@@ -152,6 +153,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     value={getInputValue(values[prop.name] as SettingValue)}
                     min={prop.display?.minValue}
                     max={prop.display?.maxValue}
+                    step={prop.type === 'Double' || prop.type === 'Single' || prop.type === 'Decimal' ? 'any' : '1'}
                     onChange={e => onChange(prop.name, e.currentTarget.value === '' ? '' : Number(e.currentTarget.value))}
                     placeholder={prop.display?.description || displayName}
                     title={prop.display?.description || displayName}

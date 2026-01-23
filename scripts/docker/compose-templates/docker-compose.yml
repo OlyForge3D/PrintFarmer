@@ -44,7 +44,9 @@ services:
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
       # Required JWT signing key (32+ chars) for auth configuration
-      - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
+      - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
+      - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
     volumes:

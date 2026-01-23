@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useEffectEvent } from 'react';
 import { CubeIcon, FileIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
-import { Breadcrumbs } from '@/common/components/Breadcrumbs';
 import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayout';
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
@@ -135,16 +134,6 @@ export function FilesPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Breadcrumb Navigation */}
-      <div className="px-6 py-4 border-b border-pf-border bg-pf-bg-1">
-        <Breadcrumbs
-          items={[
-            { label: 'Dashboard', href: '/' },
-            { label: 'Files', current: true }
-          ]}
-        />
-      </div>
-
       {/* Page Header - Dynamic based on active tab */}
       <div className="border-b border-pf-border bg-pf-bg-1 px-6 py-4">
         <h1 className="text-2xl font-bold text-pf-text-primary">{currentTab.label}</h1>

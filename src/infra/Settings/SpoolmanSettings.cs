@@ -13,7 +13,7 @@ public class SpoolmanSettings : IAppSetting
     [SettingDisplay(
         Name = "Base URL",
         Description = "Base URL for the Spoolman API server (e.g., http://spoolman.local:7912)",
-        InputType = SettingInputType.Text)]
+        InputType = SettingInputType.Url)]
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; set; } = string.Empty;
 }

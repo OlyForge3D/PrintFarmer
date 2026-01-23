@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { apiClient } from '@/services/api';
 import { DiscoveredGcodeFileDto, HarvestFileStatus } from '@/types/api';
 import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdatedEvent } from '@/services/harvest-signalr';
@@ -21,12 +21,31 @@ interface FileWithProgress extends DiscoveredGcodeFileDto {
   completedAt?: string;
 }
 
+export interface IndexedFilesListRef {
+  /** Trigger import of selected files from parent component */
+  importSelected: () => Promise<{ success: boolean; imported: number; skipped: number; failed: number }>;
+  /** Get current selection count */
+  getSelectedCount: () => number;
+  /** Get current file count */
+  getFileCount: () => number;
+  /** Check if import is in progress */
+  isImporting: () => boolean;
+}
+
 interface IndexedFilesListProps {
   operationId: string;
   onFilesImported?: () => void;
+  /** Hide the "Indexed Files" header */
+  hideHeader?: boolean;
+  /** Hide the import button in footer (for external control via ref) */
+  hideFooterImport?: boolean;
+  /** Callback when selection count changes */
+  onSelectionChange?: (count: number) => void;
+  /** Callback when import completes (success or failure) */
+  onImportComplete?: (stats: { success: boolean; imported: number; skipped: number; failed: number }) => void;
 }
 
-export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId, onFilesImported }) => {
+export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesListProps>(function IndexedFilesList({ operationId, onFilesImported, hideHeader = false, hideFooterImport = false, onSelectionChange, onImportComplete }, ref) {
   const [files, setFiles] = useState<FileWithProgress[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +55,11 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(0);
   const filesRef = useRef<FileWithProgress[]>([]);
+
+  // Notify parent of selection changes
+  useEffect(() => {
+    onSelectionChange?.(selected.size);
+  }, [selected.size, onSelectionChange]);
 
   // Helper to get status display string
   const getStatusString = (status: HarvestFileStatus | undefined): string => {
@@ -51,9 +75,9 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
     }
   };
 
-  // Import selected files logic
-  const handleImportSelected = async () => {
-    if (selected.size === 0) return;
+  // Import selected files logic - returns result for external callers
+  const handleImportSelected = async (): Promise<{ success: boolean; imported: number; skipped: number; failed: number }> => {
+    if (selected.size === 0) return { success: false, imported: 0, skipped: 0, failed: 0 };
     setIsImporting(true);
     try {
       const fileIds = Array.from(selected);
@@ -100,6 +124,16 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
 
       setSelected(new Set());
 
+      const importResult = {
+        success: result.success ?? (failedCount === 0),
+        imported: importedCount,
+        skipped: skippedCount,
+        failed: failedCount,
+      };
+
+      // Notify parent of completion
+      onImportComplete?.(importResult);
+
       // Show appropriate toast based on results
       if (!result.success || failedCount > 0) {
         // Show error toast with details about what happened
@@ -131,13 +165,26 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
         // Notify parent component that files have been imported
         onFilesImported?.();
       }
+      
+      return importResult;
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
       toast.error('Import operation failed: ' + (msg || 'Unknown error'), { duration: 6000 });
+      const failedResult = { success: false, imported: 0, skipped: 0, failed: 0 };
+      onImportComplete?.(failedResult);
+      return failedResult;
     } finally {
       setIsImporting(false);
     }
   };
+
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    importSelected: handleImportSelected,
+    getSelectedCount: () => selected.size,
+    getFileCount: () => files.length,
+    isImporting: () => isImporting,
+  }), [selected, files, isImporting]);
 
   // Skip a file (call backend and update UI)
   const handleSkipFile = async (fileId: string) => {
@@ -245,7 +292,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
     });
 
     const unsubFileUpdated = harvestSignalRService.onHarvestFileUpdated((evt: HarvestFileUpdatedEvent) => {
-      if (evt.operationId !== operationId) return;
+      if (evt.harvestOperationId !== operationId) return;
       setFiles(prev => {
         const idx = prev.findIndex(f => f.id === evt.id);
         if (idx === -1) return prev;
@@ -263,8 +310,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
         next[idx] = {
           ...next[idx],
           status: status ?? next[idx].status,
-          error: evt.error,
-          completedAt: evt.completedAt,
+          error: evt.errorMessage,
           thumbnailUrl: evt.thumbnailUrl ?? next[idx].thumbnailUrl,
           extractedSlicerName: evt.extractedSlicerName ?? next[idx].extractedSlicerName,
           extractedSlicerVersion: evt.extractedSlicerVersion ?? next[idx].extractedSlicerVersion,
@@ -374,7 +420,9 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
 
   return (
     <div className="flex flex-col h-full">
-      <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
+      {!hideHeader && (
+        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
+      )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
@@ -538,21 +586,23 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
             </div>
           )}
         </div>
-        <Button
-          onClick={handleImportSelected}
-          disabled={selected.size === 0 || isImporting}
-        >
-          {isImporting ? (
-            <>
-              <span className="inline-block w-4 h-4 border-2 border-pf-accent border-t-transparent rounded-full animate-spin mr-2" />
-              Importing...
-            </>
-          ) : (
-            <>
-              Import Selected <span className="ml-1 font-bold">({selected.size})</span>
-            </>
-          )}
-        </Button>
+        {!hideFooterImport && (
+          <Button
+            onClick={handleImportSelected}
+            disabled={selected.size === 0 || isImporting}
+          >
+            {isImporting ? (
+              <>
+                <span className="inline-block w-4 h-4 border-2 border-pf-accent border-t-transparent rounded-full animate-spin mr-2" />
+                Importing...
+              </>
+            ) : (
+              <>
+                Import Selected <span className="ml-1 font-bold">({selected.size})</span>
+              </>
+            )}
+          </Button>
+        )}
       </div>
 
       {/* Error Details Modal */}
@@ -591,4 +641,4 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
       )}
     </div>
   );
-};
+});
