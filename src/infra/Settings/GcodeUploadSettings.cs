@@ -5,7 +5,8 @@ namespace Farm.Infrastructure.Settings;
 
 // Use PerEngineSlicerSetting from AppSettings.cs (record)
 [AppSetting(SectionName)]
-[SettingDisplay(Name = "G-code Upload", Description = "Settings for G-code file uploads.", Icon = "pf-icon-gcodeupload", Group = "Files", Order = 6)]
+[SettingGroup("Files", DisplayName = "Files", Description = "File management and upload settings", Icon = "pf-icon-files", Order = 4)]
+[SettingDisplay(Name = "G-code Upload", Description = "Settings for G-code file uploads.", Icon = "pf-icon-gcodeupload", Group = "Files", Order = 1)]
 public class GcodeUploadSettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "GcodeUpload";

@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 namespace Farm.Infrastructure.Settings;
 
 [AppSetting(SectionName)]
+[SettingGroup("Networking", DisplayName = "Networking", Description = "Network and communication settings", Icon = "pf-icon-network", Order = 2)]
 [SettingDisplay(Name = "Network Discovery", Description = "Scan your network for printers.", Icon = "pf-icon-network", Group = "Networking", Order = 1)]
 public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
 {

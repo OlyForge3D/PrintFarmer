@@ -114,6 +114,14 @@ export class ApiClient {
   }
 
   /**
+   * Get all settings group metadata for sidebar organization
+   */
+  async getSettingsGroups(): Promise<Array<{ key: string; displayName: string; description?: string; icon?: string; order: number }>> {
+    const res = await this.client.get("/settings/groups");
+    return res.data;
+  }
+
+  /**
    * Get all unified settings
    */
   async getAllSettings(): Promise<Record<string, unknown>> {

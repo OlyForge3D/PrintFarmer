@@ -7,6 +7,7 @@ namespace Farm.Web.Api.Services.Maintenance;
 /// Settings for the Print Statistics Sync Service
 /// </summary>
 [AppSetting(PrintStatsSyncSettings.SectionName)]
+[SettingGroup("Maintenance", DisplayName = "Maintenance", Description = "Printer maintenance and lifecycle settings", Icon = "pf-icon-maintenance", Order = 1)]
 [SettingDisplay(Name = "Print Statistics Sync", Description = "Synchronizes printer statistics from external prints for maintenance tracking.", Icon = "pf-icon-stats", Group = "Maintenance", Order = 1)]
 public class PrintStatsSyncSettings : IAppSetting
 {

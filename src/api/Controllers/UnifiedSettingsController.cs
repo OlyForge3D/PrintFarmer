@@ -217,6 +217,28 @@ public class UnifiedSettingsController(
     }
 
     /// <summary>
+    /// Gets metadata for all settings groups, including display names, icons, and ordering.
+    /// </summary>
+    /// <remarks>
+    /// Used for organizing settings sections in the UI sidebar.
+    /// Groups are defined via [SettingGroup] attributes on settings classes.
+    /// </remarks>
+    /// <returns>Metadata for all settings groups, ordered by their Order property.</returns>
+    [HttpGet("groups")]
+    public ActionResult<IEnumerable<SettingGroupMetadata>> GetGroups()
+    {
+        try
+        {
+            IEnumerable<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata();
+            return Ok(groups);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Failed to get settings group metadata: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Gets the settings for a specific section by keyName.
     /// </summary>
     /// <param name="keyName">The key name of the settings section.</param>

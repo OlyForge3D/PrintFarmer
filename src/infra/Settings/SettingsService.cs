@@ -242,6 +242,7 @@ public class SettingsService : ISettingsService
             string? description = classDisplayAttr?.Description;
             string? icon = classDisplayAttr?.Icon;
             string? group = classDisplayAttr?.Group;
+            // Order now represents order within the group, not absolute order
             int? order = classDisplayAttr?.Order;
 
             List<SettingPropertyMetadata> props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -288,5 +289,76 @@ public class SettingsService : ISettingsService
                 Properties = new System.Collections.ObjectModel.ReadOnlyCollection<SettingPropertyMetadata>(props)
             };
         }
+    }
+
+    /// <summary>
+    /// Returns metadata for all discovered settings groups for UI organization.
+    /// Groups are derived from [SettingGroup] attributes on settings classes.
+    /// If a group has no explicit attribute, it uses default ordering (100).
+    /// </summary>
+    public IEnumerable<SettingGroupMetadata> GetAllGroupMetadata()
+    {
+        // Collect all group definitions from SettingGroupAttribute
+        Dictionary<string, SettingGroupMetadata> groups = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Type type in _settingTypes)
+        {
+            // Skip SystemSettings
+            AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
+            SystemSettingAttribute? sysAttr = type.GetCustomAttribute<SystemSettingAttribute>();
+            if (sysAttr != null && appAttr == null)
+            {
+                continue;
+            }
+
+            // Check for SettingGroupAttribute
+            SettingGroupAttribute? groupAttr = type.GetCustomAttribute<SettingGroupAttribute>();
+            if (groupAttr != null)
+            {
+                string groupKey = groupAttr.GroupKey;
+                // If we already have this group, keep the one with lower order
+                if (groups.TryGetValue(groupKey, out SettingGroupMetadata? existing))
+                {
+                    if (groupAttr.Order < existing.Order)
+                    {
+                        groups[groupKey] = new SettingGroupMetadata
+                        {
+                            Key = groupKey,
+                            DisplayName = groupAttr.DisplayName ?? groupKey,
+                            Description = groupAttr.Description,
+                            Icon = groupAttr.Icon,
+                            Order = groupAttr.Order
+                        };
+                    }
+                }
+                else
+                {
+                    groups[groupKey] = new SettingGroupMetadata
+                    {
+                        Key = groupKey,
+                        DisplayName = groupAttr.DisplayName ?? groupKey,
+                        Description = groupAttr.Description,
+                        Icon = groupAttr.Icon,
+                        Order = groupAttr.Order
+                    };
+                }
+            }
+
+            // Also collect groups from SettingDisplay.Group that don't have explicit SettingGroupAttribute
+            SettingDisplayAttribute? displayAttr = type.GetCustomAttribute<SettingDisplayAttribute>();
+            if (displayAttr?.Group != null && !groups.ContainsKey(displayAttr.Group))
+            {
+                groups[displayAttr.Group] = new SettingGroupMetadata
+                {
+                    Key = displayAttr.Group,
+                    DisplayName = displayAttr.Group,
+                    Description = null,
+                    Icon = null,
+                    Order = 100 // Default order for undefined groups
+                };
+            }
+        }
+
+        return groups.Values.OrderBy(g => g.Order).ThenBy(g => g.DisplayName);
     }
 }

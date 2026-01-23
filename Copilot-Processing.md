@@ -1,3 +1,108 @@
+# Copilot Processing: Settings Group Ordering Feature
+
+**Session**: Implementing SettingGroupAttribute for proper sidebar group ordering
+**Phase**: ✅ Completed
+
+## ✅ SETTINGS GROUP ORDERING FEATURE
+
+**Objective**: 
+- The `Order` property on `SettingDisplayAttribute` should indicate order within the group, not absolute order
+- Create a way to configure Setting Groups so we can indicate what order the groups are rendered in the sidebar
+
+### Implementation
+
+**Backend Changes**:
+
+1. **Created `SettingGroupAttribute.cs`** - New attribute for defining group-level metadata:
+   - `GroupKey` (required) - The group identifier matching `SettingDisplay.Group`
+   - `DisplayName` - Human-readable name for sidebar
+   - `Description` - Optional tooltip/description
+   - `Icon` - Icon identifier for the group
+   - `Order` - Sort order for groups (default 100)
+
+2. **Created `SettingGroupMetadata.cs`** - DTO for transferring group metadata to frontend
+
+3. **Updated `ISettingsService.cs`** - Added `GetAllGroupMetadata()` method signature
+
+4. **Updated `SettingsService.cs`** - Implemented `GetAllGroupMetadata()`:
+   - Scans all setting types for `[SettingGroup]` attributes
+   - Deduplicates by GroupKey (keeps lowest Order)
+   - Falls back to SettingDisplay.Group with default order (100) if no explicit attribute
+   - Returns sorted by Order, then by DisplayName
+
+5. **Updated `UnifiedSettingsController.cs`** - Added new endpoint:
+   - `GET /api/settings/groups` - Returns all group metadata
+
+6. **Applied `[SettingGroup]` to settings classes**:
+   - `NetworkDiscoverySettings` → `"Networking"`, Order = 2
+   - `SlicerSettings` → `"Slicing"`, Order = 3
+   - `GcodeUploadSettings` → `"Files"`, Order = 4
+   - `SpoolmanSettings` → `"Integrations"`, Order = 5
+   - `ExternalServicesHealthSettings` → `"System"`, Order = 6
+   - `PrintStatsSyncSettings` → `"Maintenance"`, Order = 1
+
+**Frontend Changes**:
+
+1. **Updated `api.ts`** - Added `getSettingsGroups()` method
+
+2. **Updated `settingsApi.ts`** - Added `fetchSettingsGroups()` and `SettingGroupMetadata` interface
+
+3. **Updated `SettingsPage.tsx`**:
+   - Added `groupMetadata` state
+   - Parallel fetch of metadata and group metadata
+   - Created `groupOrderMap` from group metadata for sorting
+   - Added `getGroupDisplayName()` helper for display names
+   - Updated sidebar to use group display names
+
+### Build Status
+✅ **API Build**: Passed (0 errors, 51 warnings)
+✅ **React Build**: Passed (12.63s)
+
+---
+
+# Copilot Processing: HarvestWizardModal Refactor
+
+**Session**: Refactoring HarvestWizardModal to use shared IndexedFilesList component
+**Phase**: ✅ Completed
+
+## ✅ HARVEST WIZARD MODAL REFACTOR
+
+**Objective**: Fix race conditions and consolidate duplicate file table implementation
+
+### Problem
+- HarvestWizardModal had its own inline file table (~150 lines) instead of using the shared IndexedFilesList component
+- Duplicate SignalR subscription logic for file events
+- File discovery worked but files weren't displayed correctly
+- Import status updates weren't reaching the UI due to stale closure issues
+
+### Solution
+Refactored HarvestWizardModal to delegate file management to IndexedFilesList:
+
+**IndexedFilesList.tsx enhancements**:
+- Added `forwardRef` with `useImperativeHandle` for external control
+- New ref methods: `importSelected()`, `getSelectedCount()`, `getFileCount()`, `isImporting()`
+- New props: `hideHeader`, `hideFooterImport`, `onSelectionChange`, `onImportComplete`
+- Modified `handleImportSelected` to return result object for parent coordination
+
+**HarvestWizardModal.tsx changes**:
+- Removed inline file table JSX (~150 lines)
+- Removed file-level state (`files`, `DiscoveredFileWithSelection`)
+- Removed file-level SignalR subscriptions (handled by IndexedFilesList)
+- Removed unused helper functions (`formatFileSize`, `getStatusString`, `getStatusColor`)
+- Kept operation-level subscriptions for stats display (filesFound, filesAdded, etc.)
+- Added `IndexedFilesList` component with ref-based import control
+- Uses `selectedCount` state via callback from child component
+
+**Files Modified**:
+1. `/src/Web/ReactApp/src/features/gcode/components/harvest/IndexedFilesList.tsx`
+2. `/src/Web/ReactApp/src/features/gcode/components/harvest/HarvestWizardModal.tsx`
+
+### Build Status
+✅ **React Build**: Passed (12.74s)
+✅ **React Tests**: 499/499 passed
+
+---
+
 # Copilot Processing: Toolhead Component Auto-Population
 
 **Session Start**: Implementing toolhead component auto-population and nozzle interface types

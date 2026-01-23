@@ -3,7 +3,8 @@
 namespace Farm.Infrastructure.Settings;
 
 [AppSetting(SectionName)]
-[SettingDisplay(Name = "Slicer", Description = "Settings for slicer integration and engines.", Icon = "pf-icon-slicer", Group = "Slicing", Order = 3)]
+[SettingGroup("Slicing", DisplayName = "Slicing", Description = "Slicer and G-code generation settings", Icon = "pf-icon-slicer", Order = 3)]
+[SettingDisplay(Name = "Slicer", Description = "Settings for slicer integration and engines.", Icon = "pf-icon-slicer", Group = "Slicing", Order = 1)]
 public class SlicerSettings : IAppSetting
 {
     public const string SectionName = "Slicer";
