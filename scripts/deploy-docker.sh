@@ -796,8 +796,11 @@ generate_jwt_key() {
     if command -v openssl >/dev/null 2>&1; then
         openssl rand -base64 32
     else
-        # Fallback: use /dev/urandom
-        head -c 32 /dev/urandom 2>/dev/null | base64 || echo "PrintFarmer_Fallback_JWT_Key_$(date +%s)"
+        # Fallback: use /dev/urandom with base64; if that fails, abort rather than using a weak, predictable key
+        if ! head -c 32 /dev/urandom 2>/dev/null | base64; then
+            echo "Error: Failed to generate JWT signing key; no cryptographically secure random source available." >&2
+            return 1
+        fi
     fi
 }
 
