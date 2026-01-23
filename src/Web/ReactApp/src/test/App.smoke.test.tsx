@@ -30,7 +30,11 @@ vi.mock('@/services/printer-signalr', () => ({ printerSignalRService: { connect:
 vi.mock('@/services/harvest-signalr', () => ({ signalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
 
 // Mock API helpers to keep network calls predictable
-vi.mock('@/common/utils/apiUrlHelpers', () => ({ getApiBaseUrl: () => 'http://localhost:5245', getAuthHeaders: () => ({}) }));
+vi.mock('@/common/utils/apiUrlHelpers', () => ({ 
+  getApiBaseUrl: () => 'http://localhost:5245', 
+  getAuthHeaders: () => ({}),
+  getHubUrl: (hubPath: string) => `http://localhost:5245${hubPath}`
+}));
 
 // Mock providers and components used by App to keep rendering lightweight
 vi.mock('@/contexts/ThemeContext', () => ({ ThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
