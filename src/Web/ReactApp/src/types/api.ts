@@ -820,7 +820,7 @@ export interface ToolheadDto {
 export interface PrinterDetails {
   id: string;
   name: string;
-  backendUrl: string;
+  serverUrl: string;
   notes?: string;
   manufacturerId?: string;
   manufacturerName?: string;
