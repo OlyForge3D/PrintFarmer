@@ -704,8 +704,7 @@ public class MaintenanceController(
             var response = lifespans.Select(l => new ComponentLifespanResponse(
                 l.Component,
                 l.AvgLifespanHours,
-                l.Replacements
-            )).ToList();
+                l.Replacements)).ToList();
 
             return Ok(response);
         }
@@ -731,8 +730,7 @@ public class MaintenanceController(
 
             var response = costs.Select(c => new MaintenanceCostResponse(
                 c.Month,
-                c.TotalCost
-            )).ToList();
+                c.TotalCost)).ToList();
 
             return Ok(response);
         }
@@ -759,8 +757,7 @@ public class MaintenanceController(
                 u.PrinterId,
                 u.UptimePercent,
                 u.MaintenanceCount,
-                u.TotalDowntimeMinutes
-            )).ToList();
+                u.TotalDowntimeMinutes)).ToList();
 
             return Ok(response);
         }
@@ -833,19 +830,32 @@ public record UpdateMaintenanceModeRequest(bool InMaintenance);
 public record FleetPrinterStatisticsDto
 {
     public Guid PrinterId { get; init; }
+
     public string PrinterName { get; init; } = string.Empty;
+
     public string? ManufacturerName { get; init; }
+
     public string? ModelName { get; init; }
+
     public bool IsOnline { get; init; }
+
     public bool InMaintenance { get; init; }
+
     public double TotalPrintHours { get; init; }
+
     public int TotalJobsCompleted { get; init; }
+
     public int TotalJobsFailed { get; init; }
+
     public double TotalFilamentUsedGrams { get; init; }
+
     public double TotalFilamentUsedMeters { get; init; }
+
     public DateTime? LastSyncTime { get; init; }
+
     /// <summary>Days until next maintenance task is due (negative = overdue)</summary>
     public int? DaysUntilNextMaintenance { get; init; }
+
     /// <summary>Name of the next maintenance task due</summary>
     public string? NextMaintenanceTask { get; init; }
 }

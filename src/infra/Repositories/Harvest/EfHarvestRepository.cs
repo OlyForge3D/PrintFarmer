@@ -224,6 +224,7 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
             Id = Guid.NewGuid(),
             HarvestDiscoveredFile = discoveredFile,
             HarvestDiscoveredFileId = discoveredFile.Id,
+
             // Don't set GcodeFile navigation property - it's from a different context
             // Just set the FK value which is all the database needs
             GcodeFileId = gcodeFile.Id,

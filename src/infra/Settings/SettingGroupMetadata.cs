@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Settings;
+﻿namespace Farm.Infrastructure.Settings;
 
 /// <summary>
 /// Metadata for a settings group, used for UI rendering and organization.

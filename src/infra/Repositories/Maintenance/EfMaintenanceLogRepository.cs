@@ -120,7 +120,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
     {
         // Get all logs grouped by component
         var componentLogs = await _context.MaintenanceLogs
-            .Where(l => l.Component != null && l.Component != "")
+            .Where(l => l.Component != null && l.Component != string.Empty)
             .GroupBy(l => l.Component!)
             .Select(g => new
             {
@@ -153,6 +153,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
                         lifespans.Add(diff);
                     }
                 }
+
                 if (lifespans.Count > 0)
                 {
                     avgLifespanHours = lifespans.Average();
@@ -172,6 +173,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
                         daysBetween.Add(days);
                     }
                 }
+
                 if (daysBetween.Count > 0)
                 {
                     // Estimate 8 print hours per day average
@@ -182,8 +184,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             result.Add(new ComponentLifespanEntry(
                 componentGroup.Component,
                 Math.Round(avgLifespanHours, 1),
-                componentGroup.Replacements
-            ));
+                componentGroup.Replacements));
         }
 
         return result.OrderByDescending(c => c.Replacements).ToList();
@@ -202,8 +203,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             .GroupBy(l => new { l.PerformedAt.Year, l.PerformedAt.Month })
             .Select(g => new MaintenanceCostEntry(
                 $"{g.Key.Year}-{g.Key.Month:D2}",
-                g.Sum(l => l.Cost ?? 0m)
-            ))
+                g.Sum(l => l.Cost ?? 0m)))
             .OrderBy(e => e.Month)
             .ToList();
 

@@ -1,11 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
-import { Button } from "@/common/components/ui/Button";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { Tabs } from "@/common/components/ui/Tabs";
-import { MasterDetailLayout } from "@/common/components/layout/MasterDetailLayout";
-import { ArrowLeftIcon } from "@/common/components/icons/MdiIcons";
 import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
 import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";

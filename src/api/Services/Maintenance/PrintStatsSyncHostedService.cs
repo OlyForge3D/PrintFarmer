@@ -341,7 +341,7 @@ public class PrintStatsSyncHostedService(
             // Get history totals from OctoPrint using BackendUrl and ApiKey
             HistoryTotals? historyTotals = await octoPrintClient.GetHistoryTotalsAsync(
                 printer.BackendUrl,
-                printer.ApiKey ?? "");
+                printer.ApiKey ?? string.Empty);
 
             if (historyTotals == null || historyTotals.JobTotals == null)
             {

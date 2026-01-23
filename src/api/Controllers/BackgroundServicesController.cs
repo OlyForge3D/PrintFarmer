@@ -85,10 +85,15 @@ public class BackgroundServicesController(IBackgroundServiceMonitor serviceMonit
 public record BackgroundServicesSummary
 {
     public int TotalServices { get; init; }
+
     public int RunningServices { get; init; }
+
     public int EnabledServices { get; init; }
+
     public int DisabledServices { get; init; }
+
     public int ServicesWithErrors { get; init; }
+
     public Dictionary<string, CategorySummary> ByCategory { get; init; } = new();
 }
 
@@ -98,6 +103,8 @@ public record BackgroundServicesSummary
 public record CategorySummary
 {
     public int Total { get; init; }
+
     public int Running { get; init; }
+
     public int WithErrors { get; init; }
 }

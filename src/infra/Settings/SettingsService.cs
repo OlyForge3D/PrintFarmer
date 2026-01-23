@@ -242,6 +242,7 @@ public class SettingsService : ISettingsService
             string? description = classDisplayAttr?.Description;
             string? icon = classDisplayAttr?.Icon;
             string? group = classDisplayAttr?.Group;
+
             // Order now represents order within the group, not absolute order
             int? order = classDisplayAttr?.Order;
 
@@ -316,6 +317,7 @@ public class SettingsService : ISettingsService
             if (groupAttr != null)
             {
                 string groupKey = groupAttr.GroupKey;
+
                 // If we already have this group, keep the one with lower order
                 if (groups.TryGetValue(groupKey, out SettingGroupMetadata? existing))
                 {

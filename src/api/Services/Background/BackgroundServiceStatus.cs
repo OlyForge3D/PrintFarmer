@@ -84,18 +84,31 @@ public record BackgroundServiceStatus
 public class BackgroundServiceState
 {
     public required string ServiceId { get; init; }
+
     public required string DisplayName { get; init; }
+
     public string? Description { get; init; }
+
     public string? Category { get; init; }
+
     public string? Icon { get; init; }
+
     public bool IsRunning { get; set; }
+
     public bool IsEnabled { get; set; } = true;
+
     public DateTime? LastRunTime { get; set; }
+
     public DateTime? NextRunTime { get; set; }
+
     public string? LastError { get; set; }
+
     public DateTime? LastErrorTime { get; set; }
+
     public long SuccessfulRuns { get; set; }
+
     public long FailedRuns { get; set; }
+
     public int? IntervalSeconds { get; set; }
 
     public BackgroundServiceStatus ToStatus() => new()

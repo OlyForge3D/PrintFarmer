@@ -513,7 +513,8 @@ public class PrintJobManagementService(
             string gcodeStorageRoot = _storagePathService.GetGcodeStorageDirectory();
             string localFilePath = Path.Combine(gcodeStorageRoot, job.GcodeFile.FilePath.TrimStart('/'), job.GcodeFile.FileName);
 
-            _logger.LogInformation("Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName} from {LocalPath}",
+            _logger.LogInformation(
+                "Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName} from {LocalPath}",
                 jobId, job.AssignedPrinterId, printerFileName, localFilePath);
 
             try
@@ -543,7 +544,8 @@ public class PrintJobManagementService(
                     }
                     else
                     {
-                        _logger.LogInformation("Successfully uploaded {FileName} to printer {PrinterId}",
+                        _logger.LogInformation(
+                            "Successfully uploaded {FileName} to printer {PrinterId}",
                             printerFileName, job.AssignedPrinterId);
 
                         // Step 2: Start the print on the printer using the uploaded filename
