@@ -1623,6 +1623,19 @@ export class ApiClient {
     await this.client.delete(`/job-queue/${jobId}`);
   }
 
+  /**
+   * Dispatch a queued/assigned job to its printer to start printing.
+   * The job must have an assigned printer and be in Queued or Assigned status.
+   * @param jobId - The ID of the job to dispatch
+   * @returns The updated job with Starting/Printing status
+   */
+  async dispatchJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+      `/job-queue/${jobId}/dispatch`
+    );
+    return response.data;
+  }
+
   // ============ Printer file operations ============
 
   async uploadGcodeToPrinter(printerId: string, file: File): Promise<boolean> {
@@ -2144,7 +2157,7 @@ export class ApiClient {
     const form = new FormData();
     form.append('file', file, file.name);
     
-    const response = await this.client.post('/models', form, {
+    const response = await this.client.post('/3d-models', form, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -2157,7 +2170,7 @@ export class ApiClient {
    * Get list of all 3D models
    */
   async getModels3D(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/models');
+    const response = await this.client.get('/3d-models');
     return response.data || [];
   }
 

@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -13,6 +14,7 @@ namespace Farm.Web.Api.Controllers
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public sealed class AssetsController(IAssetService assetService, ILogger<AssetsController> logger) : ControllerBase
     {
         private readonly IAssetService _assetService = assetService ?? throw new ArgumentNullException(nameof(assetService));

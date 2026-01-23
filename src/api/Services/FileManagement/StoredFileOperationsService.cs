@@ -86,7 +86,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
     /// <param name="gcodeFileId">The unique identifier of the GCode file.</param>
     public string BuildGcodeFileUrl(Guid gcodeFileId)
     {
-        return $"/api/gcode/file/{gcodeFileId}";
+        return $"/api/gcode-files/file/{gcodeFileId}";
     }
 
     /// <summary>
@@ -118,7 +118,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
     /// <param name="gcodeFileId">The unique identifier of the GCode file.</param>
     public string BuildGcodeThumbnailUrl(Guid gcodeFileId)
     {
-        return $"/api/gcode/thumbnail/{gcodeFileId}";
+        return $"/api/gcode-files/thumbnail/{gcodeFileId}";
     }
 
     /// <summary>

@@ -44,7 +44,8 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Reset database to ensure clean state for this test
         await _factory.ResetDatabaseAsync();
 
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        // Use admin client since FileConsistencyController requires farm_admin role
+        _client = await _factory.CreateAdminClientAsync();
         IServiceScope scope = _factory.Services.CreateScope();
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         // Setup test storage directories

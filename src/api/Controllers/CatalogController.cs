@@ -5,6 +5,7 @@ using Farm.Infrastructure.Exceptions;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -15,6 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/catalog")]
 [Tags("Catalog")]
+[Authorize]
 public class CatalogController(
     Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService,
     Services.Catalog.ICatalogService catalogService) : ControllerBase
@@ -28,6 +30,7 @@ public class CatalogController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all printer manufacturers ordered by name</returns>
     /// <response code="200">Returns the list of manufacturers</response>
+    [AllowAnonymous]
     [HttpGet("manufacturers")]
     [ProducesResponseType(typeof(IEnumerable<ManufacturerDto>), 200)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync(CancellationToken ct)
@@ -47,6 +50,7 @@ public class CatalogController(
         }
     }
 
+    [AllowAnonymous]
     [HttpGet("manufacturers/{id:guid}", Name = "GetManufacturerById")]
     [ProducesResponseType(typeof(ManufacturerDto), 200)]
     [ProducesResponseType(404)]
@@ -65,6 +69,7 @@ public class CatalogController(
     /// <response code="201">Returns the newly created manufacturer</response>
     /// <response code="400">If the manufacturer name is invalid or empty</response>
     /// <response code="409">If a manufacturer with the same name already exists</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("manufacturers")]
     [ProducesResponseType(typeof(ManufacturerDto), 201)]
     [ProducesResponseType(400)]
@@ -90,6 +95,7 @@ public class CatalogController(
         return CreatedAtRoute("GetManufacturerById", new { id = dto.Id }, dto);
     }
 
+    [AllowAnonymous]
     [HttpGet("printer-models")]
     [ProducesResponseType(typeof(IEnumerable<PrinterModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
@@ -98,6 +104,7 @@ public class CatalogController(
         return Ok(list);
     }
 
+    [AllowAnonymous]
     [HttpGet("printer-models/{id:guid}", Name = "GetPrinterModelById")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]
@@ -107,6 +114,7 @@ public class CatalogController(
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("printer-models")]
     [ProducesResponseType(typeof(PrinterModelDto), 201)]
     [ProducesResponseType(400)]
@@ -150,6 +158,7 @@ public class CatalogController(
         }
     }
 
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("printer-models/{id:guid}")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(400)]
@@ -169,6 +178,7 @@ public class CatalogController(
         }
     }
 
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("printer-models/{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -198,6 +208,7 @@ public class CatalogController(
     /// <returns>List of slicer name aliases for the model</returns>
     /// <response code="200">Returns the list of aliases</response>
     /// <response code="404">Model not found</response>
+    [AllowAnonymous]
     [HttpGet("printer-models/{modelId:guid}/aliases")]
     [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
     [ProducesResponseType(404)]
@@ -228,6 +239,7 @@ public class CatalogController(
     /// <returns>Updated list of aliases</returns>
     /// <response code="200">Returns the updated aliases</response>
     /// <response code="404">Model not found</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("printer-models/{modelId:guid}/aliases")]
     [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
     [ProducesResponseType(404)]
@@ -256,6 +268,7 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all hotend model definitions</returns>
+    [AllowAnonymous]
     [HttpGet("hotends")]
     [ProducesResponseType(typeof(IEnumerable<HotendModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<HotendModelDto>>> GetHotendsAsync(CancellationToken ct)
@@ -277,6 +290,7 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all extruder model definitions</returns>
+    [AllowAnonymous]
     [HttpGet("extruders")]
     [ProducesResponseType(typeof(IEnumerable<ExtruderModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ExtruderModelDto>>> GetExtrudersAsync(CancellationToken ct)
@@ -298,6 +312,7 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all toolhead model definitions</returns>
+    [AllowAnonymous]
     [HttpGet("toolheads")]
     [ProducesResponseType(typeof(IEnumerable<ToolheadModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ToolheadModelDto>>> GetToolheadsAsync(CancellationToken ct)
@@ -319,6 +334,7 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all nozzle model definitions</returns>
+    [AllowAnonymous]
     [HttpGet("nozzles")]
     [ProducesResponseType(typeof(IEnumerable<NozzleModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<NozzleModelDto>>> GetNozzlesAsync(CancellationToken ct)
@@ -341,6 +357,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new hotend model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("hotends")]
     [ProducesResponseType(typeof(HotendModelDto), 201)]
     [ProducesResponseType(400)]
@@ -370,6 +387,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing hotend model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("hotends/{id:guid}")]
     [ProducesResponseType(typeof(HotendModelDto), 200)]
     [ProducesResponseType(404)]
@@ -390,6 +408,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a hotend model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("hotends/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteHotendAsync(Guid id, CancellationToken ct)
@@ -413,6 +432,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new extruder model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("extruders")]
     [ProducesResponseType(typeof(ExtruderModelDto), 201)]
     [ProducesResponseType(400)]
@@ -442,6 +462,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing extruder model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("extruders/{id:guid}")]
     [ProducesResponseType(typeof(ExtruderModelDto), 200)]
     [ProducesResponseType(404)]
@@ -462,6 +483,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes an extruder model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("extruders/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteExtruderAsync(Guid id, CancellationToken ct)
@@ -485,6 +507,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new toolhead model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("toolheads")]
     [ProducesResponseType(typeof(ToolheadModelDto), 201)]
     [ProducesResponseType(400)]
@@ -514,6 +537,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing toolhead model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("toolheads/{id:guid}")]
     [ProducesResponseType(typeof(ToolheadModelDto), 200)]
     [ProducesResponseType(404)]
@@ -534,6 +558,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a toolhead model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("toolheads/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteToolheadAsync(Guid id, CancellationToken ct)
@@ -557,6 +582,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new nozzle model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("nozzles")]
     [ProducesResponseType(typeof(NozzleModelDto), 201)]
     [ProducesResponseType(400)]
@@ -586,6 +612,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing nozzle model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("nozzles/{id:guid}")]
     [ProducesResponseType(typeof(NozzleModelDto), 200)]
     [ProducesResponseType(404)]
@@ -606,6 +633,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a nozzle model definition.
     /// </summary>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("nozzles/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteNozzleAsync(Guid id, CancellationToken ct)
@@ -632,6 +660,7 @@ public class CatalogController(
     /// <param name="context">The catalog context (Printers, Hotends, Extruders, Toolheads, Nozzles)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Manufacturers split into with-items and without-items groups</returns>
+    [AllowAnonymous]
     [HttpGet("manufacturers/by-context/{context}")]
     [ProducesResponseType(typeof(ManufacturersByContextDto), 200)]
     [ProducesResponseType(400)]

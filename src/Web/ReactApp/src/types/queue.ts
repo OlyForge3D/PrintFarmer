@@ -65,7 +65,7 @@ export interface JobDetails {
   priority: number;
   queuePosition: number;
   gcodeFileId: string;
-  fileName?: string;
+  fileName?: string; // Original G-code filename for display
   printerId: string;
   printerName: string;
   printerModel: string;

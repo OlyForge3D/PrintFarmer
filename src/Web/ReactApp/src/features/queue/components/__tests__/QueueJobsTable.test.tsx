@@ -18,14 +18,14 @@ describe("QueueJobsTable Component", () => {
       updatedAtUtc: new Date().toISOString(),
       queuedAtUtc: new Date().toISOString(),
     },
-    fileMetadata: {
+    gcodeFile: {
       id: "file-1",
       fileName: "test-print.gcode",
       fileSizeBytes: 1024,
       materialType: "PLA",
       createdAtUtc: new Date().toISOString(),
     },
-    printerMetadata: {
+    assignedPrinter: {
       id: "printer-1",
       name: "Printer 1",
       modelName: "Prusa CORE One",
@@ -49,7 +49,7 @@ describe("QueueJobsTable Component", () => {
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
       },
-      fileMetadata: {
+      gcodeFile: {
         id: "file-1",
         fileName: "test-print.gcode",
         fileSizeBytes: 1024,
@@ -70,7 +70,7 @@ describe("QueueJobsTable Component", () => {
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
       },
-      fileMetadata: {
+      gcodeFile: {
         id: "file-2",
         fileName: "another-print.gcode",
         fileSizeBytes: 2048,

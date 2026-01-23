@@ -66,7 +66,7 @@ public class RetriesController(
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Server error</response>
     [HttpPut("policy")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(RetryPolicyDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -198,7 +198,7 @@ public class RetriesController(
     /// <response code="200">Returns list of due retries</response>
     /// <response code="500">Server error</response>
     [HttpGet("due/list")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(JobRetryDto[]), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetDueRetriesAsync(CancellationToken cancellationToken)
@@ -228,7 +228,7 @@ public class RetriesController(
     /// <response code="404">Job not found</response>
     /// <response code="500">Server error</response>
     [HttpPost("jobs/{jobId}/check-retry")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "farm_admin")]
     [ProducesResponseType(typeof(CheckRetryResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

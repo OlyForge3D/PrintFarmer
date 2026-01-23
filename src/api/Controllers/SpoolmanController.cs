@@ -15,6 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/spoolman")]
 [Tags("Spoolman Integration")]
+[Authorize]
 public class SpoolmanController(
     ISpoolmanService spoolman,
     ISettingsService settingsService,

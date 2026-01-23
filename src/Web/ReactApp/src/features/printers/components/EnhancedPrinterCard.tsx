@@ -74,7 +74,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
   const handleSetTemperatures = useCallback(() => apiCall(`/api/printers/${printer.id}/temps`, { hotend: tempInputs.hotend, bed: tempInputs.bed }), [printer.id, tempInputs]);
   const handleApplyPreset = useCallback((m: keyof TempPresets) => { const p = DEFAULT_PRESETS[m]; setTempInputs(p); apiCall(`/api/printers/${printer.id}/temps`, p); }, [printer.id]);
   const handleMove = useCallback((x?: number | null, y?: number | null, z?: number | null) => apiCall(`/api/printers/${printer.id}/move`, { x: x || undefined, y: y || undefined, z: z || undefined }), [printer.id]);
-  const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/move-to`, moveInputs), [printer.id, moveInputs]);
+  const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/moveto`, moveInputs), [printer.id, moveInputs]);
   const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await apiClient.uploadGcodeLibraryFile(selectedFile); if (r) setSelectedFile(null); } finally { setIsUploading(false); } }, [selectedFile]);
 
   if (!isExpanded) {

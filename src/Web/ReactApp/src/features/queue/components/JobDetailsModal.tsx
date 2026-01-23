@@ -1,11 +1,11 @@
 import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition } from 'react';
 import { Button } from '@/common/components/ui/Button';
+import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { apiClient } from '@/services/api';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
 import JobTagsEditor from './JobTagsEditor';
-import '../styles/JobDetailsModal.css';
 import type { JobDetails, JobDetailsTabType } from '@/types/queue';
 import type { JobDetailsModalProps } from '@/types/components';
 
@@ -138,110 +138,148 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
     doClose();
   }, [hasChanges, doClose]);
 
-  if (!isOpen) return null;
-
   // React 19: Use optimistic details for immediate UI feedback
   const displayDetails = isEditing ? editedDetails : optimisticDetails;
 
-  return (
-    <div className="job-details-modal-overlay" onClick={handleClose}>
-      <div
-        className="job-details-modal-container"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
+  const footerContent = isEditing ? (
+    <div className="flex gap-2 justify-end">
+      <Button
+        onClick={handleCancelEdit}
+        disabled={isPending}
+        variant="secondary"
       >
-        {/* Header */}
-        <div className="job-details-modal-header">
-          <div className="header-content">
-            <h2 id="modal-title" className="modal-title">
-              Job Details
-            </h2>
-            {displayDetails && (
-              <div className="modal-subtitle">
-                {displayDetails.name}
-                <span className="status-badge" data-status={displayDetails.status.toLowerCase()}>
-                  {displayDetails.status}
-                </span>
-              </div>
-            )}
-          </div>
+        Cancel
+      </Button>
+      <Button
+        onClick={handleSave}
+        disabled={!hasChanges || isPending}
+        variant="primary"
+      >
+        {isPending ? 'Saving...' : 'Save Changes'}
+      </Button>
+    </div>
+  ) : (
+    <div className="flex gap-2 justify-end">
+      <Button
+        onClick={handleClose}
+        variant="secondary"
+      >
+        Close
+      </Button>
+      <Button
+        onClick={handleEditClick}
+        variant="primary"
+      >
+        Edit Details
+      </Button>
+    </div>
+  );
 
-          <Button
-            className="modal-close-button"
-            onClick={handleClose}
-            aria-label="Close modal"
-            variant="subtle"
-          >
-            ✕
-          </Button>
-        </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="modal-error-message" role="alert">
-            <strong>Error:</strong> {error}
-            <Button
-              className="error-dismiss"
-              onClick={() => setError(null)}
-              aria-label="Dismiss error"
-              variant="subtle"
-              size="sm"
+  return (
+    <>
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={displayDetails ? `${displayDetails.name}` : 'Job Details'}
+        size="lg"
+        footer={footerContent}
+        closeOnBackdrop={false}
+        closeOnEscape={!hasChanges}
+      >
+        {/* Status Badge */}
+        {displayDetails && (
+          <div className="mb-4">
+            <span 
+              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                displayDetails.status.toLowerCase() === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                displayDetails.status.toLowerCase() === 'printing' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                displayDetails.status.toLowerCase() === 'queued' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                displayDetails.status.toLowerCase() === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
+                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+              }`}
             >
-              ✕
-            </Button>
+              {displayDetails.status}
+            </span>
           </div>
         )}
 
-        {/* Content - No loading state needed, Suspense handles it */}
-        <>
-          {/* Tabs */}
-          <div className="modal-tabs">
+        {/* Error Message */}
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800" role="alert">
+            <div className="flex items-center justify-between">
+              <span className="text-red-800 dark:text-red-200">
+                <strong>Error:</strong> {error}
+              </span>
               <Button
-                className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
-                onClick={() => setActiveTab('overview')}
-                role="tab"
-                aria-selected={activeTab === 'overview'}
-                aria-controls="tab-overview"
-                variant="tab"
+                onClick={() => setError(null)}
+                aria-label="Dismiss error"
+                variant="subtle"
+                size="sm"
               >
-                Overview
-              </Button>
-              <Button
-                className={`tab-button ${activeTab === 'details' ? 'active' : ''}`}
-                onClick={() => setActiveTab('details')}
-                role="tab"
-                aria-selected={activeTab === 'details'}
-                aria-controls="tab-details"
-                variant="tab"
-              >
-                Details
-              </Button>
-              <Button
-                className={`tab-button ${activeTab === 'timing' ? 'active' : ''}`}
-                onClick={() => setActiveTab('timing')}
-                role="tab"
-                aria-selected={activeTab === 'timing'}
-                aria-controls="tab-timing"
-                variant="tab"
-              >
-                Timing
-              </Button>
-              <Button
-                className={`tab-button ${activeTab === 'history' ? 'active' : ''}`}
-                onClick={() => setActiveTab('history')}
-                role="tab"
-                aria-selected={activeTab === 'history'}
-                aria-controls="tab-history"
-                variant="tab"
-              >
-                History
+                ✕
               </Button>
             </div>
+          </div>
+        )}
 
-            {/* Tab Content */}
-            <div className="modal-content">
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4" role="tablist">
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'overview' 
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            onClick={() => setActiveTab('overview')}
+            role="tab"
+            aria-selected={activeTab === 'overview'}
+            aria-controls="tab-overview"
+          >
+            Overview
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'details' 
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            onClick={() => setActiveTab('details')}
+            role="tab"
+            aria-selected={activeTab === 'details'}
+            aria-controls="tab-details"
+          >
+            Details
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'timing' 
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            onClick={() => setActiveTab('timing')}
+            role="tab"
+            aria-selected={activeTab === 'timing'}
+            aria-controls="tab-timing"
+          >
+            Timing
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'history' 
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            onClick={() => setActiveTab('history')}
+            role="tab"
+            aria-selected={activeTab === 'history'}
+            aria-controls="tab-history"
+          >
+            History
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        <div className="min-h-[300px]">
               {/* Overview Tab */}
               {activeTab === 'overview' && (
                 <div id="tab-overview" role="tabpanel">
@@ -250,18 +288,18 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                     isEditing={isEditing}
                     onFieldChange={handleFieldChange}
                   />
-                  <div className="section-divider"></div>
-                  <div className="notes-and-tags-section">
-                    <div className="notes-editor-wrapper">
-                      <h3>Notes</h3>
+                  <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Notes</h3>
                       <JobNotesEditor
                         notes={displayDetails.notes || ''}
                         isEditing={isEditing}
                         onNotesChange={handleNotesChange}
                       />
                     </div>
-                    <div className="tags-editor-wrapper">
-                      <h3>Tags</h3>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Tags</h3>
                       <JobTagsEditor
                         tags={displayDetails.tags || []}
                         isEditing={isEditing}
@@ -274,72 +312,74 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
               {/* Details Tab */}
               {activeTab === 'details' && (
-                <div id="tab-details" role="tabpanel" className="details-grid">
-                  <div className="detail-item">
-                    <label>Printer</label>
-                    <p>{displayDetails.printerName}</p>
+                <div id="tab-details" role="tabpanel" className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Printer</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.printerName}</p>
                   </div>
-                  <div className="detail-item">
-                    <label>Model</label>
-                    <p>{displayDetails.printerModel}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Model</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.printerModel}</p>
                   </div>
-                  <div className="detail-item">
-                    <label>Material Type</label>
-                    <p>{displayDetails.materialType || 'Not specified'}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Material Type</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.materialType || 'Not specified'}</p>
                   </div>
-                  <div className="detail-item">
-                    <label>Nozzle Diameter</label>
-                    <p>{displayDetails.nozzleDiameter ? `${displayDetails.nozzleDiameter}mm` : 'Not specified'}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Nozzle Diameter</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.nozzleDiameter ? `${displayDetails.nozzleDiameter}mm` : 'Not specified'}</p>
                   </div>
-                  <div className="detail-item">
-                    <label>Priority</label>
-                    <p>{displayDetails.priority}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Priority</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.priority}</p>
                   </div>
-                  <div className="detail-item">
-                    <label>Queue Position</label>
-                    <p>{displayDetails.queuePosition}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Queue Position</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.queuePosition}</p>
                   </div>
-                  <div className="detail-item full-width">
-                    <label>File Name</label>
-                    <p>{displayDetails.fileName || 'Unknown'}</p>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">File Name</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.fileName || 'Unknown'}</p>
                   </div>
-                  <div className="detail-item full-width">
-                    <label>Estimated Filament</label>
-                    <p>{displayDetails.estimatedFilamentUsage || 'Not available'}</p>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Estimated Filament</label>
+                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.estimatedFilamentUsage || 'Not available'}</p>
                   </div>
                 </div>
               )}
 
               {/* Timing Tab */}
               {activeTab === 'timing' && (
-                <div id="tab-timing" role="tabpanel" className="timing-info">
-                  <div className="timing-item">
-                    <label>Estimated Print Time</label>
-                    <p className="timing-value">
+                <div id="tab-timing" role="tabpanel" className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Estimated Print Time</label>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {Math.round(displayDetails.estimatedPrintTimeSeconds / 60)} minutes
-                      ({Math.round(displayDetails.estimatedPrintTimeSeconds / 3600)} hours)
+                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                        ({Math.round(displayDetails.estimatedPrintTimeSeconds / 3600)} hours)
+                      </span>
                     </p>
                   </div>
-                  <div className="timing-item">
-                    <label>Created</label>
-                    <p>{new Date(displayDetails.createdAt).toLocaleString()}</p>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</label>
+                    <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.createdAt).toLocaleString()}</p>
                   </div>
                   {displayDetails.queuedAt && (
-                    <div className="timing-item">
-                      <label>Queued</label>
-                      <p>{new Date(displayDetails.queuedAt).toLocaleString()}</p>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Queued</label>
+                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.queuedAt).toLocaleString()}</p>
                     </div>
                   )}
                   {displayDetails.startedAt && (
-                    <div className="timing-item">
-                      <label>Started</label>
-                      <p>{new Date(displayDetails.startedAt).toLocaleString()}</p>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Started</label>
+                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.startedAt).toLocaleString()}</p>
                     </div>
                   )}
                   {displayDetails.completedAt && (
-                    <div className="timing-item">
-                      <label>Completed</label>
-                      <p>{new Date(displayDetails.completedAt).toLocaleString()}</p>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Completed</label>
+                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.completedAt).toLocaleString()}</p>
                     </div>
                   )}
                 </div>
@@ -347,75 +387,33 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
               {/* History Tab */}
               {activeTab === 'history' && (
-                <div id="tab-history" role="tabpanel" className="history-info">
-                  <div className="history-event">
-                    <span className="event-type">Created</span>
-                    <span className="event-time">{new Date(displayDetails.createdAt).toLocaleString()}</span>
+                <div id="tab-history" role="tabpanel" className="space-y-2">
+                  <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                    <span className="font-medium text-gray-700 dark:text-gray-300">Created</span>
+                    <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.createdAt).toLocaleString()}</span>
                   </div>
                   {displayDetails.queuedAt && (
-                    <div className="history-event">
-                      <span className="event-type">Queued</span>
-                      <span className="event-time">{new Date(displayDetails.queuedAt).toLocaleString()}</span>
+                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Queued</span>
+                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.queuedAt).toLocaleString()}</span>
                     </div>
                   )}
                   {displayDetails.startedAt && (
-                    <div className="history-event">
-                      <span className="event-type">Started</span>
-                      <span className="event-time">{new Date(displayDetails.startedAt).toLocaleString()}</span>
+                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Started</span>
+                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.startedAt).toLocaleString()}</span>
                     </div>
                   )}
                   {displayDetails.completedAt && (
-                    <div className="history-event">
-                      <span className="event-type">Completed</span>
-                      <span className="event-time">{new Date(displayDetails.completedAt).toLocaleString()}</span>
+                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Completed</span>
+                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.completedAt).toLocaleString()}</span>
                     </div>
                   )}
                 </div>
               )}
             </div>
-          </>
-
-        {/* Footer */}
-        <div className="modal-footer">
-          {isEditing ? (
-            <>
-              <Button
-                className="btn btn-secondary"
-                onClick={handleCancelEdit}
-                disabled={isPending}
-                variant="secondary"
-              >
-                Cancel
-              </Button>
-              <Button
-                className="btn btn-primary"
-                onClick={handleSave}
-                disabled={!hasChanges || isPending}
-                variant="primary"
-              >
-                {isPending ? 'Saving...' : 'Save Changes'}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                className="btn btn-secondary"
-                onClick={handleClose}
-                variant="secondary"
-              >
-                Close
-              </Button>
-              <Button
-                className="btn btn-primary"
-                onClick={handleEditClick}
-                variant="primary"
-              >
-                Edit Details
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      </Modal>
 
       {/* Unsaved changes confirmation */}
       <ConfirmationModal
@@ -428,7 +426,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         onConfirm={doClose}
         onCancel={() => setShowUnsavedConfirm(false)}
       />
-    </div>
+    </>
   );
 }
 
@@ -447,14 +445,12 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   return (
     // React 19 Suspense boundary shows fallback while promise resolves
     <Suspense fallback={
-      <div className="job-details-modal-overlay">
-        <div className="job-details-modal-container" role="dialog" aria-modal="true">
-          <div className="modal-loading">
-            <div className="spinner"></div>
-            <p>Loading job details...</p>
-          </div>
+      <Modal isOpen={true} onClose={onClose} title="Job Details" size="lg">
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading job details...</p>
         </div>
-      </div>
+      </Modal>
     }>
       <JobDetailsContent
         jobDetailsPromise={fetchJobDetails(jobId)}

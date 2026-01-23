@@ -29,6 +29,8 @@ public class QueuedPrintJobDto
 
     public string GcodeFileId { get; set; } = string.Empty;
 
+    public string? FileName { get; set; } // Original G-code filename for display
+
     public string? AssignedPrinterId { get; set; }
 
     public string Status { get; set; } = string.Empty;
@@ -71,7 +73,9 @@ public class QueueGcodeFileMetaDto
 {
     public string Id { get; set; } = string.Empty;
 
-    public string FileName { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty; // Original filename for display
+
+    public string FileName { get; set; } = string.Empty; // GUID-based filename on disk
 
     public long FileSizeBytes { get; set; }
 

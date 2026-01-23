@@ -546,7 +546,8 @@ namespace Farm.Web.Api.Services.Gcode
                 Name: gcodeFile.Name,  // Original filename for display
                 FileSize: gcodeFile.FileSizeBytes,
                 UploadedAt: info.LastWriteTimeUtc,
-                IsDirectory: false);
+                IsDirectory: false,
+                Id: gcodeFile.Id.ToString());  // Include the file ID for OctoPrint upload and other lookups
         }
 
         /// <summary>

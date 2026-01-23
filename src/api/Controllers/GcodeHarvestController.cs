@@ -3,6 +3,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -13,6 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting")]
+[Authorize(Roles = "farm_admin")]
 public class GcodeHarvestController(
     IGcodeHarvestService harvestService,
     IGcodeHarvestQueue harvestQueue,

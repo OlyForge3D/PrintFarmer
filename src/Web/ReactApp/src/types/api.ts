@@ -1579,6 +1579,7 @@ export interface QueuedPrintJobDto {
   id: string;
   name: string;
   gcodeFileId: string;
+  fileName?: string; // Original G-code filename for display
   assignedPrinterId?: string;
   status: string;
   priority: number;
@@ -1600,7 +1601,8 @@ export interface QueuedPrintJobDto {
 
 export interface QueueGcodeFileMetaDto {
   id: string;
-  fileName: string;
+  name: string; // Original filename for display
+  fileName: string; // GUID-based filename on disk
   fileSizeBytes: number;
   materialType?: string;
   nozzleDiameter?: number;
@@ -1618,10 +1620,11 @@ export interface QueuePrinterMetaDto {
 }
 
 export interface QueuedPrintJobWithFileMetaDto {
-  id: string;
   job: QueuedPrintJobDto;
-  fileMetadata?: QueueGcodeFileMetaDto;
-  printerMetadata?: QueuePrinterMetaDto;
+  gcodeFile?: QueueGcodeFileMetaDto;
+  assignedPrinter?: QueuePrinterMetaDto;
+  estimatedStartTime?: string;
+  estimatedCompletionTime?: string;
 }
 
 export interface QueueStatsDto {

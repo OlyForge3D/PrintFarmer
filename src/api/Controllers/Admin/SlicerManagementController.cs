@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/slicers")]
-[Authorize]
+[Authorize(Roles = "farm_admin")]
 [RequirePermission("slicers", "admin")]
 public class SlicerManagementController(ISlicersService service, ILogger<SlicerManagementController> logger) : ControllerBase
 {

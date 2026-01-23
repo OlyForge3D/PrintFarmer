@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -14,6 +15,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-library")]
 [Tags("G-code Library")]
+[Authorize]
 public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
@@ -144,6 +146,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// Delete a G-code file from the library.
     /// </summary>
     /// <param name="id">The unique identifier of the G-code file to delete.</param>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]

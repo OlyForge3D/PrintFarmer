@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using Farm.Api.Services.Interfaces;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Queue;
@@ -11,21 +12,23 @@ namespace Farm.Web.Api.Tests.Controllers;
 public class JobQueueControllerTests
 {
     private readonly Mock<IJobQueueService> _queueServiceMock;
+    private readonly Mock<IPrintJobManagementService> _printJobManagementServiceMock;
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
     {
         _queueServiceMock = new Mock<IJobQueueService>();
+        _printJobManagementServiceMock = new Mock<IPrintJobManagementService>();
         _loggerMock = new Mock<IUnifiedLoggingService>();
-        _controller = new JobQueueController(_queueServiceMock.Object, _loggerMock.Object);
+        _controller = new JobQueueController(_queueServiceMock.Object, _printJobManagementServiceMock.Object, _loggerMock.Object);
     }
 
     [Fact]
     public void Constructor_WithValidDependencies_CreatesInstance()
     {
         // Arrange & Act
-        var controller = new JobQueueController(_queueServiceMock.Object, _loggerMock.Object);
+        var controller = new JobQueueController(_queueServiceMock.Object, _printJobManagementServiceMock.Object, _loggerMock.Object);
 
         // Assert
         Assert.NotNull(controller);
@@ -122,9 +125,9 @@ public class JobQueueControllerTests
 
         // Assert
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
-        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(actionResult.Result);
+        CreatedResult createdResult = Assert.IsType<CreatedResult>(actionResult.Result);
         Assert.Equal(jobDto, createdResult.Value);
-        Assert.Equal(nameof(_controller.GetJobAsync), createdResult.ActionName);
+        Assert.Contains(jobDto.Id.ToString(), createdResult.Location);
     }
 
     [Fact]

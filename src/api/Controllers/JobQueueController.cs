@@ -1,9 +1,12 @@
-﻿using Farm.Infrastructure;
+﻿using Farm.Api.Services.Interfaces;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.DTOs.PrintQueue;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -14,7 +17,11 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
-public class JobQueueController(Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
+[Authorize]
+public class JobQueueController(
+    Services.Queue.IJobQueueService queueService,
+    IPrintJobManagementService printJobManagementService,
+    IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get queue overview with optional model filtering.
@@ -57,9 +64,14 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
         try
         {
             JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
-            return added == null
-                ? NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer")
-                : CreatedAtAction(nameof(GetJobAsync), new { id = added.Id }, added);
+            if (added == null)
+            {
+                return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
+            }
+
+            // Return 201 Created with location header
+            string location = $"/api/job-queue/{added.Id}";
+            return Created(location, added);
         }
         catch (Exception ex)
         {
@@ -72,7 +84,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// Get a specific job
     /// </summary>
     /// <param name="id">The unique identifier of the job to retrieve.</param>
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -95,7 +107,7 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     /// </summary>
     /// <param name="id">The unique identifier of the job to update.</param>
     /// <param name="request">The update request containing new status, priority, or assignment.</param>
-    [HttpPut("{id}")]
+    [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -126,10 +138,41 @@ public class JobQueueController(Services.Queue.IJobQueueService queueService, IU
     }
 
     /// <summary>
+    /// Dispatch a queued/assigned job to its printer to start printing.
+    /// The job must have an assigned printer and be in Queued or Assigned status.
+    /// </summary>
+    /// <param name="id">The unique identifier of the job to dispatch.</param>
+    /// <returns>The updated job with Starting/Printing status.</returns>
+    [HttpPost("{id:guid}/dispatch")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> DispatchJobAsync(Guid id)
+    {
+        try
+        {
+            string? userId = User.Identity?.Name ?? "anonymous";
+            QueuedPrintJobDto result = await printJobManagementService.DispatchJobAsync(id.ToString(), userId, CancellationToken.None);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning($"Cannot dispatch job {id}: {ex.Message}");
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, $"Error dispatching print job {id}");
+            return Problem("An error occurred while dispatching the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Delete a job from the queue
     /// </summary>
     /// <param name="id">The unique identifier of the job to delete.</param>
-    [HttpDelete("{id}")]
+    [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
