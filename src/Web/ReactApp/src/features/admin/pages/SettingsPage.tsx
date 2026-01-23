@@ -1,34 +1,52 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
-import { ThemeSelector } from '@/common/components/ui/ThemeSelector';
 import {
   fetchSettingsMetadata,
+  fetchSettingsGroups,
   saveAllSettings,
   fetchSettingsUnified,
+  SettingGroupMetadata,
 } from '@/services/settingsApi';
+
+/** Sidebar navigation item for settings sections */
+interface NavItem {
+  key: string;
+  displayName: string;
+  icon?: string;
+  group?: string;
+  order?: number;
+}
 
 export function SettingsPage() {
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
+  const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrorsBySection, setFieldErrorsBySection] = useState<Record<string, Record<string, string>>>({});
+  const [activeSection, setActiveSection] = useState<string | null>(null);
 
   const location = useLocation();
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const refetchSettingsValues = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const meta = await fetchSettingsMetadata();
+      const [meta, groups] = await Promise.all([
+        fetchSettingsMetadata(),
+        fetchSettingsGroups(),
+      ]);
       setMetadata(meta);
+      setGroupMetadata(groups);
       const unified = await fetchSettingsUnified();
       const valueMap: Record<string, Record<string, unknown>> = {};
       for (const m of meta) {
@@ -48,10 +66,11 @@ export function SettingsPage() {
     let mounted = true;
     setLoading(true);
     setError(null);
-    fetchSettingsMetadata()
-      .then(async (meta) => {
+    Promise.all([fetchSettingsMetadata(), fetchSettingsGroups()])
+      .then(async ([meta, groups]) => {
         if (!mounted) return;
         setMetadata(meta);
+        setGroupMetadata(groups);
         await refetchSettingsValues();
         setLoading(false);
       })
@@ -61,6 +80,108 @@ export function SettingsPage() {
       });
     return () => { mounted = false; };
   }, [location, refetchSettingsValues]);
+
+  // Scroll-spy: track which section is currently visible
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // All section keys from metadata
+    const allSectionKeys = metadata.map(m => m.key);
+
+    const handleScroll = () => {
+      const containerRect = container.getBoundingClientRect();
+      
+      // Find the section that is most visible in the viewport
+      let closestSection: string | null = null;
+      let closestDistance = Infinity;
+
+      for (const key of allSectionKeys) {
+        const el = sectionRefs.current[key];
+        if (!el) continue;
+        
+        const rect = el.getBoundingClientRect();
+        const relativeTop = rect.top - containerRect.top;
+        
+        // Calculate distance from top of viewport (prefer sections near the top)
+        const distance = Math.abs(relativeTop - 100); // 100px offset for header
+        
+        if (relativeTop <= 150 && distance < closestDistance) {
+          closestDistance = distance;
+          closestSection = key;
+        }
+      }
+
+      // If no section found near top, use the first one that's partially visible
+      if (!closestSection) {
+        for (const key of allSectionKeys) {
+          const el = sectionRefs.current[key];
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+            closestSection = key;
+            break;
+          }
+        }
+      }
+
+      if (closestSection && closestSection !== activeSection) {
+        setActiveSection(closestSection);
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    // Initial check
+    handleScroll();
+
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [metadata, activeSection]);
+
+  // Build navigation items grouped and sorted
+  const navItems: NavItem[] = metadata.map(m => ({
+    key: m.key,
+    displayName: m.displayName || m.className,
+    icon: m.icon,
+    group: m.group || 'Other',
+    order: m.order ?? 999,
+  })).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+  // Group nav items by group
+  const groupedNavItems = navItems.reduce<Record<string, NavItem[]>>((acc, item) => {
+    const group = item.group || 'Other';
+    if (!acc[group]) acc[group] = [];
+    acc[group].push(item);
+    return acc;
+  }, {});
+
+  // Build a map of group key to order from group metadata
+  const groupOrderMap = groupMetadata.reduce<Record<string, number>>((acc, g) => {
+    acc[g.key] = g.order;
+    return acc;
+  }, {});
+
+  // Sort groups by their order from group metadata, with fallback for undefined groups
+  const sortedGroups = Object.keys(groupedNavItems).sort((a, b) => {
+    const orderA = groupOrderMap[a] ?? 999;
+    const orderB = groupOrderMap[b] ?? 999;
+    if (orderA !== orderB) return orderA - orderB;
+    // If same order, sort alphabetically
+    return a.localeCompare(b);
+  });
+
+  // Get display name for a group from metadata
+  const getGroupDisplayName = (groupKey: string): string => {
+    const group = groupMetadata.find(g => g.key === groupKey);
+    return group?.displayName || groupKey;
+  };
+
+  const scrollToSection = (key: string) => {
+    const el = sectionRefs.current[key];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSection(key);
+    }
+  };
 
   const handleFieldChange = (className: string, field: string, value: SettingValue) => {
     setSettingsValues(prev => ({
@@ -180,35 +301,81 @@ export function SettingsPage() {
       ) : error ? (
         <div className="text-center text-pf-error">{error}</div>
       ) : (
-        <div className="space-y-6">
-          {/* Theme Selector Section */}
-          <div className="bg-pf-bg-1 rounded-lg p-6 border border-pf-border">
-            <h2 className="text-lg font-semibold text-pf-text-primary mb-4">
-              Appearance
-            </h2>
-            <ThemeSelector />
-          </div>
+        <div className="flex gap-6" style={{ height: 'calc(100vh - 160px)' }}>
+          {/* Sidebar Navigation - Hidden on small screens */}
+          <nav className="hidden lg:block w-56 flex-shrink-0">
+            <div className="pr-2">
+              <div className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wider mb-3">
+                Sections
+              </div>
+              {sortedGroups.map(group => (
+                <div key={group} className="mb-4">
+                  <div className="text-xs font-medium text-pf-text-secondary mb-2 px-2">
+                    {getGroupDisplayName(group)}
+                  </div>
+                  <ul className="space-y-0.5 ml-3">
+                    {groupedNavItems[group].map(item => (
+                      <li key={item.key}>
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection(item.key)}
+                          className={`w-full px-3 py-1.5 text-sm rounded-md transition-colors border-0 outline-none justify-start bg-transparent shadow-none
+                            ${activeSection === item.key
+                              ? 'bg-pf-accent/15 text-pf-accent font-medium'
+                              : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+                            }`}
+                          aria-current={activeSection === item.key ? 'true' : undefined}
+                        >
+                          {item.displayName}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </nav>
 
-          {/* Application Settings */}
-          <form onSubmit={e => { e.preventDefault(); handleSave(); }}>
-            {metadata.map((meta) => (
-              <SettingsPagelet
-                key={meta.key}
-                metadata={meta}
-                values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
-                onChange={(field, value) => handleFieldChange(meta.key, field, value)}
-                fieldErrors={fieldErrorsBySection[meta.key]}
-              />
-            ))}
-            {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={saving}
+          {/* Main Content Area */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            <div 
+              ref={scrollContainerRef}
+              className="flex-1 space-y-6 overflow-y-auto scroll-smooth pr-2"
             >
-              {saving ? 'Saving...' : 'Save All'}
-            </Button>
-          </form>
+              {/* Application Settings - rendered in same order as sidebar */}
+              {sortedGroups.flatMap(group => 
+                groupedNavItems[group].map(item => {
+                  const meta = metadata.find(m => m.key === item.key);
+                  if (!meta) return null;
+                  return (
+                    <div 
+                      key={meta.key}
+                      ref={el => { sectionRefs.current[meta.key] = el; }}
+                      id={`section-${meta.key}`}
+                    >
+                      <SettingsPagelet
+                        metadata={meta}
+                        values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
+                        onChange={(field, value) => handleFieldChange(meta.key, field, value)}
+                        fieldErrors={fieldErrorsBySection[meta.key]}
+                      />
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
+            <div className="py-4 flex justify-end border-t border-pf-border mt-4">
+              <Button
+                type="button"
+                onClick={handleSave}
+                variant="primary"
+                disabled={saving}
+              >
+                {saving ? 'Saving...' : 'Save All'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </PageTemplate>

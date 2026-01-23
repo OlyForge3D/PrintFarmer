@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,6 +10,7 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.DTOs.Artifacts;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Tests.Slicing;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

@@ -1,7 +1,7 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
-import { ThemeToggle } from '@/common/components/ThemeToggle';
+import { useTheme, Theme } from '@/contexts/ThemeContext';
 import { Button } from '@/common/components/ui';
 import { 
   CloseIcon, 
@@ -24,7 +24,8 @@ import {
   TrendingUpIcon,
   LocationIcon,
   KeyIcon,
-  DatabaseIcon
+  DatabaseIcon,
+  CheckIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -84,6 +85,12 @@ const navigation: NavigationElement[] = [
     name: 'Spools', 
     href: '/spools', 
     icon: SpoolIcon
+  },
+  {
+    name: 'Maintenance',
+    href: '/maintenance',
+    icon: WrenchIcon,
+    requiredPermission: { resource: 'printers', action: 'read' }
   },
   { name: '', isDivider: true },
   {
@@ -151,6 +158,7 @@ const navigation: NavigationElement[] = [
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const { theme, setTheme } = useTheme();
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
   useEffect(() => {
@@ -382,9 +390,6 @@ export function Layout() {
 
           {/* Right side - Status and user */}
           <div className="flex items-center space-x-3">
-            {/* Theme toggle */}
-            <ThemeToggle size="sm" />
-
             {/* Connection status */}
             <div className="flex items-center space-x-2">
               <div 
@@ -420,7 +425,7 @@ export function Layout() {
 
               {/* User dropdown menu */}
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-10">
+                <div className="absolute right-0 mt-2 w-64 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-10">
                   <div className="py-1">
                     {isAuthenticated && user ? (
                       <>
@@ -477,6 +482,35 @@ export function Layout() {
                         </Button>
                       </>
                     )}
+
+                    {/* Theme Selection - available to all users */}
+                    <div className="border-t border-pf-border mt-1 pt-1">
+                      <div className="px-4 py-2 text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
+                        Theme
+                      </div>
+                      {([
+                        { value: 'github-dark' as Theme, label: 'GitHub Dark', desc: 'Dark theme inspired by GitHub' },
+                        { value: 'printfarmer-dark' as Theme, label: 'PrintFarmer Dark', desc: 'Original dark theme' },
+                        { value: 'light' as Theme, label: 'Light', desc: 'Light theme for bright environments' },
+                      ]).map((t) => (
+                        <button
+                          key={t.value}
+                          type="button"
+                          onClick={() => setTheme(t.value)}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-pf-bg-2 flex items-center gap-2 ${
+                            theme === t.value ? 'text-pf-accent' : 'text-pf-text-primary'
+                          }`}
+                        >
+                          <span className="flex-1">
+                            <span className="block">{t.label}</span>
+                            <span className="block text-xs text-pf-text-secondary">{t.desc}</span>
+                          </span>
+                          {theme === t.value && (
+                            <CheckIcon className="h-4 w-4 text-pf-accent flex-shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}

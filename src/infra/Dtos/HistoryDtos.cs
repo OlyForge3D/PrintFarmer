@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure;
 
@@ -68,8 +69,10 @@ public class AuxiliaryData
 /// </summary>
 public class HistoryTotals
 {
+    [JsonPropertyName("job_totals")]
     public JobTotals JobTotals { get; set; } = new();
 
+    [JsonPropertyName("auxiliary_totals")]
     public AuxiliaryTotals[]? AuxiliaryTotals { get; set; }
 }
 
@@ -78,16 +81,23 @@ public class HistoryTotals
 /// </summary>
 public class JobTotals
 {
-    public int TotalJobs { get; set; }
+    // Note: Moonraker can return total_jobs as a float (e.g., 338.0), so use double
+    [JsonPropertyName("total_jobs")]
+    public double TotalJobs { get; set; }
 
+    [JsonPropertyName("total_time")]
     public double TotalTime { get; set; }
 
+    [JsonPropertyName("total_print_time")]
     public double TotalPrintTime { get; set; }
 
+    [JsonPropertyName("total_filament_used")]
     public double TotalFilamentUsed { get; set; }
 
+    [JsonPropertyName("longest_job")]
     public double LongestJob { get; set; }
 
+    [JsonPropertyName("longest_print")]
     public double LongestPrint { get; set; }
 }
 

@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Locations;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -17,6 +18,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/locations")]
 [Tags("Locations")]
+[Authorize]
 public class LocationsController(
     ILocationService locationService,
     IStartupStatus startupStatus,
@@ -33,6 +35,7 @@ public class LocationsController(
     /// <returns>List of all locations</returns>
     /// <response code="200">Returns the list of locations</response>
     /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<LocationDto>), 200)]
     [ProducesResponseType(503)]
@@ -68,6 +71,7 @@ public class LocationsController(
     /// <response code="200">Returns the location</response>
     /// <response code="404">If the location is not found</response>
     /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(LocationDetailsDto), 200)]
     [ProducesResponseType(404)]
@@ -104,6 +108,7 @@ public class LocationsController(
     /// <response code="201">Returns the created location</response>
     /// <response code="400">If the request is invalid</response>
     /// <response code="503">If the system is still initializing</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost]
     [ProducesResponseType(typeof(LocationDto), 201)]
     [ProducesResponseType(400)]
@@ -151,6 +156,7 @@ public class LocationsController(
     /// <response code="200">Returns the updated location</response>
     /// <response code="404">If the location is not found</response>
     /// <response code="503">If the system is still initializing</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(LocationDto), 200)]
     [ProducesResponseType(404)]
@@ -192,6 +198,7 @@ public class LocationsController(
     /// <response code="204">Successfully deleted the location</response>
     /// <response code="404">If the location is not found</response>
     /// <response code="503">If the system is still initializing</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]

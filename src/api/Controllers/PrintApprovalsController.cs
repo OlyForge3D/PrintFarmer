@@ -3,12 +3,14 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.PrintJobs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Web.Api.Data.Repositories.IPrintApprovalRepository? repo = null) : ControllerBase
     {
         private readonly IPrintApprovalService _approvalService = approvalService;
@@ -27,6 +29,7 @@ namespace Farm.Web.Api.Controllers
             return Ok(dto);
         }
 
+        [Authorize(Roles = "farm_admin")]
         [HttpPost("{id:guid}/approve")]
         public async Task<IActionResult> ApproveAsync([FromRoute] Guid id)
         {
@@ -34,6 +37,7 @@ namespace Farm.Web.Api.Controllers
             return !ok ? NotFound() : NoContent();
         }
 
+        [Authorize(Roles = "farm_admin")]
         [HttpPost("{id:guid}/reject")]
         public async Task<IActionResult> RejectAsync([FromRoute] Guid id)
         {

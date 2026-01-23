@@ -3,6 +3,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.SlicerServices;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 
@@ -10,6 +11,7 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/settings")]
+[Authorize]
 public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
     ILogger<UnifiedSettingsController> logger) : ControllerBase
@@ -29,6 +31,7 @@ public class UnifiedSettingsController(
     /// Returns a dictionary where each key is a settings section name (keyName) and the value is the current settings object for that section.
     /// </remarks>
     /// <returns>Dictionary of all settings sections keyed by section name.</returns>
+    [AllowAnonymous]
     [HttpGet]
     public ActionResult<IDictionary<string, object>> Get()
     {
@@ -52,6 +55,7 @@ public class UnifiedSettingsController(
     /// </remarks>
     /// <param name="settingsSections">Dictionary of keyName to settings object.</param>
     /// <returns>Result of save operation, including validation errors if any.</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost]
     public ActionResult Update([FromBody] Dictionary<string, object> settingsSections)
     {
@@ -213,6 +217,28 @@ public class UnifiedSettingsController(
         catch (Exception ex)
         {
             return BadRequest($"Failed to get settings metadata: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets metadata for all settings groups, including display names, icons, and ordering.
+    /// </summary>
+    /// <remarks>
+    /// Used for organizing settings sections in the UI sidebar.
+    /// Groups are defined via [SettingGroup] attributes on settings classes.
+    /// </remarks>
+    /// <returns>Metadata for all settings groups, ordered by their Order property.</returns>
+    [HttpGet("groups")]
+    public ActionResult<IEnumerable<SettingGroupMetadata>> GetGroups()
+    {
+        try
+        {
+            IEnumerable<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata();
+            return Ok(groups);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Failed to get settings group metadata: {ex.Message}");
         }
     }
 

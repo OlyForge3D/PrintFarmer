@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Net.Http;
@@ -10,6 +9,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.JobDispatch;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Tests.SlicerServices
     /// </summary>
     [Trait("Category", "Integration")]
     [Collection(IntegrationTestCollection.Name)]
-public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
+    public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
     {
         private readonly CustomWebApplicationFactory _factory;
 

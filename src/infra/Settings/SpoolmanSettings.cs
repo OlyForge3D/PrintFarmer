@@ -3,7 +3,8 @@
 namespace Farm.Infrastructure.Settings;
 
 [AppSetting(SectionName)]
-[SettingDisplay(Name = "Spoolman", Description = "Settings for Spoolman filament management integration.", Icon = "pf-icon-spoolman", Group = "Integrations", Order = 10)]
+[SettingGroup("Integrations", DisplayName = "Integrations", Description = "External service integrations", Icon = "pf-icon-integration", Order = 5)]
+[SettingDisplay(Name = "Spoolman", Description = "Settings for Spoolman filament management integration.", Icon = "pf-icon-spoolman", Group = "Integrations", Order = 1)]
 public class SpoolmanSettings : IAppSetting
 {
     public const string SectionName = "Spoolman";
@@ -13,7 +14,7 @@ public class SpoolmanSettings : IAppSetting
     [SettingDisplay(
         Name = "Base URL",
         Description = "Base URL for the Spoolman API server (e.g., http://spoolman.local:7912)",
-        InputType = SettingInputType.Text)]
+        InputType = SettingInputType.Url)]
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; set; } = string.Empty;
 }

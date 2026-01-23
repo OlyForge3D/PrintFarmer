@@ -6,8 +6,21 @@ import type { SettingMetadata } from '@/components/SettingsPagelet';
  * apiClient handles authentication, correlation IDs, and error handling automatically
  */
 
+/** Group metadata for sidebar organization */
+export interface SettingGroupMetadata {
+  key: string;
+  displayName: string;
+  description?: string;
+  icon?: string;
+  order: number;
+}
+
 export async function fetchSettingsMetadata(): Promise<SettingMetadata[]> {
   return apiClient.getSettingsMetadata();
+}
+
+export async function fetchSettingsGroups(): Promise<SettingGroupMetadata[]> {
+  return apiClient.getSettingsGroups();
 }
 
 export async function fetchSettingsUnified(): Promise<Record<string, unknown>> {

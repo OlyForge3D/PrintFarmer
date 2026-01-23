@@ -256,7 +256,7 @@ const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragg
       <div className="flex items-center justify-between">
         <div className="min-w-0">
           <p className="font-medium text-sm text-pf-text-primary truncate">{printer.name}</p>
-          <p className="text-xs text-pf-text-tertiary truncate">{printer.serverUrl}</p>
+          <p className="text-xs text-pf-text-tertiary truncate">{printer.backendUrl}</p>
         </div>
         {isSaving && (
           <div className="ml-3 text-xs text-pf-text-secondary">Saving...</div>

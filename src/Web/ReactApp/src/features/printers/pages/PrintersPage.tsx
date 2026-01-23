@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useOptimistic, useTransition } from 'react';
+import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
@@ -49,6 +49,7 @@ function getBackendName(backend: PrinterBackend | string | number): string {
 export function PrintersPage() {
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
+  
   const { 
     data: printers, 
     isLoading,
@@ -86,7 +87,7 @@ export function PrintersPage() {
   const [showDiscovery, setShowDiscovery] = useState(false);
 
   // Check if discovery service is available
-  React.useEffect(() => {
+  useEffect(() => {
     const checkDiscoveryAvailability = async () => {
       try {
         const settings = await apiClient.getSettings<import('@/types/NetworkDiscoverySettings').NetworkDiscoverySettings>('NetworkDiscovery');
@@ -106,7 +107,7 @@ export function PrintersPage() {
   }, []);
 
   // Save view mode preference to localStorage
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem('printerViewMode', viewMode);
   }, [viewMode]);
 
@@ -225,7 +226,7 @@ export function PrintersPage() {
         if (window.PrintFarmerDebug?.printers) {
           console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
         }
-        await apiClient.setPrinterMaintenance(printer.id, { inMaintenance });
+        await apiClient.setPrinterMaintenance(printer.id, inMaintenance);
       }));
       
       

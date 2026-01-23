@@ -171,7 +171,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     const model = models.find(m => m.id === selectedModelId);
                     if (model) {
                       const a = document.createElement('a');
-                      a.href = `/api/files/${model.id}/download`;
+                      a.href = `/api/3d-models/file/${model.id}`;
                       a.download = model.fileName;
                       a.click();
                     }

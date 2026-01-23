@@ -73,6 +73,11 @@ export interface ComponentModelCardProps<T extends ComponentModelCardData = Comp
   onEdit?: (model: T) => void;
 
   /**
+   * Callback when the clone button is clicked
+   */
+  onClone?: (model: T) => void;
+
+  /**
    * Callback when the delete button is clicked
    */
   onDelete?: (model: T) => void;
@@ -161,6 +166,7 @@ function TypeSpecificProperties({ model }: { model: ComponentModelCardData }) {
 export function ComponentModelCard<T extends ComponentModelCardData>({
   model,
   onEdit,
+  onClone,
   onDelete,
   isLoading = false,
 }: ComponentModelCardProps<T>) {
@@ -200,6 +206,31 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
                     strokeLinejoin="round"
                     strokeWidth={2}
                     d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                  />
+                </svg>
+              </Button>
+            )}
+            {onClone && (
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => onClone(model)}
+                disabled={isLoading}
+                aria-label={`Clone ${model.name}`}
+                title={`Clone ${model.name}`}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                   />
                 </svg>
               </Button>

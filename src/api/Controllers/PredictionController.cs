@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -13,6 +14,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/predictions")]
+[Authorize]
 [Produces("application/json")]
 public class PredictionController(PredictionService predictionService) : ControllerBase
 {
@@ -133,6 +135,7 @@ public class PredictionController(PredictionService predictionService) : Control
     /// <param name="request">Completion record request</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Success response</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("jobs/{jobId:guid}/record-completion")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

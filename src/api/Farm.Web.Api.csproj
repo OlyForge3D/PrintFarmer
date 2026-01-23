@@ -75,6 +75,12 @@
     <None Include="Tests\**\*.cs" />
   </ItemGroup>
 
+  <!-- Exclude appsettings.Development.json from Release builds (Docker) -->
+  <!-- This file has relative paths that only work for local development outside containers -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Content Remove="appsettings.Development.json" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Include native Lib3MF libraries for runtime loading -->
     <None Include="runtimes/linux-x64/native/lib3mf.so">

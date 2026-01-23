@@ -8,6 +8,9 @@ public enum SettingInputType
     /// <summary>Single-line text input.</summary>
     Text,
 
+    /// <summary>Multi-line text area for longer content.</summary>
+    TextArea,
+
     /// <summary>Numeric input (integer or float).</summary>
     Number,
 

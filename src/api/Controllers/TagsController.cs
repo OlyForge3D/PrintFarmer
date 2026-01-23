@@ -28,6 +28,7 @@ public class TagsController(
     /// <response code="200">Returns the list of tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("")]
     [ProducesResponseType(typeof(IEnumerable<TagDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -55,6 +56,7 @@ public class TagsController(
     /// <response code="200">Returns matching tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("search")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -87,6 +89,7 @@ public class TagsController(
     /// <response code="200">Returns popular tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("popular")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -118,6 +121,7 @@ public class TagsController(
     /// <response code="200">Returns analytics data</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("analytics")]
     [ProducesResponseType(typeof(TagAnalyticsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -146,6 +150,7 @@ public class TagsController(
     /// <response code="200">Returns suggestions</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("suggestions")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -183,6 +188,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="409">Tag with this name already exists</response>
     /// <response code="500">Internal server error</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("")]
     [ProducesResponseType(typeof(TagDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -225,6 +231,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Tag not found</response>
     /// <response code="500">Internal server error</response>
+    [AllowAnonymous]
     [HttpGet("{tagId:guid}")]
     [ProducesResponseType(typeof(TagDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -256,6 +263,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Tag not found</response>
     /// <response code="500">Internal server error</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{tagId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -295,6 +303,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Object or tag not found</response>
     /// <response code="500">Internal server error</response>
+    /// Keep [Authorize] from class level - users can tag their own items
     [HttpPost("{objectId:guid}/{tagId:guid}/assign")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -345,6 +354,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Mapping not found</response>
     /// <response code="500">Internal server error</response>
+    /// Keep [Authorize] from class level - users can remove tags from their own items
     [HttpDelete("{objectId:guid}/{tagId:guid}/remove")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -390,6 +400,7 @@ public class TagsController(
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
+    /// Keep [Authorize] from class level - authenticated users can view item tags
     [HttpGet("object/{objectId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<TagDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

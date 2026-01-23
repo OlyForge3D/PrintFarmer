@@ -42,7 +42,7 @@ export interface MaintenanceAlert {
   dismissalReason?: string | null;
   updatedAt: string;
   // Navigation properties (optional for API responses)
-  printer?: any; // Printer entity
+  printer?: Record<string, unknown>; // Printer entity reference
   maintenanceSchedule?: MaintenanceSchedule;
 }
 
@@ -65,8 +65,8 @@ export interface MaintenanceSchedule {
   createdAt: string;
   updatedAt: string;
   // Navigation properties (optional)
-  printer?: any;
-  printerModel?: any;
+  printer?: Record<string, unknown>;
+  printerModel?: Record<string, unknown>;
 }
 
 /**
@@ -89,7 +89,7 @@ export interface MaintenanceLog {
   printerHoursAtMaintenance?: number | null;
   createdAt: string;
   // Navigation properties (optional)
-  printer?: any;
+  printer?: Record<string, unknown>;
   maintenanceSchedule?: MaintenanceSchedule;
   resolvedAlert?: MaintenanceAlert;
 }
@@ -102,12 +102,36 @@ export interface PrinterStatistics {
   id: string;
   printerId: string;
   totalPrintHours: number; // Cumulative print time in hours
-  totalJobs: number; // Total number of print jobs
+  totalJobsCompleted: number; // Total number of completed print jobs
+  totalJobsFailed: number; // Total number of failed print jobs
   totalFilamentUsedGrams: number; // Total filament used in grams
   totalFilamentUsedMeters: number; // Total filament used in meters
   lastSyncTime: string; // ISO 8601 datetime - when stats were last updated
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Fleet-wide printer statistics with maintenance projections.
+ * Returned by GET /api/maintenance/statistics/fleet
+ */
+export interface FleetPrinterStatistics {
+  printerId: string;
+  printerName: string;
+  manufacturerName?: string | null;
+  modelName?: string | null;
+  isOnline: boolean;
+  inMaintenance: boolean;
+  totalPrintHours: number;
+  totalJobsCompleted: number;
+  totalJobsFailed: number;
+  totalFilamentUsedGrams: number;
+  totalFilamentUsedMeters: number;
+  lastSyncTime?: string | null;
+  /** Days until next maintenance task is due (negative = overdue) */
+  daysUntilNextMaintenance?: number | null;
+  /** Name of the next maintenance task due */
+  nextMaintenanceTask?: string | null;
 }
 
 // ============================================================================

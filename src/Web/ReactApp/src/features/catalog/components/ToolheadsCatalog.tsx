@@ -23,7 +23,7 @@ import {
   useNozzleModels,
 } from '@/common/hooks/useApi';
 import { CatalogContext, type ToolheadModelDefinition, type CreateToolheadModelDto, type UpdateToolheadModelDefDto } from '@/types/api';
-import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
@@ -180,6 +180,25 @@ export function ToolheadsCatalog() {
     });
     setFormErrors({});
     setEditingModel(model);
+  }, [toolheadModels]);
+
+  // Clone an existing toolhead model
+  const handleCloneClick = useCallback((card: ToolheadModelCardData) => {
+    const model = toolheadModels?.find(m => m.id === card.id);
+    if (!model) return;
+
+    setFormState({
+      name: `${model.name} - Copy`,
+      manufacturerId: model.manufacturerId,
+      manufacturerName: model.manufacturerName,
+      description: model.description ?? '',
+      url: model.url ?? '',
+      defaultHotendId: model.defaultHotendId ?? '',
+      defaultExtruderId: model.defaultExtruderId ?? '',
+      defaultNozzleId: model.defaultNozzleId ?? '',
+    });
+    setFormErrors({});
+    setIsAddModalOpen(true);
   }, [toolheadModels]);
 
   // Open delete confirmation
@@ -349,6 +368,7 @@ export function ToolheadsCatalog() {
               key={card.id}
               model={card}
               onEdit={handleEditClick}
+              onClone={handleCloneClick}
               onDelete={handleDeleteClick}
               isLoading={deleteMutation.isPending && deletingModel?.id === card.id}
             />
@@ -370,6 +390,14 @@ export function ToolheadsCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"

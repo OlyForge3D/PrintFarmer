@@ -19,6 +19,12 @@ public interface ISettingsService
 
     IEnumerable<SettingMetadata> GetAllMetadata();
 
+    /// <summary>
+    /// Returns metadata for all discovered settings groups for UI organization.
+    /// Groups are derived from [SettingGroup] attributes on settings classes.
+    /// </summary>
+    IEnumerable<SettingGroupMetadata> GetAllGroupMetadata();
+
     void Save<T>(T settings)
         where T : class, IAppSetting;
 

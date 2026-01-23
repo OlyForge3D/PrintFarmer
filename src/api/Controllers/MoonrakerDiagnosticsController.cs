@@ -1,6 +1,7 @@
 ﻿using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -11,6 +12,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/moonraker-test")]
 [Tags("Moonraker Diagnostics")]
+[Authorize(Roles = "farm_admin")]
 public class MoonrakerDiagnosticsController(
     IMoonrakerDiagnosticsService diagnosticsService,
     IUnifiedLoggingService logger) : ControllerBase

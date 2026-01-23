@@ -4,7 +4,7 @@
 // ============================================================================
 
 import * as signalR from '@microsoft/signalr';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import type {
   AlertCreatedEvent,
   AlertStatusChangedEvent,
@@ -33,8 +33,7 @@ export class MaintenanceSignalRService {
   private maintenanceCompletedHandlers = new Set<MaintenanceCompletedHandler>();
 
   constructor() {
-    const baseUrl = getApiBaseUrl();
-    this.hubUrl = `${baseUrl}/hubs/maintenance`;
+    this.hubUrl = getHubUrl('/hubs/maintenance');
   }
 
   /**
@@ -68,27 +67,27 @@ export class MaintenanceSignalRService {
 
       // Register event handlers
       this.connection.on('alertcreated', (event: AlertCreatedEvent) => {
-        console.log('[MaintenanceSignalR] Alert created:', event);
+        if (window.PrintFarmerDebug?.maintenance) console.log('[MaintenanceSignalR] Alert created:', event);
         this.alertCreatedHandlers.forEach(handler => handler(event));
       });
 
       this.connection.on('alertstatuschanged', (event: AlertStatusChangedEvent) => {
-        console.log('[MaintenanceSignalR] Alert status changed:', event);
+        if (window.PrintFarmerDebug?.maintenance) console.log('[MaintenanceSignalR] Alert status changed:', event);
         this.alertStatusChangedHandlers.forEach(handler => handler(event));
       });
 
       this.connection.on('maintenancecompleted', (event: MaintenanceCompletedEvent) => {
-        console.log('[MaintenanceSignalR] Maintenance completed:', event);
+        if (window.PrintFarmerDebug?.maintenance) console.log('[MaintenanceSignalR] Maintenance completed:', event);
         this.maintenanceCompletedHandlers.forEach(handler => handler(event));
       });
 
       // Handle reconnection
       this.connection.onreconnecting(error => {
-        console.warn('[MaintenanceSignalR] Reconnecting...', error);
+        if (window.PrintFarmerDebug?.maintenance) console.warn('[MaintenanceSignalR] Reconnecting...', error);
       });
 
       this.connection.onreconnected(connectionId => {
-        console.info('[MaintenanceSignalR] Reconnected. Connection ID:', connectionId);
+        if (window.PrintFarmerDebug?.maintenance) console.info('[MaintenanceSignalR] Reconnected. Connection ID:', connectionId);
       });
 
       this.connection.onclose(error => {
@@ -98,7 +97,7 @@ export class MaintenanceSignalRService {
       });
 
       await this.connection.start();
-      console.info('[MaintenanceSignalR] Connected successfully');
+      if (window.PrintFarmerDebug?.maintenance) console.info('[MaintenanceSignalR] Connected successfully');
     } catch (error) {
       console.error('[MaintenanceSignalR] Error starting connection:', error);
       // Retry after a delay
@@ -115,7 +114,7 @@ export class MaintenanceSignalRService {
     if (this.connection) {
       try {
         await this.connection.stop();
-        console.info('[MaintenanceSignalR] Connection stopped');
+        if (window.PrintFarmerDebug?.maintenance) console.info('[MaintenanceSignalR] Connection stopped');
       } catch (error) {
         console.error('[MaintenanceSignalR] Error stopping connection:', error);
       }

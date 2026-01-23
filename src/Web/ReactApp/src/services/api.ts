@@ -114,6 +114,14 @@ export class ApiClient {
   }
 
   /**
+   * Get all settings group metadata for sidebar organization
+   */
+  async getSettingsGroups(): Promise<Array<{ key: string; displayName: string; description?: string; icon?: string; order: number }>> {
+    const res = await this.client.get("/settings/groups");
+    return res.data;
+  }
+
+  /**
    * Get all unified settings
    */
   async getAllSettings(): Promise<Record<string, unknown>> {
@@ -126,6 +134,32 @@ export class ApiClient {
    */
   async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
     await this.client.post("/settings", settings);
+  }
+
+  // ========== Background Services API ==========
+
+  /**
+   * Get status of all background services
+   */
+  async getBackgroundServices(): Promise<import("@/types/api").BackgroundServiceStatus[]> {
+    const res = await this.client.get("/services");
+    return res.data;
+  }
+
+  /**
+   * Get summary of background services status
+   */
+  async getBackgroundServicesSummary(): Promise<import("@/types/api").BackgroundServicesSummary> {
+    const res = await this.client.get("/services/summary");
+    return res.data;
+  }
+
+  /**
+   * Get status of a specific background service
+   */
+  async getBackgroundServiceStatus(serviceId: string): Promise<import("@/types/api").BackgroundServiceStatus> {
+    const res = await this.client.get(`/services/${serviceId}`);
+    return res.data;
   }
 
   private client: AxiosInstance;
@@ -1589,6 +1623,19 @@ export class ApiClient {
     await this.client.delete(`/job-queue/${jobId}`);
   }
 
+  /**
+   * Dispatch a queued/assigned job to its printer to start printing.
+   * The job must have an assigned printer and be in Queued or Assigned status.
+   * @param jobId - The ID of the job to dispatch
+   * @returns The updated job with Starting/Printing status
+   */
+  async dispatchJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+      `/job-queue/${jobId}/dispatch`
+    );
+    return response.data;
+  }
+
   // ============ Printer file operations ============
 
   async uploadGcodeToPrinter(printerId: string, file: File): Promise<boolean> {
@@ -2110,7 +2157,7 @@ export class ApiClient {
     const form = new FormData();
     form.append('file', file, file.name);
     
-    const response = await this.client.post('/models', form, {
+    const response = await this.client.post('/3d-models', form, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -2123,7 +2170,7 @@ export class ApiClient {
    * Get list of all 3D models
    */
   async getModels3D(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/models');
+    const response = await this.client.get('/3d-models');
     return response.data || [];
   }
 
@@ -2376,10 +2423,12 @@ export class ApiClient {
   }
 
   /**
-   * Set printer maintenance
+   * Set printer maintenance mode
+   * @param printerId - The printer ID
+   * @param inMaintenance - Boolean indicating if printer should be in maintenance mode
    */
-  async setPrinterMaintenance(printerId: string, maintenanceData: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.put(`/printers/${printerId}/maintenance`, maintenanceData);
+  async setPrinterMaintenance(printerId: string, inMaintenance: boolean): Promise<Record<string, unknown>> {
+    const response = await this.client.put(`/printers/${printerId}/maintenance`, inMaintenance);
     return response.data;
   }
 

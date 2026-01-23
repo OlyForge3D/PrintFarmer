@@ -74,7 +74,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
   const handleSetTemperatures = useCallback(() => apiCall(`/api/printers/${printer.id}/temps`, { hotend: tempInputs.hotend, bed: tempInputs.bed }), [printer.id, tempInputs]);
   const handleApplyPreset = useCallback((m: keyof TempPresets) => { const p = DEFAULT_PRESETS[m]; setTempInputs(p); apiCall(`/api/printers/${printer.id}/temps`, p); }, [printer.id]);
   const handleMove = useCallback((x?: number | null, y?: number | null, z?: number | null) => apiCall(`/api/printers/${printer.id}/move`, { x: x || undefined, y: y || undefined, z: z || undefined }), [printer.id]);
-  const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/move-to`, moveInputs), [printer.id, moveInputs]);
+  const handleMoveTo = useCallback(() => apiCall(`/api/printers/${printer.id}/moveto`, moveInputs), [printer.id, moveInputs]);
   const handleFileUpload = useCallback(async () => { if (!selectedFile) return; const formData = new FormData(); formData.append('file', selectedFile); setIsUploading(true); try { const r = await apiClient.uploadGcodeLibraryFile(selectedFile); if (r) setSelectedFile(null); } finally { setIsUploading(false); } }, [selectedFile]);
 
   if (!isExpanded) {
@@ -87,8 +87,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               <h3 className="text-lg font-medium text-gray-900 truncate">{printer.name}</h3>
               {(printer.manufacturerName || printer.modelName) && <p className="text-sm text-gray-500 truncate">{[printer.manufacturerName, printer.modelName].filter(Boolean).join(' ')}</p>}
               <div className="flex items-center space-x-2 text-sm text-gray-500">
-                <span>{printer.serverUrl}</span>
-                <a href={`${printer.serverUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
+                <span>{printer.backendUrl}</span>
+                <a href={`${printer.backendUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
               </div>
               <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>{currentStatus.isOnline ? (currentStatus.state || 'Online') : 'Offline'}</span>
@@ -173,8 +173,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               <h3 className="text-lg font-medium text-gray-900">{printer.name}</h3>
               {(printer.manufacturerName || printer.modelName) && <p className="text-sm text-gray-500">{[printer.manufacturerName, printer.modelName].filter(Boolean).join(' ')}</p>}
               <div className="flex items-center space-x-2 text-sm text-gray-500">
-                <span>{printer.serverUrl}</span>
-                <a href={`${printer.serverUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
+                <span>{printer.backendUrl}</span>
+                <a href={`${printer.backendUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
                 {(currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
                   <Button
                     type="button"

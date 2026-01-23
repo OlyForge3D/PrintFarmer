@@ -9,7 +9,7 @@ import { AuthProvider } from '@/common/contexts/AuthContext';
 const basePrinter: Printer = {
   id: 'octo-2',
   name: 'OctoPrint Enhanced',
-  serverUrl: 'http://octoprint.local',
+  backendUrl: 'http://octoprint.local',
   isOnline: true,
   isReachable: true,
   backend: PrinterBackend.OctoPrint,

@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,6 +9,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.Model;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;

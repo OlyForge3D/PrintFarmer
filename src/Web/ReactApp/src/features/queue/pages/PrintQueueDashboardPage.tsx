@@ -1,11 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
-import { Button } from "@/common/components/ui/Button";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { Tabs } from "@/common/components/ui/Tabs";
-import { MasterDetailLayout } from "@/common/components/layout/MasterDetailLayout";
-import { ArrowLeftIcon } from "@/common/components/icons/MdiIcons";
 import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
 import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
@@ -79,6 +76,19 @@ export function PrintQueueDashboardPage() {
       description: 'Pause/resume selected job'
     },
     {
+      key: 's',
+      handler: async () => {
+        if (selectedIndex >= 0 && jobs[selectedIndex]) {
+          const job = jobs[selectedIndex];
+          // Only dispatch if job is in Queued or Assigned state and has an assigned printer
+          if ((job.job.status === 'Queued' || job.job.status === 'Assigned') && job.assignedPrinter) {
+            await handleDispatchJob(job.id);
+          }
+        }
+      },
+      description: 'Start print (dispatch selected job)'
+    },
+    {
       key: 'v',
       handler: () => {
         setShowDetailPanel(!showDetailPanel);
@@ -135,12 +145,12 @@ export function PrintQueueDashboardPage() {
     return () => clearInterval(interval);
   }, [loadJobs]);
 
-  const handleCancelJob = (jobId: string) => {
+  const handleCancelJob = useCallback((jobId: string) => {
     setJobToCancel(jobId);
     setShowCancelConfirmation(true);
-  };
+  }, []);
 
-  const handleConfirmCancel = async () => {
+  const handleConfirmCancel = useCallback(async () => {
     if (!jobToCancel) return;
 
     try {
@@ -155,7 +165,7 @@ export function PrintQueueDashboardPage() {
       setShowCancelConfirmation(false);
       setJobToCancel(null);
     }
-  };
+  }, [jobToCancel, loadJobs]);
 
   const handlePauseJob = async (jobId: string) => {
     try {
@@ -168,7 +178,7 @@ export function PrintQueueDashboardPage() {
     }
   };
 
-  const handleResumeJob = async (jobId: string) => {
+  const handleResumeJob = useCallback(async (jobId: string) => {
     try {
       await apiClient.resumeJob(jobId);
       loadJobs(true);
@@ -177,7 +187,18 @@ export function PrintQueueDashboardPage() {
         err instanceof Error ? err.message : "Failed to resume job";
       setError(errorMessage);
     }
-  };
+  }, [loadJobs]);
+
+  const handleDispatchJob = useCallback(async (jobId: string) => {
+    try {
+      await apiClient.dispatchJob(jobId);
+      loadJobs(true);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to start print job";
+      setError(errorMessage);
+    }
+  }, [loadJobs]);
 
   const handleRerunJob = async (jobId: string) => {
     try {
@@ -268,78 +289,37 @@ export function PrintQueueDashboardPage() {
         </Tabs.List>
 
         <Tabs.Panels>
-          {/* Tab 1: All Jobs with Master-Detail Layout */}
+          {/* Tab 1: All Jobs */}
           <Tabs.Panel id="all-jobs">
-            <MasterDetailLayout
-              master={
-                <div className="flex flex-col h-full w-full min-h-0">
-                  {/* Filters */}
-                  <div className="flex-shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
-                    <TableFiltersBar
-                      onStatusChange={setStatusFilter}
-                      onModelChange={setModelFilter}
-                      onMaterialChange={setMaterialFilter}
-                      onRefresh={() => loadJobs(false)}
-                      isLoading={loading || isRefreshing}
-                    />
-                  </div>
+            <div className="flex flex-col h-full w-full min-h-0">
+              {/* Filters */}
+              <div className="flex-shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
+                <TableFiltersBar
+                  onStatusChange={setStatusFilter}
+                  onModelChange={setModelFilter}
+                  onMaterialChange={setMaterialFilter}
+                  onRefresh={() => loadJobs(false)}
+                  isLoading={loading || isRefreshing}
+                />
+              </div>
 
-                  {/* Jobs Table */}
-                  <div className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
-                    <QueueJobsTable
-                      jobs={jobs}
-                      isLoading={loading}
-                      onPause={handlePauseJob}
-                      onResume={handleResumeJob}
-                      onCancel={handleCancelJob}
-                      onPriority={handlePriorityChange}
-                      onEdit={(jobId) => {
-                        setSelectedJobId(jobId);
-                        setShowDetailPanel(true);
-                      }}
-                    />
-                  </div>
-                </div>
-              }
-              detail={
-                selectedJobId ? (
-                  <div className="flex flex-col h-full">
-                    {/* Detail Header with Close Button */}
-                    <div className="flex items-center justify-between p-4 border-b border-pf-border">
-                      <h3 className="text-lg font-semibold">Job Details</h3>
-                      <Button
-                        onClick={() => setShowDetailPanel(false)}
-                        variant="subtle"
-                        size="sm"
-                        title="Close detail panel (Esc)"
-                      >
-                        <ArrowLeftIcon className="w-5 h-5" />
-                      </Button>
-                    </div>
-
-                    {/* Job Details Content */}
-                    <div className="flex-1 overflow-auto p-4">
-                      <JobDetailsModal
-                        jobId={selectedJobId}
-                        isOpen={true}
-                        onClose={() => setShowDetailPanel(false)}
-                        onSave={() => {
-                          setShowDetailPanel(false);
-                          setSelectedJobId(null);
-                          loadJobs(true);
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-pf-text-secondary">
-                    <p>Select a job to view details</p>
-                  </div>
-                )
-              }
-              hasDetail={!!selectedJobId}
-              onCloseDetail={() => setShowDetailPanel(false)}
-            />
+              {/* Jobs Table */}
+              <div className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
+                <QueueJobsTable
+                  jobs={jobs}
+                  isLoading={loading}
+                  onPause={handlePauseJob}
+                  onResume={handleResumeJob}
+                  onCancel={handleCancelJob}
+                  onPriority={handlePriorityChange}
+                  onDispatch={handleDispatchJob}
+                  onEdit={(jobId) => {
+                    setSelectedJobId(jobId);
+                    setIsJobDetailsModalOpen(true);
+                  }}
+                />
+              </div>
+            </div>
           </Tabs.Panel>
 
           {/* Tab 2: By Model */}

@@ -1,10 +1,10 @@
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
-const base = `${getApiBaseUrl()}/print-job-queue`;
+const base = `${getApiBaseUrl()}/job-queue`;
 
 export interface EnqueuePrintJobRequest {
-  gcodeFileId: string;
-  assignedPrinterId?: string;
+  gcodeFileId: string; // UUID string
+  assignedPrinterId?: string; // UUID string
   priority?: 'Low' | 'Normal' | 'High' | 'Urgent';
   requiredNozzleDiameter?: number;
   requiredMaterialType?: string;

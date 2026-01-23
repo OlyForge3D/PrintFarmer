@@ -67,7 +67,7 @@ export interface PrintJobStatusDto {
 export interface Printer {
   id: string;
   name: string;
-  serverUrl: string;
+  backendUrl: string;
   frontendUrl?: string;
   notes?: string;
   isOnline: boolean;
@@ -128,7 +128,7 @@ export interface PrinterBackendCapabilitiesDto {
 export interface PrinterFast {
   id: string;
   name: string;
-  serverUrl: string;
+  backendUrl: string;
   notes?: string;
   isOnline: boolean;
   state?: string;
@@ -548,6 +548,8 @@ export interface NozzleModelDefinition {
   name: string;
   manufacturerId: string;
   manufacturerName?: string;
+  /** Nozzle diameter in mm (e.g., 0.4, 0.6, 0.8) */
+  diameter?: number;
   maxTemp?: number;
   /** The material type of this nozzle */
   nozzleType: NozzleType | string;
@@ -644,6 +646,8 @@ export interface UpdateToolheadModelDefDto {
 export interface CreateNozzleModelDto {
   name: string;
   manufacturerId: string;
+  /** Nozzle diameter in mm - defaults to 0.4 if not specified */
+  diameter?: number;
   maxTemp?: number;
   /** The material type of this nozzle - defaults to Brass if not specified */
   nozzleType?: NozzleType | string;
@@ -659,6 +663,8 @@ export interface CreateNozzleModelDto {
 export interface UpdateNozzleModelDto {
   name?: string;
   manufacturerId?: string;
+  /** Nozzle diameter in mm */
+  diameter?: number;
   maxTemp?: number;
   /** The material type of this nozzle */
   nozzleType?: NozzleType | string;
@@ -1573,6 +1579,7 @@ export interface QueuedPrintJobDto {
   id: string;
   name: string;
   gcodeFileId: string;
+  fileName?: string; // Original G-code filename for display
   assignedPrinterId?: string;
   status: string;
   priority: number;
@@ -1594,7 +1601,8 @@ export interface QueuedPrintJobDto {
 
 export interface QueueGcodeFileMetaDto {
   id: string;
-  fileName: string;
+  name: string; // Original filename for display
+  fileName: string; // GUID-based filename on disk
   fileSizeBytes: number;
   materialType?: string;
   nozzleDiameter?: number;
@@ -1612,10 +1620,11 @@ export interface QueuePrinterMetaDto {
 }
 
 export interface QueuedPrintJobWithFileMetaDto {
-  id: string;
   job: QueuedPrintJobDto;
-  fileMetadata?: QueueGcodeFileMetaDto;
-  printerMetadata?: QueuePrinterMetaDto;
+  gcodeFile?: QueueGcodeFileMetaDto;
+  assignedPrinter?: QueuePrinterMetaDto;
+  estimatedStartTime?: string;
+  estimatedCompletionTime?: string;
 }
 
 export interface QueueStatsDto {
@@ -1736,4 +1745,37 @@ export interface QueueOperationFailureDto {
   itemId: string;
   errorMessage: string;
   errorCode?: string;
+}
+
+// Background Service Status Types
+export interface BackgroundServiceStatus {
+  serviceId: string;
+  displayName: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  isRunning: boolean;
+  isEnabled: boolean;
+  lastRunTime?: string;
+  nextRunTime?: string;
+  lastError?: string;
+  lastErrorTime?: string;
+  successfulRuns: number;
+  failedRuns: number;
+  intervalSeconds?: number;
+}
+
+export interface CategorySummary {
+  total: number;
+  running: number;
+  withErrors: number;
+}
+
+export interface BackgroundServicesSummary {
+  totalServices: number;
+  runningServices: number;
+  enabledServices: number;
+  disabledServices: number;
+  servicesWithErrors: number;
+  byCategory: Record<string, CategorySummary>;
 }

@@ -237,6 +237,65 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
   }, [formData?.modelId, defaultCapabilities, lastModelId]);
 
+  // Auto-populate toolhead components when model changes and has toolhead templates
+  useEffect(() => {
+    // Skip if no model selected or model hasn't changed
+    if (!formData?.modelId || formData.modelId === lastModelId) return;
+    
+    // Find the selected model in the models list
+    const selectedModel = models?.find(m => m.id === formData.modelId);
+    if (!selectedModel?.toolheads?.length) return;
+    
+    // Map model toolhead templates to printer toolhead updates
+    const modelToolheads = selectedModel.toolheads;
+    
+    setToolheads(prev => {
+      // If printer has no toolheads, create them from model templates
+      if (prev.length === 0) {
+        return modelToolheads.map(mt => ({
+          id: generateUUID(),
+          name: mt.name,
+          index: mt.index,
+          nozzleDiameter: mt.nozzleDiameter ?? 0.4,
+          hotendModelId: mt.hotendModelId,
+          extruderModelId: mt.extruderModelId,
+          toolheadModelDefId: mt.toolheadModelDefId,
+          nozzleModelId: mt.nozzleModelId,
+          supportedMaterials: mt.supportedMaterials ?? selectedModel.supportedFilamentTypes,
+          isPrimary: mt.isPrimary,
+        }));
+      }
+      
+      // If printer already has toolheads, update their component references from model templates
+      return prev.map((th, idx) => {
+        // Find matching template by index or use primary
+        const template = modelToolheads.find(mt => mt.index === idx) 
+          ?? modelToolheads.find(mt => mt.isPrimary) 
+          ?? modelToolheads[0];
+        
+        if (!template) return th;
+        
+        return {
+          ...th,
+          // Update component references from model template
+          hotendModelId: template.hotendModelId ?? th.hotendModelId,
+          extruderModelId: template.extruderModelId ?? th.extruderModelId,
+          toolheadModelDefId: template.toolheadModelDefId ?? th.toolheadModelDefId,
+          nozzleModelId: template.nozzleModelId ?? th.nozzleModelId,
+          nozzleDiameter: template.nozzleDiameter ?? th.nozzleDiameter,
+          supportedMaterials: template.supportedMaterials ?? selectedModel.supportedFilamentTypes ?? th.supportedMaterials,
+        };
+      });
+    });
+  }, [formData?.modelId, lastModelId, models]);
+
+  // Expand toolheads when they change (so user can see auto-populated values)
+  useEffect(() => {
+    if (toolheads.length > 0) {
+      setExpandedToolheads(new Set(toolheads.map(th => th.id!)));
+    }
+  }, [toolheads.length]);
+
   const handleInputChange = (field: keyof UpdatePrinterDto, value: unknown) => {
     setFormData(prev => prev ? { ...prev, [field]: value } : prev);
     if (validationErrors[field]) {
@@ -359,6 +418,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
   const filteredModels = models || [];
 
+  // Direct submit handler for the Save button (avoids form attribute issues with portals)
+  const handleSaveClick = () => {
+    const form = document.getElementById('edit-printer-form') as HTMLFormElement;
+    if (form) {
+      form.requestSubmit();
+    }
+  };
+
   const modalFooter = (
     <div className="flex gap-2">
       <Button
@@ -369,8 +436,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         Cancel
       </Button>
       <Button
-        type="submit"
-        form="edit-printer-form"
+        type="button"
+        onClick={handleSaveClick}
         variant="primary"
         disabled={updateMutation.status === 'pending' || !hasChanges}
         iconLeft={<CheckIcon className="w-4 h-4" />}

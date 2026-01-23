@@ -52,7 +52,7 @@ export function PrinterTableViewPage() {
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
       await Promise.all(printers.map(printer => 
-        apiClient.setPrinterMaintenance(printer.id, { inMaintenance } as Record<string, unknown>)
+        apiClient.setPrinterMaintenance(printer.id, inMaintenance)
       ));
       refetch();
     } catch (error) {

@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Net;
 using System.Net.Http;
@@ -6,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

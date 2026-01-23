@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
@@ -6,6 +5,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

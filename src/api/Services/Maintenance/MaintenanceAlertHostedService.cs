@@ -1,5 +1,6 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Web.Api.Services.Background;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,22 +13,37 @@ namespace Farm.Web.Api.Services.Maintenance;
 public class MaintenanceAlertHostedService(
     IServiceProvider serviceProvider,
     ILogger<MaintenanceAlertHostedService> logger,
-    IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor) : BackgroundService
+    IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
+    IBackgroundServiceMonitor serviceMonitor) : BackgroundService
 {
+    private const string ServiceId = "MaintenanceAlertService";
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<MaintenanceAlertHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IOptionsMonitor<MaintenanceAlertSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+    private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
 
+        // Register with the service monitor
+        _serviceMonitor.Register(
+            ServiceId,
+            "Maintenance Alerts",
+            "Evaluates maintenance schedules and generates alerts when maintenance is due",
+            "Maintenance",
+            "pf-icon-alert",
+            settings.IntervalSeconds);
+        _serviceMonitor.ReportStarted(ServiceId);
+
         if (!settings.Enabled)
         {
             _logger.LogInformation("Maintenance alert engine is disabled");
+            _serviceMonitor.ReportEnabled(ServiceId, false);
             return;
         }
 
+        _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
             "Maintenance alert engine started. Interval: {Interval}s, Max printers per iteration: {MaxPrinters}",
             settings.IntervalSeconds,
@@ -48,10 +64,13 @@ public class MaintenanceAlertHostedService(
                 if (!settings.Enabled)
                 {
                     _logger.LogInformation("Maintenance alert engine disabled, pausing service");
+                    _serviceMonitor.ReportEnabled(ServiceId, false);
                     continue;
                 }
 
+                _serviceMonitor.ReportEnabled(ServiceId, true);
                 await EvaluateMaintenanceAlertsAsync(settings, stoppingToken);
+                _serviceMonitor.ReportSuccess(ServiceId, settings.IntervalSeconds);
             }
             catch (OperationCanceledException)
             {
@@ -61,8 +80,11 @@ public class MaintenanceAlertHostedService(
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during maintenance alert evaluation");
+                _serviceMonitor.ReportError(ServiceId, ex.Message);
             }
         }
+
+        _serviceMonitor.ReportStopped(ServiceId);
     }
 
     private async Task EvaluateMaintenanceAlertsAsync(MaintenanceAlertSettings settings, CancellationToken ct)

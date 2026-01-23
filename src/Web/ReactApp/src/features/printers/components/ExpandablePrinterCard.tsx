@@ -367,10 +367,10 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               )}
               <div className="flex items-center gap-2 mb-1">
                 <div className="text-pf-text-secondary text-xs">
-                  {printer.serverUrl}
+                  {printer.backendUrl}
                 </div>
                 <a 
-                  href={printer.frontendUrl || printer.serverUrl} 
+                  href={printer.frontendUrl || printer.backendUrl} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-pf-text-secondary hover:text-pf-text-primary"
@@ -541,10 +541,10 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             )}
             <div className="flex items-center gap-2 mb-1">
               <div className="text-pf-text-secondary text-xs">
-                {printer.serverUrl}
+                {printer.backendUrl}
               </div>
               <a 
-                href={printer.frontendUrl || printer.serverUrl} 
+                href={printer.frontendUrl || printer.backendUrl} 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="text-pf-text-secondary hover:text-pf-text-primary"

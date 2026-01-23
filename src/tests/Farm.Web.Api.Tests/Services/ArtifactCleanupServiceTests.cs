@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Linq;
 using System.Threading;
@@ -8,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Artifacts;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;

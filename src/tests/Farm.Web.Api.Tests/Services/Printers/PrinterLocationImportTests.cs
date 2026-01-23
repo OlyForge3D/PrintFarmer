@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.IO;
 using System.Linq;
@@ -14,6 +13,7 @@ using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Locations;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

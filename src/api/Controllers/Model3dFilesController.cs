@@ -16,6 +16,7 @@ using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.IO;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Services.Tags;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 
@@ -26,6 +27,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
+[Authorize]
 public class Model3DFilesController(
     IUnifiedLoggingService logger,
     IModel3DFileService modelService,
@@ -318,6 +320,7 @@ public class Model3DFilesController(
     /// <param name="id">Model ID</param>
     /// <returns>Thumbnail image</returns>
     [HttpGet("thumbnail/{id:guid}")]
+    [AllowAnonymous] // Allow unauthenticated access for <img> tags that can't include auth headers
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
@@ -430,6 +433,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">Model ID</param>
     /// <returns>No content if successful</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -456,6 +460,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="request">Request with list of model IDs (GUIDs) to delete</param>
     /// <returns>Deletion result with count</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

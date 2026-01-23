@@ -18,7 +18,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = "farm_admin")]
 public class FileConsistencyController(
     IFileConsistencyRepository fileConsistencyRepo) : ControllerBase
 {

@@ -14,9 +14,18 @@ interface HarvestWizardStep1SelectionProps {
   activeHarvests?: GcodeHarvestOperation[];
 }
 
-// Helper to convert PrinterBackend enum to string
-function backendToString(backend: PrinterBackend | undefined): string {
-  if (backend === undefined) return 'Unknown';
+// Helper to convert PrinterBackend enum (number or string) to display string
+// API returns string values due to JsonStringEnumConverter
+function backendToString(backend: PrinterBackend | string | undefined): string {
+  if (backend === undefined || backend === null) return 'Unknown';
+  
+  // If it's already a string (from API), return it directly if valid
+  if (typeof backend === 'string') {
+    const validBackends = ['Moonraker', 'PrusaLink', 'SDCP', 'OctoPrint'];
+    return validBackends.includes(backend) ? backend : 'Unknown';
+  }
+  
+  // If it's a number (enum value), map it
   const backendNames: Record<PrinterBackend, string> = {
     [PrinterBackend.Unknown]: 'Unknown',
     [PrinterBackend.Moonraker]: 'Moonraker',
@@ -87,7 +96,7 @@ export function HarvestWizardStep1Selection({
       // Search query filter (searches in name, model, backend, server URL)
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const searchableText = `${p.name} ${p.modelName} ${backendToString(p.backend)} ${p.serverUrl}`.toLowerCase();
+        const searchableText = `${p.name} ${p.modelName} ${backendToString(p.backend)} ${p.backendUrl}`.toLowerCase();
         return searchableText.includes(query);
       }
 
@@ -330,7 +339,7 @@ export function HarvestWizardStep1Selection({
                   {printer.manufacturerName} {printer.modelName}
                 </div>
                 <div className="text-xs text-pf-text-secondary mt-2 font-mono">
-                  {backendToString(printer.backend)} • {printer.serverUrl}
+                  {backendToString(printer.backend)} • {printer.backendUrl}
                 </div>
               </div>
               {selectedPrinterId === printer.id && !hasActiveHarvest && (

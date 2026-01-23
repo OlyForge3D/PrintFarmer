@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -78,4 +78,78 @@ public interface IMaintenanceLogRepository
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if deleted, false if not found.</returns>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    #region Analytics
+
+    /// <summary>
+    /// Gets maintenance trends data grouped by date.
+    /// </summary>
+    /// <param name="startDate">Start date for the trend period.</param>
+    /// <param name="endDate">End date for the trend period.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of maintenance trend entries.</returns>
+    Task<List<MaintenanceTrendEntry>> GetTrendsAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets component lifespan statistics based on maintenance history.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of component lifespan statistics.</returns>
+    Task<List<ComponentLifespanEntry>> GetComponentLifespanAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets maintenance cost analysis grouped by month.
+    /// </summary>
+    /// <param name="months">Number of months to analyze.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of monthly cost entries.</returns>
+    Task<List<MaintenanceCostEntry>> GetCostAnalysisAsync(int months = 12, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets printer uptime statistics based on maintenance downtime.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of printer uptime entries.</returns>
+    Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(CancellationToken cancellationToken = default);
+
+    #endregion
 }
+
+#region Analytics DTOs
+
+/// <summary>
+/// Represents a single maintenance trend data point.
+/// </summary>
+public record MaintenanceTrendEntry(
+    DateTime Date,
+    string PrinterName,
+    string? Component,
+    string Action,
+    decimal Cost);
+
+/// <summary>
+/// Represents component lifespan statistics.
+/// </summary>
+public record ComponentLifespanEntry(
+    string Component,
+    double AvgLifespanHours,
+    int Replacements);
+
+/// <summary>
+/// Represents monthly maintenance cost.
+/// </summary>
+public record MaintenanceCostEntry(
+    string Month,
+    decimal TotalCost);
+
+/// <summary>
+/// Represents printer uptime statistics.
+/// </summary>
+public record PrinterUptimeEntry(
+    string PrinterName,
+    Guid PrinterId,
+    double UptimePercent,
+    int MaintenanceCount,
+    int TotalDowntimeMinutes);
+
+#endregion

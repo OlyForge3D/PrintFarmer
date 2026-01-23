@@ -44,6 +44,8 @@ import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendi
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
+import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
+import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -113,9 +115,11 @@ function AuthenticatedAppRoutes() {
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
+        <Route path="printers/:printerId/maintenance" element={<PrinterMaintenancePage />} />
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
+        <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />

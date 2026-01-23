@@ -215,12 +215,18 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
     // Harvest file mapping operations
     public async Task CreateFileImportMappingAsync(HarvestDiscoveredFile discoveredFile, GcodeFile gcodeFile, CancellationToken ct = default)
     {
+        // IMPORTANT: Only use FK IDs, not navigation properties!
+        // The gcodeFile may have been created by a different DbContext (GcodeFilesService)
+        // while discoveredFile is from this context. Setting navigation properties across
+        // contexts causes EF Core tracking issues and constraint violations.
         HarvestFileGcodeFileMapping mapping = new()
         {
             Id = Guid.NewGuid(),
             HarvestDiscoveredFile = discoveredFile,
             HarvestDiscoveredFileId = discoveredFile.Id,
-            GcodeFile = gcodeFile,
+
+            // Don't set GcodeFile navigation property - it's from a different context
+            // Just set the FK value which is all the database needs
             GcodeFileId = gcodeFile.Id,
             CreatedAt = DateTime.UtcNow
         };

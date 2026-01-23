@@ -125,6 +125,18 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Dispatch a queued/assigned job to its printer to start printing
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>Updated job with Starting/Printing status.</returns>
+    Task<QueuedPrintJobDto> DispatchJobAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Cancel a job (remove from queue or stop printing)
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>

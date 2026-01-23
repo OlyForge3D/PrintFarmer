@@ -16,7 +16,7 @@ import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
 import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';
 import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels } from '@/types/api';
-import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 
 /**
@@ -43,16 +43,33 @@ interface NozzleFormState {
   name: string;
   manufacturerId: string;
   manufacturerName?: string;
+  diameter: string;
   maxTemp: string;
   nozzleType: string;
   description: string;
   url: string;
 }
 
+// Common nozzle diameters in mm
+const COMMON_NOZZLE_DIAMETERS = ['0.2', '0.25', '0.3', '0.4', '0.5', '0.6', '0.8', '1.0', '1.2'];
+
+// Default max temperatures by nozzle type (°C)
+const DEFAULT_TEMPS_BY_TYPE: Record<string, number> = {
+  'Brass': 300,
+  'HardenedSteel': 500,
+  'Steel': 450,
+  'Copper': 350,
+  'Ruby': 500,
+  'Tungsten': 550,
+  'PlatedCopper': 400,
+  'Other': 300,
+};
+
 const emptyForm: NozzleFormState = {
   name: '',
   manufacturerId: '',
-  maxTemp: '',
+  diameter: '0.4',
+  maxTemp: '300',
   nozzleType: 'Brass',
   description: '',
   url: '',
@@ -136,6 +153,7 @@ export function NozzlesCatalog() {
       name: model.name,
       manufacturerId: model.manufacturerId,
       manufacturerName: model.manufacturerName,
+      diameter: model.diameter?.toString() ?? '0.4',
       maxTemp: model.maxTemp?.toString() ?? '',
       nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
       description: model.description ?? '',
@@ -143,6 +161,25 @@ export function NozzlesCatalog() {
     });
     setFormErrors({});
     setEditingModel(model);
+  }, [nozzleModels]);
+
+  // Clone an existing nozzle model
+  const handleCloneClick = useCallback((card: NozzleModelCardData) => {
+    const model = nozzleModels?.find(m => m.id === card.id);
+    if (!model) return;
+
+    setFormState({
+      name: `${model.name} - Copy`,
+      manufacturerId: model.manufacturerId,
+      manufacturerName: model.manufacturerName,
+      diameter: model.diameter?.toString() ?? '0.4',
+      maxTemp: model.maxTemp?.toString() ?? '',
+      nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
+      description: model.description ?? '',
+      url: model.url ?? '',
+    });
+    setFormErrors({});
+    setIsAddModalOpen(true); // Use add modal since we're creating a new record
   }, [nozzleModels]);
 
   // Open delete confirmation
@@ -191,6 +228,15 @@ export function NozzlesCatalog() {
     return Object.keys(errors).length === 0;
   }, [formState]);
 
+  // Handle nozzle type change - update default temp
+  const handleNozzleTypeChange = useCallback((newType: string) => {
+    setFormState(prev => ({
+      ...prev,
+      nozzleType: newType,
+      maxTemp: DEFAULT_TEMPS_BY_TYPE[newType]?.toString() || prev.maxTemp,
+    }));
+  }, []);
+
   // Handle form submission for add
   const handleAdd = useCallback(async () => {
     if (!validateForm()) return;
@@ -198,6 +244,7 @@ export function NozzlesCatalog() {
     const dto: CreateNozzleModelDto = {
       name: formState.name.trim(),
       manufacturerId: formState.manufacturerId,
+      diameter: formState.diameter ? Number(formState.diameter) : 0.4,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
       nozzleType: formState.nozzleType,
       description: formState.description.trim() || undefined,
@@ -219,6 +266,7 @@ export function NozzlesCatalog() {
     const dto: UpdateNozzleModelDto = {
       name: formState.name.trim(),
       manufacturerId: formState.manufacturerId,
+      diameter: formState.diameter ? Number(formState.diameter) : undefined,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
       nozzleType: formState.nozzleType,
       description: formState.description.trim() || undefined,
@@ -314,6 +362,7 @@ export function NozzlesCatalog() {
               key={card.id}
               model={card}
               onEdit={handleEditClick}
+              onClone={handleCloneClick}
               onDelete={handleDeleteClick}
               isLoading={deleteMutation.isPending && deletingModel?.id === card.id}
             />
@@ -335,6 +384,14 @@ export function NozzlesCatalog() {
                 title={`Edit ${item.name}`}
               >
                 <EditIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => handleCloneClick(item)}
+                title={`Clone ${item.name}`}
+              >
+                <CopyIcon className="w-4 h-4" />
               </Button>
               <Button
                 variant="subtle"
@@ -362,6 +419,7 @@ export function NozzlesCatalog() {
           formErrors={formErrors}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
+          onNozzleTypeChange={handleNozzleTypeChange}
           onSubmit={handleAdd}
           onCancel={handleCloseAddModal}
           isSubmitting={createMutation.isPending}
@@ -381,6 +439,7 @@ export function NozzlesCatalog() {
           formErrors={formErrors}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
+          onNozzleTypeChange={handleNozzleTypeChange}
           onSubmit={handleUpdate}
           onCancel={handleCloseEditModal}
           isSubmitting={updateMutation.isPending}
@@ -426,6 +485,7 @@ interface NozzleFormProps {
   formErrors: Partial<Record<keyof NozzleFormState, string>>;
   onFieldChange: (field: keyof NozzleFormState, value: string) => void;
   onManufacturerChange: (manufacturerId: string | undefined, manufacturerName?: string) => void;
+  onNozzleTypeChange: (nozzleType: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -437,11 +497,34 @@ function NozzleForm({
   formErrors,
   onFieldChange,
   onManufacturerChange,
+  onNozzleTypeChange,
   onSubmit,
   onCancel,
   isSubmitting,
   submitLabel,
 }: NozzleFormProps) {
+  const [customDiameter, setCustomDiameter] = useState('');
+  const [showCustomDiameter, setShowCustomDiameter] = useState(false);
+
+  // Handle diameter selection or custom input
+  const handleDiameterChange = (value: string) => {
+    if (value === 'custom') {
+      setShowCustomDiameter(true);
+    } else {
+      setShowCustomDiameter(false);
+      onFieldChange('diameter', value);
+    }
+  };
+
+  const handleCustomDiameterSubmit = () => {
+    const num = parseFloat(customDiameter);
+    if (!isNaN(num) && num > 0 && num <= 3) {
+      onFieldChange('diameter', num.toString());
+      setShowCustomDiameter(false);
+      setCustomDiameter('');
+    }
+  };
+
   return (
     <div className="space-y-4">
       <FormField
@@ -470,9 +553,73 @@ function NozzleForm({
         />
       </FormField>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
+        <FormField label="Diameter (mm)" required error={formErrors.diameter}>
+          {showCustomDiameter ? (
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                step="0.01"
+                min="0.1"
+                max="3"
+                value={customDiameter}
+                onChange={(e) => setCustomDiameter(e.target.value)}
+                placeholder="e.g., 0.35"
+                className="flex-1"
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleCustomDiameterSubmit}
+                disabled={!customDiameter}
+              >
+                Set
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setShowCustomDiameter(false);
+                  setCustomDiameter('');
+                }}
+              >
+                ✕
+              </Button>
+            </div>
+          ) : (
+            <Select
+              value={formState.diameter}
+              onChange={(e) => handleDiameterChange(e.target.value)}
+            >
+              {COMMON_NOZZLE_DIAMETERS.map((d) => (
+                <option key={d} value={d}>
+                  {d}mm
+                </option>
+              ))}
+              <option value="custom">Custom...</option>
+            </Select>
+          )}
+        </FormField>
+
+        <FormField label="Nozzle Type">
+          <Select
+            value={formState.nozzleType}
+            onChange={(e) => {
+              const newType = e.target.value;
+              onFieldChange('nozzleType', newType);
+              onNozzleTypeChange(newType);
+            }}
+          >
+            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
         <FormField
-          label="Max Temperature (°C)"
+          label="Max Temp (°C)"
           error={formErrors.maxTemp}
         >
           <Input
@@ -481,19 +628,6 @@ function NozzleForm({
             onChange={(e) => onFieldChange('maxTemp', e.target.value)}
             placeholder="e.g., 500"
           />
-        </FormField>
-
-        <FormField label="Nozzle Type">
-          <Select
-            value={formState.nozzleType}
-            onChange={(e) => onFieldChange('nozzleType', e.target.value)}
-          >
-            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
         </FormField>
       </div>
 

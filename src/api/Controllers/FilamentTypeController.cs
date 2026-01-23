@@ -7,6 +7,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -17,6 +18,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/filament-types")]
 [Tags("Filament Types")]
+[Authorize]
 public class FilamentTypeController(
     IFilamentTypeService filamentService,
     IStartupStatus startupStatus,
@@ -33,6 +35,7 @@ public class FilamentTypeController(
     /// <returns>List of all filament types ordered by name</returns>
     /// <response code="200">Returns the list of filament types</response>
     /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
     [ProducesResponseType(503)]
@@ -67,6 +70,7 @@ public class FilamentTypeController(
     /// <returns>Dictionary of filament type names to temperature targets</returns>
     /// <response code="200">Returns the filament presets dictionary</response>
     /// <response code="503">If the system is still initializing</response>
+    [AllowAnonymous]
     [HttpGet("presets")]
     [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
     [ProducesResponseType(503)]
@@ -102,6 +106,7 @@ public class FilamentTypeController(
     /// <response code="201">Returns the newly created filament type</response>
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="409">If a filament type with the same name already exists</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost]
     [ProducesResponseType(typeof(FilamentTypeDto), 201)]
     [ProducesResponseType(400)]
@@ -134,6 +139,7 @@ public class FilamentTypeController(
     /// <response code="204">If the filament type was updated successfully</response>
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="404">If the filament type was not found</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -168,6 +174,7 @@ public class FilamentTypeController(
     /// <returns>No content if successful</returns>
     /// <response code="204">If the filament type was deleted successfully</response>
     /// <response code="404">If the filament type was not found</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -197,6 +204,7 @@ public class FilamentTypeController(
     /// <returns>No content if successful</returns>
     /// <response code="204">If the presets were saved successfully</response>
     /// <response code="400">If the presets data is invalid</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("presets")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -226,6 +234,7 @@ public class FilamentTypeController(
     /// <response code="200">Returns the import results</response>
     /// <response code="400">If Spoolman is not configured</response>
     /// <response code="503">If system is still initializing</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("import-from-spoolman")]
     [ProducesResponseType(typeof(SpoolmanFilamentImportResult), 200)]
     [ProducesResponseType(400)]

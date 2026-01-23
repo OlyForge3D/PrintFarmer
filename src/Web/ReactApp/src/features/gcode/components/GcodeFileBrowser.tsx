@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useOptimistic, useTransition } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
@@ -146,19 +146,6 @@ export const GcodeFileBrowser = ({
   const queryClient = useQueryClient();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isPending, startTransition] = useTransition();
-  
-  // Track deleted file IDs for optimistic deletes with useOptimistic
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [optimisticDeletedIds, addOptimisticDelete] = useOptimistic(
-    new Set<string>(),
-    (state: Set<string>, deletedId: string) => {
-      const newState = new Set(state);
-      newState.add(deletedId);
-      return newState;
-    }
-  );
   
   // Only use local state if viewMode prop is not provided (uncontrolled mode)
   const [localViewMode, setLocalViewMode] = useState<'grid' | 'explorer'>('grid');
@@ -200,6 +187,9 @@ export const GcodeFileBrowser = ({
     file: null,
   });
 
+  // Bulk delete state
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+
   const handleDeleteClick = useCallback((file: FileItem) => {
     setDeleteConfirm({ isOpen: true, file });
   }, []);
@@ -209,27 +199,66 @@ export const GcodeFileBrowser = ({
     const file = deleteConfirm.file;
     setDeleteConfirm({ isOpen: false, file: null });
     
-    // Handle delete with optimistic UI update
-    startTransition(async () => {
-      // Show optimistic delete immediately
-      addOptimisticDelete(file.id);
-      
-      try {
-        // Execute deletion in background
-        await apiClient.deleteGcodeFile(file.id);
-        toast.success('File deleted');
-        // On success, state remains optimistically deleted
-      } catch (error) {
-        // On error, state rolls back automatically via useOptimistic
-        const message = error instanceof Error ? error.message : 'Failed to delete file';
-        toast.error('Failed to delete file');
-        console.error('Delete error:', message);
+    try {
+      await apiClient.deleteGcodeFile(file.id);
+      toast.success('File deleted');
+      // Invalidate the cache to refresh the file list
+      queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      // Also clear selection if the deleted file was selected
+      if (selection.includes(file.id)) {
+        handleSelectionChange(selection.filter(id => id !== file.id));
       }
-    });
-  }, [deleteConfirm.file, addOptimisticDelete]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete file';
+      toast.error('Failed to delete file');
+      console.error('Delete error:', message);
+    }
+  }, [deleteConfirm.file, queryClient, selection, handleSelectionChange]);
 
   const handleDeleteCancel = useCallback(() => {
     setDeleteConfirm({ isOpen: false, file: null });
+  }, []);
+
+  // Bulk delete handlers
+  const handleBulkDeleteClick = useCallback(() => {
+    if (selection.length > 0) {
+      setBulkDeleteConfirm(true);
+    }
+  }, [selection.length]);
+
+  const handleBulkDeleteConfirm = useCallback(async () => {
+    setBulkDeleteConfirm(false);
+    const idsToDelete = [...selection];
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const id of idsToDelete) {
+      try {
+        await apiClient.deleteGcodeFile(id);
+        successCount++;
+      } catch (error) {
+        console.error(`Failed to delete file ${id}:`, error);
+        failCount++;
+      }
+    }
+    
+    // Clear selection and refresh
+    handleSelectionChange([]);
+    queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+    
+    // Show result toast
+    if (successCount > 0 && failCount === 0) {
+      toast.success(`Deleted ${successCount} file${successCount > 1 ? 's' : ''}`);
+    } else if (successCount > 0 && failCount > 0) {
+      toast.warning(`Deleted ${successCount} file${successCount > 1 ? 's' : ''}, ${failCount} failed`);
+    } else {
+      toast.error(`Failed to delete ${failCount} file${failCount > 1 ? 's' : ''}`);
+    }
+  }, [selection, handleSelectionChange, queryClient]);
+
+  const handleBulkDeleteCancel = useCallback(() => {
+    setBulkDeleteConfirm(false);
   }, []);
 
   const renderActions = useCallback(
@@ -550,6 +579,19 @@ export const GcodeFileBrowser = ({
           Tag ({selection.length})
         </Button>
       )}
+      {selection.length > 0 && hasPermission('gcode_harvest', 'delete') && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="text-pf-error hover:text-pf-error hover:bg-pf-error/10"
+          onClick={handleBulkDeleteClick}
+          title={`Delete ${selection.length} selected file${selection.length > 1 ? 's' : ''}`}
+        >
+          <DeleteIcon className="h-4 w-4 mr-1" />
+          Delete ({selection.length})
+        </Button>
+      )}
     </>
   );
 
@@ -662,6 +704,16 @@ export const GcodeFileBrowser = ({
         isDangerous
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
+      />
+      <ConfirmationModal
+        isOpen={bulkDeleteConfirm}
+        title="Delete Selected Files"
+        message={`Are you sure you want to delete ${selection.length} selected file${selection.length > 1 ? 's' : ''}? This action cannot be undone.`}
+        confirmButtonText={`Delete ${selection.length} File${selection.length > 1 ? 's' : ''}`}
+        cancelButtonText="Cancel"
+        isDangerous
+        onConfirm={handleBulkDeleteConfirm}
+        onCancel={handleBulkDeleteCancel}
       />
     </>
   );

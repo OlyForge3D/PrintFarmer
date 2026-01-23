@@ -5,12 +5,14 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.SystemLogs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/systemlogs")]
+[Authorize(Roles = "farm_admin")]
 public class SystemLogsController(Services.SystemLogs.ISystemLogService systemLogService) : ControllerBase
 {
     private readonly Services.SystemLogs.ISystemLogService _service = systemLogService;

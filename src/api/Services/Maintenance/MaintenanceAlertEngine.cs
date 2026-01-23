@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -58,7 +58,7 @@ public class MaintenanceAlertEngine(
         // Evaluate each schedule
         foreach (MaintenanceSchedule schedule in schedules)
         {
-            bool shouldAlert = await ShouldGenerateAlertAsync(stats, schedule, settings, cancellationToken);
+            bool shouldAlert = ShouldGenerateAlert(stats, schedule, settings);
 
             if (shouldAlert)
             {
@@ -95,11 +95,10 @@ public class MaintenanceAlertEngine(
         return alertsGenerated;
     }
 
-    private async Task<bool> ShouldGenerateAlertAsync(
+    private bool ShouldGenerateAlert(
         PrinterStatistics stats,
         MaintenanceSchedule schedule,
-        MaintenanceAlertSettings settings,
-        CancellationToken cancellationToken)
+        MaintenanceAlertSettings settings)
     {
         // Check hour-based interval
         if (schedule.IntervalHours.HasValue)

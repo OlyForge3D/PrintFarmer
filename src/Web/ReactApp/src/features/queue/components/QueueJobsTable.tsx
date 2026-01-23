@@ -10,6 +10,7 @@ export interface QueueJobsTableProps {
   onCancel?: (jobId: string) => void;
   onPriority?: (jobId: string, priority: number) => void;
   onEdit?: (jobId: string) => void;
+  onDispatch?: (jobId: string) => void;
 }
 
 export function QueueJobsTable({
@@ -20,6 +21,7 @@ export function QueueJobsTable({
   onCancel,
   onPriority,
   onEdit,
+  onDispatch,
 }: QueueJobsTableProps) {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
 
@@ -45,6 +47,10 @@ export function QueueJobsTable({
     switch (status) {
       case "Queued":
         return "bg-pf-info-bg text-pf-info-text";
+      case "Assigned":
+        return "bg-pf-accent/20 text-pf-accent";
+      case "Starting":
+        return "bg-pf-warning-bg text-pf-warning-text";
       case "Printing":
         return "bg-pf-success-bg text-pf-success-text";
       case "Paused":
@@ -115,22 +121,32 @@ export function QueueJobsTable({
         <tbody>
           {jobs.map((jobWrapper) => {
             const job = jobWrapper.job;
-            const fileName = jobWrapper.fileMetadata?.fileName || "Unknown File";
-            const printerName = jobWrapper.printerMetadata?.name || "Unknown Printer";
-            const model = jobWrapper.printerMetadata?.modelName || "Unknown Model";
-            const material = jobWrapper.fileMetadata?.materialType || "-";
+            const jobId = job.id;
+            const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
+            const printerName = jobWrapper.assignedPrinter?.name || "Unknown Printer";
+            const model = jobWrapper.assignedPrinter?.modelName || "Unknown Model";
+            const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "-";
             const status = job.status || "Unknown";
             const priority = job.priority || 0;
 
             return (
               <tr
-                key={jobWrapper.id}
-                className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors"
+                key={jobId}
+                className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-pointer"
+                onClick={() => onEdit?.(jobId)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onEdit?.(jobId);
+                  }
+                }}
               >
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <Checkbox
-                    checked={selectedJobs.has(jobWrapper.id)}
-                    onChange={() => handleSelectJob(jobWrapper.id)}
+                    checked={selectedJobs.has(jobId)}
+                    onChange={() => handleSelectJob(jobId)}
                   />
                 </td>
                 <td className="px-4 py-3">
@@ -148,11 +164,11 @@ export function QueueJobsTable({
                     {status}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <Select
                     value={priority}
                     onChange={(e) =>
-                      onPriority?.(jobWrapper.id, parseInt(e.target.value))
+                      onPriority?.(jobId, parseInt(e.target.value))
                     }
                     className="text-xs w-24"
                   >
@@ -162,18 +178,26 @@ export function QueueJobsTable({
                     <option value="-1">Low</option>
                   </Select>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <div className="flex gap-2">
-                    <Button
-                      onClick={() => onEdit?.(jobWrapper.id)}
-                      variant="subtle"
-                      size="sm"
-                    >
-                      Edit
-                    </Button>
+                    {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDispatch?.(jobId);
+                        }}
+                        variant="primary"
+                        size="sm"
+                      >
+                        Start Print
+                      </Button>
+                    )}
                     {status === "Printing" && (
                       <Button
-                        onClick={() => onPause?.(jobWrapper.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPause?.(jobId);
+                        }}
                         variant="subtle"
                         size="sm"
                       >
@@ -182,7 +206,10 @@ export function QueueJobsTable({
                     )}
                     {status === "Paused" && (
                       <Button
-                        onClick={() => onResume?.(jobWrapper.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onResume?.(jobId);
+                        }}
                         variant="subtle"
                         size="sm"
                       >
@@ -191,7 +218,10 @@ export function QueueJobsTable({
                     )}
                     {status !== "Completed" && (
                       <Button
-                        onClick={() => onCancel?.(jobWrapper.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCancel?.(jobId);
+                        }}
                         variant="danger"
                         size="sm"
                       >

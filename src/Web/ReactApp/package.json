@@ -23,7 +23,7 @@
     "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"
   },
   "dependencies": {
-    "@farm/slicers-orcaslicer-v2_3_1": "file:../../src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1",
+    "@farm/slicers-orcaslicer-v2_3_1": "file:../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_1",
     "@headlessui/react": "^2.2.7",
     "@heroicons/react": "^2.2.0",
     "@hookform/resolvers": "^5.2.2",
@@ -45,12 +45,17 @@
     "autoprefixer": "^10.4.21",
     "axios": "^1.12.0",
     "date-fns": "^4.1.0",
+    "jspdf": "^4.0.0",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.542.0",
     "postcss": "^8.5.6",
+    "prop-types": "^15.8.1",
     "react": "^19.2.3",
+    "react-csv": "^2.2.2",
     "react-dom": "^19.2.3",
     "react-hook-form": "^7.62.0",
     "react-router-dom": "^6.26.1",
+    "recharts": "^3.6.0",
     "sonner": "^2.0.7",
     "tailwindcss": "3.4.17",
     "zod": "^4.1.5"

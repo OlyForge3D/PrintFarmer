@@ -12,6 +12,8 @@ export interface TableFiltersBarProps {
 
 const STATUS_OPTIONS = [
   { value: "Queued", label: "Queued" },
+  { value: "Assigned", label: "Assigned" },
+  { value: "Starting", label: "Starting" },
   { value: "Printing", label: "Printing" },
   { value: "Paused", label: "Paused" },
   { value: "Completed", label: "Completed" },
@@ -103,7 +105,7 @@ export function TableFiltersBar({
               onChange={handleStatusChange}
               className="flex-1"
             >
-              <option value="">All Statuses</option>
+              <option value="">Active Jobs</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}

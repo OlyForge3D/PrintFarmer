@@ -1,4 +1,3 @@
-using Farm.Web.Api.Tests.TestInfrastructure;
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
@@ -10,6 +9,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;

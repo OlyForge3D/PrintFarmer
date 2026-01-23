@@ -4,6 +4,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.DTOs.PrintQueue;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,6 +23,8 @@ public class PrintJobManagementService(
     AppDbContext dbContext,
     IPrintJobManagementRepository repository,
     ILogger<PrintJobManagementService> logger,
+    IPrintersService printersService,
+    IStoragePathService storagePathService,
     INotificationService? notificationService = null,
     IRetryService? retryService = null) : IPrintJobManagementService
 {
@@ -30,6 +34,8 @@ public class PrintJobManagementService(
     // New: Repository pattern - use this for new code and migrations
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
 
@@ -231,13 +237,15 @@ public class PrintJobManagementService(
             }
 
             // Create new print job
+            // Status is Assigned if a printer is specified, otherwise Queued
+            Guid? assignedPrinterId = string.IsNullOrEmpty(request.AssignedPrinterId) ? null : Guid.Parse(request.AssignedPrinterId);
             var job = new PrintJob
             {
                 Id = Guid.NewGuid(),
                 Name = gcodeFile.FileName,
                 GcodeFileId = Guid.Parse(request.GcodeFileId),
-                AssignedPrinterId = string.IsNullOrEmpty(request.AssignedPrinterId) ? null : Guid.Parse(request.AssignedPrinterId),
-                Status = PrintJobStatus.Queued,
+                AssignedPrinterId = assignedPrinterId,
+                Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
@@ -444,6 +452,145 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error resuming print job {JobId}", jobId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Dispatch a queued/assigned job to its printer to start printing.
+    /// This sends the job's G-code file to the assigned printer and starts the print.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user dispatching the job.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>Updated job with Starting/Printing status.</returns>
+    public async Task<QueuedPrintJobDto> DispatchJobAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Load job with related entities
+            PrintJob? job = await _dbContext.PrintJobs
+                .Include(j => j.GcodeFile)
+                .Include(j => j.AssignedPrinter)
+                .FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken);
+
+            if (job == null)
+            {
+                throw new InvalidOperationException($"Print job {jobId} not found");
+            }
+
+            // Validate job is in a dispatchable state
+            if (job.Status != PrintJobStatus.Queued && job.Status != PrintJobStatus.Assigned)
+            {
+                throw new InvalidOperationException($"Only Queued or Assigned jobs can be dispatched. Current status: {job.Status}");
+            }
+
+            // Validate printer is assigned
+            if (job.AssignedPrinterId == null || job.AssignedPrinter == null)
+            {
+                throw new InvalidOperationException("Cannot dispatch job without an assigned printer. Please assign a printer first.");
+            }
+
+            // Validate G-code file exists
+            if (job.GcodeFile == null)
+            {
+                throw new InvalidOperationException($"G-code file not found for job {jobId}");
+            }
+
+            // Update status to Starting
+            job.Status = PrintJobStatus.Starting;
+            job.ActualStartTime = DateTime.UtcNow;
+            job.UpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            // Use original filename for the printer (not the GUID-based storage filename)
+            string printerFileName = job.GcodeFile.Name;
+
+            // Resolve the full local file path: StorageRoot + VirtualPath + FileName
+            string gcodeStorageRoot = _storagePathService.GetGcodeStorageDirectory();
+            string localFilePath = Path.Combine(gcodeStorageRoot, job.GcodeFile.FilePath.TrimStart('/'), job.GcodeFile.FileName);
+
+            _logger.LogInformation(
+                "Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName} from {LocalPath}",
+                jobId, job.AssignedPrinterId, printerFileName, localFilePath);
+
+            try
+            {
+                // Validate the local file exists
+                if (!System.IO.File.Exists(localFilePath))
+                {
+                    job.Status = PrintJobStatus.Assigned;
+                    job.FailureReason = $"G-code file not found on disk: {localFilePath}";
+                    _logger.LogError("G-code file not found on disk for job {JobId}: {LocalPath}", jobId, localFilePath);
+                }
+                else
+                {
+                    // Step 1: Upload the file to the printer
+                    await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
+                    bool uploadSuccess = await _printersService.UploadGcodeAsync(
+                        job.AssignedPrinterId.Value,
+                        printerFileName,
+                        fileStream,
+                        cancellationToken);
+
+                    if (!uploadSuccess)
+                    {
+                        job.Status = PrintJobStatus.Assigned;
+                        job.FailureReason = "Failed to upload G-code file to printer";
+                        _logger.LogWarning("Failed to upload G-code to printer for job {JobId}", jobId);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Successfully uploaded {FileName} to printer {PrinterId}",
+                            printerFileName, job.AssignedPrinterId);
+
+                        // Step 2: Start the print on the printer using the uploaded filename
+                        bool startSuccess = await _printersService.StartPrintFromFileAsync(
+                            job.AssignedPrinterId.Value,
+                            printerFileName,
+                            cancellationToken);
+
+                        if (startSuccess)
+                        {
+                            job.Status = PrintJobStatus.Printing;
+                            _logger.LogInformation("Print job {JobId} successfully started on printer {PrinterId}", jobId, job.AssignedPrinterId);
+                        }
+                        else
+                        {
+                            // Revert to Assigned status if start failed
+                            job.Status = PrintJobStatus.Assigned;
+                            job.FailureReason = "Failed to start print on printer after upload";
+                            _logger.LogWarning("Failed to start print job {JobId} on printer {PrinterId} after successful upload", jobId, job.AssignedPrinterId);
+                        }
+                    }
+                }
+            }
+            catch (Exception printEx)
+            {
+                // Revert to Assigned status on exception
+                job.Status = PrintJobStatus.Assigned;
+                job.FailureReason = $"Error starting print: {printEx.Message}";
+                _logger.LogError(printEx, "Error dispatching print job {JobId} to printer {PrinterId}", jobId, job.AssignedPrinterId);
+            }
+
+            job.UpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            // Send notification for job start
+            if (job.Status == PrintJobStatus.Printing)
+            {
+                await SendJobStartNotificationAsync(job, cancellationToken);
+            }
+
+            return MapToQueuedPrintJobDto(job);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error dispatching print job {JobId}", jobId);
             throw;
         }
     }
@@ -718,6 +865,7 @@ public class PrintJobManagementService(
             Id = job.Id.ToString(),
             Name = job.Name,
             GcodeFileId = job.GcodeFileId.ToString(),
+            FileName = job.GcodeFile?.Name, // Original filename for display (may be null if GcodeFile not loaded)
             AssignedPrinterId = job.AssignedPrinterId?.ToString(),
             Status = job.Status.ToString(),
             Priority = job.Priority,
@@ -743,7 +891,8 @@ public class PrintJobManagementService(
         return new QueueGcodeFileMetaDto
         {
             Id = file.Id.ToString(),
-            FileName = file.FileName,
+            Name = file.Name, // Original filename for display
+            FileName = file.FileName, // GUID-based filename on disk
             FileSizeBytes = file.FileSizeBytes,
             MaterialType = file.RequiredMaterial,
             NozzleDiameter = (int?)file.RequiredNozzleDiameter,
@@ -784,6 +933,7 @@ public class PrintJobManagementService(
             }
 
             PrintJob? job = await _dbContext.PrintJobs
+                .Include(pj => pj.GcodeFile)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
@@ -1403,6 +1553,39 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending job resume notification for job {JobId}", job.Id);
+
+            // Don't rethrow - notification failure shouldn't block queue operations
+        }
+    }
+
+    /// <summary>
+    /// Send job start notification to user (when job is dispatched to printer)
+    /// </summary>
+    /// <param name="job">The print job that was started.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    private async Task SendJobStartNotificationAsync(
+        PrintJob job,
+        CancellationToken cancellationToken = default)
+    {
+        if (_notificationService == null)
+        {
+            _logger.LogWarning("INotificationService not configured - skipping job start notification for job {JobId}", job.Id);
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendJobStartedAsync(
+                job.Id.ToString(),
+                job.Name,
+                job.AssignedPrinter?.Name,
+                cancellationToken);
+
+            _logger.LogInformation("Job start notification sent for job {JobId}: {JobName}", job.Id, job.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job start notification for job {JobId}", job.Id);
 
             // Don't rethrow - notification failure shouldn't block queue operations
         }

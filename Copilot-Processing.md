@@ -1,3 +1,108 @@
+# Copilot Processing: Settings Group Ordering Feature
+
+**Session**: Implementing SettingGroupAttribute for proper sidebar group ordering
+**Phase**: ✅ Completed
+
+## ✅ SETTINGS GROUP ORDERING FEATURE
+
+**Objective**: 
+- The `Order` property on `SettingDisplayAttribute` should indicate order within the group, not absolute order
+- Create a way to configure Setting Groups so we can indicate what order the groups are rendered in the sidebar
+
+### Implementation
+
+**Backend Changes**:
+
+1. **Created `SettingGroupAttribute.cs`** - New attribute for defining group-level metadata:
+   - `GroupKey` (required) - The group identifier matching `SettingDisplay.Group`
+   - `DisplayName` - Human-readable name for sidebar
+   - `Description` - Optional tooltip/description
+   - `Icon` - Icon identifier for the group
+   - `Order` - Sort order for groups (default 100)
+
+2. **Created `SettingGroupMetadata.cs`** - DTO for transferring group metadata to frontend
+
+3. **Updated `ISettingsService.cs`** - Added `GetAllGroupMetadata()` method signature
+
+4. **Updated `SettingsService.cs`** - Implemented `GetAllGroupMetadata()`:
+   - Scans all setting types for `[SettingGroup]` attributes
+   - Deduplicates by GroupKey (keeps lowest Order)
+   - Falls back to SettingDisplay.Group with default order (100) if no explicit attribute
+   - Returns sorted by Order, then by DisplayName
+
+5. **Updated `UnifiedSettingsController.cs`** - Added new endpoint:
+   - `GET /api/settings/groups` - Returns all group metadata
+
+6. **Applied `[SettingGroup]` to settings classes**:
+   - `NetworkDiscoverySettings` → `"Networking"`, Order = 2
+   - `SlicerSettings` → `"Slicing"`, Order = 3
+   - `GcodeUploadSettings` → `"Files"`, Order = 4
+   - `SpoolmanSettings` → `"Integrations"`, Order = 5
+   - `ExternalServicesHealthSettings` → `"System"`, Order = 6
+   - `PrintStatsSyncSettings` → `"Maintenance"`, Order = 1
+
+**Frontend Changes**:
+
+1. **Updated `api.ts`** - Added `getSettingsGroups()` method
+
+2. **Updated `settingsApi.ts`** - Added `fetchSettingsGroups()` and `SettingGroupMetadata` interface
+
+3. **Updated `SettingsPage.tsx`**:
+   - Added `groupMetadata` state
+   - Parallel fetch of metadata and group metadata
+   - Created `groupOrderMap` from group metadata for sorting
+   - Added `getGroupDisplayName()` helper for display names
+   - Updated sidebar to use group display names
+
+### Build Status
+✅ **API Build**: Passed (0 errors, 51 warnings)
+✅ **React Build**: Passed (12.63s)
+
+---
+
+# Copilot Processing: HarvestWizardModal Refactor
+
+**Session**: Refactoring HarvestWizardModal to use shared IndexedFilesList component
+**Phase**: ✅ Completed
+
+## ✅ HARVEST WIZARD MODAL REFACTOR
+
+**Objective**: Fix race conditions and consolidate duplicate file table implementation
+
+### Problem
+- HarvestWizardModal had its own inline file table (~150 lines) instead of using the shared IndexedFilesList component
+- Duplicate SignalR subscription logic for file events
+- File discovery worked but files weren't displayed correctly
+- Import status updates weren't reaching the UI due to stale closure issues
+
+### Solution
+Refactored HarvestWizardModal to delegate file management to IndexedFilesList:
+
+**IndexedFilesList.tsx enhancements**:
+- Added `forwardRef` with `useImperativeHandle` for external control
+- New ref methods: `importSelected()`, `getSelectedCount()`, `getFileCount()`, `isImporting()`
+- New props: `hideHeader`, `hideFooterImport`, `onSelectionChange`, `onImportComplete`
+- Modified `handleImportSelected` to return result object for parent coordination
+
+**HarvestWizardModal.tsx changes**:
+- Removed inline file table JSX (~150 lines)
+- Removed file-level state (`files`, `DiscoveredFileWithSelection`)
+- Removed file-level SignalR subscriptions (handled by IndexedFilesList)
+- Removed unused helper functions (`formatFileSize`, `getStatusString`, `getStatusColor`)
+- Kept operation-level subscriptions for stats display (filesFound, filesAdded, etc.)
+- Added `IndexedFilesList` component with ref-based import control
+- Uses `selectedCount` state via callback from child component
+
+**Files Modified**:
+1. `/src/Web/ReactApp/src/features/gcode/components/harvest/IndexedFilesList.tsx`
+2. `/src/Web/ReactApp/src/features/gcode/components/harvest/HarvestWizardModal.tsx`
+
+### Build Status
+✅ **React Build**: Passed (12.74s)
+✅ **React Tests**: 499/499 passed
+
+---
+
 # Copilot Processing: Toolhead Component Auto-Population
 
 **Session Start**: Implementing toolhead component auto-population and nozzle interface types
@@ -815,3 +920,83 @@ Complete audit with detailed analysis, code patterns, and implementation recomme
 ## Session Complete ✅
 
 All requested React 19 verification completed. Codebase is well-positioned for continued modernization.
+
+
+---
+
+# Phase 5.5 & 5.8 Completion Summary
+
+**Session Date**: January 28, 2026
+**Status**: ✅ COMPLETE
+
+## Phase 5.5: Component-Specific Tracking
+
+**Completed Components**:
+1. ✅ `useComponentMaintenance.ts` - Hook for component-grouped maintenance data
+   - `COMPONENT_CATEGORIES` constant for normalization
+   - `ComponentMaintenanceData` interface with aggregated stats
+   - `ComponentReplacement` interface for replacement tracking
+   - `normalizeComponent()` function for category mapping
+
+2. ✅ `ComponentMaintenanceTracker.tsx` - Component tracking UI
+   - Selectable component cards with stats (schedules, maintenance count, avg interval, cost)
+   - Detail panel showing schedules and recent logs for selected component
+   - Color-coded category badges
+
+3. ✅ `ComponentReplacementHistory.tsx` - Replacement history with filtering
+   - Filter by component category
+   - Sort by date (newest/oldest) or cost (highest/lowest)
+   - Total cost calculation
+   - Part details and performer tracking
+
+4. ✅ Integrated into MaintenanceDashboardPage
+   - New "Component Tracking" section with tabs
+   - "Components" tab: Component cards with stats
+   - "Replacements" tab: Replacement history with filtering
+
+## Phase 5.8: Dashboard Integration
+
+**Completed Components**:
+1. ✅ `MaintenanceAlertsWidget.tsx` - Compact alerts widget
+   - Top N alerts sorted by severity
+   - Critical count badge
+   - Link to maintenance page
+   - Severity color coding
+
+2. ✅ `MaintenanceOverviewWidget.tsx` - Overview stats widget
+   - Stats grid: Overdue, Due Soon, Printers in Maintenance
+   - Upcoming tasks list (top N)
+   - Healthy state indicator when no issues
+
+3. ✅ Integrated into PrinterDashboard (main home page)
+   - 2-column responsive layout
+   - Appears after Recent Print History section
+
+## Verification
+
+- ✅ **Build**: 10.80s production build succeeded
+- ✅ **Tests**: 499/499 React tests passing
+- ✅ **Exports**: All new components exported from barrel files
+
+## Files Created
+
+```
+src/features/maintenance/
+├── hooks/
+│   └── useComponentMaintenance.ts (NEW)
+├── components/
+│   ├── ComponentMaintenanceTracker.tsx (NEW)
+│   ├── ComponentReplacementHistory.tsx (NEW)
+│   ├── MaintenanceAlertsWidget.tsx (NEW)
+│   └── MaintenanceOverviewWidget.tsx (NEW)
+```
+
+## Files Modified
+
+- `hooks/index.ts` - Added useComponentMaintenance export
+- `components/index.ts` - Added 4 new component exports
+- `pages/MaintenanceDashboardPage.tsx` - Added Component Tracking section
+- `PrinterDashboard.tsx` - Added maintenance widgets to main dashboard
+
+---
+

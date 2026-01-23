@@ -142,7 +142,7 @@ describe('PrinterDashboard', () => {
       {
         id: '1',
         name: 'Test Printer 1',
-        serverUrl: 'http://printer1.local',
+        backendUrl: 'http://printer1.local',
         isOnline: true,
         state: 'printing',
         manufacturerName: 'Prusa',
@@ -152,7 +152,7 @@ describe('PrinterDashboard', () => {
       {
         id: '2',
         name: 'Test Printer 2',
-        serverUrl: 'http://printer2.local',
+        backendUrl: 'http://printer2.local',
         isOnline: false,
         state: null,
         manufacturerName: 'Creality',

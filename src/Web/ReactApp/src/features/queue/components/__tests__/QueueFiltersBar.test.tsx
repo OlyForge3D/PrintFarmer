@@ -30,7 +30,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const statusSelect = screen.getByDisplayValue("All Statuses") as HTMLSelectElement;
+    const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
     fireEvent.change(statusSelect, { target: { value: "Queued" } });
 
     expect(onStatusChange).toHaveBeenCalledWith("Queued");
@@ -134,11 +134,13 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const statusSelect = screen.getByDisplayValue("All Statuses") as HTMLSelectElement;
+    const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
     const options = statusSelect.querySelectorAll("option");
 
     const statusValues = Array.from(options).map((o) => o.value);
     expect(statusValues).toContain("Queued");
+    expect(statusValues).toContain("Assigned");
+    expect(statusValues).toContain("Starting");
     expect(statusValues).toContain("Printing");
     expect(statusValues).toContain("Paused");
   });

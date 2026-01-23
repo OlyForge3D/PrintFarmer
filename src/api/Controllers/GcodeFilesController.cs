@@ -12,6 +12,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Tags;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +30,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/gcode-files")]
+[Authorize]
 public class GcodeFilesController(
     IUnifiedLoggingService logger,
     IGcodeUploadSettings uploadSettings,
@@ -542,6 +544,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="id">Gcode file ID</param>
     /// <returns>No content if successful</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -564,6 +567,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="request">Request with list of file IDs (GUIDs) to delete</param>
     /// <returns>Deletion result with count</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -595,6 +599,7 @@ public class GcodeFilesController(
     /// </summary>
     [HttpGet("download")]
     [HttpHead("download")]
+    [AllowAnonymous] // Thumbnails are served via this endpoint and img tags can't send auth headers
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> DownloadAsync([FromQuery] string path)
@@ -680,6 +685,7 @@ public class GcodeFilesController(
     /// <param name="id">GCode file ID</param>
     /// <returns>Thumbnail image</returns>
     [HttpGet("thumbnail/{id:guid}")]
+    [AllowAnonymous] // Allow unauthenticated access for <img> tags that can't include auth headers
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetGcodeThumbnailAsync(Guid id)
