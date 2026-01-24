@@ -8,18 +8,59 @@ using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.OctoPrint
 {
+    /// <summary>
+    /// Interface for OctoPrint client providing communication with OctoPrint 3D printer management servers.
+    /// Supports printer status monitoring, job control, file management, temperature control, and system operations.
+    /// </summary>
     public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload
     {
+        /// <summary>
+        /// Tests the connection to an OctoPrint server.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>True if connection is successful; otherwise false.</returns>
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
 
+        /// <summary>
+        /// Gets the current printer state including temperatures and flags.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>Printer state information, or null if unavailable.</returns>
         Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, string apiKey);
 
+        /// <summary>
+        /// Gets the current job status including progress and file information.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>Job status information, or null if unavailable.</returns>
         Task<OctoPrintJobStatus?> GetJobStatusAsync(string baseUrl, string apiKey);
 
+        /// <summary>
+        /// Starts printing a file by name.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <param name="fileName">Name of the file to print.</param>
+        /// <returns>True if successful; otherwise false.</returns>
         Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName);
 
+        /// <summary>
+        /// Cancels the current print job.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>True if successful; otherwise false.</returns>
         Task<bool> CancelJobAsync(string baseUrl, string apiKey);
 
+        /// <summary>
+        /// Gets the camera stream URL from OctoPrint webcam configuration.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>Camera stream URL, or null if not configured.</returns>
         Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
 
         /// <summary>

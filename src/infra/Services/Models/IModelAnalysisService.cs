@@ -1,7 +1,17 @@
 ﻿namespace Farm.Infrastructure.Services.Models;
 
+/// <summary>
+/// Result of analyzing a 3D model file, containing dimensions and mesh statistics.
+/// </summary>
+/// <param name="DimensionX">The X-axis dimension in millimeters, or null if unavailable.</param>
+/// <param name="DimensionY">The Y-axis dimension in millimeters, or null if unavailable.</param>
+/// <param name="DimensionZ">The Z-axis dimension in millimeters, or null if unavailable.</param>
+/// <param name="TriangleCount">The number of triangles in the mesh, or null if unavailable.</param>
 public record ModelAnalysisResult(double? DimensionX, double? DimensionY, double? DimensionZ, int? TriangleCount);
 
+/// <summary>
+/// Service for analyzing 3D model files to extract metadata such as dimensions and triangle count.
+/// </summary>
 public interface IModelAnalysisService
 {
     /// <summary>

@@ -6,12 +6,33 @@ using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Artifacts;
 
+/// <summary>
+/// Service for managing build artifacts (sliced G-code, logs, reports) associated with print jobs.
+/// </summary>
 public interface IArtifactsService
 {
+    /// <summary>
+    /// Uploads a file as an artifact associated with a job.
+    /// </summary>
+    /// <param name="file">The uploaded file.</param>
+    /// <param name="jobId">The job ID this artifact belongs to.</param>
+    /// <param name="workerId">The optional worker ID that produced this artifact.</param>
+    /// <param name="kind">The kind/type of artifact (e.g., "gcode", "log", "thumbnail").</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<Farm.Infrastructure.Domain.Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct);
 
+    /// <summary>
+    /// Gets an artifact by its ID.
+    /// </summary>
+    /// <param name="id">The artifact ID.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<Farm.Infrastructure.Domain.Artifact?> GetAsync(Guid id, CancellationToken ct);
 
+    /// <summary>
+    /// Lists all artifacts for a specific job.
+    /// </summary>
+    /// <param name="jobId">The job ID to list artifacts for.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Farm.Infrastructure.Domain.Artifact>> ListByJobAsync(Guid jobId, CancellationToken ct);
 
     /// <summary>

@@ -3,18 +3,60 @@ using System.Diagnostics.Metrics;
 
 namespace Farm.Infrastructure.Telemetry;
 
+/// <summary>
+/// Service for collecting and recording application telemetry metrics.
+/// Tracks API calls, printer operations, slicer jobs, file operations, and database activity.
+/// </summary>
 public interface IPrintFarmerTelemetryService
 {
+    /// <summary>
+    /// Starts a new telemetry activity for distributed tracing.
+    /// </summary>
+    /// <param name="name">The name of the activity.</param>
+    /// <param name="kind">The kind of activity (Internal, Server, Client, etc.).</param>
+    /// <returns>The started activity, or null if tracing is not enabled.</returns>
     Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal);
 
+    /// <summary>
+    /// Records metrics for an API call including endpoint, method, status, and duration.
+    /// </summary>
+    /// <param name="endpoint">The API endpoint that was called.</param>
+    /// <param name="method">The HTTP method used.</param>
+    /// <param name="statusCode">The HTTP status code returned.</param>
+    /// <param name="duration">The duration of the API call.</param>
     void RecordApiCall(string endpoint, string method, int statusCode, TimeSpan duration);
 
+    /// <summary>
+    /// Records metrics for a printer operation.
+    /// </summary>
+    /// <param name="operation">The type of operation performed.</param>
+    /// <param name="printerId">The identifier of the printer.</param>
+    /// <param name="success">Whether the operation succeeded.</param>
     void RecordPrinterOperation(string operation, string printerId, bool success);
 
+    /// <summary>
+    /// Records metrics for a slicer operation.
+    /// </summary>
+    /// <param name="operation">The type of operation performed.</param>
+    /// <param name="engine">The slicer engine used.</param>
+    /// <param name="success">Whether the operation succeeded.</param>
+    /// <param name="duration">Optional duration of the operation.</param>
     void RecordSlicerOperation(string operation, string engine, bool success, TimeSpan? duration = null);
 
+    /// <summary>
+    /// Records metrics for a file operation.
+    /// </summary>
+    /// <param name="operation">The type of operation performed.</param>
+    /// <param name="fileType">The type of file involved.</param>
+    /// <param name="fileSize">Optional size of the file in bytes.</param>
     void RecordFileOperation(string operation, string fileType, long? fileSize = null);
 
+    /// <summary>
+    /// Records metrics for a database operation.
+    /// </summary>
+    /// <param name="table">The database table involved.</param>
+    /// <param name="operation">The type of operation performed.</param>
+    /// <param name="recordCount">The number of records affected.</param>
     void RecordDatabaseOperation(string table, string operation, int recordCount);
 }
 
