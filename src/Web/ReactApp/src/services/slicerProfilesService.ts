@@ -1,7 +1,7 @@
 // Service for interacting with slicer profile API endpoints (Phase 6)
 // Provides list, import, export, and set-default operations.
 
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from './api';
 
 // Base interface for all profile types
 export interface IProfileListItem {
@@ -113,63 +113,31 @@ export interface HierarchicalProfilesResponse {
   processProfiles: Record<string, ProcessProfileListItem[]>;
 }
 
-const base = `${getApiBaseUrl()}/slicer/profiles`;
-
-async function handle<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json() as Promise<T>;
-}
-
-function getAuthHeaders(): HeadersInit {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
-  const token = localStorage.getItem('auth-token');
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return headers;
-}
-
 export const slicerProfilesService = {
   async listExtended(): Promise<ExtendedProfilesResponse> {
-    const res = await fetch(`${base}/extended`, {
-      headers: getAuthHeaders()
-    });
-    return handle<ExtendedProfilesResponse>(res);
+    const res = await apiClient.get<ExtendedProfilesResponse>('/slicer/profiles/extended');
+    return res.data;
   },
-  async listHierarchical(): Promise<HierarchicalProfilesResponse> {
-    const res = await fetch(`${base}`, {
-      headers: getAuthHeaders()
-    });
-    return handle<HierarchicalProfilesResponse>(res);
+  async listHierarchical(machineProfileId?: string): Promise<HierarchicalProfilesResponse> {
+    // Use /hierarchy endpoint which returns hierarchical profile data with byHierarchy
+    // Optional machineProfileId filter to support CompatiblePrinters filtering
+    const url = machineProfileId 
+      ? `/slicer/profiles/hierarchy?machineProfileId=${machineProfileId}`
+      : '/slicer/profiles/hierarchy';
+      
+    const res = await apiClient.get<HierarchicalProfilesResponse>(url);
+    return res.data;
   },
   async importProfile(req: ImportSlicerProfileRequest): Promise<SlicerProfileExtended> {
-    const res = await fetch(`${base}/import`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(req)
-    });
-    return handle<SlicerProfileExtended>(res);
+    const res = await apiClient.post<SlicerProfileExtended>('/slicer/profiles/import', req);
+    return res.data;
   },
   async exportProfile(id: string): Promise<SlicerProfileExportDto> {
-    const res = await fetch(`${base}/${id}/export`, {
-      headers: getAuthHeaders()
-    });
-    return handle<SlicerProfileExportDto>(res);
+    const res = await apiClient.get<SlicerProfileExportDto>(`/slicer/profiles/${id}/export`);
+    return res.data;
   },
   async setDefault(id: string): Promise<void> {
-    const res = await fetch(`${base}/${id}/set-default`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `Failed to set default (${res.status})`);
-    }
+    await apiClient.post<void>(`/slicer/profiles/${id}/set-default`);
   }
 };
 

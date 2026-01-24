@@ -35,6 +35,9 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
         {
             _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy");
 
+            // Load machine model profiles (base templates from machine_model_list)
+            IList<MachineModelProfileDto> machineModelProfiles = await _profileService.ListAvailableMachineModelProfilesAsync(ct);
+            // Load machine profiles (nozzle variants from machine_list)
             IList<MachineProfileDto> machineProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
             IList<FilamentProfileDto> filamentProfiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
             IList<ProcessProfileDto> processProfiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
@@ -126,6 +129,10 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
             {
                 ByHierarchy = byHierarchy,
 
+                MachineModelProfiles = machineModelProfiles
+                    .GroupBy(p => p.Manufacturer ?? "Unknown")
+                    .ToDictionary(g => g.Key, g => (IList<MachineModelProfileDto>)g.ToList()),
+
                 MachineProfiles = machineProfiles
                     .GroupBy(p => p.Manufacturer ?? "Unknown")
                     .ToDictionary(g => g.Key, g => (IList<MachineProfileDto>)g.ToList()),
@@ -139,7 +146,7 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
                     .ToDictionary(g => g.Key, g => (IList<ProcessProfileDto>)g.ToList())
             };
 
-            _logger.LogInformation($"Returning {machineProfiles.Count} machine, {filamentProfiles.Count} filament, {processProfiles.Count} process profiles in {byHierarchy.Count} manufacturers");
+            _logger.LogInformation($"Returning {machineModelProfiles.Count} machine model, {machineProfiles.Count} machine, {filamentProfiles.Count} filament, {processProfiles.Count} process profiles in {byHierarchy.Count} manufacturers");
             return Ok(response);
         }
         catch (Exception ex)

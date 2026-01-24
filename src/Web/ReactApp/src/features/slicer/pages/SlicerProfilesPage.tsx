@@ -92,43 +92,85 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   }, [slicerNames, slicerType]);
 
+  // Main hierarchy query - loads all profiles for browsing
   const { data: profilesData, isLoading, error } = useQuery<HierarchicalProfilesResponse, Error>({
     queryKey: ['slicerProfilesHierarchy'],
     queryFn: async () => slicerProfilesService.listHierarchical(),
     staleTime: 10_000
   });
 
+  // Filtered query - loads profiles filtered by selected machine (for CompatiblePrinters filtering)
+  const { data: filteredProfilesData } = useQuery<HierarchicalProfilesResponse, Error>({
+    queryKey: ['slicerProfilesHierarchyFiltered', selectedMachineProfileId],
+    queryFn: async () => slicerProfilesService.listHierarchical(selectedMachineProfileId),
+    enabled: !!selectedMachineProfileId,
+    staleTime: 10_000
+  });
+
   const allMachineProfiles = useMemo<MachineProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: MachineProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.machineProfiles ?? []));
+    // Try hierarchical data first, fallback to flat machineProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: MachineProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.machineProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat machineProfiles grouped by manufacturer
+    if (profilesData?.machineProfiles) {
+      const out: MachineProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.machineProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   const allFilamentProfiles = useMemo<FilamentProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: FilamentProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.filamentProfiles ?? []));
+    // Try hierarchical data first, fallback to flat filamentProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: FilamentProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.filamentProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat filamentProfiles grouped by key
+    if (profilesData?.filamentProfiles) {
+      const out: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.filamentProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   const allProcessProfiles = useMemo<ProcessProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: ProcessProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.processProfiles ?? []));
+    // Try hierarchical data first, fallback to flat processProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: ProcessProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.processProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat processProfiles grouped by key
+    if (profilesData?.processProfiles) {
+      const out: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.processProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   type MachineProfileContext = {
@@ -271,9 +313,24 @@ export const SlicerProfilesPage: React.FC = () => {
   ]);
 
   // Filament/process profiles are shown only after selecting a machine profile
+  // Use filteredProfilesData when available (contains CompatiblePrinters-filtered results)
   const filteredFilamentProfiles = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.filamentProfiles ?? []).filter((p) => {
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
+    if (filteredProfilesData?.filamentProfiles) {
+      // Flatten filtered profiles from all manufacturers
+      const filtered: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         if (!p.name.toLowerCase().includes(query) && !p.material.toLowerCase().includes(query)) {
@@ -292,11 +349,25 @@ export const SlicerProfilesPage: React.FC = () => {
       }
       return true;
     });
-  }, [filterEngine, filterSource, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
+  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
 
   const filteredProcessProfiles = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.processProfiles ?? []).filter((p) => {
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
+    if (filteredProfilesData?.processProfiles) {
+      // Flatten filtered profiles from all manufacturers
+      const filtered: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         if (!p.name.toLowerCase().includes(query) && !p.quality.toLowerCase().includes(query)) {
@@ -315,7 +386,7 @@ export const SlicerProfilesPage: React.FC = () => {
       }
       return true;
     });
-  }, [filterEngine, filterSource, searchQuery, selectedMachineContext, selectedProcessProfileId]);
+  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedMachineContext, selectedProcessProfileId]);
 
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -390,19 +461,46 @@ export const SlicerProfilesPage: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [filterManufacturer, filteredMachineProfiles]);
 
+  // Dropdown options use CompatiblePrinters-filtered data when available
   const filamentOptions = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.filamentProfiles ?? [])
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
+    if (filteredProfilesData?.filamentProfiles) {
+      const filtered: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles
       .slice()
       .sort((a, b) => (a.material + a.name).localeCompare(b.material + b.name));
-  }, [selectedMachineContext]);
+  }, [filteredProfilesData, selectedMachineContext]);
 
   const processOptions = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.processProfiles ?? [])
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
+    if (filteredProfilesData?.processProfiles) {
+      const filtered: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles
       .slice()
       .sort((a, b) => (a.quality + a.name).localeCompare(b.quality + b.name));
-  }, [selectedMachineContext]);
+  }, [filteredProfilesData, selectedMachineContext]);
 
   const visibleProfiles = useMemo<SlicerProfileListItem[]>(() => {
     if (activeTab === 'machines') return filteredMachineProfiles;
@@ -602,7 +700,7 @@ export const SlicerProfilesPage: React.FC = () => {
               </Button>
             </div>
 
-            {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Filament/Process */}
+            {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Process/Filament */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-background rounded-lg">
               <div>
                 <label className="block text-sm font-medium mb-1">Manufacturer</label>
@@ -632,20 +730,6 @@ export const SlicerProfilesPage: React.FC = () => {
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Filament</label>
-                <Select
-                  value={selectedFilamentProfileId}
-                  onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
-                  aria-label="Select filament profile"
-                  disabled={!selectedMachineProfileId}
-                >
-                  <option value="">Select a filament profile</option>
-                  {filamentOptions.map(f => (
-                    <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Process</label>
                 <Select
                   value={selectedProcessProfileId}
@@ -656,6 +740,20 @@ export const SlicerProfilesPage: React.FC = () => {
                   <option value="">Select a process profile</option>
                   {processOptions.map(p => (
                     <option key={p.id} value={p.id}>{p.quality}  {p.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Filament</label>
+                <Select
+                  value={selectedFilamentProfileId}
+                  onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
+                  aria-label="Select filament profile"
+                  disabled={!selectedMachineProfileId}
+                >
+                  <option value="">Select a filament profile</option>
+                  {filamentOptions.map(f => (
+                    <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
                   ))}
                 </Select>
               </div>
@@ -746,21 +844,21 @@ export const SlicerProfilesPage: React.FC = () => {
               </Button>
               <Button
                 type="button"
-                onClick={() => setActiveTab('filaments')}
-                variant="tab"
-                size="sm"
-                className={activeTab === 'filaments' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-              >
-                Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
-              </Button>
-              <Button
-                type="button"
                 onClick={() => setActiveTab('processes')}
                 variant="tab"
                 size="sm"
                 className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
               >
                 Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setActiveTab('filaments')}
+                variant="tab"
+                size="sm"
+                className={activeTab === 'filaments' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
+              >
+                Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
               </Button>
             </div>
           </div>

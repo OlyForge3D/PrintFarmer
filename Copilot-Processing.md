@@ -1,3 +1,93 @@
+# Copilot Processing: Machine Model Profiles Separation
+
+**Session**: Separating machine_model_list from machine_list profiles
+**Phase**: ✅ Completed
+
+## ✅ MACHINE MODEL PROFILES SEPARATION FEATURE
+
+**Objective**:
+- OrcaSlicer bundles have two distinct lists:
+  - `machine_model_list`: Base printer model templates (e.g., "Sovol SV08") - NOT directly instantiatable
+  - `machine_list`: Nozzle variant profiles (e.g., "Sovol SV08 0.4 nozzle") - User-selectable
+- Previously, both were being imported into the same `MachineProfiles` table
+- Base models had null `PrinterModelId` because they don't have a `printer_model` field
+- Need to separate into distinct tables with proper relationships
+
+### Implementation
+
+**Infrastructure Layer Changes**:
+
+1. **Created `MachineModelProfile.cs`** - New entity for base printer model templates:
+   - `Id`, `Name`, `Manufacturer`, `Description`
+   - `SlicerType`, `PrinterModelId` (FK to catalog)
+   - `RawJson`, `Hash`, `IsSystem`, `IsPublic`
+   - `SlicerVersion`, `CreatedAt`, `UpdatedAt`
+   - Navigation: `ICollection<MachineProfile> MachineProfiles`
+
+2. **Updated `MachineProfile.cs`** - Added relationship to parent model:
+   - `MachineModelProfileId` (nullable Guid FK)
+   - `MachineModelProfile` navigation property
+
+3. **Updated `AppDbContext.cs`**:
+   - Added `DbSet<MachineModelProfile> MachineModelProfiles`
+
+4. **Created `IMachineModelProfileRepository.cs`** - Repository interface:
+   - `GetByIdAsync`, `GetByNameAsync`, `GetByEngineAsync`
+   - `GetByHashAsync`, `AddAsync`, `UpdateAsync`, `DeleteAsync`
+   - `DeleteSystemProfilesAsync`
+
+5. **Created `EfMachineModelProfileRepository.cs`** - Full EF implementation
+
+6. **Updated `ServiceCollectionExtensions.cs`** - Registered repository in DI
+
+**Worker Layer Changes**:
+
+7. **Created `MachineModelProfileDto.cs`** - DTO for worker communication:
+   - `Name`, `Manufacturer`, `Description`
+   - `Instantiation` (always false for models), `Inherits`, `Settings`
+
+8. **Updated `ISlicerProfilesService.cs`** - Added new method:
+   - `ListAvailableMachineModelProfilesAsync()` - For base model templates
+
+9. **Updated `OrcaProfilesService.cs`**:
+   - Added `_allMachineModelProfilesCache` for caching
+   - Implemented `ListAvailableMachineModelProfilesAsync()` - Loads ONLY from `machine_model_list`
+   - Updated `ListAvailableMachineProfilesAsync()` - Now loads ONLY from `machine_list` (was loading both)
+
+10. **Updated `AllProfilesResponseDto.cs`** - Added `MachineModelProfiles` dictionary
+
+11. **Updated `SlicerProfilesController.cs`**:
+    - Now calls `ListAvailableMachineModelProfilesAsync()` and includes in response
+    - Updated logging to show machine model profile count
+
+**API Layer Changes**:
+
+12. **Updated `SlicersService.cs`**:
+    - Added `IMachineModelProfileRepository` dependency
+    - Updated constructor and XML documentation
+    - Added seeding logic for machine model profiles (STEP 0 before hierarchy processing)
+    - Seeds only for manufacturers in catalog
+    - Uses alias service to resolve `PrinterModelId`
+
+**Test Updates**:
+
+13. **Updated `SlicersControllerUnitTests.cs`**:
+    - Added `CreateMockMachineModelProfileRepository()` helper method
+    - Updated all 4 SlicersService constructor calls with new parameter
+
+14. **Updated `SlicersServiceWorkerSyncTests.cs`**:
+    - Added `CreateMockMachineModelProfileRepository()` helper method
+    - Updated all 3 SlicersService constructor calls with new parameter
+
+### Results
+
+- ✅ Build successful (0 errors, 0 warnings)
+- ✅ All 1657 tests passing
+- ✅ Machine model profiles now stored separately from nozzle variant profiles
+- ✅ Each profile type has proper linking to catalog via `PrinterModelId`
+
+---
+
 # Copilot Processing: Settings Group Ordering Feature
 
 **Session**: Implementing SettingGroupAttribute for proper sidebar group ordering

@@ -33,6 +33,7 @@ import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
+import { OrcaSlicerPage } from '@/features/slicer/pages/OrcaSlicerPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
@@ -136,6 +137,7 @@ function AuthenticatedAppRoutes() {
           <Route path="system" element={<SystemDashboardPage />} />
         </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
+        <Route path="slicer" element={<OrcaSlicerPage />} />
       </Route>
     </Routes>
   );

@@ -69,6 +69,13 @@ public class ProcessProfile
     /// </summary>
     public string? Hash { get; set; }
 
+    /// <summary>
+    /// Comma-separated list of compatible machine profile names (e.g., "Qidi X-Plus 4 0.4 nozzle,Qidi X-Plus 4 0.6 nozzle").
+    /// Used to filter process profiles based on selected machine profile.
+    /// Extracted from OrcaSlicer's compatible_printers array during import.
+    /// </summary>
+    public string? CompatiblePrinters { get; set; }
+
     public bool IsDefault { get; set; }
 
     public bool IsPublic { get; set; } = true; // Can be used by other users

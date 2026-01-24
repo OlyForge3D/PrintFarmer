@@ -13,6 +13,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
@@ -46,7 +47,9 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IProcessProfileRepository _profileRepo;
         private readonly IFilamentProfileRepository _filamentProfileRepo;
         private readonly IMachineProfileRepository _machineProfileRepo;
+        private readonly IMachineModelProfileRepository _machineModelProfileRepo;
         private readonly ICatalogService _catalogService;
+        private readonly IPrinterModelAliasService _aliasService;
         private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService;
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
@@ -64,7 +67,9 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="profileRepo">Repository for process profile data access</param>
         /// <param name="filamentProfileRepo">Repository for filament profile data access</param>
         /// <param name="machineProfileRepo">Repository for machine profile data access</param>
+        /// <param name="machineModelProfileRepo">Repository for machine model profile (base templates) data access</param>
         /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
+        /// <param name="aliasService">Service for resolving slicer profile model names to catalog PrinterModel IDs via aliases</param>
         /// <param name="settingsService">Service for managing application settings and distributed locks</param>
         /// <param name="hub">SignalR hub context for broadcasting worker state changes to connected clients</param>
         /// <param name="metrics">Metrics collection service for capacity and utilization tracking</param>
@@ -78,7 +83,9 @@ namespace Farm.Web.Api.Services.Slicing
             IProcessProfileRepository profileRepo,
             IFilamentProfileRepository filamentProfileRepo,
             IMachineProfileRepository machineProfileRepo,
+            IMachineModelProfileRepository machineModelProfileRepo,
             ICatalogService catalogService,
+            IPrinterModelAliasService aliasService,
             Farm.Infrastructure.Settings.ISettingsService settingsService,
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
@@ -91,7 +98,9 @@ namespace Farm.Web.Api.Services.Slicing
             _profileRepo = profileRepo ?? throw new ArgumentNullException(nameof(profileRepo));
             _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
             _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
+            _machineModelProfileRepo = machineModelProfileRepo ?? throw new ArgumentNullException(nameof(machineModelProfileRepo));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+            _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
@@ -629,9 +638,87 @@ namespace Farm.Web.Api.Services.Slicing
                 HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
                 HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
 
-                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModels.Count} models in catalog");
+                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModels.Count} models in catalog (using alias service for PrinterModel linking)");
 
                 int imported = 0;
+
+                // Track hashes we've already processed this session to avoid duplicate insert attempts
+                // (same profile may be compatible with multiple printer models)
+                HashSet<string> processedMachineModelHashes = new(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> processedMachineHashes = new(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> processedFilamentHashes = new(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> processedProcessHashes = new(StringComparer.OrdinalIgnoreCase);
+
+                // STEP 0: Import machine MODEL profiles (base templates from machine_model_list)
+                // These are NOT directly selectable by users - they define base printer models like "Sovol SV08"
+                if (allProfiles?.MachineModelProfiles != null && allProfiles.MachineModelProfiles.Count > 0)
+                {
+                    _logger.LogInformation($"[SeedProfilesFromWorker] Processing {allProfiles.MachineModelProfiles.Count} manufacturers for machine MODEL profiles (base templates)");
+                    foreach (KeyValuePair<string, IList<MachineModelProfileDto>> manufacturerEntry in allProfiles.MachineModelProfiles)
+                    {
+                        string manufacturerName = manufacturerEntry.Key;
+                        IList<MachineModelProfileDto> modelProfiles = manufacturerEntry.Value;
+
+                        // Check if manufacturer is in catalog
+                        if (!catalogManufacturerNames.Contains(manufacturerName))
+                        {
+                            _logger.LogDebug($"[SeedProfilesFromWorker] Skipping machine model profiles for manufacturer '{manufacturerName}' - not in catalog");
+                            continue;
+                        }
+
+                        foreach (MachineModelProfileDto modelProfile in modelProfiles)
+                        {
+                            try
+                            {
+                                string profileJson = JsonSerializer.Serialize(modelProfile);
+                                string profileHash = ComputeProfileHash(profileJson);
+
+                                // Skip if we've already processed this hash
+                                if (processedMachineModelHashes.Contains(profileHash))
+                                {
+                                    continue;
+                                }
+
+                                processedMachineModelHashes.Add(profileHash);
+
+                                MachineModelProfile? existing = await _machineModelProfileRepo.GetByHashAsync(profileHash, ct);
+                                if (existing != null && existing.IsSystem)
+                                {
+                                    continue;
+                                }
+
+                                // Look up the catalog PrinterModelId via alias service using the profile name
+                                Guid? printerModelId = null;
+                                if (!string.IsNullOrEmpty(modelProfile.Name))
+                                {
+                                    printerModelId = await _aliasService.ResolveModelAliasAsync(modelProfile.Name, "OrcaSlicer");
+                                }
+
+                                MachineModelProfile systemProfile = new MachineModelProfile
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = modelProfile.Name ?? string.Empty,
+                                    Manufacturer = manufacturerName,
+                                    PrinterModelId = printerModelId,
+                                    IsSystem = true,
+                                    IsPublic = true,
+                                    Hash = profileHash,
+                                    RawJson = profileJson,
+                                    CreatedAt = DateTime.UtcNow,
+                                    UpdatedAt = DateTime.UtcNow
+                                };
+
+                                await _machineModelProfileRepo.AddAsync(systemProfile, ct);
+                                imported++;
+                                _logger.LogDebug($"[SeedProfilesFromWorker] Imported machine MODEL profile '{modelProfile.Name}' for {manufacturerName} (PrinterModelId: {printerModelId})");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import machine MODEL profile '{modelProfile.Name}' for {manufacturerName}: {ex.Message}");
+                            }
+                        }
+                    }
+                }
 
                 // Use the hierarchical structure from the worker: Manufacturer -> Model -> Profiles
                 if (allProfiles?.ByHierarchy != null && allProfiles.ByHierarchy.Count > 0)
@@ -685,10 +772,27 @@ namespace Farm.Web.Api.Services.Slicing
                                         string profileJson = JsonSerializer.Serialize(machineProfile);
                                         string profileHash = ComputeProfileHash(profileJson);
 
+                                        // Skip if we've already processed this hash in this session
+                                        if (processedMachineHashes.Contains(profileHash))
+                                        {
+                                            continue;
+                                        }
+
+                                        processedMachineHashes.Add(profileHash);
+
                                         MachineProfile? existing = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
                                         if (existing != null && existing.IsSystem)
                                         {
                                             continue;
+                                        }
+
+                                        // Look up the catalog PrinterModelId via alias service
+                                        // Use the printer_model field from the profile (e.g., "Voron 2.4 350") for alias lookup
+                                        Guid? printerModelId = null;
+                                        string? printerModel = machineProfile.PrinterModel;
+                                        if (!string.IsNullOrEmpty(printerModel))
+                                        {
+                                            printerModelId = await _aliasService.ResolveModelAliasAsync(printerModel, "OrcaSlicer");
                                         }
 
                                         MachineProfile systemProfile = new MachineProfile
@@ -698,6 +802,7 @@ namespace Farm.Web.Api.Services.Slicing
                                             Manufacturer = manufacturerName,
                                             Description = $"OrcaSlicer machine profile for {displayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : string.Empty),
                                             SlicerType = SlicerType.OrcaSlicer,
+                                            PrinterModelId = printerModelId,
                                             IsSystem = true,
                                             IsPublic = true,
                                             IsDefault = false,
@@ -731,6 +836,14 @@ namespace Farm.Web.Api.Services.Slicing
                                         string profileJson = JsonSerializer.Serialize(filamentProfile);
                                         string profileHash = ComputeProfileHash(profileJson);
 
+                                        // Skip if we've already processed this hash in this session
+                                        if (processedFilamentHashes.Contains(profileHash))
+                                        {
+                                            continue;
+                                        }
+
+                                        processedFilamentHashes.Add(profileHash);
+
                                         FilamentProfile? existing = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
                                         if (existing != null && existing.IsSystem)
                                         {
@@ -748,6 +861,9 @@ namespace Farm.Web.Api.Services.Slicing
                                             NozzleTemperature = filamentProfile.NozzleTemperature,
                                             BedTemperature = filamentProfile.BedTemperature,
                                             PrintSpeed = filamentProfile.PrintSpeed,
+                                            CompatiblePrinters = filamentProfile.CompatiblePrinters?.Count > 0
+                                                ? string.Join(",", filamentProfile.CompatiblePrinters)
+                                                : null,
                                             IsSystem = true,
                                             IsPublic = true,
                                             IsDefault = false,
@@ -782,11 +898,23 @@ namespace Farm.Web.Api.Services.Slicing
                                         string profileJson = JsonSerializer.Serialize(processProfile);
                                         string profileHash = ComputeProfileHash(profileJson);
 
+                                        // Skip if we've already processed this hash in this session
+                                        if (processedProcessHashes.Contains(profileHash))
+                                        {
+                                            continue;
+                                        }
+
+                                        processedProcessHashes.Add(profileHash);
+
                                         ProcessProfile? existing = await _profileRepo.GetByHashAsync(profileHash, ct);
                                         if (existing != null && existing.IsSystem)
                                         {
                                             continue;
                                         }
+
+                                        // Look up the catalog PrinterModelId via alias service using the model's display name
+                                        // Process profiles are grouped under models in the hierarchy, so displayName is the model name (e.g., "Prusa CORE One")
+                                        Guid? printerModelId = await _aliasService.ResolveModelAliasAsync(displayName, "OrcaSlicer");
 
                                         ProcessProfile systemProfile = new ProcessProfile
                                         {
@@ -794,11 +922,15 @@ namespace Farm.Web.Api.Services.Slicing
                                             Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                             Description = processProfile.Description ?? $"OrcaSlicer process profile: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                             SlicerType = SlicerType.OrcaSlicer,
+                                            PrinterModelId = printerModelId,
                                             Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                             LayerHeight = processProfile.LayerHeight,
                                             InfillPercentage = processProfile.InfillPercentage,
                                             PrintSpeed = processProfile.PrintSpeed,
                                             EnableSupports = processProfile.Supports,
+                                            CompatiblePrinters = processProfile.CompatiblePrinters?.Count > 0
+                                                ? string.Join(",", processProfile.CompatiblePrinters)
+                                                : null,
                                             IsSystem = true,
                                             IsPublic = true,
                                             IsDefault = false,

@@ -1,23 +1,21 @@
-import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import slicerProfilesService from '@/services/slicerProfilesService';
-import workersService from '@/services/workersService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
-import { WorkerResponse } from '@/types/worker';
-import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
+import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
 import type { MaterialType, MaterialPreset } from '@/types/slicer';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea, Toggle } from '@/common/components/ui';
+import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
 import { LayersIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
@@ -49,25 +47,14 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'quality' | 'strength' | 'speed' | 'support' | 'material' | 'other'>('quality');
 
-  // === Custom Settings ===
-  const [customSettings, setCustomSettings] = useState({
-    layerHeight: 0.2,
-    infill: 20,
-    printSpeed: 120,
-    wallThickness: 1.2,
-    nozzleTemp: MATERIAL_PRESETS.PLA.nozzleTemp,
-    bedTemp: MATERIAL_PRESETS.PLA.bedTemp,
-    enableSupports: false,
-    supportDensity: 15,
-    supportPattern: 'linear',
-    topLayerCount: 4,
-    bottomLayerCount: 4,
-    travelSpeed: 150,
-    topSurfaceFinish: 'standard',
-  });
+  // === OrcaSlicer-style Settings Panel ===
+  const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
+
+  // Callback for settings panel changes
+  const handleSlicerSettingsChange = useCallback((newSettings: BasicSlicerSettings) => {
+    setSlicerSettings(newSettings);
+  }, []);
 
   // === Model Selection ===
   const [modelFileUrl, setModelFileUrl] = useState('');
@@ -76,7 +63,6 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [useProfile, setUseProfile] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
   const [rawProfileJson, setRawProfileJson] = useState('');
   const [requiredCapabilitiesJson, setRequiredCapabilitiesJson] = useState('[]');
   const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
@@ -90,19 +76,6 @@ export const NewSliceJobPage: React.FC = () => {
   const stlFile = useSTLFile();
 
   // === Queries ===
-  const { data: availableWorkers = [], error: workersError, isLoading: workersLoading } = useQuery<WorkerResponse[], Error>({
-    queryKey: ['workers-available'],
-    queryFn: () => workersService.getAvailableWorkers(),
-    staleTime: 10_000,
-    refetchInterval: 15_000,
-  });
-
-  useEffect(() => {
-    if (!selectedWorkerId && availableWorkers.length > 0) {
-      setSelectedWorkerId(availableWorkers[0].id);
-    }
-  }, [availableWorkers, selectedWorkerId]);
-
   const { data: availableSlicers = [] } = useQuery({
     queryKey: ['slicers-available'],
     queryFn: () => slicerRegistry.getSlicers(),
@@ -126,16 +99,6 @@ export const NewSliceJobPage: React.FC = () => {
       value: slicer.slicerType === 'PrusaSlicer' ? 1 : slicer.slicerType === 'OrcaSlicer' ? 2 : 0
     }));
   }, [availableSlicers]);
-
-  // Auto-select first available worker based on capabilities (for system use)
-  // selectedWorkerId is auto-selected by the backend based on capabilities
-  useMemo(() => {
-    if (parsedCapabilities.length === 0) {
-      return availableWorkers[0]?.id;
-    }
-    const compatible = availableWorkers.find(w => hasRequiredCapabilities(w, parsedCapabilities));
-    return compatible?.id || availableWorkers[0]?.id;
-  }, [availableWorkers, parsedCapabilities]);
 
   // Fetch printers for dropdown
   const { data: printers = [] } = useQuery({
@@ -352,10 +315,10 @@ export const NewSliceJobPage: React.FC = () => {
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
       const apiBase = getApiBaseUrl();
-      setModelFileUrl(`${apiBase}/3d-models/${selectedModelId}/file`);
+      setModelFileUrl(`${apiBase}/3d-models/file/${selectedModelId}`);
       const mdl = models?.find(m => m.id === selectedModelId);
       if (mdl) {
-        setModelFileName(mdl.fileName || mdl.originalFileName);
+        setModelFileName(mdl.originalFileName || mdl.fileName);
       }
     }
   }, [useModelPicker, selectedModelId, models]);
@@ -473,18 +436,13 @@ export const NewSliceJobPage: React.FC = () => {
     return 'stl';
   };
 
-  const formatWorkerCapacity = (worker: WorkerResponse) => {
-    if (typeof worker.freeSlots === 'number' && typeof worker.totalSlots === 'number') {
-      return `${worker.freeSlots}/${worker.totalSlots} slots`;
-    }
-    return 'Capacity unknown';
-  };
-
   return (
     <PageTemplate
       title="New Slice Job"
       subtitle="OrcaSlicer-style distributed slicing"
       icon={LayersIcon}
+      showHeader={false}
+      padding="p-2"
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
@@ -558,31 +516,20 @@ export const NewSliceJobPage: React.FC = () => {
             </div>
           </div>
 
-          {/* PROCESS PRESETS - Only for selected printer, with Advanced toggle */}
+          {/* PROCESS PRESETS - Profile Selector */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-semibold text-pf-text">Process</label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-pf-text">Advanced</span>
-                <Toggle
-                  checked={showAdvancedSettings}
-                  onChange={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  title="Toggle advanced settings"
-                />
-              </div>
-            </div>
+            <label className="block text-sm font-semibold text-pf-text mb-3">Process Profile</label>
             {hierarchyProfiles ? (
               <ProfileSelector
                 hierarchyData={hierarchyProfiles}
                 selectedProfileId={selectedProcessPresetId}
                 onChange={setSelectedProcessPresetId}
-                className="mb-3"
               />
             ) : (
               <Select
                 value={selectedProcessPresetId}
                 onChange={e => setSelectedProcessPresetId(e.target.value)}
-                className="w-full mb-3"
+                className="w-full"
               >
                 <option value="">-- Select Process Profile --</option>
                 {printerProcessProfiles.map(p => (
@@ -590,239 +537,15 @@ export const NewSliceJobPage: React.FC = () => {
                 ))}
               </Select>
             )}
+          </div>
 
-            {/* Advanced Settings - Only shown if Advanced toggle is ON */}
-            {showAdvancedSettings && (
-              <>
-                {/* Settings Tabs */}
-                <div className="flex gap-1 border-b border-pf-border mb-3 text-xs">
-                  {(['quality', 'strength', 'speed', 'support', 'material', 'other'] as const).map(tab => (
-                    <Button
-                      key={tab}
-                      type="button"
-                      onClick={() => setActiveSettingsTab(tab)}
-                      variant={activeSettingsTab === tab ? 'primary' : 'subtle'}
-                      size="sm"
-                      className="pb-2 px-2 capitalize"
-                    >
-                      {tab}
-                    </Button>
-                  ))}
-                </div>
-
-                {/* Settings Panel Content */}
-                <div className="space-y-3 text-sm">
-                  {activeSettingsTab === 'quality' && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Layer Height: {customSettings.layerHeight.toFixed(2)}mm
-                        </label>
-                        <input
-                          type="range"
-                          min="0.08"
-                          max="0.4"
-                          step="0.04"
-                          value={customSettings.layerHeight}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, layerHeight: parseFloat(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Layer Height"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Wall Thickness: {customSettings.wallThickness.toFixed(1)}mm
-                        </label>
-                        <input
-                          type="range"
-                          min="0.8"
-                          max="2.4"
-                          step="0.2"
-                          value={customSettings.wallThickness}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, wallThickness: parseFloat(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Wall Thickness"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {activeSettingsTab === 'strength' && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Infill: {customSettings.infill}%
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="5"
-                          value={customSettings.infill}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, infill: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Infill Percentage"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {activeSettingsTab === 'speed' && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Print Speed: {customSettings.printSpeed}mm/s
-                        </label>
-                        <input
-                          type="range"
-                          min="20"
-                          max="200"
-                          step="10"
-                          value={customSettings.printSpeed}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, printSpeed: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Print Speed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Travel Speed: {customSettings.travelSpeed}mm/s
-                        </label>
-                        <input
-                          type="range"
-                          min="100"
-                          max="300"
-                          step="10"
-                          value={customSettings.travelSpeed}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, travelSpeed: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Travel Speed"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {activeSettingsTab === 'support' && (
-                    <>
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={customSettings.enableSupports}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, enableSupports: e.target.checked }))}
-                          title="Enable Supports"
-                        />
-                        <span>Enable Supports</span>
-                      </label>
-                      {customSettings.enableSupports && (
-                        <>
-                          <div>
-                            <label className="block text-xs font-medium text-pf-text mb-1">
-                              Density: {customSettings.supportDensity}%
-                            </label>
-                            <input
-                              type="range"
-                              min="5"
-                              max="50"
-                              step="5"
-                              value={customSettings.supportDensity}
-                              onChange={e => setCustomSettings(prev => ({ ...prev, supportDensity: parseInt(e.target.value) }))}
-                              className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                              title="Support Density"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-pf-text mb-1">Pattern</label>
-                            <Select
-                              value={customSettings.supportPattern}
-                              onChange={e => {
-                                const value = e.target.value;
-                                if (value === 'linear' || value === 'grid' || value === 'honeycomb') {
-                                  setCustomSettings(prev => ({ ...prev, supportPattern: value }));
-                                }
-                              }}
-                              className="w-full text-xs"
-                            >
-                              <option value="linear">Linear</option>
-                              <option value="grid">Grid</option>
-                              <option value="honeycomb">Honeycomb</option>
-                            </Select>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-
-                  {activeSettingsTab === 'material' && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Nozzle: {customSettings.nozzleTemp}°C
-                        </label>
-                        <input
-                          type="range"
-                          min="190"
-                          max="280"
-                          step="5"
-                          value={customSettings.nozzleTemp}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, nozzleTemp: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Nozzle Temperature"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Bed: {customSettings.bedTemp}°C
-                        </label>
-                        <input
-                          type="range"
-                          min="20"
-                          max="120"
-                          step="5"
-                          value={customSettings.bedTemp}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, bedTemp: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Bed Temperature"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {activeSettingsTab === 'other' && (
-                    <>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Top Layers: {customSettings.topLayerCount}
-                        </label>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          step="1"
-                          value={customSettings.topLayerCount}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, topLayerCount: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Top Layer Count"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-pf-text mb-1">
-                          Bottom Layers: {customSettings.bottomLayerCount}
-                        </label>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          step="1"
-                          value={customSettings.bottomLayerCount}
-                          onChange={e => setCustomSettings(prev => ({ ...prev, bottomLayerCount: parseInt(e.target.value) }))}
-                          className="w-full h-2 bg-pf-border rounded cursor-pointer"
-                          title="Bottom Layer Count"
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
+          {/* ORCASLICER-STYLE SETTINGS PANEL */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
+            <SlicerSettingsPanel
+              settings={slicerSettings}
+              onChange={handleSlicerSettingsChange}
+              initialViewMode="basic"
+            />
           </div>
 
           {/* MODEL SELECTION - Inline, not collapsible */}
@@ -855,7 +578,7 @@ export const NewSliceJobPage: React.FC = () => {
                   <Select value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
                     <option value="">-- Select model --</option>
                     {models.map(m => (
-                      <option key={m.id} value={m.id}>{m.fileName}</option>
+                      <option key={m.id} value={m.id}>{m.originalFileName}</option>
                     ))}
                   </Select>
                 ) : (
@@ -997,47 +720,6 @@ export const NewSliceJobPage: React.FC = () => {
 
         {/* RIGHT SIDE: 3D Model Preview */}
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
-          <div className="card bg-pf-panel border border-pf-border">
-            <div className="card-header flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-pf-text">Available Workers</h3>
-                <p className="text-sm text-pf-text-secondary">Select a worker to process this job</p>
-              </div>
-              {workersLoading && <span className="text-xs text-pf-text-secondary">Loading...</span>}
-            </div>
-            <div className="card-body gap-3">
-              {workersError && <Alert type="error">Failed to load workers</Alert>}
-              {!workersLoading && availableWorkers.length === 0 ? (
-                <div className="text-sm text-pf-text-secondary">No workers available</div>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {availableWorkers.map(worker => (
-                    <div
-                      key={worker.id}
-                      data-testid={`worker-card-${worker.id}`}
-                      role="button"
-                      onClick={() => setSelectedWorkerId(worker.id)}
-                      className={`border border-pf-border rounded-lg p-3 bg-pf-bg-0 hover:border-pf-accent transition cursor-pointer ${selectedWorkerId === worker.id ? 'ring-2 ring-pf-accent' : ''}`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="font-medium text-pf-text">{worker.name}</div>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-pf-bg-2 border border-pf-border text-pf-text-secondary">{worker.status || 'Unknown'}</span>
-                      </div>
-                      <div className="text-xs text-pf-text-secondary mb-2">{formatWorkerCapacity(worker)}</div>
-                      <div className="flex flex-wrap gap-1">
-                        {(worker.capabilities || []).map(cap => (
-                          <span key={`${worker.id}-${cap}`} className="text-[11px] px-2 py-1 rounded bg-pf-bg-1 border border-pf-border text-pf-text-secondary">
-                            {cap}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
           <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
             <div className="card-header flex-shrink-0">
               <h3 className="font-semibold text-pf-text">

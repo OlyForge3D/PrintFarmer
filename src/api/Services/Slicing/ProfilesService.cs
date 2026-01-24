@@ -484,7 +484,18 @@ namespace Farm.Web.Api.Services.Slicing
 
             IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
             IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll;
-            if (modelFilter.HasValue)
+
+            // If a specific machine profile is selected, filter by CompatiblePrinters field
+            // This ensures "Qidi X-Plus 4 0.4 nozzle" only shows profiles with compatible_printers containing that exact machine name
+            // Profiles without CompatiblePrinters are excluded - only show explicitly compatible profiles
+            if (selectedMachine != null && !string.IsNullOrWhiteSpace(selectedMachine.Name))
+            {
+                processProfilesFiltered = processProfilesFiltered.Where(p =>
+                    !string.IsNullOrWhiteSpace(p.CompatiblePrinters) &&
+                    p.CompatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => string.Equals(cp.Trim(), selectedMachine.Name, StringComparison.OrdinalIgnoreCase)));
+            }
+            else if (modelFilter.HasValue)
             {
                 processProfilesFiltered = processProfilesFiltered.Where(p => p.PrinterModelId == modelFilter || p.PrinterModelId == null);
             }
@@ -498,7 +509,17 @@ namespace Farm.Web.Api.Services.Slicing
 
             IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
             IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll;
-            if (!string.IsNullOrWhiteSpace(manufacturerFilter))
+
+            // Filter filaments by CompatiblePrinters if a specific machine is selected
+            // Profiles without CompatiblePrinters are excluded - only show explicitly compatible profiles
+            if (selectedMachine != null && !string.IsNullOrWhiteSpace(selectedMachine.Name))
+            {
+                filamentProfilesFiltered = filamentProfilesFiltered.Where(f =>
+                    !string.IsNullOrWhiteSpace(f.CompatiblePrinters) &&
+                    f.CompatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => string.Equals(cp.Trim(), selectedMachine.Name, StringComparison.OrdinalIgnoreCase)));
+            }
+            else if (!string.IsNullOrWhiteSpace(manufacturerFilter))
             {
                 filamentProfilesFiltered = filamentProfilesFiltered.Where(f => string.Equals(f.Manufacturer, manufacturerFilter, StringComparison.OrdinalIgnoreCase));
             }

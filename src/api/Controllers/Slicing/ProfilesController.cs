@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -196,6 +197,7 @@ public class ProfilesController(
     /// Used for populating UI selectors and providing detailed profile information for job configuration.
     /// </remarks>
     [HttpGet("extended")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
@@ -207,6 +209,55 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to list extended profiles");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list profiles");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves profiles organized in a hierarchical structure by manufacturer and machine model.
+    /// </summary>
+    /// <param name="manufacturer">Optional filter to retrieve only profiles for a specific manufacturer</param>
+    /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>HierarchicalProfilesResponseDto containing profiles organized by manufacturer → model → profiles</returns>
+    /// <remarks>
+    /// This endpoint provides a hierarchical view of profiles that reflects the real-world organization:
+    /// - Top level: Manufacturer (e.g., "Prusa", "Sovol")
+    /// - Second level: Model (e.g., "Prusa CORE One", "Sovol SV08")
+    /// - Third level: Individual profiles with compatibility information
+    ///
+    /// Both filters are optional and work together with AND logic:
+    /// - If manufacturer is specified: Returns only that manufacturer's profiles
+    /// - If machineProfileId is specified: Returns only compatible profiles for that machine
+    /// - If both are specified: Both filters apply
+    /// - If neither is specified: Returns all profiles in hierarchy
+    ///
+    /// Used for populating the Slicer Profiles admin page with organized profile listings.
+    /// </remarks>
+    [HttpGet("hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(HierarchicalProfilesResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListHierarchyAsync(
+        [FromQuery] string? manufacturer = null,
+        [FromQuery] Guid? machineProfileId = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            HierarchicalProfilesResponseDto response = await _profilesService.ListHierarchyAsync(manufacturer, machineProfileId, ct);
+            return Ok(response);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list hierarchical profiles");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list profiles");
         }
     }
@@ -345,6 +396,7 @@ public class ProfilesController(
     /// and printer capabilities. Returns empty list if no profiles match the filter criteria.
     /// </remarks>
     [HttpGet]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {

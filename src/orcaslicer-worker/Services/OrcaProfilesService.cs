@@ -39,6 +39,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     private readonly Lock _machineCacheLock = new();
 
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
+    private List<MachineModelProfileDto>? _allMachineModelProfilesCache;
     private List<MachineProfileDto>? _allMachineProfilesCache;
     private List<FilamentProfileDto>? _allFilamentProfilesCache;
     private List<ProcessProfileDto>? _allProcessProfilesCache;
@@ -83,6 +84,118 @@ public class OrcaProfilesService : ISlicerProfilesService
     }
 
 #pragma warning disable CS1998
+    /// <summary>
+    /// Lists machine model profiles from machine_model_list entries.
+    /// These are base printer model templates like "Sovol SV08" that are NOT directly instantiatable.
+    /// </summary>
+    public async Task<IList<MachineModelProfileDto>> ListAvailableMachineModelProfilesAsync(CancellationToken ct = default)
+    {
+        // Return from cache if available
+        lock (_profilesCacheLock)
+        {
+            if (_allMachineModelProfilesCache != null)
+            {
+                _logger.LogInformation($"Returning {_allMachineModelProfilesCache.Count} machine model profiles from cache");
+                return _allMachineModelProfilesCache;
+            }
+        }
+
+        List<MachineModelProfileDto> profiles = [];
+
+        try
+        {
+            _logger.LogInformation($"Loading OrcaSlicer machine MODEL profiles (base templates) from bundles in: {_orcaProfilesPath}");
+
+            if (!Directory.Exists(_orcaProfilesPath))
+            {
+                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                return profiles;
+            }
+
+            // Find all manufacturer bundle JSON files (e.g., Prusa.json, Voron.json, etc.)
+            List<string> bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
+                .ToList();
+
+            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files for machine model profiles");
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            foreach (string? bundleFile in bundleFiles)
+            {
+                try
+                {
+                    ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
+                    if (bundle != null)
+                    {
+                        string manufacturerName = bundle.Name;
+
+                        // ONLY load from machine_model_list - these are base printer models
+                        if (bundle.MachineModelList != null)
+                        {
+                            foreach (ManufacturerBundleProfileEntry entry in bundle.MachineModelList)
+                            {
+                                try
+                                {
+                                    string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                    if (!File.Exists(profilePath))
+                                    {
+                                        _logger.LogWarning($"Machine model profile referenced in bundle not found: {profilePath}");
+                                        failureCount++;
+                                        continue;
+                                    }
+
+                                    MachineModelProfileDto? profile = LoadProfileFromFile<MachineModelProfileDto>(profilePath);
+                                    if (profile != null)
+                                    {
+                                        // Ensure manufacturer name is set from bundle
+                                        profile.Manufacturer = manufacturerName;
+                                        profiles.Add(profile);
+                                        successCount++;
+                                    }
+                                    else
+                                    {
+                                        failureCount++;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning($"Failed to load machine model profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                    failureCount++;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    failureCount++;
+                }
+            }
+
+            _logger.LogInformation($"Loaded {successCount} machine MODEL profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+
+            // Cache the results
+            lock (_profilesCacheLock)
+            {
+                _allMachineModelProfilesCache = profiles;
+            }
+
+            return profiles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error loading machine model profiles: {ex.Message}");
+            return profiles;
+        }
+    }
+
+    /// <summary>
+    /// Lists machine profiles from machine_list entries.
+    /// These are the actual selectable profiles with nozzle sizes like "Sovol SV08 0.4 nozzle".
+    /// </summary>
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
         // Return from cache if available
@@ -99,7 +212,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer machine profiles from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation($"Loading OrcaSlicer machine profiles (nozzle variants) from bundles in: {_orcaProfilesPath}");
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
@@ -124,49 +237,41 @@ public class OrcaProfilesService : ISlicerProfilesService
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle != null)
                     {
-                        string manufacturerName = bundle.Name; // Extract from bundle
+                        string manufacturerName = bundle.Name;
 
-                        // Load from both machine_model_list and machine_list
-                        List<ManufacturerBundleProfileEntry> allMachineEntries = [];
-                        if (bundle.MachineModelList != null)
-                        {
-                            allMachineEntries.AddRange(bundle.MachineModelList);
-                        }
-
+                        // ONLY load from machine_list - these are actual selectable profiles with nozzle sizes
                         if (bundle.MachineList != null)
                         {
-                            allMachineEntries.AddRange(bundle.MachineList);
-                        }
-
-                        foreach (ManufacturerBundleProfileEntry entry in allMachineEntries)
-                        {
-                            try
+                            foreach (ManufacturerBundleProfileEntry entry in bundle.MachineList)
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
-                                if (!File.Exists(profilePath))
+                                try
                                 {
-                                    _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
-                                    failureCount++;
-                                    continue;
-                                }
+                                    string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                    if (!File.Exists(profilePath))
+                                    {
+                                        _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
+                                        failureCount++;
+                                        continue;
+                                    }
 
-                                MachineProfileDto? profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
-                                if (profile != null)
-                                {
-                                    // Ensure manufacturer name is set from bundle
-                                    profile.Manufacturer = manufacturerName;
-                                    profiles.Add(profile);
-                                    successCount++;
+                                    MachineProfileDto? profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
+                                    if (profile != null)
+                                    {
+                                        // Ensure manufacturer name is set from bundle
+                                        profile.Manufacturer = manufacturerName;
+                                        profiles.Add(profile);
+                                        successCount++;
+                                    }
+                                    else
+                                    {
+                                        failureCount++;
+                                    }
                                 }
-                                else
+                                catch (Exception ex)
                                 {
+                                    _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
                                     failureCount++;
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
-                                failureCount++;
                             }
                         }
                     }
@@ -704,6 +809,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("manufacturer", out JsonElement mfgElem))
         {
             profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+        }
+
+        // Extract printer_model - base model name used for catalog alias lookup
+        if (root.TryGetProperty("printer_model", out JsonElement printerModelElem))
+        {
+            profile.PrinterModel = printerModelElem.GetString();
         }
 
         // Extract nozzle diameter from settings - REQUIRED property

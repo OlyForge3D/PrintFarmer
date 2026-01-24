@@ -275,6 +275,7 @@ public static class ServiceCollectionExtensions
         // Slicing repositories
         _ = services.AddScoped<IProfilesRepository, EfProfilesRepository>();
         _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
+        _ = services.AddScoped<IMachineModelProfileRepository, EfMachineModelProfileRepository>();
         _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
         _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();

@@ -37,6 +37,13 @@ public class FilamentProfile
 
     public string? Hash { get; set; } // SHA256 for deduplication
 
+    /// <summary>
+    /// Comma-separated list of compatible machine profile names.
+    /// Used to filter filament profiles based on selected machine profile.
+    /// Extracted from OrcaSlicer's compatible_printers array during import.
+    /// </summary>
+    public string? CompatiblePrinters { get; set; }
+
     public bool IsSystem { get; set; } // From OrcaSlicer system profiles
 
     public bool IsDefault { get; set; } // Can be set as default filament

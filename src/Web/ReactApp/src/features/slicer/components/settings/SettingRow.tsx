@@ -1,0 +1,364 @@
+/**
+ * Individual setting row component with OrcaSlicer-style UI
+ * Supports slider, select, radio, and checkbox control types
+ */
+import React, { useId } from 'react';
+import { HelpIcon } from './SlicerSettingIcons';
+
+interface BaseSettingRowProps {
+  icon: React.ReactNode;
+  label: string;
+  description?: string;
+  tooltip?: string;
+  disabled?: boolean;
+}
+
+interface SliderSettingProps extends BaseSettingRowProps {
+  type: 'slider';
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  unit?: string;
+  showTicks?: boolean;
+  tickLabels?: string[];
+}
+
+interface SelectSettingProps extends BaseSettingRowProps {
+  type: 'select';
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string; icon?: React.ReactNode }>;
+}
+
+interface RadioSettingProps extends BaseSettingRowProps {
+  type: 'radio';
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}
+
+interface CheckboxSettingProps extends BaseSettingRowProps {
+  type: 'checkbox';
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+interface NumberInputSettingProps extends BaseSettingRowProps {
+  type: 'number';
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+}
+
+export type SettingRowProps =
+  | SliderSettingProps
+  | SelectSettingProps
+  | RadioSettingProps
+  | CheckboxSettingProps
+  | NumberInputSettingProps;
+
+/**
+ * SettingRow - OrcaSlicer-style setting control with icon, label, description, and control
+ */
+export const SettingRow: React.FC<SettingRowProps> = (props) => {
+  const id = useId();
+  const { icon, label, description, tooltip, disabled } = props;
+
+  const renderControl = () => {
+    switch (props.type) {
+      case 'slider':
+        return <SliderControl {...props} id={id} />;
+      case 'select':
+        return <SelectControl {...props} id={id} />;
+      case 'radio':
+        return <RadioControl {...props} id={id} />;
+      case 'checkbox':
+        return <CheckboxControl {...props} id={id} />;
+      case 'number':
+        return <NumberInputControl {...props} id={id} />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`py-4 ${disabled ? 'opacity-50' : ''}`}>
+      {/* Header row with icon, label, and help */}
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-pf-accent-2">{icon}</span>
+        <label htmlFor={id} className="font-semibold text-pf-text">
+          {label}
+        </label>
+        {tooltip && (
+          <button
+            type="button"
+            className="text-pf-text-muted hover:text-pf-text transition-colors"
+            title={tooltip}
+            aria-label={`Help for ${label}`}
+          >
+            <HelpIcon className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      
+      {/* Description */}
+      {description && (
+        <p className="text-sm text-pf-text-muted mb-3">{description}</p>
+      )}
+      
+      {/* Control */}
+      {renderControl()}
+    </div>
+  );
+};
+
+/** Slider control with tick marks */
+const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  unit = '',
+  showTicks = true,
+  tickLabels,
+  disabled,
+}) => {
+  const percentage = ((value - min) / (max - min)) * 100;
+  
+  // Generate tick positions
+  const ticks = tickLabels || [];
+  const numTicks = ticks.length || 5;
+  const tickPositions = Array.from({ length: numTicks }, (_, i) => 
+    min + (i * (max - min)) / (numTicks - 1)
+  );
+
+  return (
+    <div className="relative">
+      {/* Slider track with custom styling */}
+      <div className="relative h-8 flex items-center">
+        <input
+          id={id}
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          disabled={disabled}
+          className="w-full h-2 bg-pf-border rounded-full appearance-none cursor-pointer
+                     [&::-webkit-slider-thumb]:appearance-none
+                     [&::-webkit-slider-thumb]:w-5
+                     [&::-webkit-slider-thumb]:h-5
+                     [&::-webkit-slider-thumb]:rounded-full
+                     [&::-webkit-slider-thumb]:bg-pf-accent-2
+                     [&::-webkit-slider-thumb]:border-2
+                     [&::-webkit-slider-thumb]:border-pf-bg-0
+                     [&::-webkit-slider-thumb]:shadow-md
+                     [&::-webkit-slider-thumb]:cursor-pointer
+                     [&::-moz-range-thumb]:w-5
+                     [&::-moz-range-thumb]:h-5
+                     [&::-moz-range-thumb]:rounded-full
+                     [&::-moz-range-thumb]:bg-pf-accent-2
+                     [&::-moz-range-thumb]:border-2
+                     [&::-moz-range-thumb]:border-pf-bg-0
+                     [&::-moz-range-thumb]:cursor-pointer
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{
+            background: `linear-gradient(to right, var(--pf-accent-2) 0%, var(--pf-accent-2) ${percentage}%, var(--pf-border) ${percentage}%, var(--pf-border) 100%)`
+          }}
+        />
+        
+        {/* Current value indicator below thumb */}
+        <div 
+          className="absolute top-6 transform -translate-x-1/2 text-sm font-bold text-pf-text"
+          style={{ left: `${percentage}%` }}
+        >
+          {value}{unit}
+        </div>
+      </div>
+      
+      {/* Tick marks and labels */}
+      {showTicks && (
+        <div className="flex justify-between mt-4 px-1">
+          {tickPositions.map((tickValue, i) => (
+            <div key={i} className="flex flex-col items-center">
+              <div className="w-px h-2 bg-pf-border-light" />
+              <span className="text-xs text-pf-text-muted mt-1">
+                {tickLabels?.[i] ?? `${Math.round(tickValue)}${unit}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Dropdown select control */
+const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  options,
+  disabled,
+}) => {
+  const selectedOption = options.find(o => o.value === value);
+  
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-4 py-3 bg-pf-panel border border-pf-border rounded-lg
+                   text-pf-text appearance-none cursor-pointer
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      
+      {/* Custom dropdown arrow */}
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg className="w-5 h-5 text-pf-text-muted" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+      </div>
+      
+      {/* Selected option icon preview */}
+      {selectedOption?.icon && (
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-pf-accent-2">
+          {selectedOption.icon}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Radio button group control */
+const RadioControl: React.FC<RadioSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  options,
+  disabled,
+}) => {
+  return (
+    <div className="space-y-2">
+      {options.map((opt) => (
+        <label
+          key={opt.value}
+          className={`flex items-center gap-3 cursor-pointer ${disabled ? 'cursor-not-allowed' : ''}`}
+        >
+          <div className="relative">
+            <input
+              type="radio"
+              name={id}
+              value={opt.value}
+              checked={value === opt.value}
+              onChange={(e) => onChange(e.target.value)}
+              disabled={disabled}
+              className="sr-only"
+            />
+            <div className={`w-5 h-5 rounded-full border-2 transition-colors
+                            ${value === opt.value 
+                              ? 'border-pf-accent-2 bg-pf-accent-2' 
+                              : 'border-pf-border bg-transparent hover:border-pf-border-light'}`}
+            >
+              {value === opt.value && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-pf-bg-0" />
+                </div>
+              )}
+            </div>
+          </div>
+          <span className="text-pf-text">{opt.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+};
+
+/** Checkbox control */
+const CheckboxControl: React.FC<CheckboxSettingProps & { id: string }> = ({
+  id,
+  checked,
+  onChange,
+  disabled,
+}) => {
+  return (
+    <label className={`flex items-center gap-3 cursor-pointer ${disabled ? 'cursor-not-allowed' : ''}`}>
+      <div className="relative">
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          disabled={disabled}
+          className="sr-only"
+        />
+        <div className={`w-5 h-5 rounded border-2 transition-colors
+                        ${checked 
+                          ? 'border-pf-accent-2 bg-pf-accent-2' 
+                          : 'border-pf-border bg-transparent hover:border-pf-border-light'}`}
+        >
+          {checked && (
+            <svg className="w-full h-full text-pf-bg-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+          )}
+        </div>
+      </div>
+    </label>
+  );
+};
+
+/** Number input with unit */
+const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  min,
+  max,
+  step = 0.01,
+  unit,
+  disabled,
+}) => {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        id={id}
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        className="flex-1 px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
+                   text-pf-text text-right
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      />
+      {unit && (
+        <span className="text-sm text-pf-text-muted px-2 py-2 bg-pf-border rounded">
+          {unit}
+        </span>
+      )}
+    </div>
+  );
+};
+
+export default SettingRow;

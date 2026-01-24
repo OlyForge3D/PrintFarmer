@@ -68,6 +68,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
 
+    public DbSet<MachineModelProfile> MachineModelProfiles => Set<MachineModelProfile>();
+
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
 
     public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();
@@ -1134,8 +1136,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(p => p.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // Indexes
-            _ = b.HasIndex(p => new { p.Material, p.SlicerType }).IsUnique();
+            // Indexes - Name included in unique constraint to allow multiple profiles with same material
+            // (e.g., "Generic PLA" vs "Bambu PLA" both with Material="PLA")
+            _ = b.HasIndex(p => new { p.Name, p.Material, p.SlicerType }).IsUnique();
             _ = b.HasIndex(p => p.SlicerType);
             _ = b.HasIndex(p => p.Material);
             _ = b.HasIndex(p => p.Hash).IsUnique();
