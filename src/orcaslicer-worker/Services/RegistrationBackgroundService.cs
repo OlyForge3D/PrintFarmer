@@ -3,12 +3,14 @@
 namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
-/// Background service that handles worker registration, periodic heartbeats, and deregistration
+/// Background service that handles worker registration, periodic heartbeats, and deregistration.
+/// Waits for the profile cache to be ready before registering with the API.
 /// </summary>
 public class RegistrationBackgroundService : BackgroundService
 {
     private readonly ISlicerRegistrationClient _registrationClient;
     private readonly IWorkerStateService _workerState;
+    private readonly CachedOrcaProfilesService? _cachedProfilesService;
     private readonly ILogger<RegistrationBackgroundService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
 
@@ -21,12 +23,16 @@ public class RegistrationBackgroundService : BackgroundService
     public RegistrationBackgroundService(
         ISlicerRegistrationClient registrationClient,
         IWorkerStateService workerState,
+        ISlicerProfilesService profilesService,
         IConfiguration configuration,
         ILogger<RegistrationBackgroundService> logger,
         IHostApplicationLifetime lifetime)
     {
         _registrationClient = registrationClient ?? throw new ArgumentNullException(nameof(registrationClient));
         _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
+
+        // Get the cached service if available (for waiting on cache readiness)
+        _cachedProfilesService = profilesService as CachedOrcaProfilesService;
         ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
@@ -42,8 +48,28 @@ public class RegistrationBackgroundService : BackgroundService
     {
         _logger.LogInformation("RegistrationBackgroundService starting...");
 
-        // Wait a bit for the worker to fully initialize
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+        // Wait for the profile cache to be ready before registering
+        if (_cachedProfilesService != null)
+        {
+            _logger.LogInformation("Waiting for profile cache to be ready before registering...");
+            try
+            {
+                // Wait for cache with a timeout (5 minutes should be enough for even slow systems)
+                using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+                await _cachedProfilesService.CacheReadyTask.WaitAsync(timeoutCts.Token);
+                _logger.LogInformation("Profile cache is ready, proceeding with registration.");
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogError("Timed out waiting for profile cache. Will attempt registration anyway.");
+            }
+        }
+        else
+        {
+            // No cached service, wait a bit for the worker to fully initialize
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+        }
 
         // Initial registration
         if (!await TryRegisterAsync(stoppingToken))

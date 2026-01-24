@@ -1,3 +1,214 @@
+# Copilot Processing: Selective Profile Import with Task System
+
+**Session**: Implementing selective profile import with TODO/Task system for profile management
+**Phase**: ✅ Phase 1 Complete - Simplified Wizard Implemented
+
+## Current Status (2026-01-24)
+
+**What's Working**:
+- ✅ UserTask entity and repository
+- ✅ TasksController API endpoints
+- ✅ TasksWidget in dashboard sidebar
+- ✅ ProfileTaskCheckService background service (detects printers needing profiles)
+- ✅ ProfileImportWizardPage - 3-step wizard:
+  1. Select machine profile (nozzle variant)
+  2. Select filaments (grouped by manufacturer → material)
+  3. Review & import (auto-selected process profiles shown)
+- ✅ Frontend and backend both build successfully
+
+**Next Steps (Phase 2)**:
+- Backend endpoint to persist selected profiles to database
+- Associate imported profiles with PrinterModel
+- Track which profiles have been imported vs available
+
+## 🔄 SELECTIVE PROFILE IMPORT WITH TASK SYSTEM
+
+**Objective**:
+- Replace automatic bulk profile seeding with selective, user-driven profile import
+- Users choose which machine variants (nozzle sizes), process profiles, and filaments to import
+- Handle `compatible_printers_condition` regex patterns for Prusa and other profiles
+- Create a Task/TODO system for alerting users when new printers need profiles
+- Support CSV/JSON import and background discovery scenarios
+
+### Phase 1: Task System Foundation
+
+**1.1 UserTask Entity** (`src/infra/Domain/UserTask.cs`)
+- Id (Guid)
+- TaskType (enum: ProfileImport, MaintenanceDue, FirmwareUpdate, etc.)
+- EntityType (string: "Printer", "PrinterModel")
+- EntityId (Guid)
+- Title (string - e.g., "Import slicer profiles for Prusa MK4S")
+- Description (optional details)
+- Status (enum: Pending, InProgress, Completed, Dismissed, Skipped)
+- Priority (enum: Low, Normal, High)
+- CreatedAt, DueAt (optional), CompletedAt, DismissedAt
+- DismissedByUserId (nullable Guid)
+- Metadata (JSON - task-specific data)
+- PrinterIds (JSON array - printers waiting for this model's profiles)
+
+**1.2 Repository** (`src/infra/Repositories/Tasks/`)
+- IUserTaskRepository interface
+- EfUserTaskRepository implementation
+
+**1.3 Service** (`src/infra/Services/Tasks/`)
+- IUserTaskService interface
+- UserTaskService implementation
+- Methods: CreateTaskAsync, GetPendingTasksAsync, DismissTaskAsync, CompleteTaskAsync
+
+**1.4 API Controller** (`src/api/Controllers/TasksController.cs`)
+- GET /api/tasks - List pending tasks (filterable)
+- GET /api/tasks/{id} - Get task details
+- POST /api/tasks/{id}/dismiss - Mark dismissed
+- POST /api/tasks/{id}/skip - Skip task
+
+**1.5 SignalR Events**
+- taskCreated, taskUpdated events via PrinterHub
+
+### Phase 2: Profile Preview Endpoint
+
+**2.1 Available Profiles Preview** (`src/api/Services/Slicing/ISlicersService.cs`)
+- GetAvailableProfilesForModelAsync(printerModelId) - Returns:
+  - MachineVariants (grouped by nozzle size and type)
+  - ProcessProfiles (matched via compatible_printers_condition)
+  - FilamentProfiles (by manufacturer/material)
+
+**2.2 DTO Structure** (`src/infra/Dtos/AvailableProfilesDto.cs`)
+```
+AvailableProfilesDto
+├── PrinterModelId
+├── PrinterModelName
+├── ManufacturerName
+├── MachineVariants[] (name, nozzleDiameter, nozzleType, hash)
+├── ProcessProfiles[] (name, quality, layerHeight, compatibleMachines[], hash)
+└── FilamentProfiles[] (name, manufacturer, material, isUniversal, hash)
+```
+
+### Phase 3: Selective Import
+
+**3.1 Import Endpoint**
+- POST /api/slicers/import-selected-profiles
+- Request: printerModelId, machineVariantHashes[], filamentHashes[], importCompatibleProcess: bool
+
+**3.2 Updated Import Logic**
+- Import only selected machine variants
+- Auto-import process profiles matching selected machines (via condition evaluation)
+- Import selected filament profiles
+
+### Phase 4: Printer Creation Integration
+
+**4.1 Modify Printer Creation Flow**
+- After printer created, check if MachineModelProfile exists for model
+- If not, create/update UserTask (ProfileImport type)
+- Fire SignalR event for real-time notification
+
+**4.2 Background Service Check**
+- ProfileTaskCheckService - Periodic check for printers without profiles
+- Runs on startup and after bulk imports
+
+### Phase 5: React UI
+
+**5.1 Dashboard TODO Widget** (`src/Web/ReactApp/src/components/Dashboard/TasksWidget.tsx`)
+- Displays pending tasks with priority badges
+- Click opens Profile Import Wizard
+
+**5.2 Profile Import Wizard** (`src/Web/ReactApp/src/components/Profiles/ProfileImportWizard.tsx`)
+- Step 1: Select Machine Variants (nozzle sizes you have)
+- Step 2: Select Process Profiles (auto-filtered by machine selection)
+- Step 3: Select Filament Profiles (by manufacturer/material)
+- Step 4: Review and Import
+
+**5.3 Navbar Badge**
+- Shows count of pending tasks
+- Links to dashboard or task list
+
+### UI Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Profile Import Wizard for: Prusa MK4S                               │
+├─────────────────────────────────────────────────────────────────────┤
+│ Step 1: Machine Variants                                            │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ Select the nozzle configurations you have:                      │ │
+│ │ ☑ MK4S 0.4mm Standard                                          │ │
+│ │ ☐ MK4S 0.25mm                                                  │ │
+│ │ ☐ MK4S 0.3mm                                                   │ │
+│ │ ☑ MK4S 0.6mm                                                   │ │
+│ │ ☐ MK4S 0.4mm HF                                                │ │
+│ │ ☐ MK4S 0.6mm HF                                                │ │
+│ │ ☐ MK4S 0.8mm HF                                                │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                                        [Next →]     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 2: Process Profiles (18 compatible profiles found)             │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ ☑ Select All Compatible (recommended)                          │ │
+│ │ ──────────────────────────────────────────────────────────────  │ │
+│ │ For MK4S 0.4mm:                                                │ │
+│ │   ☑ 0.20mm QUALITY                                             │ │
+│ │   ☑ 0.20mm SPEED                                               │ │
+│ │   ☑ 0.15mm QUALITY                                             │ │
+│ │   ☑ 0.12mm DETAIL                                              │ │
+│ │ For MK4S 0.6mm:                                                │ │
+│ │   ☑ 0.30mm SPEED                                               │ │
+│ │   ☑ 0.25mm QUALITY                                             │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                              [← Back] [Next →]      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 3: Filament Profiles                                           │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ ☑ Generic Profiles (PLA, PETG, ABS, TPU...)             (12)   │ │
+│ │ ──────────────────────────────────────────────────────────────  │ │
+│ │ Brand Profiles:                                                 │ │
+│ │   ☑ Prusament (PLA, PETG, ASA, PC...)                   (8)    │ │
+│ │   ☐ eSUN (PLA+, PETG)                                   (4)    │ │
+│ │   ☐ Polymaker (PLA Pro, PolyLite)                       (6)    │ │
+│ │   ☐ Overture (PLA, PETG, TPU)                           (5)    │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                              [← Back] [Import]      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Dashboard TODO Widget
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📋 Pending Tasks                                              (3)   │
+├─────────────────────────────────────────────────────────────────────┤
+│ ⚠️ Import slicer profiles for Prusa MK4S                     [→]   │
+│    2 printers waiting • High priority                               │
+│─────────────────────────────────────────────────────────────────────│
+│ ⚠️ Import slicer profiles for Creality K1 Max                [→]   │
+│    1 printer waiting • High priority                                │
+│─────────────────────────────────────────────────────────────────────│
+│ 🔧 Maintenance due: Ender 3 V2                               [→]   │
+│    Last maintenance: 45 days ago • Normal priority                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Order
+
+- [x] Phase 1.1: UserTask entity and TaskType/TaskStatus enums
+- [x] Phase 1.2: IUserTaskRepository and EfUserTaskRepository
+- [x] Phase 1.3: IUserTaskService and UserTaskService
+- [x] Phase 1.4: TasksController with CRUD endpoints
+- [x] Phase 1.5: SignalR task events (ITaskBroadcaster + SignalRTaskBroadcaster)
+- [ ] Phase 2.1: GetAvailableProfilesForModelAsync method
+- [ ] Phase 2.2: AvailableProfilesDto and response structure
+- [ ] Phase 3.1: Import selected profiles endpoint
+- [ ] Phase 3.2: Update ImportProfilesForModelAsync to accept selections
+- [ ] Phase 4.1: Modify PrintersController to create tasks
+- [ ] Phase 4.2: ProfileTaskCheckService background service
+- [ ] Phase 5.1: TasksWidget React component
+- [ ] Phase 5.2: ProfileImportWizard React component
+- [ ] Phase 5.3: Navbar task badge
+
+---
+
 # Copilot Processing: Machine Model Profiles Separation
 
 **Session**: Separating machine_model_list from machine_list profiles

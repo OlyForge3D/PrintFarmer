@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Repositories.Slicing;
 
@@ -28,6 +28,12 @@ public interface IMachineModelProfileRepository
     /// Gets a machine model profile by its content hash.
     /// </summary>
     Task<MachineModelProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets a machine model profile by its linked printer model ID.
+    /// Used to check if profiles have been imported for a specific printer model.
+    /// </summary>
+    Task<MachineModelProfile?> GetByPrinterModelIdAsync(Guid printerModelId, CancellationToken ct = default);
 
     /// <summary>
     /// Adds a new machine model profile.

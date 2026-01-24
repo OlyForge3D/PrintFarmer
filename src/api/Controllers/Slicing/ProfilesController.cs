@@ -716,6 +716,40 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Get the full profile hierarchy from OrcaSlicer worker organized by manufacturer and model.
+    /// Proxies the worker's /api/profiles endpoint which returns all available profiles.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy</returns>
+    /// <response code="200">Successfully fetched profiles hierarchy from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("worker-hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetWorkerProfilesHierarchyAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            AllProfilesResponseDto? profiles = await _profilesService.GetWorkerProfilesHierarchyAsync(httpClient, ct);
+            return Ok(profiles ?? new AllProfilesResponseDto());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching profiles hierarchy from OrcaSlicer worker: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get system profiles available for import for a specific registered printer.
     /// Filters compatible OrcaSlicer profiles by matching printer model and nozzle size from database.
     /// Supports both OrcaSlicer bundled profiles and previously imported system profiles.

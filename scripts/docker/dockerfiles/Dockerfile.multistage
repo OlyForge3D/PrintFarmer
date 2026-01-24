@@ -13,7 +13,7 @@ ARG BUILD_VERBOSITY=quiet
 # Ubuntu Noble has glibc 2.39 which is compatible with bundled Assimp libraries (built for 2.38)
 ARG SDK_TAG=10.0-noble
 ARG ASPNET_TAG=10.0-noble
-ARG NODE_TAG=22-alpine
+ARG NODE_TAG=24-alpine
 ARG NGINX_TAG=alpine
 ARG UBUNTU_TAG=24.04
 
@@ -327,6 +327,9 @@ RUN set -e; \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
     echo "✓ OrcaSlicer worker binaries verified" && \
+    # Create cache directory for SQLite profile cache \
+    mkdir -p /app/cache && \
+    chown appuser:appuser /app/cache && \
     # Verify profile directories exist \
     PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
     if [ -d "$PROFILES_DIR" ]; then \

@@ -284,6 +284,9 @@ public static class ServiceCollectionExtensions
         // Worker repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
 
+        // Task repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
+
         // Settings repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();
 
@@ -552,6 +555,10 @@ public static class ServiceCollectionExtensions
         // Tag services
         _ = services.AddScoped<Services.Tags.ITagService, Services.Tags.TagService>();
 
+        // Task services (user task management)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
+
         // SystemLogs service
         _ = services.AddScoped<Services.SystemLogs.ISystemLogService, Services.SystemLogs.SystemLogService>();
 
@@ -662,6 +669,9 @@ public static class ServiceCollectionExtensions
 
             // Stale worker cleanup service
             _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
+
+            // Profile task check service - creates tasks for printers without slicer profiles
+            _ = services.AddHostedService<Services.ProfileTaskCheckService>();
 
             // Backend-specific background services are now registered by their respective plugins
             // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:

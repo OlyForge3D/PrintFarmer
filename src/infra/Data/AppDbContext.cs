@@ -82,6 +82,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Worker> Workers => Set<Worker>();
 
+    public DbSet<UserTask> UserTasks => Set<UserTask>();
+
     // Slicing artifacts (G-code outputs, thumbnails, logs, previews)
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 

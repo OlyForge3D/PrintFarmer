@@ -6,6 +6,7 @@ import { DetailedSystemHealth } from '@/features/printers/components/SystemHealt
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
 import { BackgroundServicesWidget } from '@/features/admin/components';
+import { TasksWidget } from '@/features/tasks';
 
 interface StatsCardProps {
   title: string;
@@ -143,6 +144,9 @@ export const PrinterDashboard: React.FC = () => {
                 </div>
               </div>
             ) : null}
+
+            {/* Pending Tasks Widget - Shows profile imports, maintenance reminders, etc */}
+            <TasksWidget />
 
             {/* Active Jobs Widget */}
             {globalQueue && globalQueue.length > 0 ? (

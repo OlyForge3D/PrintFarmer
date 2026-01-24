@@ -44,7 +44,8 @@ public class PrintersController(
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
-    IHttpClientFactory httpClientFactory)
+    IHttpClientFactory httpClientFactory,
+    Services.Slicing.ISlicersService slicersService)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -55,6 +56,7 @@ public class PrintersController(
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
 #pragma warning disable CA1823 // Avoid unused private fields
@@ -813,6 +815,36 @@ public class PrintersController(
 
         // Delegate creation/business logic to the service
         PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+
+        // Import slicer profiles for this printer's model (pull-based, on-demand import)
+        // Only imports if profiles don't already exist for this model
+        // Use the input DTO since it has ModelId, and the result DTO only has names
+        Guid? modelId = dto.ModelId;
+        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
+        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
+
+        if (modelId.HasValue && modelId.Value != Guid.Empty)
+        {
+            try
+            {
+                int imported = await _slicersService.ImportProfilesForModelAsync(
+                    modelId.Value,
+                    modelName,
+                    manufacturerName,
+                    ct);
+
+                if (imported > 0)
+                {
+                    _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail printer creation if profile import fails
+                _logger.LogWarning($"Failed to import profiles for {modelName}: {ex.Message}");
+            }
+        }
+
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
     }
 
@@ -927,6 +959,28 @@ public class PrintersController(
                 registered.Add(created);
 
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+
+                // Import slicer profiles for this printer's model (pull-based, on-demand import)
+                if (createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                {
+                    try
+                    {
+                        int imported = await _slicersService.ImportProfilesForModelAsync(
+                            createDto.ModelId.Value,
+                            createDto.NewModelName ?? created.ModelName ?? "Unknown",
+                            createDto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown",
+                            ct);
+
+                        if (imported > 0)
+                        {
+                            _logger.LogInformation($"Imported {imported} slicer profiles for {created.ModelName}");
+                        }
+                    }
+                    catch (Exception profileEx)
+                    {
+                        _logger.LogWarning($"Failed to import profiles for {created.ModelName}: {profileEx.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {

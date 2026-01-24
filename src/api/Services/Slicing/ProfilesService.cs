@@ -1285,6 +1285,31 @@ namespace Farm.Web.Api.Services.Slicing
         }
 
         /// <summary>
+        /// Fetches the full profile hierarchy from OrcaSlicer worker organized by manufacturer and model.
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy, or null if worker unavailable</returns>
+        public async Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+
+        /// <summary>
         /// Retrieves profiles that are compatible with a specific printer.
         /// </summary>
         /// <param name="printerId">The unique identifier of the printer</param>

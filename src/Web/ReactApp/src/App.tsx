@@ -40,6 +40,7 @@ import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
+import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
@@ -138,6 +139,7 @@ function AuthenticatedAppRoutes() {
         </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
         <Route path="slicer" element={<OrcaSlicerPage />} />
+        <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>
     </Routes>
   );

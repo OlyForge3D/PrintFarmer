@@ -129,6 +129,18 @@ namespace Farm.Web.Api.Services.Slicing
         Task<IReadOnlyList<ProcessProfileDto>> GetAvailableProfilesFromWorkerAsync(HttpClient httpClient, CancellationToken ct);
 
         /// <summary>
+        /// Fetches the full profile hierarchy from OrcaSlicer worker organized by manufacturer and model.
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy, or null if worker unavailable</returns>
+        /// <remarks>
+        /// Proxies the worker's /api/profiles endpoint which returns all available profiles.
+        /// Does not persist to database; returns worker's current profile hierarchy for import UI.
+        /// </remarks>
+        Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct);
+
+        /// <summary>
         /// Gets system OrcaSlicer profiles available for import to a specific registered printer.
         /// </summary>
         /// <param name="printerId">ID of the registered printer</param>

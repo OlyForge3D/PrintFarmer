@@ -1,6 +1,7 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
+import { TasksBadge } from '@/features/tasks';
 import { useTheme, Theme } from '@/contexts/ThemeContext';
 import { Button } from '@/common/components/ui';
 import { 
@@ -401,6 +402,9 @@ export function Layout() {
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
+
+            {/* Pending Tasks Badge */}
+            {isAuthenticated && <TasksBadge />}
 
             {/* User menu */}
             <div className="relative">

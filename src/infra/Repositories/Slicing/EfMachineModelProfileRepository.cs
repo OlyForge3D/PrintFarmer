@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +28,10 @@ public class EfMachineModelProfileRepository(AppDbContext db) : IMachineModelPro
 
     public async Task<MachineModelProfile?> GetByHashAsync(string hash, CancellationToken ct = default) =>
         await _db.MachineModelProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
+
+    public async Task<MachineModelProfile?> GetByPrinterModelIdAsync(Guid printerModelId, CancellationToken ct = default) =>
+        await _db.MachineModelProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.PrinterModelId == printerModelId, ct);
 
     public async Task AddAsync(MachineModelProfile profile, CancellationToken ct = default)
     {

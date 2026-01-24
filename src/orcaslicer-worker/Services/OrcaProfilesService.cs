@@ -853,6 +853,11 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
+        // Extract material type from multiple sources:
+        // 1. filament_type property (direct)
+        // 2. material property (direct)
+        // 3. inherits field (e.g., "fdm_filament_abs" -> "ABS")
+        // 4. Profile name parsing (e.g., "Generic ABS @System" -> "ABS")
         if (root.TryGetProperty("filament_type", out JsonElement typeElem))
         {
             profile.Material = typeElem.GetString() ?? "PLA";
@@ -860,6 +865,17 @@ public class OrcaProfilesService : ISlicerProfilesService
         else if (root.TryGetProperty("material", out JsonElement matElem))
         {
             profile.Material = matElem.GetString() ?? "PLA";
+        }
+        else if (root.TryGetProperty("inherits", out JsonElement inheritsElem))
+        {
+            // Parse material from inherits like "fdm_filament_abs", "fdm_filament_petg", etc.
+            string? inherits = inheritsElem.GetString();
+            profile.Material = ExtractMaterialFromInherits(inherits) ?? ExtractMaterialFromName(profile.Name) ?? "Other";
+        }
+        else
+        {
+            // Try to extract from profile name
+            profile.Material = ExtractMaterialFromName(profile.Name) ?? "Other";
         }
 
         if (root.TryGetProperty("nozzle_temperature", out JsonElement nozzleElem))
@@ -1114,6 +1130,114 @@ public class OrcaProfilesService : ISlicerProfilesService
             if (_machinesByManufacturerCache?.TryGetValue(manufacturerName, out List<MachineProfileDto>? machines) == true)
             {
                 return machines;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts material type from inherits field like "fdm_filament_abs" -> "ABS".
+    /// </summary>
+    private static string? ExtractMaterialFromInherits(string? inherits)
+    {
+        if (string.IsNullOrWhiteSpace(inherits))
+        {
+            return null;
+        }
+
+        // Common patterns: fdm_filament_abs, fdm_filament_petg, filament_pla, etc.
+        string lower = inherits.ToLowerInvariant();
+
+        // Map of known suffixes to material names
+        Dictionary<string, string> materialMap = new()
+        {
+            { "abs", "ABS" },
+            { "asa", "ASA" },
+            { "pla", "PLA" },
+            { "petg", "PETG" },
+            { "pet", "PET" },
+            { "tpu", "TPU" },
+            { "tpe", "TPE" },
+            { "flex", "FLEX" },
+            { "pa", "PA" },
+            { "nylon", "PA" },
+            { "pc", "PC" },
+            { "pctg", "PCTG" },
+            { "pva", "PVA" },
+            { "bvoh", "BVOH" },
+            { "hips", "HIPS" },
+            { "pp", "PP" },
+            { "cpe", "CPE" },
+            { "peba", "PEBA" },
+            { "pvb", "PVB" },
+            { "pha", "PHA" },
+            { "cf", "CF" },  // Carbon Fiber
+            { "gf", "GF" },  // Glass Fiber
+            { "wood", "Wood" },
+            { "metal", "Metal" },
+            { "silk", "Silk" },
+            { "marble", "Marble" },
+            { "eva", "EVA" },
+        };
+
+        foreach (KeyValuePair<string, string> kvp in materialMap)
+        {
+            // Check if the inherits field ends with or contains the material
+            if (lower.EndsWith("_" + kvp.Key) || lower.EndsWith(kvp.Key) || lower.Contains("_" + kvp.Key + "_"))
+            {
+                return kvp.Value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts material type from profile name like "Generic ABS @System" -> "ABS".
+    /// </summary>
+    private static string? ExtractMaterialFromName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        // Common material names to look for in the profile name
+        // Ordered by specificity - composite materials first, then base materials
+        string[] materials = [
+
+            // Composite materials (check these first - they contain base material names)
+            "ABS-GF", "ABS-CF", "ASA-GF", "ASA-CF", "ASA-Aero",
+            "PA12-CF", "PA6-CF", "PA6-GF", "PA-CF", "PA-GF",
+            "PAHT-CF", "PAHT-GF", "PPA-CF", "PPA-GF",
+            "PETG-CF", "PETG-GF", "PET-CF",
+            "PC-CF", "PC-GF", "PC-ABS",
+            "PE-CF", "PP-CF", "PP-GF",
+            "PPS-CF", "PPS-GF", "PPS",
+
+            // Base materials
+            "ABS", "ASA", "PLA", "PETG", "PET", "TPU", "TPE", "FLEX",
+            "PA", "Nylon", "PC", "PCTG", "PVA", "BVOH", "HIPS", "PP", "CPE", "PEBA",
+            "PVB", "PHA", "Wood", "Metal", "Silk", "Marble", "EVA"
+        ];
+
+        string upper = name.ToUpperInvariant();
+
+        foreach (string material in materials)
+        {
+            string upperMat = material.ToUpperInvariant();
+
+            // Check for word boundary matches
+            if (upper.Contains(" " + upperMat + " ") ||
+                upper.Contains(" " + upperMat + "@") ||
+                upper.Contains(" " + upperMat + "-") ||
+                upper.StartsWith(upperMat + " ") ||
+                upper.StartsWith("GENERIC " + upperMat) ||
+                upper.Contains("/" + upperMat) ||
+                upper.Contains(upperMat + "/"))
+            {
+                return material;
             }
         }
 
