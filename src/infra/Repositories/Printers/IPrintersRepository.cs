@@ -33,8 +33,8 @@ public interface IPrintersRepository
     // Get all printers with a specific backend
     Task<List<Printer>> GetByBackendAsync(PrinterBackend backend, CancellationToken ct);
 
-    // Find printer by IP address using efficient database query (not loading all printers)
-    Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+    // Find printer by ServerUrl using efficient database query (not loading all printers)
+    Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct);
 
     // Detach all tracked entities to prevent concurrent operation errors in bulk operations
     void DetachAllEntities();

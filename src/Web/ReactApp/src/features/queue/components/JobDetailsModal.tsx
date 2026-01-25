@@ -224,58 +224,46 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4" role="tablist">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'overview' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          <Button
+            variant={activeTab === 'overview' ? 'tab' : 'subtle'}
+            className="px-4 py-2 text-sm font-medium rounded-none border-b-2 border-transparent"
             onClick={() => setActiveTab('overview')}
             role="tab"
             aria-selected={activeTab === 'overview'}
             aria-controls="tab-overview"
           >
             Overview
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'details' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          </Button>
+          <Button
+            variant={activeTab === 'details' ? 'tab' : 'subtle'}
+            className="px-4 py-2 text-sm font-medium rounded-none border-b-2 border-transparent"
             onClick={() => setActiveTab('details')}
             role="tab"
             aria-selected={activeTab === 'details'}
             aria-controls="tab-details"
           >
             Details
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'timing' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          </Button>
+          <Button
+            variant={activeTab === 'timing' ? 'tab' : 'subtle'}
+            className="px-4 py-2 text-sm font-medium rounded-none border-b-2 border-transparent"
             onClick={() => setActiveTab('timing')}
             role="tab"
             aria-selected={activeTab === 'timing'}
             aria-controls="tab-timing"
           >
             Timing
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'history' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          </Button>
+          <Button
+            variant={activeTab === 'history' ? 'tab' : 'subtle'}
+            className="px-4 py-2 text-sm font-medium rounded-none border-b-2 border-transparent"
             onClick={() => setActiveTab('history')}
             role="tab"
             aria-selected={activeTab === 'history'}
             aria-controls="tab-history"
           >
             History
-          </button>
+          </Button>
         </div>
 
         {/* Tab Content */}

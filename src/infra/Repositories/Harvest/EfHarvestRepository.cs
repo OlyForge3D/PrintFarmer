@@ -134,41 +134,38 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
 
     public async Task<int> GetDiscoveredFilesCountWithSearchAsync(Guid operationId, string search, CancellationToken ct = default)
     {
-        // Load all files with the operation ID first (required for SQLite compatibility with case-insensitive Contains)
-        List<HarvestDiscoveredFile> allFiles = await _db.HarvestDiscoveredFiles
-            .Where(d => d.HarvestOperationId == operationId)
-            .ToListAsync(ct);
+        IQueryable<HarvestDiscoveredFile> query = _db.HarvestDiscoveredFiles
+            .Where(d => d.HarvestOperationId == operationId);
 
-        // Apply client-side filtering for case-insensitive search
+        // Use EF.Functions.Like for database-level case-insensitive search
+        // Works with SQLite (case-insensitive by default) and SQL Server
         if (!string.IsNullOrWhiteSpace(search))
         {
-            string term = search.Trim().ToLowerInvariant();
-            return allFiles.Count(d => d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase));
+            string pattern = $"%{search.Trim()}%";
+            query = query.Where(d => EF.Functions.Like(d.FileName, pattern));
         }
 
-        return allFiles.Count;
+        return await query.CountAsync(ct);
     }
 
     public async Task<List<HarvestDiscoveredFile>> GetDiscoveredFilesPagedAsync(Guid operationId, int page, int pageSize, string? search, CancellationToken ct = default)
     {
-        // Load all files with the operation ID first (required for SQLite compatibility with case-insensitive Contains)
-        List<HarvestDiscoveredFile> allFiles = await _db.HarvestDiscoveredFiles
-            .Where(d => d.HarvestOperationId == operationId)
-            .ToListAsync(ct);
+        IQueryable<HarvestDiscoveredFile> query = _db.HarvestDiscoveredFiles
+            .Where(d => d.HarvestOperationId == operationId);
 
-        // Apply client-side filtering for case-insensitive search
-        IEnumerable<HarvestDiscoveredFile> query = allFiles.AsEnumerable();
+        // Use EF.Functions.Like for database-level case-insensitive search
+        // Works with SQLite (case-insensitive by default) and SQL Server
         if (!string.IsNullOrWhiteSpace(search))
         {
-            string term = search.Trim().ToLowerInvariant();
-            query = query.Where(d => d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase));
+            string pattern = $"%{search.Trim()}%";
+            query = query.Where(d => EF.Functions.Like(d.FileName, pattern));
         }
 
-        return query
+        return await query
             .OrderBy(d => d.FileName)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToList();
+            .ToListAsync(ct);
     }
 
     public Task AddDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)

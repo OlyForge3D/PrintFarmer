@@ -138,7 +138,6 @@ namespace Farm.Backend.Plugin.OctoPrint
                         Backend: (PrinterBackend)printer.Backend,
                         ApiKey: printer.ApiKey,
                         OriginalServerUrl: printer.OriginalServerUrl,
-                        IpAddress: printer.IpAddress,
                         BackendPort: printer.BackendPort,
                         FrontendPort: printer.FrontendPort,
                         SpoolInfo: null,

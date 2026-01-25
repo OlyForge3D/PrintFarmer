@@ -567,7 +567,6 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             Backend: PrinterBackend.Moonraker,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             SpoolInfo: spoolInfo,

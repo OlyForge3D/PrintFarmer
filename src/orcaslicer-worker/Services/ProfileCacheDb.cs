@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Data.Sqlite;
@@ -162,7 +162,7 @@ public class ProfileCacheDb : IDisposable
             throw new InvalidOperationException("Database not initialized");
         }
 
-        using SqliteTransaction transaction = _connection.BeginTransaction();
+        await using SqliteTransaction transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken);
         using SqliteCommand cmd = _connection.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
@@ -202,7 +202,7 @@ public class ProfileCacheDb : IDisposable
             throw new InvalidOperationException("Database not initialized");
         }
 
-        using SqliteTransaction transaction = _connection.BeginTransaction();
+        await using SqliteTransaction transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken);
         using SqliteCommand cmd = _connection.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
@@ -244,7 +244,7 @@ public class ProfileCacheDb : IDisposable
             throw new InvalidOperationException("Database not initialized");
         }
 
-        using SqliteTransaction transaction = _connection.BeginTransaction();
+        await using SqliteTransaction transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken);
         using SqliteCommand cmd = _connection.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """

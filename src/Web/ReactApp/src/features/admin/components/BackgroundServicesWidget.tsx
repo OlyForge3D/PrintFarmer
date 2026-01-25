@@ -16,6 +16,7 @@ import {
   PlayIcon,
   PauseIcon,
 } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
 import type { BackgroundServiceStatus, BackgroundServicesSummary } from '@/types/api';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -242,16 +243,18 @@ export function BackgroundServicesWidget({
           <GearIcon className="h-5 w-5 text-pf-loading" />
           <h2 className="text-lg font-semibold text-pf-text-primary">Background Services</h2>
         </div>
-        <button
+        <Button
+          variant="subtle"
+          size="sm"
           onClick={() => refetch()}
           disabled={isLoading}
-          className="p-1.5 rounded-lg hover:bg-pf-bg-2 transition-colors"
+          className="p-1.5 rounded-lg"
           aria-label="Refresh services"
         >
           <RefreshIcon
             className={`h-4 w-4 text-pf-text-secondary ${isLoading ? 'animate-spin' : ''}`}
           />
-        </button>
+        </Button>
       </div>
 
       {/* Content */}

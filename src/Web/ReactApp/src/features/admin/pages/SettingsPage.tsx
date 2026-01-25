@@ -316,18 +316,16 @@ export function SettingsPage() {
                   <ul className="space-y-0.5 ml-3">
                     {groupedNavItems[group].map(item => (
                       <li key={item.key}>
-                        <button
+                        <Button
+                          variant={activeSection === item.key ? 'tab' : 'subtle'}
                           type="button"
                           onClick={() => scrollToSection(item.key)}
-                          className={`w-full px-3 py-1.5 text-sm rounded-md transition-colors border-0 outline-none justify-start bg-transparent shadow-none
-                            ${activeSection === item.key
-                              ? 'bg-pf-accent/15 text-pf-accent font-medium'
-                              : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
-                            }`}
+                          className={`w-full justify-start px-3 py-1.5 text-sm
+                            ${activeSection === item.key ? 'font-medium' : ''}`}
                           aria-current={activeSection === item.key ? 'true' : undefined}
                         >
                           {item.displayName}
-                        </button>
+                        </Button>
                       </li>
                     ))}
                   </ul>

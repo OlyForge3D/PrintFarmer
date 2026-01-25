@@ -59,35 +59,35 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
   // Toolbar action handlers (placeholders for now)
   const handleArrange = useCallback(() => {
-    console.log('Auto-arrange models');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Auto-arrange models'); }
   }, []);
 
   const handleOrient = useCallback(() => {
-    console.log('Orient model');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Orient model'); }
   }, []);
 
   const handleLayFlat = useCallback(() => {
-    console.log('Lay model flat');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Lay model flat'); }
   }, []);
 
   const handleSplit = useCallback(() => {
-    console.log('Split model');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Split model'); }
   }, []);
 
   const handleCut = useCallback(() => {
-    console.log('Cut model');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Cut model'); }
   }, []);
 
   const handleMeasure = useCallback(() => {
-    console.log('Measure tool');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Measure tool'); }
   }, []);
 
   const handleSupportPaint = useCallback(() => {
-    console.log('Support paint mode');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Support paint mode'); }
   }, []);
 
   const handleSeamPaint = useCallback(() => {
-    console.log('Seam paint mode');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Seam paint mode'); }
   }, []);
 
   const handleUndo = useCallback(() => {
@@ -107,11 +107,11 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   }, [redoStack]);
 
   const handleAssemblyView = useCallback(() => {
-    console.log('Assembly view');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Assembly view'); }
   }, []);
 
   const handleKeyboardShortcuts = useCallback(() => {
-    console.log('Show keyboard shortcuts');
+    if (window.PrintFarmerDebug?.slicer) { console.log('Show keyboard shortcuts'); }
   }, []);
 
   const handleToolChange = useCallback((tool: ToolType) => {

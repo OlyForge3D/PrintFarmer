@@ -3,6 +3,7 @@
  * Supports slider, select, radio, and checkbox control types
  */
 import React, { useId } from 'react';
+import { Button } from '@/common/components/ui';
 import { HelpIcon } from './SlicerSettingIcons';
 
 interface BaseSettingRowProps {
@@ -95,14 +96,15 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
           {label}
         </label>
         {tooltip && (
-          <button
+          <Button
+            variant="subtle"
             type="button"
-            className="text-pf-text-muted hover:text-pf-text transition-colors"
+            className="p-0.5"
             title={tooltip}
             aria-label={`Help for ${label}`}
           >
             <HelpIcon className="w-4 h-4" />
-          </button>
+          </Button>
         )}
       </div>
       
@@ -213,6 +215,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
   
   return (
     <div className="relative">
+      {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom OrcaSlicer-style dropdown with icon preview */}
       <select
         id={id}
         value={value}
@@ -263,6 +266,7 @@ const RadioControl: React.FC<RadioSettingProps & { id: string }> = ({
           className={`flex items-center gap-3 cursor-pointer ${disabled ? 'cursor-not-allowed' : ''}`}
         >
           <div className="relative">
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom OrcaSlicer-style radio with animated indicator */}
             <input
               type="radio"
               name={id}
@@ -301,6 +305,7 @@ const CheckboxControl: React.FC<CheckboxSettingProps & { id: string }> = ({
   return (
     <label className={`flex items-center gap-3 cursor-pointer ${disabled ? 'cursor-not-allowed' : ''}`}>
       <div className="relative">
+        {/* eslint-disable-next-line local/pf-no-raw-html-controls -- Custom OrcaSlicer-style checkbox with SVG checkmark */}
         <input
           id={id}
           type="checkbox"

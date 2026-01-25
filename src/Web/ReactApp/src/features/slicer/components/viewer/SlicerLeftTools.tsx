@@ -3,6 +3,7 @@
  * Left sidebar tools matching OrcaSlicer's manipulation tools
  */
 import React from 'react';
+import { Button } from '@/common/components/ui';
 import {
   MoveToolIcon,
   RotateToolIcon,
@@ -20,11 +21,12 @@ interface ToolButtonProps {
 }
 
 const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, onClick }) => (
-  <button
+  <Button
     onClick={onClick}
     title={title}
+    variant={active ? 'primary' : 'subtle'}
     className={`
-      w-10 h-10 flex items-center justify-center rounded-lg transition-colors
+      w-10 h-10 flex items-center justify-center rounded-lg transition-colors p-0
       ${active 
         ? 'bg-pf-accent text-white shadow-lg' 
         : 'bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-3 hover:text-pf-text'
@@ -33,7 +35,7 @@ const ToolButton: React.FC<ToolButtonProps> = ({ icon, title, active = false, on
     `}
   >
     {icon}
-  </button>
+  </Button>
 );
 
 export interface SlicerLeftToolsProps {

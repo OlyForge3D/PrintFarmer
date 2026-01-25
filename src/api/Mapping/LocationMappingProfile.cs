@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Mapping;
@@ -31,11 +32,11 @@ public class LocationMappingProfile : Profile
             .ForMember(dest => dest.ModifiedAt, opt => opt.MapFrom(src => src.ModifiedAt))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.IsActive))
             .ForMember(dest => dest.Printers, opt => opt.MapFrom(src =>
-                src.Printers.Select(p => new PrinterInfoDto
+                src.Printers.Select(p => new DiscoveryPrinterInfoDto
                 {
                     Name = p.Name,
-                    ServerUrl = p.ServerUrl ?? $"http://{p.IpAddress}:{p.BackendPort}",
-                    IpAddress = p.IpAddress ?? string.Empty,
+                    ServerUrl = p.ServerUrl,
+                    IpAddress = string.Empty,  // No longer stored on Printer entity
                     Backend = (PrinterBackend)p.Backend,
                     BackendPort = p.BackendPort,
                     FrontendPort = p.FrontendPort,

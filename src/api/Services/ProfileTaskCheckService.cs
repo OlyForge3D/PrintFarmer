@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
@@ -81,7 +81,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
         try
         {
             // Get all printers
-            IReadOnlyList<Printer> printers = await printersService.GetAllAsync(ct);
+            List<Printer> printers = (await printersService.GetAllAsync(ct)).ToList();
 
             if (printers.Count == 0)
             {

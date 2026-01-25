@@ -3,6 +3,7 @@
  * Bottom status bar matching OrcaSlicer's interface
  */
 import React from 'react';
+import { Button } from '@/common/components/ui';
 import { InfoIcon } from './SlicerToolbarIcons';
 
 export interface SlicerStatusBarProps {
@@ -49,28 +50,24 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
             <span>
               {slicesRemaining} / {slicesTotal} left
             </span>
-            <button
+            <Button
+              variant="subtle"
               title="Slice information"
-              className="p-1 rounded hover:bg-pf-bg-2 transition-colors"
+              className="p-1"
             >
               <InfoIcon className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         )}
         
-        <button
+        <Button
+          variant="primary"
           onClick={onSlice}
           disabled={!canSlice || slicing}
-          className={`
-            px-6 py-1.5 rounded-md font-medium text-sm transition-colors
-            ${canSlice && !slicing
-              ? 'bg-pf-accent text-white hover:bg-pf-accent-hover'
-              : 'bg-pf-disabled text-pf-text-secondary cursor-not-allowed'
-            }
-          `}
+          className="px-6 py-1.5"
         >
           {slicing ? 'Slicing...' : 'Slice'}
-        </button>
+        </Button>
       </div>
     </div>
   );

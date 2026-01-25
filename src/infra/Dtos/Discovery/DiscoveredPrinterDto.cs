@@ -1,16 +1,15 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Infrastructure;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Printer discovered during network scanning.
-/// Now a type alias to PrinterInfoDto for backward compatibility.
-/// All discovery operations should use PrinterInfoDto going forward.
+/// Extends DiscoveryPrinterInfoDto with factory method for probe results.
 /// </summary>
-public class DiscoveredPrinterDto : PrinterInfoDto
+public class DiscoveredPrinterDto : DiscoveryPrinterInfoDto
 {
     /// <summary>
-    /// Create a DiscoveredPrinterDto from raw discovery data.
+    /// Create a DiscoveredPrinterDto from raw discovery probe data.
     /// </summary>
     /// <param name="ipAddress">IP address of the discovered printer.</param>
     /// <param name="serverUrl">Server URL for printer communication.</param>

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tasksApi, UserTask, TaskType, TaskPriority, TaskStatus } from '@/services/tasksApi';
-import { AlertCircleIcon, ChevronRightIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
+import { tasksApi, UserTask, TaskType, TaskPriority } from '@/services/tasksApi';
+import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -37,16 +37,21 @@ function getPriorityClasses(priority: TaskPriority): string {
 
 interface TaskItemProps {
   task: UserTask;
-  onDismiss: (taskId: string) => void;
   onSkip: (taskId: string) => void;
   onNavigate: (task: UserTask) => void;
 }
 
-function TaskItem({ task, onDismiss, onSkip, onNavigate }: TaskItemProps) {
+function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
   const Icon = getTaskIcon(task.taskType);
   
   return (
-    <div className="flex items-start gap-3 p-3 hover:bg-pf-bg-hover rounded-lg transition-colors group">
+    <div 
+      className="flex items-start gap-3 p-3 hover:bg-pf-bg-hover rounded-lg transition-colors group cursor-pointer"
+      onClick={() => onNavigate(task)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate(task); } }}
+    >
       <div className="flex-shrink-0 mt-0.5">
         <div className="p-2 rounded-lg bg-pf-warning/10">
           <Icon className="h-5 w-5 text-pf-warning" />
@@ -76,25 +81,16 @@ function TaskItem({ task, onDismiss, onSkip, onNavigate }: TaskItemProps) {
             </div>
           </div>
           
-          {/* Action buttons */}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Skip button */}
+          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <Button
-              variant="ghost"
+              variant="subtle"
               size="sm"
               onClick={(e) => { e.stopPropagation(); onSkip(task.id); }}
               title="Skip task"
               className="h-7 w-7 p-0"
             >
               <CloseIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-text-secondary" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onNavigate(task)}
-              title="Open task"
-              className="h-7 w-7 p-0"
-            >
-              <ChevronRightIcon className="h-4 w-4 text-pf-text-tertiary hover:text-pf-accent" />
             </Button>
           </div>
         </div>
@@ -130,24 +126,13 @@ export function TasksWidget() {
     },
   });
 
-  // Dismiss task mutation
-  const dismissMutation = useMutation({
-    mutationFn: (taskId: string) => tasksApi.dismissTask(taskId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      toast.success('Task dismissed');
-    },
-    onError: () => {
-      toast.error('Failed to dismiss task');
-    },
-  });
-
   // Navigate to task action
   const handleNavigate = (task: UserTask) => {
     switch (task.taskType) {
       case TaskType.ProfileImport:
         // Navigate to profile import wizard with model context
         // The task's metadataJson contains printerModelId for filtering profiles
+      {
         let modelId = task.entityId;
         if (task.metadataJson) {
           try {
@@ -161,6 +146,7 @@ export function TasksWidget() {
         }
         navigate(`/profiles/import?modelId=${modelId}&taskId=${task.id}`);
         break;
+      }
       case TaskType.MaintenanceDue:
         navigate(`/maintenance?printerId=${task.entityId}`);
         break;
@@ -211,7 +197,6 @@ export function TasksWidget() {
               <TaskItem
                 key={task.id}
                 task={task}
-                onDismiss={(id) => dismissMutation.mutate(id)}
                 onSkip={(id) => skipMutation.mutate(id)}
                 onNavigate={handleNavigate}
               />

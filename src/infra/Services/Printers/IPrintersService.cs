@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -99,12 +100,12 @@ public interface IPrintersService
     Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct);
 
     /// <summary>
-    /// Finds a printer by its resolved IP address.
+    /// Finds a printer by its ServerUrl.
     /// </summary>
-    /// <param name="serverUrl">The server URL (resolved IP) to search for</param>
+    /// <param name="serverUrl">The server URL to search for</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>The printer with matching IP, or null if not found</returns>
-    Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+    /// <returns>The printer with matching ServerUrl, or null if not found</returns>
+    Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct);
 
     /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
@@ -182,7 +183,7 @@ public interface IPrintersService
     /// <param name="dto">The printer creation DTO with configuration</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>The created printer as a DTO</returns>
-    Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct);
+    Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct);
 
     /// <summary>
     /// Applies template defaults from the PrinterModel to an existing printer.
@@ -441,7 +442,7 @@ public interface IPrintersService
     /// <param name="duplicateHandling">How to handle duplicates: "skip", "overwrite", or "error" (default: "skip")</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Object containing creation results and status (successful count, failed items, etc.)</returns>
-    Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
+    Task<object> BulkCreatePrintersAsync(CreatePrinterFromDiscoveryDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
 
     /// <summary>
     /// Imports printers from a file stream (CSV or JSON format).

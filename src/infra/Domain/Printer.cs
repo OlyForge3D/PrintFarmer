@@ -11,6 +11,13 @@ public class Printer
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Optimistic concurrency token for EF Core.
+    /// Automatically updated on each modification to detect concurrent edits.
+    /// </summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
@@ -112,8 +119,6 @@ public class Printer
             }
         }
     }
-
-    public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
 
     public string? Notes { get; set; }
 

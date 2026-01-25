@@ -18,6 +18,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
@@ -614,20 +615,19 @@ public class PrintersService(
     }
 
     /// <summary>
-    /// Finds a printer by its IP address (extracted from server URL).
+    /// Finds a printer by its ServerUrl.
     /// </summary>
-    /// <param name="serverUrl">The server URL containing an IP address</param>
+    /// <param name="serverUrl">The server URL to search for</param>
     /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>Printer with matching IP address if found; otherwise null</returns>
+    /// <returns>Printer with matching ServerUrl if found; otherwise null</returns>
     /// <remarks>
-    /// Extracts IP from ServerUrl input and compares against stored IpAddress.
     /// Uses efficient direct database query instead of loading all printers.
     /// Useful for discovering existing printers during network scanning.
     /// </remarks>
-    public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+    public async Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct)
     {
         // Use the repository's efficient direct database query instead of loading all printers
-        return await _unitOfWork.Printers.FindByIpAddressAsync(serverUrl, ct);
+        return await _unitOfWork.Printers.FindByServerUrlAsync(serverUrl, ct);
     }
 
     /// <summary>
@@ -665,7 +665,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -693,7 +693,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -763,7 +763,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -805,7 +805,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -854,7 +854,7 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>CSV content as UTF-8 encoded byte array</returns>
     /// <remarks>
-    /// CSV format includes: Name, IpAddress, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
+    /// CSV format includes: Name, ServerUrl, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
     /// Format matches AdminCli CSV format for consistency across tools.
     /// Properly escapes CSV values to handle commas and quotes in string fields.
     /// </remarks>
@@ -867,7 +867,8 @@ public class PrintersService(
         List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
         IQueryable<Printer> query = printers.AsQueryable();
 
-        // Export fields matching AdminCli CSV format for consistency
+        // Export fields matching discovery DTO format for consistency
+        // Use IpAddress (not ServerUrl) to match discovery DTOs and be more user-friendly
         List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired", "LocationName" };
 
         await writer.WriteLineAsync(string.Join(',', headerParts));
@@ -877,6 +878,9 @@ public class PrintersService(
             PrinterBackend backend = (PrinterBackend)p.Backend;
             string backendName = backend.ToString();
 
+            // Extract IP address from ServerUrl (remove http:// prefix)
+            string ipAddress = p.ServerUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).TrimEnd('/');
+
             string backendPort = p.BackendPort.ToString();
             string frontendPort = p.FrontendPort?.ToString() ?? string.Empty;
             string apiKey = p.ApiKey ?? string.Empty;
@@ -884,7 +888,7 @@ public class PrintersService(
             string cameraSnapshotUrl = p.CameraSnapshotUrl ?? string.Empty;
             string dateAcquired = p.DateAcquired?.ToString("O") ?? string.Empty;
             string locationName = p.Location?.Name ?? string.Empty;
-            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
+            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(ipAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
             await writer.WriteLineAsync(csvLine);
         }
 
@@ -964,7 +968,6 @@ public class PrintersService(
                 PrinterModel = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
                 ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
                 Backend = MapBackendEnum(p.Backend),
-                IpAddress = p.IpAddress,
 
                 // Add import-friendly fields for re-importing
                 ServerUrl = p.ServerUrl,
@@ -1018,7 +1021,8 @@ public class PrintersService(
             // Core configuration (always present)
             ["id"] = p.Id,
             ["name"] = p.Name,
-            ["ipAddress"] = p.IpAddress,
+
+            // ipAddress removed - use serverUrl
             ["serverUrl"] = p.ServerUrl,
             ["originalServerUrl"] = p.OriginalServerUrl,
             ["notes"] = p.Notes,
@@ -1100,7 +1104,7 @@ public class PrintersService(
             Backend: MapBackendEnum(p.Backend),
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress,
+
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             SpoolInfo: null,
@@ -1129,10 +1133,10 @@ public class PrintersService(
     /// 7. Broadcasts printer creation via SignalR
     /// Camera URLs discovered asynchronously and updated after initial creation.
     /// </remarks>
-    public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
+    public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
     {
         // Check for duplicate printer by IP address
-        Printer? duplicate = await FindByIpAddressAsync(dto.ServerUrl, ct);
+        Printer? duplicate = await FindByServerUrlAsync(dto.ServerUrl, ct);
 
         if (duplicate != null)
         {
@@ -1244,7 +1248,6 @@ public class PrintersService(
             Name = dto.Name,
             ServerUrl = serverUrlForStorage,
             OriginalServerUrl = originalUrlForStorage,
-            IpAddress = resolvedIp,
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
@@ -2465,7 +2468,7 @@ public class PrintersService(
     /// Camera discovery deferred to next status poll to avoid threading issues.
     /// Returns comprehensive error details for failed printers.
     /// </remarks>
-    public async Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
+    public async Task<object> BulkCreatePrintersAsync(CreatePrinterFromDiscoveryDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(printers);
 
@@ -2479,26 +2482,26 @@ public class PrintersService(
         {
             try
             {
-                CreatePrinterDto printerDto = printers[i];
+                CreatePrinterFromDiscoveryDto printerDto = printers[i];
                 string status = "Imported";
                 string? reason = null;
                 PrinterDto? createdDto = null;
                 Guid? createdPrinterId = null;
 
                 // Check for duplicates by IP address
-                Printer? existingByIp = await FindByIpAddressAsync(printerDto.ServerUrl, ct);
+                Printer? existingByIp = await FindByServerUrlAsync(printerDto.ServerUrl, ct);
                 if (existingByIp != null)
                 {
                     if ((duplicateHandling ?? "skip") == "skip")
                     {
-                        _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (IP: {existingByIp.IpAddress})");
+                        _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (ServerUrl: {existingByIp.ServerUrl})");
                         skippedCount++;
                         status = "Skipped";
-                        reason = $"Printer with IP {existingByIp.IpAddress} already exists";
+                        reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                     }
                     else if ((duplicateHandling ?? "skip") == "overwrite")
                     {
-                        _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (IP: {existingByIp.IpAddress})");
+                        _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (ServerUrl: {existingByIp.ServerUrl})");
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
 
@@ -2513,7 +2516,7 @@ public class PrintersService(
                     else if ((duplicateHandling ?? "skip") == "error")
                     {
                         status = "Failed";
-                        reason = $"Printer with IP {existingByIp.IpAddress} already exists";
+                        reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                         errorResults[i] = reason;
                     }
                 }
@@ -2675,7 +2678,7 @@ public class PrintersService(
     /// <returns>Object containing import results with counts and detailed per-printer status</returns>
     /// <remarks>
     /// Supports CSV and JSON import formats.
-    /// CSV format requires columns: Name, IpAddress, Backend (plus optional columns for other fields).
+    /// CSV format requires columns: Name, ServerUrl, Backend (plus optional columns for other fields).
     /// JSON format requires array of printer objects matching CreatePrinterDto schema.
     /// IDs are not portable between systems; import uses names and IP addresses for matching.
     /// Delegates to BulkCreatePrintersAsync for actual printer creation and duplicate handling.
@@ -2701,7 +2704,7 @@ public class PrintersService(
 
         try
         {
-            CreatePrinterDto[] printers;
+            CreatePrinterFromDiscoveryDto[] printers;
 
             if (fileExtension == ".csv")
             {
@@ -2734,13 +2737,13 @@ public class PrintersService(
 
     /// <summary>
     /// Parses a CSV stream into printer DTOs.
-    /// Required columns: Name, IpAddress, Backend
+    /// Required columns: Name, ServerUrl, Backend
     /// Optional columns: Notes, ManufacturerName, ModelName, ApiKey, IsEnabled, BackendPort, FrontendPort, CameraStreamUrl, CameraSnapshotUrl
     /// IDs are not portable between systems; use names instead.
     /// </summary>
-    private async Task<CreatePrinterDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
+    private async Task<CreatePrinterFromDiscoveryDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
     {
-        List<CreatePrinterDto> printers = [];
+        List<CreatePrinterFromDiscoveryDto> printers = [];
         List<string> errors = [];
 
         try
@@ -2793,7 +2796,7 @@ public class PrintersService(
 
                         if (values.Length < 3)
                         {
-                            errors.Add($"Line {lineNumber}: Insufficient columns (need at least Name, IpAddress, Backend)");
+                            errors.Add($"Line {lineNumber}: Insufficient columns (need at least Name, ServerUrl, Backend)");
                             continue;
                         }
 
@@ -2804,7 +2807,7 @@ public class PrintersService(
                             continue;
                         }
 
-                        // Build ServerUrl from IpAddress
+                        // IpAddress is the required column for CSV import
                         string ipAddress = values[ipAddressIdx];
 
                         // Get BackendPort from CSV - use default if not provided
@@ -2821,7 +2824,7 @@ public class PrintersService(
 
                         string serverUrl = $"http://{ipAddress}";
 
-                        CreatePrinterDto printer = new()
+                        CreatePrinterFromDiscoveryDto printer = new()
                         {
                             Name = values[nameIdx],
                             ServerUrl = serverUrl,
@@ -2874,7 +2877,7 @@ public class PrintersService(
     /// Parses a JSON stream into printer DTOs.
     /// Expected format: Array of printer objects with Name, ServerUrl, Backend, etc.
     /// </summary>
-    private async Task<CreatePrinterDto[]> ParseJsonStreamAsync(Stream stream, CancellationToken ct)
+    private async Task<CreatePrinterFromDiscoveryDto[]> ParseJsonStreamAsync(Stream stream, CancellationToken ct)
     {
         try
         {
@@ -2894,7 +2897,7 @@ public class PrintersService(
                     TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver()
                 };
 
-                CreatePrinterDto[]? printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);
+                CreatePrinterFromDiscoveryDto[]? printers = JsonSerializer.Deserialize<CreatePrinterFromDiscoveryDto[]>(content, options);
 
                 return printers == null || printers.Length == 0
                     ? throw new InvalidOperationException("JSON file contains no valid printer entries")

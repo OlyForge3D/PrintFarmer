@@ -325,14 +325,15 @@ export const OrcaSlicerPage: React.FC = () => {
         >
           <div className="p-4 border-b border-pf-border flex items-center justify-between">
             <h2 className="text-lg font-semibold text-pf-text">Settings & Profiles</h2>
-            <button 
+            <Button 
+              variant="subtle"
               onClick={() => setShowSettingsPanel(false)}
-              className="p-2 hover:bg-pf-bg-2 rounded-lg transition-colors"
+              className="p-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </Button>
           </div>
           
           <div className="p-4 space-y-4">

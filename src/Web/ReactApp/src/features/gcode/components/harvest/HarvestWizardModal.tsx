@@ -122,11 +122,13 @@ export function HarvestWizardModal({
   // If we don't have operationId yet, buffer the event for later processing
   const handleOperationProgress = useCallback((progress: HarvestOperationProgress) => {
     const currentOpId = operationIdRef.current;
-    console.log('[HarvestWizard] OperationProgress event:', progress.filesFound, 'files found, op:', progress.operationId, 'current:', currentOpId);
+    if (window.PrintFarmerDebug?.harvest) {
+      console.log('[HarvestWizard] OperationProgress event:', progress.filesFound, 'files found, op:', progress.operationId, 'current:', currentOpId);
+    }
     
     // If we don't have operationId yet, buffer the event
     if (!currentOpId) {
-      console.log('[HarvestWizard] Buffering progress (no operationId yet)');
+      if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Buffering progress (no operationId yet)'); }
       progressBufferRef.current.push(progress);
       return;
     }
@@ -143,18 +145,26 @@ export function HarvestWizardModal({
   // If we don't have operationId yet, buffer the event for later processing
   const handleOperationCompleted = useCallback((evt: HarvestOperationCompletedEvent) => {
     const currentOpId = operationIdRef.current;
-    console.log('[HarvestWizard] OperationCompleted event for op:', evt.operationId, 'current:', currentOpId);
+    if (window.PrintFarmerDebug?.harvest) {
+      console.log('[HarvestWizard] OperationCompleted event for op:', evt.operationId, 'current:', currentOpId);
+    }
     
     // If we don't have operationId yet, buffer the event
     if (!currentOpId) {
-      console.log('[HarvestWizard] Buffering completed event (no operationId yet)');
+      if (window.PrintFarmerDebug?.harvest) {
+        console.log('[HarvestWizard] Buffering completed event (no operationId yet)'); 
+      }
+
       completedBufferRef.current.push(evt);
       return;
     }
     
     if (evt.operationId !== currentOpId) return;
     
-    console.log('[HarvestWizard] Applying completed event - discovery done!');
+    if (window.PrintFarmerDebug?.harvest) {
+      console.log('[HarvestWizard] Applying completed event - discovery done!');
+    }
+
     setFilesAdded(evt.filesAdded);
     setFilesSkipped(evt.filesSkipped);
     setFilesErrored(evt.filesErrored);
@@ -191,14 +201,16 @@ export function HarvestWizardModal({
   // Process buffered operation-level events once we have operationId
   // Note: File-level events are handled by IndexedFilesList
   const processBufferedEvents = useCallback((opId: string) => {
-    console.log('[HarvestWizard] Processing buffered events for operation:', opId);
-    console.log('[HarvestWizard] Buffered progress events:', progressBufferRef.current.length);
+    if (window.PrintFarmerDebug?.harvest) {
+      console.log('[HarvestWizard] Processing buffered events for operation:', opId);
+      console.log('[HarvestWizard] Buffered progress events:', progressBufferRef.current.length);
+    }
     
     // Process buffered progress events - take the latest one for this operation
     const matchingProgressEvents = progressBufferRef.current.filter(p => p.operationId === opId);
     if (matchingProgressEvents.length > 0) {
       const latest = matchingProgressEvents[matchingProgressEvents.length - 1];
-      console.log('[HarvestWizard] Applying latest progress:', latest.filesFound, 'files found');
+      if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Applying latest progress:', latest.filesFound, 'files found'); }
       setFilesFound(latest.filesFound);
       setFilesAdded(latest.filesAdded);
       setFilesSkipped(latest.filesSkipped);
@@ -209,7 +221,7 @@ export function HarvestWizardModal({
     const matchingCompletedEvents = completedBufferRef.current.filter(e => e.operationId === opId);
     if (matchingCompletedEvents.length > 0) {
       const latest = matchingCompletedEvents[matchingCompletedEvents.length - 1];
-      console.log('[HarvestWizard] Applying buffered completed event - discovery done!');
+      if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Applying buffered completed event - discovery done!'); }
       setFilesAdded(latest.filesAdded);
       setFilesSkipped(latest.filesSkipped);
       setFilesErrored(latest.filesErrored);
@@ -220,7 +232,7 @@ export function HarvestWizardModal({
     // Process buffered discovery complete events
     const matchingDiscoveryComplete = discoveryCompleteBufferRef.current.filter(e => e.operationId === opId);
     if (matchingDiscoveryComplete.length > 0) {
-      console.log('[HarvestWizard] Applying buffered discovery complete event');
+      if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Applying buffered discovery complete event'); }
       setDiscoveryComplete(true);
       setIsDiscovering(false);
     }
@@ -242,22 +254,22 @@ export function HarvestWizardModal({
     
     // CRITICAL: Subscribe to operation-level SignalR events BEFORE starting the API call
     // File-level events (discovered, updated) are handled by IndexedFilesList
-    console.log('[HarvestWizard] Subscribing to operation-level SignalR events BEFORE starting operation');
+    if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Subscribing to operation-level SignalR events BEFORE starting operation'); }
     const unsubProgress = signalRService.onHarvestOperationProgress(handleOperationProgress);
     const unsubComplete = signalRService.onHarvestOperationCompleted(handleOperationCompleted);
     const unsubDiscoveryComplete = signalRService.onHarvestDiscoveryComplete((evt) => {
       const currentOpId = operationIdRef.current;
-      console.log('[HarvestWizard] DiscoveryComplete event for op:', evt.operationId, 'current:', currentOpId);
+      if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] DiscoveryComplete event for op:', evt.operationId, 'current:', currentOpId); }
       
       // If we don't have operationId yet, buffer the event
       if (!currentOpId) {
-        console.log('[HarvestWizard] Buffering discovery complete event (no operationId yet)');
+        if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Buffering discovery complete event (no operationId yet)'); }
         discoveryCompleteBufferRef.current.push(evt);
         return;
       }
       
       if (evt.operationId === currentOpId) {
-        console.log('[HarvestWizard] Applying discovery complete event');
+        if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Applying discovery complete event'); }
         setDiscoveryComplete(true);
         setIsDiscovering(false);
       }
@@ -305,11 +317,11 @@ export function HarvestWizardModal({
       // Fetch operation status from API to check if discovery is already complete
       // File-level data is handled by IndexedFilesList via its own API call
       try {
-        console.log('[HarvestWizard] Fetching operation status for:', opId);
+        if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Fetching operation status for:', opId); }
         
         // Fetch operation to check if discovery is already complete
         const operation = await apiClient.getHarvestOperation(opId);
-        console.log('[HarvestWizard] Operation status:', operation.status, 'filesFound:', operation.filesFound);
+        if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Operation status:', operation.status, 'filesFound:', operation.filesFound); }
         
         // Update progress from operation
         setFilesFound(operation.filesFound);
@@ -319,7 +331,7 @@ export function HarvestWizardModal({
         
         // Check if discovery is already complete
         if (operation.status !== 'Running') {
-          console.log('[HarvestWizard] Discovery already complete based on API state');
+          if (window.PrintFarmerDebug?.harvest) { console.log('[HarvestWizard] Discovery already complete based on API state'); }
           setDiscoveryComplete(true);
           setIsDiscovering(false);
         }

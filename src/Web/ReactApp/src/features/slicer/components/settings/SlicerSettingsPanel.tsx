@@ -3,6 +3,7 @@
  * Implements Basic | Simple | Advanced view modes matching OrcaSlicer's UI
  */
 import React, { useState, useCallback } from 'react';
+import { Button } from '@/common/components/ui';
 import { SettingRow } from './SettingRow';
 import {
   InfillDensityIcon,
@@ -98,18 +99,17 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       {/* View Mode Tabs */}
       <div className="flex border-b border-pf-border">
         {viewModes.map((mode) => (
-          <button
+          <Button
             key={mode.id}
+            variant={viewMode === mode.id ? 'tab' : 'subtle'}
             type="button"
             onClick={() => setViewMode(mode.id)}
             disabled={disabled}
-            className={`flex-1 px-4 py-3 text-sm font-medium transition-colors
-                       ${viewMode === mode.id
-                         ? 'bg-pf-accent-2 text-pf-text rounded-t-lg'
-                         : 'text-pf-text-muted hover:text-pf-text hover:bg-pf-bg-2'}`}
+            className={`flex-1 px-4 py-3 text-sm font-medium rounded-none
+                       ${viewMode === mode.id ? 'rounded-t-lg' : ''}`}
           >
             {mode.label}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -140,18 +140,16 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             {/* Category Tabs */}
             <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
               {categories.map((cat) => (
-                <button
+                <Button
                   key={cat.id}
+                  variant={activeCategory === cat.id ? 'tab' : 'subtle'}
                   type="button"
                   onClick={() => setActiveCategory(cat.id)}
                   disabled={disabled}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap transition-colors
-                             ${activeCategory === cat.id
-                               ? 'bg-pf-accent-2 text-pf-text'
-                               : 'bg-pf-bg-2 text-pf-text-muted hover:text-pf-text hover:bg-pf-border'}`}
+                  className="px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap"
                 >
                   {cat.label}
-                </button>
+                </Button>
               ))}
             </div>
 

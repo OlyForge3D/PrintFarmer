@@ -12,6 +12,13 @@ public class PrintJob
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Optimistic concurrency token for EF Core.
+    /// Critical for job queue operations where multiple processes may claim jobs.
+    /// </summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty; // Display name for the job
 
     public Guid GcodeFileId { get; set; }

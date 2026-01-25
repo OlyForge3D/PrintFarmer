@@ -3,6 +3,7 @@
  * Top toolbar matching OrcaSlicer's interface style
  */
 import React from 'react';
+import { Button } from '@/common/components/ui';
 import {
   AddModelIcon,
   ArrangeIcon,
@@ -37,23 +38,19 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
   disabled = false,
   title
 }) => (
-  <button
+  <Button
+    variant={active ? 'primary' : 'subtle'}
     onClick={onClick}
     disabled={disabled}
     title={title || label}
     className={`
-      flex items-center justify-center p-2 rounded-md transition-colors
-      ${active 
-        ? 'bg-pf-accent text-white' 
-        : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text'
-      }
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-      border border-transparent hover:border-pf-border
+      flex items-center justify-center p-2 rounded-md
+      ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
     `}
   >
     {icon}
     {label && <span className="ml-2 text-sm hidden xl:inline">{label}</span>}
-  </button>
+  </Button>
 );
 
 const ToolbarDivider: React.FC = () => (
@@ -202,13 +199,14 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
       <div className="flex-1" />
 
       {/* Settings & Profiles button */}
-      <button
+      <Button
+        variant="primary"
         onClick={onSettingsProfiles}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-pf-accent text-white hover:bg-pf-accent-hover transition-colors border border-pf-accent"
+        className="flex items-center gap-2 px-3 py-1.5"
       >
         <SettingsProfilesIcon className="w-4 h-4" />
         <span className="text-sm font-medium">SETTINGS & PROFILES</span>
-      </button>
+      </Button>
 
       {/* Keyboard shortcuts */}
       <ToolbarButton

@@ -1,15 +1,13 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.Json.Serialization;
-using Farm.Infrastructure.Annotations;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Infrastructure;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
-/// Request payload for creating a new printer entry.
+/// Request payload for creating a new printer entry from discovery data.
+/// Extends DiscoveryPrinterInfoDto with catalog references and hardware specs.
 /// </summary>
-public class CreatePrinterDto : PrinterInfoDto
+public class CreatePrinterFromDiscoveryDto : DiscoveryPrinterInfoDto
 {
     /// <summary>
     /// Reference to existing manufacturer in catalog.
@@ -94,7 +92,7 @@ public class CreatePrinterDto : PrinterInfoDto
     /// <param name="modelId">Optional reference to existing model in catalog.</param>
     /// <param name="newManufacturerName">Optional name for creating a new manufacturer.</param>
     /// <param name="newModelName">Optional name for creating a new model.</param>
-    public static CreatePrinterDto FromDiscovered(
+    public static CreatePrinterFromDiscoveryDto FromDiscovered(
         DiscoveredPrinterDto discovered,
         Guid? manufacturerId = null,
         Guid? modelId = null,

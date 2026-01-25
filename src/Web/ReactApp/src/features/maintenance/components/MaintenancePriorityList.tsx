@@ -233,17 +233,18 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
 
           {/* Expand button for compact mode */}
           {compact && (
-            <button
+            <Button
+              variant="subtle"
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
-              className="p-1 rounded hover:bg-pf-border/50 transition-colors"
+              className="p-1"
               aria-label={isExpanded ? 'Collapse' : 'Expand'}
             >
               <ChevronDownIcon 
                 className={`h-4 w-4 text-pf-text-tertiary transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
                 aria-hidden="true"
               />
-            </button>
+            </Button>
           )}
         </div>
       </div>

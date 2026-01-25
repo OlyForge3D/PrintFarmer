@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { maintenanceService } from '@/services/maintenanceService';
 import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
 import type { FleetPrinterStatistics } from '@/types/maintenance';
 
 export interface FleetStatisticsTableProps {
@@ -208,12 +209,13 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
       
       {maxRows && stats && stats.length > maxRows && (
         <div className="text-center py-3 border-t border-pf-border">
-          <button 
+          <Button 
+            variant="link"
             className="text-sm text-pf-primary hover:text-pf-primary-hover"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
             View all {stats.length} printers →
-          </button>
+          </Button>
         </div>
       )}
     </div>

@@ -20,7 +20,6 @@ public record CompletePrinterDto(
     PrinterBackend Backend,
     string? ApiKey,
     string? OriginalServerUrl,
-    string? IpAddress,
     int BackendPort,
     int? FrontendPort,
     bool InMaintenance,

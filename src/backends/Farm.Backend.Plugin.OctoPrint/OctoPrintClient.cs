@@ -507,7 +507,6 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             Backend: PrinterBackend.OctoPrint,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,

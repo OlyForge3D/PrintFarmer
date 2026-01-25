@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure;
@@ -285,6 +285,5 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         _initLock.Dispose();
         _cacheDb.Dispose();
         await Task.CompletedTask;
-        GC.SuppressFinalize(this);
     }
 }

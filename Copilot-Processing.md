@@ -1,7 +1,7 @@
 # Copilot Processing: Selective Profile Import with Task System
 
 **Session**: Implementing selective profile import with TODO/Task system for profile management
-**Phase**: ✅ Phase 1 Complete - Simplified Wizard Implemented
+**Phase**: ✅ Phase 1 Complete - 4-Step Lazy Loading Wizard Implemented
 
 ## Current Status (2026-01-24)
 
@@ -10,11 +10,21 @@
 - ✅ TasksController API endpoints
 - ✅ TasksWidget in dashboard sidebar
 - ✅ ProfileTaskCheckService background service (detects printers needing profiles)
-- ✅ ProfileImportWizardPage - 3-step wizard:
-  1. Select machine profile (nozzle variant)
-  2. Select filaments (grouped by manufacturer → material)
-  3. Review & import (auto-selected process profiles shown)
+- ✅ ProfileImportWizardPage - **NEW 4-step lazy-loading wizard**:
+  1. Select machine profile(s) - fetched for specific printer model only via `/slicer/profiles/machine/{manufacturer}/{model}`
+  2. Select process profiles - fetched via `POST /slicer/profiles/process/for-machines` with selected machine names
+  3. Select filament profiles - fetched via `POST /slicer/profiles/filament/for-machines` with selected machine names  
+  4. Review & import selections
+- ✅ **NEW Backend endpoints** for lazy loading:
+  - `POST /slicer/profiles/process/for-machines` - Returns only process profiles explicitly compatible with given machine names
+  - `POST /slicer/profiles/filament/for-machines` - Returns filament profiles compatible with machines OR universal (OrcaFilamentLibrary/empty compatible_printers)
 - ✅ Frontend and backend both build successfully
+- ✅ All 499 React tests passing
+- ✅ All .NET tests passing
+
+**Performance Improvement**:
+- **Before**: Fetched entire profile hierarchy (all manufacturers) on wizard load - took several seconds
+- **After**: Lazy loads only what's needed at each step - instant response for machine profiles, subsequent fetches only for selected machines
 
 **Next Steps (Phase 2)**:
 - Backend endpoint to persist selected profiles to database
