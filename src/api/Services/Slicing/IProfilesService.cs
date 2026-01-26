@@ -141,6 +141,48 @@ namespace Farm.Web.Api.Services.Slicing
         Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct);
 
         /// <summary>
+        /// Fetches machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="manufacturer">Manufacturer name (e.g., "Elegoo", "Prusa")</param>
+        /// <param name="model">Model name (e.g., "Centauri Carbon", "CORE One")</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of machine profiles matching the manufacturer and model</returns>
+        /// <remarks>
+        /// Proxies the worker's /api/profiles/machine/{manufacturer}/{model} endpoint.
+        /// Does not persist to database; returns worker's current machine profiles for import UI.
+        /// </remarks>
+        Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForModelAsync(HttpClient httpClient, string manufacturer, string model, CancellationToken ct);
+
+        /// <summary>
+        /// Fetches machine profiles by OrcaSlicer alias (printer_model) from the worker.
+        /// The alias is the exact printer_model value (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400").
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="printerModel">The OrcaSlicer alias (printer_model value)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of machine profiles matching the printer_model</returns>
+        Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(HttpClient httpClient, string printerModel, CancellationToken ct);
+
+        /// <summary>
+        /// Fetches process profiles compatible with specific machines from the OrcaSlicer worker.
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="machineNames">List of machine profile names to find compatible process profiles for</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of process profiles compatible with the specified machines</returns>
+        Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct);
+
+        /// <summary>
+        /// Fetches filament profiles compatible with specific machines from the OrcaSlicer worker.
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="machineNames">List of machine profile names to find compatible filament profiles for</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of filament profiles compatible with the specified machines</returns>
+        Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct);
+
+        /// <summary>
         /// Gets system OrcaSlicer profiles available for import to a specific registered printer.
         /// </summary>
         /// <param name="printerId">ID of the registered printer</param>
@@ -194,6 +236,23 @@ namespace Farm.Web.Api.Services.Slicing
         /// Throws ArgumentException if request is invalid.
         /// </remarks>
         Task<BulkImportFromWorkerResultDto> BulkImportFromWorkerAsync(Guid printerId, BulkImportFromWorkerRequest request, CancellationToken ct);
+
+        /// <summary>
+        /// Imports selected profiles from the OrcaSlicer worker for a specific printer model.
+        /// This is the primary workflow for on-demand profile import when a new printer model needs profiles.
+        /// </summary>
+        /// <param name="printerModelId">The catalog PrinterModel ID to associate profiles with</param>
+        /// <param name="request">Request containing selected profile names for each type (machine, process, filament)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>SelectiveProfileImportResultDto with counts of imported profiles by type</returns>
+        /// <remarks>
+        /// Called from the Profile Import Wizard after user selects specific profiles.
+        /// Fetches only the selected profiles from worker and persists them as system profiles.
+        /// </remarks>
+        Task<SelectiveProfileImportResultDto> ImportSelectedProfilesForModelAsync(
+            Guid printerModelId,
+            SelectiveProfileImportRequest request,
+            CancellationToken ct);
 
         /// <summary>
         /// Creates a new process profile with specified configuration.

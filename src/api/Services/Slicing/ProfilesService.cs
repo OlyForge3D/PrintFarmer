@@ -51,10 +51,10 @@ namespace Farm.Web.Api.Services.Slicing
     /// <param name="machineProfileRepo">Repository for machine profile operations</param>
     /// <param name="filamentProfileRepo">Repository for filament profile operations</param>
     /// <param name="unitOfWork">Unit of work for coordinating database transactions</param>
-    /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
     /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
     /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
     /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
+    /// <param name="slicersService">Service for querying registered slicer workers</param>
     /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
     public class ProfilesService(
         IProfilesRepository repo,
@@ -63,10 +63,10 @@ namespace Farm.Web.Api.Services.Slicing
         IMachineProfileRepository machineProfileRepo,
         IFilamentProfileRepository filamentProfileRepo,
         IUnitOfWork unitOfWork,
-        IWorkerRepository workerRepository,
         ICatalogService catalogService,
         IProfileParsingService parsingService,
-        IHubContext<SlicerHub> slicerHubContext) : IProfilesService
+        IHubContext<SlicerHub> slicerHubContext,
+        ISlicersService slicersService) : IProfilesService
     {
         private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
         private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -76,8 +76,8 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
         private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
         private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        private readonly IWorkerRepository _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
         private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+        private readonly ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
         private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
 
         /// <summary>
@@ -740,6 +740,356 @@ namespace Farm.Web.Api.Services.Slicing
             return result;
         }
 
+        #region Profile Import Helpers
+
+        /// <summary>
+        /// Fetches all profiles from the OrcaSlicer worker service.
+        /// </summary>
+        private async Task<(AllProfilesResponseDto? Profiles, string? OrcaVersion, string WorkerUrl)> FetchProfilesFromWorkerAsync(HttpClient httpClient, CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string? orcaVersion = await TryGetOrcaVersionAsync(httpClient, workerUrl, ct);
+
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}");
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return (allProfiles, orcaVersion, workerUrl);
+        }
+
+        /// <summary>
+        /// Persists a machine profile to the database. Returns true if imported, false if skipped (duplicate).
+        /// </summary>
+        private async Task<bool> PersistMachineProfileAsync(
+            MachineProfileDto machineProfile,
+            string manufacturerName,
+            string modelDisplayName,
+            Guid? printerModelId,
+            string? orcaVersion,
+            bool checkDuplicates,
+            CancellationToken ct)
+        {
+            string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+            (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
+
+            if (checkDuplicates)
+            {
+                MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
+                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                {
+                    return false; // Skipped
+                }
+            }
+
+            MachineProfile systemProfile = new MachineProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = machineProfile.Name ?? string.Empty,
+                Manufacturer = machineProfile.Manufacturer ?? manufacturerName,
+                Description = $"OrcaSlicer machine profile for {modelDisplayName}",
+                SlicerType = SlicerType.OrcaSlicer,
+                PrinterModelId = printerModelId,
+                IsSystem = true,
+                IsPublic = true,
+                Hash = profileHash,
+                RawJson = sanitizedRaw,
+                SettingsJson = settingsJson,
+                SlicerVersion = orcaVersion,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _machineProfileRepo.AddAsync(systemProfile, ct);
+            return true; // Imported
+        }
+
+        /// <summary>
+        /// Persists a filament profile to the database. Returns true if imported, false if skipped (duplicate).
+        /// </summary>
+        private async Task<bool> PersistFilamentProfileAsync(
+            FilamentProfileDto filamentProfile,
+            string manufacturerName,
+            string modelDisplayName,
+            string? orcaVersion,
+            bool checkDuplicates,
+            CancellationToken ct)
+        {
+            string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+            (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
+
+            if (checkDuplicates)
+            {
+                FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
+                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                {
+                    return false; // Skipped
+                }
+            }
+
+            FilamentProfile systemProfile = new FilamentProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = filamentProfile.Name ?? $"{filamentProfile.Material}",
+                Material = filamentProfile.Material ?? "PLA",
+                Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
+                Description = $"OrcaSlicer filament profile for {modelDisplayName} - {filamentProfile.Material}",
+                SlicerType = SlicerType.OrcaSlicer,
+                PrintSpeed = filamentProfile.PrintSpeed,
+                NozzleTemperature = filamentProfile.NozzleTemperature,
+                BedTemperature = filamentProfile.BedTemperature,
+                IsSystem = true,
+                IsPublic = true,
+                Hash = profileHash,
+                RawJson = sanitizedRaw,
+                SettingsJson = settingsJson,
+                SlicerVersion = orcaVersion,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _filamentProfileRepo.AddAsync(systemProfile, ct);
+            return true; // Imported
+        }
+
+        /// <summary>
+        /// Persists a process profile to the database. Returns true if imported, false if skipped (duplicate).
+        /// </summary>
+        private async Task<bool> PersistProcessProfileAsync(
+            ProcessProfileDto processProfile,
+            string modelDisplayName,
+            Guid? printerModelId,
+            string? orcaVersion,
+            bool checkDuplicates,
+            CancellationToken ct)
+        {
+            string profileJson = JsonSerializer.Serialize(processProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+            string profileHash = ComputeSha256Hash(profileJson);
+
+            if (checkDuplicates)
+            {
+                ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
+                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                {
+                    return false; // Skipped
+                }
+            }
+
+            ProcessProfile systemProfile = new ProcessProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
+                Description = $"OrcaSlicer process profile for {modelDisplayName}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
+                SlicerType = SlicerType.OrcaSlicer,
+                PrinterModelId = printerModelId,
+                Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                LayerHeight = processProfile.LayerHeight,
+                InfillPercentage = processProfile.InfillPercentage,
+                PrintSpeed = processProfile.PrintSpeed,
+                EnableSupports = processProfile.Supports,
+                IsSystem = true,
+                IsPublic = true,
+                IsDefault = false,
+                Hash = profileHash,
+                RawJson = profileJson,
+                SlicerVersion = orcaVersion,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _processProfileRepo.AddAsync(systemProfile, ct);
+            return true; // Imported
+        }
+
+        #endregion
+
+        /// <inheritdoc />
+        public async Task<SelectiveProfileImportResultDto> ImportSelectedProfilesForModelAsync(
+            Guid printerModelId,
+            SelectiveProfileImportRequest request,
+            CancellationToken ct)
+        {
+            _logger.LogInformation($"[ImportSelectedProfilesForModel] Importing selected profiles for model {printerModelId}");
+            _logger.LogDebug($"[ImportSelectedProfilesForModel] Selected: {request.SelectedMachineProfiles.Count} machines, {request.SelectedProcessProfiles.Count} processes, {request.SelectedFilamentProfiles.Count} filaments");
+
+            SelectiveProfileImportResultDto result = new()
+            {
+                PrinterModelId = printerModelId
+            };
+
+            if (request.SelectedMachineProfiles.Count == 0 &&
+                request.SelectedProcessProfiles.Count == 0 &&
+                request.SelectedFilamentProfiles.Count == 0)
+            {
+                result.Error = "No profiles selected for import";
+                return result;
+            }
+
+            try
+            {
+                // Use IHttpClientFactory if available, otherwise create new HttpClient
+                using HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+                // Fetch all profiles from worker
+                (AllProfilesResponseDto? allProfiles, string? orcaVersion, string workerUrl) = await FetchProfilesFromWorkerAsync(httpClient, ct);
+
+                if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
+                {
+                    result.Error = "No profiles available from OrcaSlicer worker";
+                    return result;
+                }
+
+                // Find the manufacturer's profiles
+                if (!allProfiles.ByHierarchy.TryGetValue(request.ManufacturerName, out ManufacturerProfilesDto? manufacturerProfiles) ||
+                    manufacturerProfiles?.Models == null)
+                {
+                    result.Error = $"Manufacturer '{request.ManufacturerName}' not found in worker profiles";
+                    return result;
+                }
+
+                // Build sets for fast lookup
+                HashSet<string> selectedMachines = new(request.SelectedMachineProfiles, StringComparer.OrdinalIgnoreCase);
+                HashSet<string> selectedProcesses = new(request.SelectedProcessProfiles, StringComparer.OrdinalIgnoreCase);
+                HashSet<string> selectedFilaments = new(request.SelectedFilamentProfiles, StringComparer.OrdinalIgnoreCase);
+
+                // Iterate through all models to find matching profiles
+                foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
+                {
+                    if (modelProfiles == null)
+                    {
+                        continue;
+                    }
+
+                    string modelDisplayName = modelProfiles.Name ?? "Unknown";
+
+                    // Import selected machine profiles
+                    if (modelProfiles.MachineProfiles != null)
+                    {
+                        foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
+                        {
+                            if (!selectedMachines.Contains(machineProfile.Name ?? string.Empty))
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                bool imported = await PersistMachineProfileAsync(
+                                    machineProfile, request.ManufacturerName, modelDisplayName,
+                                    printerModelId, orcaVersion, checkDuplicates: true, ct);
+
+                                if (imported)
+                                {
+                                    result.MachineProfilesImported++;
+                                }
+                                else
+                                {
+                                    result.Skipped++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import machine profile '{machineProfile.Name}': {ex.Message}");
+                                result.Skipped++;
+                            }
+                        }
+                    }
+
+                    // Import selected filament profiles
+                    if (modelProfiles.FilamentProfiles != null)
+                    {
+                        foreach (FilamentProfileDto filamentProfile in modelProfiles.FilamentProfiles)
+                        {
+                            if (!selectedFilaments.Contains(filamentProfile.Name ?? string.Empty))
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                bool imported = await PersistFilamentProfileAsync(
+                                    filamentProfile, request.ManufacturerName, modelDisplayName,
+                                    orcaVersion, checkDuplicates: true, ct);
+
+                                if (imported)
+                                {
+                                    result.FilamentProfilesImported++;
+                                }
+                                else
+                                {
+                                    result.Skipped++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import filament profile '{filamentProfile.Name}': {ex.Message}");
+                                result.Skipped++;
+                            }
+                        }
+                    }
+
+                    // Import selected process profiles
+                    if (modelProfiles.ProcessProfiles != null)
+                    {
+                        foreach (ProcessProfileDto processProfile in modelProfiles.ProcessProfiles)
+                        {
+                            if (!selectedProcesses.Contains(processProfile.Name ?? string.Empty))
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                bool imported = await PersistProcessProfileAsync(
+                                    processProfile, modelDisplayName, printerModelId,
+                                    orcaVersion, checkDuplicates: true, ct);
+
+                                if (imported)
+                                {
+                                    result.ProcessProfilesImported++;
+                                }
+                                else
+                                {
+                                    result.Skipped++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"[ImportSelectedProfilesForModel] Failed to import process profile '{processProfile.Name}': {ex.Message}");
+                                result.Skipped++;
+                            }
+                        }
+                    }
+                }
+
+                _logger.LogInformation($"[ImportSelectedProfilesForModel] Completed: imported {result.TotalImported} profiles ({result.MachineProfilesImported} machine, {result.ProcessProfilesImported} process, {result.FilamentProfilesImported} filament), skipped {result.Skipped}");
+
+                return result;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "[ImportSelectedProfilesForModel] Worker communication failed");
+                result.Error = $"Failed to communicate with OrcaSlicer worker: {ex.Message}";
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[ImportSelectedProfilesForModel] Import failed");
+                result.Error = $"Import failed: {ex.Message}";
+                return result;
+            }
+        }
+
         /// <summary>
         /// Seeds the database with system OrcaSlicer profiles downloaded from the worker service.
         /// </summary>
@@ -1307,6 +1657,132 @@ namespace Farm.Web.Api.Services.Slicing
 
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+
+        /// <summary>
+        /// Fetches machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
+        /// </summary>
+        public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForModelAsync(
+            HttpClient httpClient,
+            string manufacturer,
+            string model,
+            CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string url = $"{workerUrl}/api/profiles/machine/{Uri.EscapeDataString(manufacturer)}/{Uri.EscapeDataString(model)}";
+            _logger.LogInformation($"Fetching machine profiles from worker: {url}");
+
+            HttpResponseMessage response = await httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return profiles ?? new List<MachineProfileDto>();
+        }
+
+        /// <summary>
+        /// Fetches machine profiles by OrcaSlicer alias (printer_model) from the worker.
+        /// The alias is the exact printer_model value (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400").
+        /// </summary>
+        public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(
+            HttpClient httpClient,
+            string printerModel,
+            CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string url = $"{workerUrl}/api/profiles/machine/{Uri.EscapeDataString(printerModel)}";
+            _logger.LogInformation($"Fetching machine profiles by alias from worker: {url}");
+
+            HttpResponseMessage response = await httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return profiles ?? new List<MachineProfileDto>();
+        }
+
+        /// <summary>
+        /// Fetches process profiles compatible with specific machines from the OrcaSlicer worker.
+        /// </summary>
+        public async Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(
+            HttpClient httpClient,
+            IEnumerable<string> machineNames,
+            CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string url = $"{workerUrl}/api/profiles/process/for-machines";
+            _logger.LogInformation($"Fetching process profiles for machines from worker: {url}");
+
+            var request = new { machineNames = machineNames.ToList() };
+            string requestJson = JsonSerializer.Serialize(request);
+            using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
+
+            HttpResponseMessage response = await httpClient.PostAsync(url, content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            List<ProcessProfileDto>? profiles = JsonSerializer.Deserialize<List<ProcessProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return profiles ?? new List<ProcessProfileDto>();
+        }
+
+        /// <summary>
+        /// Fetches filament profiles compatible with specific machines from the OrcaSlicer worker.
+        /// </summary>
+        public async Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(
+            HttpClient httpClient,
+            IEnumerable<string> machineNames,
+            CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string url = $"{workerUrl}/api/profiles/filament/for-machines";
+            _logger.LogInformation($"Fetching filament profiles for machines from worker: {url}");
+
+            var request = new { machineNames = machineNames.ToList() };
+            string requestJson = JsonSerializer.Serialize(request);
+            using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
+
+            HttpResponseMessage response = await httpClient.PostAsync(url, content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return profiles ?? new List<FilamentProfileDto>();
         }
 
         /// <summary>
@@ -1881,34 +2357,38 @@ namespace Farm.Web.Api.Services.Slicing
         {
             try
             {
-                IReadOnlyList<Worker> allWorkers = await _workerRepository.GetAllAsync(limit: 100, offset: 0);
-                Worker? orcaWorker = allWorkers.FirstOrDefault(w =>
-                    w.Status == "online" &&
-                    !string.IsNullOrEmpty(w.CapabilitiesJson) &&
-                    w.CapabilitiesJson.Contains("orcaslicer", StringComparison.OrdinalIgnoreCase));
+                // Query SlicerService entities via ISlicersService (not the old Worker table)
+                IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
 
-                if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.EndpointUrl))
+                // SlicerType 1 = OrcaSlicer (per SlicerType enum)
+                SlicerService? orcaWorker = allSlicers.FirstOrDefault(s =>
+                    s.Status == "Online" &&
+                    s.SlicerType == 1 &&
+                    !string.IsNullOrEmpty(s.Host));
+
+                if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
                 {
-                    _logger.LogInformation($"Using OrcaSlicer worker from registry: {orcaWorker.Name} at {orcaWorker.EndpointUrl}");
-                    return orcaWorker.EndpointUrl;
+                    _logger.LogInformation($"Using OrcaSlicer worker from registry: {orcaWorker.Name} at {orcaWorker.Host}");
+                    return orcaWorker.Host;
                 }
 
-                orcaWorker = allWorkers.FirstOrDefault(w =>
-                    !string.IsNullOrEmpty(w.CapabilitiesJson) &&
-                    w.CapabilitiesJson.Contains("orcaslicer", StringComparison.OrdinalIgnoreCase));
+                // Fallback: any OrcaSlicer worker regardless of status
+                orcaWorker = allSlicers.FirstOrDefault(s =>
+                    s.SlicerType == 1 &&
+                    !string.IsNullOrEmpty(s.Host));
 
-                if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.EndpointUrl))
+                if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
                 {
-                    _logger.LogWarning($"OrcaSlicer worker '{orcaWorker.Name}' is not online, but using endpoint anyway: {orcaWorker.EndpointUrl}");
-                    return orcaWorker.EndpointUrl;
+                    _logger.LogWarning($"OrcaSlicer worker '{orcaWorker.Name}' is not online, but using endpoint anyway: {orcaWorker.Host}");
+                    return orcaWorker.Host;
                 }
 
-                _logger.LogWarning("No OrcaSlicer worker found in registry");
+                _logger.LogWarning("No OrcaSlicer worker found in slicer registry");
                 return null;
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Failed to query worker registry: {ex.Message}");
+                _logger.LogError($"Failed to query slicer registry: {ex.Message}");
                 return null;
             }
         }

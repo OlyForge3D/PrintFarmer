@@ -198,6 +198,16 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     }
 
     /// <summary>
+    /// Gets machine profiles by printer_model only (indexed query).
+    /// This is the simplest query - just match the printer_model field directly.
+    /// </summary>
+    public async Task<List<MachineProfileDto>> GetMachineProfilesByPrinterModelAsync(string printerModel, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        return await _cacheDb.GetMachineProfilesByPrinterModelAsync(printerModel, ct);
+    }
+
+    /// <summary>
     /// Gets machine profiles for a specific manufacturer and printer model (indexed query).
     /// </summary>
     public async Task<List<MachineProfileDto>> GetMachineProfilesByModelAsync(

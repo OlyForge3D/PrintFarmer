@@ -7,6 +7,7 @@ import { LayersIcon, AlertCircleIcon, CheckCircleIcon } from '@/common/component
 import { Download, Check, Package, Printer, Palette, Settings, ChevronRight } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { tasksApi } from '@/services/tasksApi';
+import { officialProfilesService } from '@/services/officialProfilesService';
 import { toast } from 'sonner';
 
 // ================================
@@ -93,17 +94,17 @@ export const ProfileImportWizardPage: React.FC = () => {
     enabled: !!printerModel?.manufacturerId,
   });
 
-  // STEP 1: Fetch machine profiles for specific model only
+  // STEP 1: Fetch machine profiles for specific model by ID (API handles alias lookup)
   const { data: machineProfiles = [], isLoading: machinesLoading, error: machinesError } = useQuery({
-    queryKey: ['machine-profiles', manufacturer?.name, printerModel?.name],
+    queryKey: ['machine-profiles-for-model', modelId],
     queryFn: async () => {
-      if (!manufacturer?.name || !printerModel?.name) return [];
-      // Use the specific endpoint for model
-      const url = `/slicer/profiles/machine/${encodeURIComponent(manufacturer.name)}/${encodeURIComponent(printerModel.name)}`;
+      if (!modelId) return [];
+      // Use the model ID endpoint - API will look up the OrcaSlicer alias internally
+      const url = `/slicer/profiles/machine/for-model/${modelId}`;
       const res = await apiClient.get<MachineProfileDto[]>(url);
       return res.data;
     },
-    enabled: !!manufacturer?.name && !!printerModel?.name,
+    enabled: !!modelId,
     staleTime: 60_000,
   });
 
@@ -212,26 +213,46 @@ export const ProfileImportWizardPage: React.FC = () => {
       if (selectedMachines.size === 0) {
         throw new Error('Please select at least one machine profile');
       }
-      
-      // TODO: Call API to persist selected profiles
-      return {
-        machineCount: selectedMachines.size,
-        processCount: selectedProcesses.size,
-        filamentCount: selectedFilaments.size,
-      };
+
+      if (!modelId) {
+        throw new Error('No printer model specified');
+      }
+
+      if (!manufacturer?.name) {
+        throw new Error('Manufacturer information not available');
+      }
+
+      // Call API to persist selected profiles
+      const result = await officialProfilesService.importSelectedProfilesForModel(modelId, {
+        manufacturerName: manufacturer.name,
+        selectedMachineProfiles: Array.from(selectedMachines),
+        selectedProcessProfiles: Array.from(selectedProcesses),
+        selectedFilamentProfiles: Array.from(selectedFilaments),
+      });
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return result;
     },
     onSuccess: async (result) => {
       toast.success(
-        `Profiles configured: ${result.machineCount} machine(s), ${result.processCount} process profile(s), ${result.filamentCount} filament profile(s)`,
+        `Profiles imported: ${result.machineProfilesImported} machine(s), ${result.processProfilesImported} process(s), ${result.filamentProfilesImported} filament(s)` +
+        (result.skipped > 0 ? ` (${result.skipped} skipped as duplicates)` : ''),
         { duration: 5000 }
       );
       
+      // Complete the task if we came from a task
       if (taskId) {
         try {
           await tasksApi.completeTask(taskId);
-          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+          // Wait for invalidation to complete before navigating
+          await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+          toast.success('Task completed', { duration: 2000 });
         } catch (e) {
           console.error('Failed to complete task:', e);
+          toast.error('Failed to mark task as complete');
         }
       }
       

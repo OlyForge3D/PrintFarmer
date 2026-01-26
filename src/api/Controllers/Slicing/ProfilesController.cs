@@ -45,10 +45,12 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Authorize] // All endpoints require authentication
 public class ProfilesController(
     IUnifiedLoggingService logger,
-    IProfilesService profilesService) : ControllerBase
+    IProfilesService profilesService,
+    Services.Catalog.ICatalogService catalogService) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IProfilesService _profilesService = profilesService;
+    private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
 
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -750,6 +752,175 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Get machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
+    /// This endpoint proxies requests to the worker's /api/profiles/machine/{manufacturer}/{model} endpoint.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="manufacturer">Manufacturer name (e.g., "Elegoo", "Prusa")</param>
+    /// <param name="model">Model name (e.g., "Centauri Carbon", "CORE One")</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of machine profiles matching the manufacturer and model</returns>
+    /// <response code="200">Successfully fetched machine profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("machine/{manufacturer}/{model}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMachineProfilesForModelAsync(
+        [FromServices] HttpClient httpClient,
+        string manufacturer,
+        string model,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching machine profiles for {manufacturer}/{model}: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get machine profiles for a printer model by its catalog ID.
+    /// This endpoint looks up the OrcaSlicer alias for the model and fetches matching profiles.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="modelId">The printer model ID from the catalog</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of machine profiles matching the model's OrcaSlicer alias</returns>
+    /// <response code="200">Successfully fetched machine profiles from OrcaSlicer worker</response>
+    /// <response code="404">Printer model not found or no OrcaSlicer alias configured</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("machine/for-model/{modelId:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMachineProfilesForModelIdAsync(
+        [FromServices] HttpClient httpClient,
+        Guid modelId,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Get the printer model
+            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
+            if (model == null)
+            {
+                return NotFound($"Printer model with ID {modelId} not found");
+            }
+
+            // Get OrcaSlicer alias for this model - this IS the printer_model value
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
+            SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a => a.SlicerType == "OrcaSlicer");
+
+            // The alias is the exact printer_model value to query (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400")
+            // If no alias exists, we cannot fetch profiles
+            if (orcaAlias == null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+            {
+                _logger.LogWarning($"No OrcaSlicer alias configured for model {model.Name}");
+                return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
+            }
+
+            string printerModel = orcaAlias.SlicerModelName;
+            _logger.LogInformation($"Fetching machine profiles for model {model.Name} using OrcaSlicer alias: {printerModel}");
+
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesByAliasAsync(
+                httpClient, printerModel, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching machine profiles for model {modelId}: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get process profiles compatible with specific machine profiles from the OrcaSlicer worker.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="request">Request containing list of machine profile names</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of process profiles compatible with the specified machines</returns>
+    /// <response code="200">Successfully fetched process profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("process/for-machines")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
+        [FromServices] HttpClient httpClient,
+        [FromBody] ForMachinesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching process profiles for machines: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get filament profiles compatible with specific machine profiles from the OrcaSlicer worker.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="request">Request containing list of machine profile names</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of filament profiles compatible with the specified machines</returns>
+    /// <response code="200">Successfully fetched filament profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("filament/for-machines")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
+        [FromServices] HttpClient httpClient,
+        [FromBody] ForMachinesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament profiles for machines: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get system profiles available for import for a specific registered printer.
     /// Filters compatible OrcaSlicer profiles by matching printer model and nozzle size from database.
     /// Supports both OrcaSlicer bundled profiles and previously imported system profiles.
@@ -914,6 +1085,116 @@ public class ProfilesController(
         {
             _logger.LogError(ex, "Bulk import failed");
             return StatusCode(StatusCodes.Status500InternalServerError, "Bulk import failed");
+        }
+    }
+
+    /// <summary>
+    /// Import selected profiles from OrcaSlicer worker for a specific printer model.
+    /// This endpoint is used by the Profile Import Wizard to import user-selected profiles.
+    /// </summary>
+    /// <param name="modelId">
+    /// The unique identifier (GUID) of the printer model in the catalog.
+    /// The model must exist and have an OrcaSlicer alias configured.
+    /// </param>
+    /// <param name="request">
+    /// Selective import request containing:
+    /// - ManufacturerName: The manufacturer name matching the OrcaSlicer bundle (e.g., "Prusa", "Elegoo")
+    /// - SelectedMachineProfiles: List of machine profile names to import
+    /// - SelectedProcessProfiles: List of process profile names to import
+    /// - SelectedFilamentProfiles: List of filament profile names to import
+    /// </param>
+    /// <param name="ct">Cancellation token for aborting the import operation</param>
+    /// <returns>
+    /// Returns SelectiveProfileImportResultDto containing:
+    /// - MachineProfilesImported: Number of machine profiles imported
+    /// - ProcessProfilesImported: Number of process profiles imported
+    /// - FilamentProfilesImported: Number of filament profiles imported
+    /// - TotalImported: Sum of all imported profiles
+    /// - Skipped: Number of profiles skipped (duplicates)
+    /// - Error: Error message if import failed, null otherwise
+    /// </returns>
+    /// <remarks>
+    /// This endpoint implements the Profile Import Wizard workflow:
+    /// 1. User creates a printer and gets a task to import profiles
+    /// 2. User navigates to Profile Import Wizard
+    /// 3. Wizard fetches available profiles from OrcaSlicer worker
+    /// 4. User selects which profiles to import
+    /// 5. This endpoint is called to persist the selected profiles
+    /// 6. Task is marked complete and wizard navigates back to dashboard
+    ///
+    /// Import behavior:
+    /// - Profiles are fetched from OrcaSlicer worker on demand
+    /// - Deduplication is performed by profile hash (SHA256)
+    /// - Imported profiles are marked as system profiles (IsSystem=true, IsPublic=true)
+    /// - Profiles are associated with the specified printer model
+    ///
+    /// Error handling:
+    /// - Returns 404 if printer model not found
+    /// - Returns 503 if OrcaSlicer worker unavailable
+    /// - Returns partial results if some profiles fail to import
+    /// </remarks>
+    /// <response code="200">Import completed (check TotalImported and Error for details)</response>
+    /// <response code="400">Bad request - missing manufacturer name or empty profile lists</response>
+    /// <response code="401">Unauthorized - authentication required</response>
+    /// <response code="403">Forbidden - farm_admin authorization policy required</response>
+    /// <response code="404">Printer model not found</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("import-selected-for-model/{modelId:guid}")]
+    [Authorize(Policy = "farm_admin")]
+    [ProducesResponseType(typeof(SelectiveProfileImportResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ImportSelectedProfilesForModelAsync(
+        Guid modelId,
+        [FromBody] SelectiveProfileImportRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ManufacturerName))
+        {
+            return BadRequest("ManufacturerName is required");
+        }
+
+        try
+        {
+            // Validate that the model exists
+            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
+            if (model == null)
+            {
+                return NotFound($"Printer model with ID {modelId} not found");
+            }
+
+            _logger.LogInformation($"Importing selected profiles for model {model.Name} (manufacturer: {request.ManufacturerName})");
+
+            SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                if (result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
+                    result.Error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, result.Error);
+                }
+            }
+
+            return Ok(result);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error importing profiles for model {modelId}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Profile import failed");
         }
     }
 
@@ -1125,4 +1406,15 @@ public class ProfilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Bulk import from worker failed");
         }
     }
+}
+
+/// <summary>
+/// Request DTO for fetching profiles compatible with specific machines.
+/// </summary>
+public record ForMachinesRequest
+{
+    /// <summary>
+    /// List of machine profile names to find compatible profiles for.
+    /// </summary>
+    public IReadOnlyList<string> MachineNames { get; init; } = Array.Empty<string>();
 }

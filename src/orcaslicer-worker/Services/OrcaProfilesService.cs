@@ -129,7 +129,11 @@ public class OrcaProfilesService : ISlicerProfilesService
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle != null)
                     {
-                        string manufacturerName = bundle.Name;
+                        // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                        // NOT bundle.Name which may differ in case or be completely different
+                        // (e.g., Eryone.json has name="Thinker X400" but manufacturer should be "Eryone")
+                        string folderName = Path.GetFileNameWithoutExtension(bundleFile);
+                        string manufacturerName = folderName;
 
                         // ONLY load from machine_model_list - these are base printer models
                         if (bundle.MachineModelList != null)
@@ -138,7 +142,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             {
                                 try
                                 {
-                                    string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
                                         _logger.LogWarning($"Machine model profile referenced in bundle not found: {profilePath}");
@@ -237,7 +241,11 @@ public class OrcaProfilesService : ISlicerProfilesService
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle != null)
                     {
-                        string manufacturerName = bundle.Name;
+                        // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                        // NOT bundle.Name which may differ in case or be completely different
+                        // (e.g., Eryone.json has name="Thinker X400" but manufacturer should be "Eryone")
+                        string folderName = Path.GetFileNameWithoutExtension(bundleFile);
+                        string manufacturerName = folderName;
 
                         // ONLY load from machine_list - these are actual selectable profiles with nozzle sizes
                         if (bundle.MachineList != null)
@@ -246,7 +254,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             {
                                 try
                                 {
-                                    string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
                                         _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
@@ -341,17 +349,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 try
                 {
+                    // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                    // NOT bundle.Name which may differ in case or be completely different
+                    string folderName = Path.GetFileNameWithoutExtension(bundleFile);
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.FilamentList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        // Use folderName for consistency - bundle.Name may differ (e.g., Eryone.json has name="Thinker X400")
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(folderName);
 
                         foreach (ManufacturerBundleProfileEntry entry in bundle.FilamentList)
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Filament profile referenced in bundle not found: {profilePath}");
@@ -362,7 +374,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 FilamentProfileDto? profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
-                                    profile.Manufacturer = bundle.Name;
+                                    profile.Manufacturer = folderName;
 
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
@@ -458,17 +470,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 try
                 {
+                    // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                    // NOT bundle.Name which may differ in case or be completely different
+                    string folderName = Path.GetFileNameWithoutExtension(bundleFile);
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.ProcessList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        // Use folderName for consistency - bundle.Name may differ (e.g., Eryone.json has name="Thinker X400")
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(folderName);
 
                         foreach (ManufacturerBundleProfileEntry entry in bundle.ProcessList)
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Process profile referenced in bundle not found: {profilePath}");

@@ -407,6 +407,43 @@ public class ProfileCacheDb : IDisposable
     }
 
     /// <summary>
+    /// Gets machine profiles by printer model only (uses indexed query).
+    /// This is the simplest query - just match the printer_model field directly.
+    /// </summary>
+    public async Task<List<MachineProfileDto>> GetMachineProfilesByPrinterModelAsync(
+        string printerModel,
+        CancellationToken cancellationToken = default)
+    {
+        if (_connection == null)
+        {
+            return [];
+        }
+
+        List<MachineProfileDto> profiles = [];
+
+        using SqliteCommand cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT json_data FROM machine_profiles 
+            WHERE printer_model = $printerModel COLLATE NOCASE
+            """;
+        cmd.Parameters.AddWithValue("$printerModel", printerModel);
+
+        using SqliteDataReader reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            string json = reader.GetString(0);
+            MachineProfileDto? profile = JsonSerializer.Deserialize<MachineProfileDto>(json);
+            if (profile != null)
+            {
+                profiles.Add(profile);
+            }
+        }
+
+        return profiles;
+    }
+
+    /// <summary>
     /// Gets machine profiles by manufacturer AND printer model (uses indexed query).
     /// </summary>
     public async Task<List<MachineProfileDto>> GetMachineProfilesByModelAsync(

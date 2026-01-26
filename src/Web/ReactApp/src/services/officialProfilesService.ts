@@ -37,6 +37,29 @@ export interface BulkImportFromWorkerResult {
   duplicated: number;
 }
 
+/**
+ * Request for selective profile import from the Profile Import Wizard.
+ */
+export interface SelectiveProfileImportRequest {
+  manufacturerName: string;
+  selectedMachineProfiles: string[];
+  selectedProcessProfiles: string[];
+  selectedFilamentProfiles: string[];
+}
+
+/**
+ * Result of selective profile import operation.
+ */
+export interface SelectiveProfileImportResult {
+  printerModelId: string;
+  machineProfilesImported: number;
+  processProfilesImported: number;
+  filamentProfilesImported: number;
+  totalImported: number;
+  skipped: number;
+  error?: string;
+}
+
 const base = `${getApiBaseUrl()}/slicer/profiles`;
 
 async function handle<T>(res: Response): Promise<T> {
@@ -124,6 +147,26 @@ export const officialProfilesService = {
       headers: getAuthHeaders(),
     });
     return handle<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }>(res);
+  },
+
+  /**
+   * Import selected profiles from OrcaSlicer worker for a specific printer model.
+   * Used by the Profile Import Wizard after user selects which profiles to import.
+   * 
+   * @param modelId - The printer model ID from the catalog
+   * @param request - The selective import request containing selected profile names
+   * @returns Result with counts of imported/skipped profiles
+   */
+  async importSelectedProfilesForModel(
+    modelId: string,
+    request: SelectiveProfileImportRequest
+  ): Promise<SelectiveProfileImportResult> {
+    const res = await fetch(`${base}/import-selected-for-model/${modelId}`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+    return handle<SelectiveProfileImportResult>(res);
   },
 };
 
