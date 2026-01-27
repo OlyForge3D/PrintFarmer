@@ -458,6 +458,11 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceA
 // This handles cases where the API restarts while a print completes
 builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
 
+// History Seeding - Periodically seeds job history from connected printers
+// This captures jobs dispatched outside of PrintFarmer (e.g., via Mainsail/Fluidd)
+builder.Services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
+
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
 

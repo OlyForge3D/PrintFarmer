@@ -21,9 +21,13 @@ public class PrintJob
 
     public string Name { get; set; } = string.Empty; // Display name for the job
 
-    public Guid GcodeFileId { get; set; }
+    /// <summary>
+    /// The G-code file for this job. Nullable for history-seeded jobs where the
+    /// original file may not exist in PrintFarmer's library.
+    /// </summary>
+    public Guid? GcodeFileId { get; set; }
 
-    public GcodeFile GcodeFile { get; set; } = null!;
+    public GcodeFile? GcodeFile { get; set; }
 
     public Guid? AssignedPrinterId { get; set; }
 
@@ -66,6 +70,26 @@ public class PrintJob
     public DateTime UpdatedAt { get; set; }
 
     public DateTime QueuedAt { get; set; }
+
+    // History Seeding: Track external job source for deduplication
+
+    /// <summary>
+    /// External job ID from the printer backend (e.g., Moonraker's JobId).
+    /// Used for deduplication when seeding history from printers.
+    /// </summary>
+    public string? ExternalJobId { get; set; }
+
+    /// <summary>
+    /// The printer that originally reported this job during history seeding.
+    /// Combined with ExternalJobId forms a unique composite key for deduplication.
+    /// </summary>
+    public Guid? SourcePrinterId { get; set; }
+
+    /// <summary>
+    /// Flag indicating this job was seeded from printer history rather than
+    /// created through PrintFarmer's job queue.
+    /// </summary>
+    public bool WasSeededFromHistory { get; set; }
 
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();

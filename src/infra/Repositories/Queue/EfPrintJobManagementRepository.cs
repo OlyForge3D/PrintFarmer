@@ -12,6 +12,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
     // ============= BASIC CRUD OPERATIONS =============
+    public async Task<PrintJob?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        return await _context.PrintJobs.FindAsync([id], ct);
+    }
+
     public async Task<PrintJob?> GetByIdWithRelationsAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.PrintJobs
@@ -21,11 +26,23 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .FirstOrDefaultAsync(pj => pj.Id == id, ct);
     }
 
+    public async Task<PrintJob?> GetByIdWithGcodeFileAsync(Guid id, CancellationToken ct = default)
+    {
+        return await _context.PrintJobs
+            .Include(pj => pj.GcodeFile)
+            .FirstOrDefaultAsync(pj => pj.Id == id, ct);
+    }
+
     public async Task<PrintJob> AddAsync(PrintJob job, CancellationToken ct = default)
     {
         _ = await _context.PrintJobs.AddAsync(job, ct);
         _ = await _context.SaveChangesAsync(ct);
         return job;
+    }
+
+    public void Add(PrintJob job)
+    {
+        _context.PrintJobs.Add(job);
     }
 
     public async Task<PrintJob> UpdateAsync(PrintJob job, CancellationToken ct = default)
@@ -311,5 +328,48 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     {
         _context.PrintJobs.UpdateRange(jobs);
         _ = await _context.SaveChangesAsync(ct);
+    }
+
+    // ============= HISTORY SEEDING OPERATIONS =============
+    public async Task<List<Printer>> GetEnabledPrintersAsync(CancellationToken ct = default)
+    {
+        return await _context.Printers
+            .AsNoTracking()
+            .Where(p => p.IsEnabled)
+            .ToListAsync(ct);
+    }
+
+    public async Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default)
+    {
+        List<string> externalIds = await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => pj.SourcePrinterId == printerId && pj.ExternalJobId != null)
+            .Select(pj => pj.ExternalJobId!)
+            .ToListAsync(ct);
+
+        return externalIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default)
+    {
+        return await _context.PrintJobs
+            .FirstOrDefaultAsync(
+                pj => pj.SourcePrinterId == printerId && pj.ExternalJobId == externalJobId,
+                ct);
+    }
+
+    public async Task<GcodeFile?> FindGcodeFileByFilenameAsync(string filename, CancellationToken ct = default)
+    {
+        string name = Path.GetFileName(filename);
+        return await _context.GcodeFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(g => g.Name == name || g.FileName == name, ct);
+    }
+
+    public async Task<int> GetMaxQueuePositionAsync(CancellationToken ct = default)
+    {
+        return await _context.PrintJobs
+            .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
+            .MaxAsync(pj => (int?)pj.QueuePosition, ct) ?? -1;
     }
 }

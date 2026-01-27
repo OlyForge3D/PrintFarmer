@@ -11,14 +11,30 @@ public interface IPrintJobManagementRepository
     // ============= BASIC CRUD OPERATIONS =============
 
     /// <summary>
+    /// Get a print job by ID (simple lookup, no related entities).
+    /// </summary>
+    Task<PrintJob?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Get a print job by ID with all related entities (GcodeFile, AssignedPrinter, Model).
     /// </summary>
     Task<PrintJob?> GetByIdWithRelationsAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
+    /// Get a print job by ID with GcodeFile relation loaded.
+    /// </summary>
+    Task<PrintJob?> GetByIdWithGcodeFileAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Add a new print job to the database.
     /// </summary>
     Task<PrintJob> AddAsync(PrintJob job, CancellationToken ct = default);
+
+    /// <summary>
+    /// Add a print job to the change tracker without saving.
+    /// Call SaveChangesAsync() separately to persist.
+    /// </summary>
+    void Add(PrintJob job);
 
     /// <summary>
     /// Update an existing print job.
@@ -150,6 +166,33 @@ public interface IPrintJobManagementRepository
     /// Update multiple jobs in a single transaction.
     /// </summary>
     Task UpdateManyAsync(IEnumerable<PrintJob> jobs, CancellationToken ct = default);
+
+    // ============= HISTORY SEEDING OPERATIONS =============
+
+    /// <summary>
+    /// Get all enabled printers (for history seeding).
+    /// </summary>
+    Task<List<Printer>> GetEnabledPrintersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Get external job IDs for a specific printer (for duplicate detection during history seeding).
+    /// </summary>
+    Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a job by external job ID and source printer ID (for history seeding updates).
+    /// </summary>
+    Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Find a GCode file by filename (for history seeding).
+    /// </summary>
+    Task<GcodeFile?> FindGcodeFileByFilenameAsync(string filename, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get the maximum queue position across all queued/printing jobs.
+    /// </summary>
+    Task<int> GetMaxQueuePositionAsync(CancellationToken ct = default);
 }
 
 /// <summary>

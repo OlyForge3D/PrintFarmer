@@ -41,10 +41,11 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
                 v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                 v => v == null ? null : JsonSerializer.Deserialize<Guid[]>(v, (JsonSerializerOptions?)null));
 
-        // Foreign key to GcodeFile (no navigation back from GcodeFile)
+        // Foreign key to GcodeFile (optional - history-seeded jobs may not have a G-code file)
         builder.HasOne(pj => pj.GcodeFile)
             .WithMany()
             .HasForeignKey(pj => pj.GcodeFileId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.NoAction);
 
         // Foreign key to Printer (optional - job may be unassigned)
@@ -59,10 +60,26 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
             .HasForeignKey(h => h.JobId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // History seeding fields
+        builder.Property(pj => pj.ExternalJobId).HasMaxLength(255);
+        builder.Property(pj => pj.WasSeededFromHistory).HasDefaultValue(false);
+
         // Indexes for common queries
         builder.HasIndex(pj => pj.Status);
         builder.HasIndex(pj => pj.QueuedAt);
         builder.HasIndex(pj => pj.Priority);
         builder.HasIndex(pj => pj.AssignedPrinterId);
+
+        // Composite unique index for history seeding deduplication
+        // Prevents duplicate jobs when seeding from the same printer
+        // Note: PostgreSQL syntax differs from SQL Server - using provider-agnostic approach
+        // The partial unique index ensures uniqueness only when both fields are NOT NULL
+        builder.HasIndex(pj => new { pj.ExternalJobId, pj.SourcePrinterId })
+            .IsUnique()
+            .HasDatabaseName("IX_PrintJobs_ExternalJobId_SourcePrinterId");
+
+        // Index for efficient lookup by external job ID and source printer (for history seeding)
+        builder.HasIndex(pj => pj.SourcePrinterId)
+            .HasDatabaseName("IX_PrintJobs_SourcePrinterId");
     }
 }

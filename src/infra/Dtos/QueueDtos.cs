@@ -138,7 +138,11 @@ public class JobQueuePrintJobDto
 {
     public Guid Id { get; set; }
 
-    public Guid GcodeFileId { get; set; }
+    /// <summary>
+    /// G-code file ID. Nullable for history-seeded jobs where the original
+    /// file may not exist in PrintFarmer's library.
+    /// </summary>
+    public Guid? GcodeFileId { get; set; }
 
     public string GcodeFileName { get; set; } = string.Empty;
 

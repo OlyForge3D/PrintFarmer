@@ -27,7 +27,11 @@ public class QueuedPrintJobDto
 
     public string Name { get; set; } = string.Empty;
 
-    public string GcodeFileId { get; set; } = string.Empty;
+    /// <summary>
+    /// G-code file ID. Nullable for history-seeded jobs where the original
+    /// file may not exist in PrintFarmer's library.
+    /// </summary>
+    public string? GcodeFileId { get; set; }
 
     public string? FileName { get; set; } // Original G-code filename for display
 

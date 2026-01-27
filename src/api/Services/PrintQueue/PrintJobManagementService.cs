@@ -1,5 +1,4 @@
 ﻿using Farm.Api.Services.Interfaces;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
@@ -7,7 +6,6 @@ using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.DTOs.PrintQueue;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Api.Services.PrintQueue;
 
@@ -15,12 +13,7 @@ namespace Farm.Api.Services.PrintQueue;
 /// Service for managing print jobs including CRUD operations, queue management,
 /// analytics, timeline visualization, and history tracking.
 /// </summary>
-/// <remarks>
-/// NOTE: This service is being incrementally migrated from AppDbContext to IPrintJobManagementRepository.
-/// New methods should use _repository. Legacy methods still use _dbContext and will be migrated.
-/// </remarks>
 public class PrintJobManagementService(
-    AppDbContext dbContext,
     IPrintJobManagementRepository repository,
     ILogger<PrintJobManagementService> logger,
     IPrintersService printersService,
@@ -28,10 +21,6 @@ public class PrintJobManagementService(
     INotificationService? notificationService = null,
     IRetryService? retryService = null) : IPrintJobManagementService
 {
-    // Legacy: Being phased out - use _repository for new code
-    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-
-    // New: Repository pattern - use this for new code and migrations
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
@@ -170,13 +159,10 @@ public class PrintJobManagementService(
     {
         try
         {
-            List<PrintJob> allCompletedJobs = await _dbContext.PrintJobs
-                .Where(pj => pj.Status == PrintJobStatus.Completed ||
-                            pj.Status == PrintJobStatus.Failed ||
-                            pj.Status == PrintJobStatus.Cancelled)
-                .ToListAsync(cancellationToken);
+            (List<PrintJob> jobs, int totalCount) = await _repository.GetHistoryAsync(
+                limit, offset, sortBy, cancellationToken);
 
-            var entries = allCompletedJobs
+            var entries = jobs
                 .Select(pj => new QueueHistoryEntryDto
                 {
                     Id = pj.Id.ToString(),
@@ -189,15 +175,12 @@ public class PrintJobManagementService(
                     ActualPrintTimeSeconds = (int?)pj.ActualPrintTime?.TotalSeconds ?? 0,
                     FailureReason = pj.FailureReason
                 })
-                .OrderByDescending(e => e.CompletedAtUtc)
-                .Skip(offset)
-                .Take(limit)
                 .ToList();
 
             return new QueueHistoryPageDto
             {
                 Entries = entries,
-                TotalCount = allCompletedJobs.Count,
+                TotalCount = totalCount,
                 CurrentPage = offset / limit,
                 PageSize = limit
             };
@@ -230,7 +213,7 @@ public class PrintJobManagementService(
             }
 
             // Verify gcode file exists
-            GcodeFile? gcodeFile = await _dbContext.GcodeFiles.FindAsync(new object[] { request.GcodeFileId }, cancellationToken);
+            GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(Guid.Parse(request.GcodeFileId), cancellationToken);
             if (gcodeFile == null)
             {
                 throw new InvalidOperationException($"G-code file {request.GcodeFileId} not found");
@@ -259,13 +242,10 @@ public class PrintJobManagementService(
             };
 
             // Calculate queue position
-            int maxPosition = await _dbContext.PrintJobs
-                .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
-                .MaxAsync(pj => (int?)pj.QueuePosition, cancellationToken) ?? -1;
+            int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
             job.QueuePosition = maxPosition + 1;
 
-            _dbContext.PrintJobs.Add(job);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            _ = await _repository.AddAsync(job, cancellationToken);
 
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
             return MapToQueuedPrintJobDto(job);
@@ -292,7 +272,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -324,7 +304,7 @@ public class PrintJobManagementService(
 
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} updated by user {UserId}", jobId, userId);
 
             return MapToQueuedPrintJobDto(job);
@@ -351,7 +331,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -360,7 +340,7 @@ public class PrintJobManagementService(
             job.Priority = newPriority;
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", jobId, newPriority, userId);
 
             return MapToQueuedPrintJobDto(job);
@@ -385,7 +365,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -399,7 +379,7 @@ public class PrintJobManagementService(
             job.Status = PrintJobStatus.Paused;
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} paused by user {UserId}", jobId, userId);
 
             // Send notification
@@ -427,7 +407,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -441,7 +421,7 @@ public class PrintJobManagementService(
             job.Status = PrintJobStatus.Printing;
             job.UpdatedAt = DateTime.UtcNow;
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} resumed by user {UserId}", jobId, userId);
 
             // Send notification
@@ -472,10 +452,7 @@ public class PrintJobManagementService(
         try
         {
             // Load job with related entities
-            PrintJob? job = await _dbContext.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken);
+            PrintJob? job = await _repository.GetByIdWithRelationsAsync(Guid.Parse(jobId), cancellationToken);
 
             if (job == null)
             {
@@ -504,7 +481,7 @@ public class PrintJobManagementService(
             job.Status = PrintJobStatus.Starting;
             job.ActualStartTime = DateTime.UtcNow;
             job.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
 
             // Use original filename for the printer (not the GUID-based storage filename)
             string printerFileName = job.GcodeFile.Name;
@@ -578,7 +555,7 @@ public class PrintJobManagementService(
             }
 
             job.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
 
             // Send notification for job start
             if (job.Status == PrintJobStatus.Printing)
@@ -609,7 +586,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
             if (job == null)
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
@@ -649,7 +626,7 @@ public class PrintJobManagementService(
             job.UpdatedAt = DateTime.UtcNow;
             job.ActualEndTime = DateTime.UtcNow;
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
 
             // Send notification
@@ -742,7 +719,7 @@ public class PrintJobManagementService(
             {
                 try
                 {
-                    PrintJob? job = await _dbContext.PrintJobs.FindAsync(new object[] { move.JobId }, cancellationToken);
+                    PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(move.JobId), cancellationToken);
                     if (job == null)
                     {
                         throw new InvalidOperationException($"Job {move.JobId} not found");
@@ -766,7 +743,7 @@ public class PrintJobManagementService(
 
             if (result.SuccessfulCount > 0)
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await _repository.SaveChangesAsync(cancellationToken);
             }
 
             _logger.LogInformation(
@@ -801,7 +778,7 @@ public class PrintJobManagementService(
             }
 
             // Find the job to rerun
-            PrintJob originalJob = await _dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken)
+            PrintJob originalJob = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken)
                 ?? throw new InvalidOperationException($"Job {jobId} not found");
 
             // Create new print job with same properties as original
@@ -824,13 +801,10 @@ public class PrintJobManagementService(
             };
 
             // Calculate queue position
-            int maxPosition = await _dbContext.PrintJobs
-                .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
-                .MaxAsync(pj => (int?)pj.QueuePosition, cancellationToken) ?? -1;
+            int maxPosition = await _repository.GetMaxQueuePositionAsync(cancellationToken);
             newJob.QueuePosition = maxPosition + 1;
 
-            _dbContext.PrintJobs.Add(newJob);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.AddAsync(newJob, cancellationToken);
 
             _logger.LogInformation(
                 "Job {JobId} rerun as {NewJobId} by user {UserId}",
@@ -848,28 +822,268 @@ public class PrintJobManagementService(
     // ============= HISTORY OPERATIONS (Phase 2) =============
 
     /// <summary>
-    /// Seed print job history from printer history (Phase 2)
+    /// Seed print job history from printer history APIs.
+    /// Jobs are identified by (ExternalJobId, SourcePrinterId) composite key.
+    /// Existing jobs are updated, new jobs are inserted (AddOrUpdate semantics).
     /// </summary>
-    /// <param name="printerIds">Optional list of printer identifiers to seed from.</param>
+    /// <param name="printerIds">Optional list of printer identifiers to seed from. If null, seeds from all printers.</param>
     /// <param name="daysBack">Number of days of history to seed.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>Summary of seeding operation with counts of added and updated jobs.</returns>
     public async Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
         int daysBack = 30,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("[HistorySeed] Starting history seeding for last {DaysBack} days", daysBack);
+
+        int totalAdded = 0;
+        int totalUpdated = 0;
+        int totalSkipped = 0;
+        int printersProcessed = 0;
+
         try
         {
-            _logger.LogInformation("Seeding history from printers for last {DaysBack} days", daysBack);
+            // Get all printers or filter by provided IDs
+            List<Printer> printers = await _repository.GetEnabledPrintersAsync(cancellationToken);
 
-            // TODO: Implement in Phase 2 when PrintJobHistory table is added
-            await Task.CompletedTask;
+            if (printerIds?.Count > 0)
+            {
+                HashSet<Guid> filterIds = printerIds
+                    .Where(id => Guid.TryParse(id, out _))
+                    .Select(id => Guid.Parse(id))
+                    .ToHashSet();
+                printers = printers.Where(p => filterIds.Contains(p.Id)).ToList();
+            }
+
+            _logger.LogInformation("[HistorySeed] Processing {PrinterCount} printer(s)", printers.Count);
+
+            DateTime sinceDate = DateTime.UtcNow.AddDays(-daysBack);
+
+            foreach (Printer printer in printers)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    (int added, int updated, int skipped) = await SeedHistoryFromSinglePrinterAsync(
+                        printer, sinceDate, cancellationToken);
+
+                    totalAdded += added;
+                    totalUpdated += updated;
+                    totalSkipped += skipped;
+                    printersProcessed++;
+
+                    _logger.LogInformation(
+                        "[HistorySeed] Printer {PrinterName} ({PrinterId}): Added={Added}, Updated={Updated}, Skipped={Skipped}",
+                        printer.Name, printer.Id, added, updated, skipped);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[HistorySeed] Failed to seed history from printer {PrinterName} ({PrinterId})",
+                        printer.Name, printer.Id);
+                }
+            }
+
+            _logger.LogInformation(
+                "[HistorySeed] Completed: Printers={PrintersProcessed}, Added={TotalAdded}, Updated={TotalUpdated}, Skipped={TotalSkipped}",
+                printersProcessed, totalAdded, totalUpdated, totalSkipped);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error seeding queue history");
+            _logger.LogError(ex, "[HistorySeed] Error seeding queue history");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Seeds history from a single printer using AddOrUpdate semantics.
+    /// </summary>
+    private async Task<(int Added, int Updated, int Skipped)> SeedHistoryFromSinglePrinterAsync(
+        Printer printer,
+        DateTime sinceDate,
+        CancellationToken cancellationToken)
+    {
+        int added = 0;
+        int updated = 0;
+        int skipped = 0;
+
+        // Get history from printer via PrintersService
+        HistoryListResponse history = await _printersService.GetHistoryListAsync(
+            printer.Id,
+            limit: 1000, // Reasonable limit per sync
+            start: 0,
+            since: sinceDate,
+            before: null,
+            order: "desc",
+            cancellationToken);
+
+        if (history.Jobs.Length == 0)
+        {
+            _logger.LogDebug("[HistorySeed] No history jobs from printer {PrinterName}", printer.Name);
+            return (0, 0, 0);
+        }
+
+        _logger.LogDebug(
+            "[HistorySeed] Retrieved {JobCount} history jobs from printer {PrinterName}",
+            history.Jobs.Length, printer.Name);
+
+        // Get all existing seeded jobs for this printer to check for duplicates
+        HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
+            printer.Id, cancellationToken);
+
+        foreach (HistoryJob historyJob in history.Jobs)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            // Skip jobs without a valid external ID
+            if (string.IsNullOrWhiteSpace(historyJob.JobId))
+            {
+                skipped++;
+                continue;
+            }
+
+            try
+            {
+                if (existingExternalJobIds.Contains(historyJob.JobId))
+                {
+                    // Job exists - update it
+                    PrintJob? existingJob = await _repository.GetByExternalIdAsync(
+                        printer.Id, historyJob.JobId, cancellationToken);
+
+                    if (existingJob != null)
+                    {
+                        UpdatePrintJobFromHistory(existingJob, historyJob);
+                        existingJob.UpdatedAt = DateTime.UtcNow;
+                        updated++;
+                    }
+                }
+                else
+                {
+                    // New job - create it
+                    PrintJob newJob = await CreatePrintJobFromHistoryAsync(historyJob, printer.Id, cancellationToken);
+
+                    // Using sync Add() is intentional - we're batching multiple entities and calling SaveChangesAsync at the end.
+                    // AddAsync() is only needed when the entity has value-generated properties requiring DB interaction.
+#pragma warning disable CA1849 // Call async methods when in an async method
+                    _repository.Add(newJob);
+#pragma warning restore CA1849
+                    existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
+                    added++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[HistorySeed] Failed to process history job {JobId}", historyJob.JobId);
+                skipped++;
+            }
+        }
+
+        // Save all changes for this printer
+        if (added > 0 || updated > 0)
+        {
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+
+        return (added, updated, skipped);
+    }
+
+    /// <summary>
+    /// Creates a new PrintJob entity from a HistoryJob record.
+    /// </summary>
+    private async Task<PrintJob> CreatePrintJobFromHistoryAsync(
+        HistoryJob historyJob,
+        Guid printerId,
+        CancellationToken cancellationToken = default)
+    {
+        DateTime startTime = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+        DateTime? endTime = historyJob.EndTime.HasValue
+            ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
+            : null;
+
+        return new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = Path.GetFileNameWithoutExtension(historyJob.Filename) ?? "Unknown",
+            Status = MapHistoryStatusToPrintJobStatus(historyJob.Status),
+            Priority = 0,
+            QueuePosition = 0,
+            ActualStartTime = startTime,
+            ActualEndTime = endTime,
+            ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null,
+            ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed / 1000.0 : null, // mm to grams approximation
+            CreatedAt = startTime,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = startTime,
+
+            // History seeding tracking
+            ExternalJobId = historyJob.JobId,
+            SourcePrinterId = printerId,
+            WasSeededFromHistory = true,
+
+            // Associate with printer
+            AssignedPrinterId = printerId,
+
+            // Try to find matching G-code file by filename
+            GcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken)
+        };
+    }
+
+    /// <summary>
+    /// Updates an existing PrintJob entity with data from a HistoryJob record.
+    /// </summary>
+    private void UpdatePrintJobFromHistory(PrintJob existingJob, HistoryJob historyJob)
+    {
+        DateTime startTime = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+        DateTime? endTime = historyJob.EndTime.HasValue
+            ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
+            : null;
+
+        // Update mutable fields
+        existingJob.Status = MapHistoryStatusToPrintJobStatus(historyJob.Status);
+        existingJob.ActualStartTime = startTime;
+        existingJob.ActualEndTime = endTime;
+        existingJob.ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null;
+        existingJob.ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed / 1000.0 : null;
+
+        // Don't overwrite printer assignment or G-code file association
+    }
+
+    /// <summary>
+    /// Maps Moonraker history status strings to PrintJobStatus enum.
+    /// </summary>
+    private static PrintJobStatus MapHistoryStatusToPrintJobStatus(string historyStatus)
+    {
+        return historyStatus?.ToLowerInvariant() switch
+        {
+            "completed" => PrintJobStatus.Completed,
+            "cancelled" => PrintJobStatus.Cancelled,
+            "error" => PrintJobStatus.Failed,
+            "in_progress" or "printing" => PrintJobStatus.Printing,
+            "paused" => PrintJobStatus.Paused,
+            "standby" or "ready" => PrintJobStatus.Queued,
+            _ => PrintJobStatus.Completed // Default for unknown statuses from history
+        };
+    }
+
+    /// <summary>
+    /// Attempts to find a matching G-code file by filename.
+    /// Returns null if no match found (GcodeFileId is nullable for history-seeded jobs).
+    /// </summary>
+    private async Task<Guid?> FindGcodeFileIdByFilenameAsync(string filename, CancellationToken cancellationToken = default)
+    {
+        // Try to find by original name (without path)
+        string name = Path.GetFileName(filename);
+
+        GcodeFile? match = await _repository.FindGcodeFileByFilenameAsync(name, cancellationToken);
+
+        return match?.Id;
     }
 
     // ============= PRIVATE HELPERS =============
@@ -891,7 +1105,7 @@ public class PrintJobManagementService(
         {
             Id = job.Id.ToString(),
             Name = job.Name,
-            GcodeFileId = job.GcodeFileId.ToString(),
+            GcodeFileId = job.GcodeFileId?.ToString(),
             FileName = job.GcodeFile?.Name, // Original filename for display (may be null if GcodeFile not loaded)
             AssignedPrinterId = job.AssignedPrinterId?.ToString(),
             Status = job.Status.ToString(),
@@ -959,10 +1173,7 @@ public class PrintJobManagementService(
                 return null;
             }
 
-            PrintJob? job = await _dbContext.PrintJobs
-                .Include(pj => pj.GcodeFile)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+            PrintJob? job = await _repository.GetByIdWithGcodeFileAsync(Guid.Parse(jobId), cancellationToken);
 
             return job != null ? MapToQueuedPrintJobDto(job) : null;
         }
@@ -996,8 +1207,7 @@ public class PrintJobManagementService(
                 throw new ArgumentNullException(nameof(updates), "Update data is required");
             }
 
-            PrintJob? job = await _dbContext.PrintJobs
-                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
 
             if (job == null)
             {
@@ -1053,7 +1263,7 @@ public class PrintJobManagementService(
             }
 
             job.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
                 "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
@@ -1095,8 +1305,7 @@ public class PrintJobManagementService(
                 throw new ArgumentException("Notes must be 500 characters or less", nameof(notes));
             }
 
-            PrintJob? job = await _dbContext.PrintJobs
-                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+            PrintJob? job = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken);
 
             if (job == null)
             {
@@ -1105,7 +1314,7 @@ public class PrintJobManagementService(
 
             job.Notes = notes;
             job.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Notes updated for job {JobId}", jobId);
             return true;
@@ -1138,40 +1347,23 @@ public class PrintJobManagementService(
     {
         try
         {
-            IQueryable<PrintJob> query = _dbContext.PrintJobs
-                .Include(pj => pj.AssignedPrinter)
-                .AsQueryable();
-
-            // Apply date filters
-            if (dateFrom.HasValue)
-            {
-                query = query.Where(pj => pj.ActualStartTime >= dateFrom || pj.CreatedAt >= dateFrom);
-            }
-
-            if (dateTo.HasValue)
-            {
-                query = query.Where(pj => pj.ActualEndTime <= dateTo || pj.CreatedAt <= dateTo);
-            }
-
-            // Apply printer filter
-            if (!string.IsNullOrEmpty(printerId))
-            {
-                query = query.Where(pj => pj.AssignedPrinterId.ToString() == printerId);
-            }
+            Guid? printerGuid = !string.IsNullOrEmpty(printerId) ? Guid.Parse(printerId) : null;
+            PrintJobStatus? statusFilter = null;
 
             // Apply status filter
-            if (!string.IsNullOrEmpty(filterStatus))
+            if (!string.IsNullOrEmpty(filterStatus) &&
+                Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus status))
             {
-                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out PrintJobStatus status))
-                {
-                    query = query.Where(pj => pj.Status == status);
-                }
+                statusFilter = status;
             }
 
-            List<PrintJob> jobs = await query
-                .OrderByDescending(pj => pj.CreatedAt)
-                .Take(limit)
-                .ToListAsync(cancellationToken);
+            List<PrintJob> jobs = await _repository.GetTimelineJobsAsync(
+                dateFrom,
+                dateTo,
+                printerGuid,
+                statusFilter,
+                limit,
+                cancellationToken);
 
             var events = jobs.Select(job => new TimelineEventDto
             {
@@ -1216,9 +1408,7 @@ public class PrintJobManagementService(
                 throw new ArgumentException("Job ID is required", nameof(jobId));
             }
 
-            PrintJob? job = await _dbContext.PrintJobs
-                .Include(pj => pj.StateHistory)
-                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+            PrintJob? job = await _repository.GetJobWithStateHistoryAsync(Guid.Parse(jobId), cancellationToken);
 
             if (job == null)
             {
@@ -1316,29 +1506,10 @@ public class PrintJobManagementService(
     {
         try
         {
-            IQueryable<PrintJob> query = _dbContext.PrintJobs
-                .Include(pj => pj.AssignedPrinter)
-                .Where(pj => pj.Status == PrintJobStatus.Completed || pj.Status == PrintJobStatus.Failed)
-                .AsQueryable();
+            Guid? printerGuid = !string.IsNullOrEmpty(printerId) ? Guid.Parse(printerId) : null;
 
-            // Apply date filters
-            if (dateFrom.HasValue)
-            {
-                query = query.Where(pj => pj.ActualEndTime >= dateFrom);
-            }
-
-            if (dateTo.HasValue)
-            {
-                query = query.Where(pj => pj.ActualEndTime <= dateTo);
-            }
-
-            // Apply printer filter
-            if (!string.IsNullOrEmpty(printerId))
-            {
-                query = query.Where(pj => pj.AssignedPrinterId.ToString() == printerId);
-            }
-
-            List<PrintJob> jobs = await query.ToListAsync(cancellationToken);
+            List<PrintJob> jobs = await _repository.GetCompletedJobsForAnalyticsAsync(
+                printerGuid, dateFrom, dateTo, cancellationToken);
 
             if (jobs.Count == 0)
             {

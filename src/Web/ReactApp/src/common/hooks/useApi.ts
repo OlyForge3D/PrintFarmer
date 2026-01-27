@@ -23,6 +23,7 @@ import {
   ManufacturerDto,
   ManufacturersByContext,
   NozzleModelDefinition,
+  PrinterBackendCapabilitiesDto,
   PrinterCapabilitiesDto,
   PrinterModelDto,
   Printer,
@@ -230,7 +231,7 @@ export function useCreatePrinter() {
       const temp: Printer = {
         id: `temp-${Date.now()}`,
         name: printer.name,
-        serverUrl: printer.serverUrl,
+        backendUrl: printer.serverUrl,
         notes: printer.notes,
         isOnline: false,
         isReachable: false,
