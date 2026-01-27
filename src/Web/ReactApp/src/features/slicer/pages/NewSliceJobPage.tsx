@@ -5,8 +5,9 @@ import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobServi
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
+import { apiClient } from '@/services/api';
 import * as signalR from '@microsoft/signalr';
-import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
@@ -104,10 +105,8 @@ export const NewSliceJobPage: React.FC = () => {
   const { data: printers = [] } = useQuery({
     queryKey: ['printers'],
     queryFn: async () => {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to load printers');
-      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; manufacturerName?: string; modelName?: string }>>;
+      const printerList = await apiClient.getPrinters();
+      return printerList as Array<{ id: string; name: string; model?: string; modelId?: string; manufacturerName?: string; modelName?: string }>;
     },
     staleTime: 30_000
   });
@@ -117,10 +116,8 @@ export const NewSliceJobPage: React.FC = () => {
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: async () => {
       if (!selectedPrinterId) return null;
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/printers/${selectedPrinterId}/details`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to load printer details');
-      return res.json() as Promise<{
+      const details = await apiClient.getPrinterDetails(selectedPrinterId);
+      return details as {
         id: string;
         name: string;
         manufacturerName?: string;
@@ -128,7 +125,7 @@ export const NewSliceJobPage: React.FC = () => {
         modelMaxX?: number;
         modelMaxY?: number;
         modelMaxZ?: number;
-      }>;
+      };
     },
     enabled: !!selectedPrinterId,
     staleTime: 30_000
@@ -224,16 +221,8 @@ export const NewSliceJobPage: React.FC = () => {
   const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      const apiBase = !baseUrl || baseUrl.trim() === '' ? '/api' : baseUrl;
-      const token = localStorage.getItem('auth-token');
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${apiBase}/3d-models`, { headers });
-      if (!res.ok) throw new Error(await res.text() || 'Failed to load models');
-      const json = await res.json();
-      return (json as unknown[]).map(obj => {
+      const response = await apiClient.get<unknown[]>('/3d-models');
+      return response.data.map(obj => {
         const m = obj as { id: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
         return {
           id: m.id,

@@ -4,7 +4,7 @@
  */
 
 import { WorkerResponse } from '@/types/worker';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from './api';
 
 export interface WorkerJobResponse {
   jobId: string;
@@ -17,73 +17,44 @@ export interface WorkerJobResponse {
 }
 
 class WorkersService {
-  private getBase(): string {
-    return `${getApiBaseUrl()}/workers`;
-  }
-
   /**
    * Get all available workers (online with free slots)
    */
   async getAvailableWorkers(limit: number = 100): Promise<WorkerResponse[]> {
-    const response = await fetch(`${this.getBase()}/available?limit=${limit}`, {
-      headers: getAuthHeaders()
-    });
-    if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to fetch available workers');
-    }
-    return response.json();
+    const response = await apiClient.get<WorkerResponse[]>(`/workers/available?limit=${limit}`);
+    return response.data;
   }
 
   /**
    * Get all workers
    */
   async getAllWorkers(limit: number = 100, offset: number = 0): Promise<WorkerResponse[]> {
-    const response = await fetch(`${this.getBase()}?limit=${limit}&offset=${offset}`, {
-      headers: getAuthHeaders()
-    });
-    if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to fetch workers');
-    }
-    return response.json();
+    const response = await apiClient.get<WorkerResponse[]>(`/workers?limit=${limit}&offset=${offset}`);
+    return response.data;
   }
 
   /**
    * Get workers by status
    */
   async getWorkersByStatus(status: string, limit: number = 100): Promise<WorkerResponse[]> {
-    const response = await fetch(`${this.getBase()}/by-status/${encodeURIComponent(status)}?limit=${limit}`, {
-      headers: getAuthHeaders()
-    });
-    if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to fetch workers by status');
-    }
-    return response.json();
+    const response = await apiClient.get<WorkerResponse[]>(`/workers/by-status/${encodeURIComponent(status)}?limit=${limit}`);
+    return response.data;
   }
 
   /**
    * Get worker by ID
    */
   async getWorkerById(id: string): Promise<WorkerResponse> {
-    const response = await fetch(`${this.getBase()}/${id}`, {
-      headers: getAuthHeaders()
-    });
-    if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to fetch worker');
-    }
-    return response.json();
+    const response = await apiClient.get<WorkerResponse>(`/workers/${id}`);
+    return response.data;
   }
 
   /**
    * Get active jobs assigned to a specific worker
    */
   async getWorkerJobs(workerId: string): Promise<WorkerJobResponse[]> {
-    const response = await fetch(`${this.getBase()}/${workerId}/jobs`, {
-      headers: getAuthHeaders()
-    });
-    if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to fetch worker jobs');
-    }
-    return response.json();
+    const response = await apiClient.get<WorkerJobResponse[]>(`/workers/${workerId}/jobs`);
+    return response.data;
   }
 
   /**

@@ -1,5 +1,5 @@
 // Service for importing official slicer profiles for registered printers
-import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
+import { apiClient } from "./api";
 import { SlicerProfileListItem } from "./slicerProfilesService";
 import { ImportedProfileNamesDto } from "@/features/tasks/components/profile-wizard/types";
 
@@ -61,37 +61,14 @@ export interface SelectiveProfileImportResult {
   error?: string;
 }
 
-const base = `${getApiBaseUrl()}/slicer/profiles`;
-
-async function handle<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json() as Promise<T>;
-}
-
-function getAuthHeaders(): HeadersInit {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-  };
-  const token = localStorage.getItem("auth-token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  return headers;
-}
-
 export const officialProfilesService = {
   /**
    * Get available OrcaSlicer profiles from the worker service
    * These are the actual profiles from OrcaSlicer's local installation
    */
   async getAvailableProfilesFromWorker(): Promise<SlicerProfileListItem[]> {
-    const res = await fetch(`${base}/available-from-worker`, {
-      headers: getAuthHeaders(),
-    });
-    return handle<SlicerProfileListItem[]>(res);
+    const response = await apiClient.get<SlicerProfileListItem[]>('/slicer/profiles/available-from-worker');
+    return response.data;
   },
 
   /**
@@ -101,10 +78,8 @@ export const officialProfilesService = {
   async getAvailableProfilesForPrinter(
     printerId: string
   ): Promise<SlicerProfileListItem[]> {
-    const res = await fetch(`${base}/available-for-printer/${printerId}`, {
-      headers: getAuthHeaders(),
-    });
-    return handle<SlicerProfileListItem[]>(res);
+    const response = await apiClient.get<SlicerProfileListItem[]>(`/slicer/profiles/available-for-printer/${printerId}`);
+    return response.data;
   },
 
   /**
@@ -114,12 +89,8 @@ export const officialProfilesService = {
     printerId: string,
     request: BulkProfileImportRequest
   ): Promise<BulkProfileImportResult> {
-    const res = await fetch(`${base}/bulk-import-for-printer/${printerId}`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(request),
-    });
-    return handle<BulkProfileImportResult>(res);
+    const response = await apiClient.post<BulkProfileImportResult>(`/slicer/profiles/bulk-import-for-printer/${printerId}`, request);
+    return response.data;
   },
 
   /**
@@ -130,12 +101,8 @@ export const officialProfilesService = {
     printerId: string,
     request: BulkImportFromWorkerRequest
   ): Promise<BulkImportFromWorkerResult> {
-    const res = await fetch(`${base}/bulk-import-from-worker/${printerId}`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(request),
-    });
-    return handle<BulkImportFromWorkerResult>(res);
+    const response = await apiClient.post<BulkImportFromWorkerResult>(`/slicer/profiles/bulk-import-from-worker/${printerId}`, request);
+    return response.data;
   },
 
   /**
@@ -143,11 +110,8 @@ export const officialProfilesService = {
    * Clears existing system profiles and fetches fresh ones from OrcaSlicer worker.
    */
   async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }> {
-    const res = await fetch(`${base}/system/orca/force-reseed-from-worker`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-    });
-    return handle<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }>(res);
+    const response = await apiClient.post<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }>('/slicer/profiles/system/orca/force-reseed-from-worker');
+    return response.data;
   },
 
   /**
@@ -162,12 +126,8 @@ export const officialProfilesService = {
     modelId: string,
     request: SelectiveProfileImportRequest
   ): Promise<SelectiveProfileImportResult> {
-    const res = await fetch(`${base}/import-selected-for-model/${modelId}`, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(request),
-    });
-    return handle<SelectiveProfileImportResult>(res);
+    const response = await apiClient.post<SelectiveProfileImportResult>(`/slicer/profiles/import-selected-for-model/${modelId}`, request);
+    return response.data;
   },
 
   /**
@@ -180,9 +140,7 @@ export const officialProfilesService = {
   async getImportedProfileNamesForModel(
     modelId: string
   ): Promise<ImportedProfileNamesDto> {
-    const res = await fetch(`${base}/imported-names/${modelId}`, {
-      headers: getAuthHeaders(),
-    });
-    return handle<ImportedProfileNamesDto>(res);
+    const response = await apiClient.get<ImportedProfileNamesDto>(`/slicer/profiles/imported-names/${modelId}`);
+    return response.data;
   },
 };

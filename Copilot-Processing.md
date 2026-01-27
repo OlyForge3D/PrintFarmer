@@ -1,9 +1,57 @@
-# Copilot Processing: Selective Profile Import with Task System
+# Copilot Processing: Raw Fetch to apiClient Refactoring
 
-**Session**: Implementing selective profile import with TODO/Task system for profile management
-**Phase**: ✅ Phase 1 Complete - 4-Step Lazy Loading Wizard Implemented
+**Session**: Refactoring all services using raw `fetch()` to use centralized `apiClient` for consistent auth handling
+**Phase**: Phase 1 - Planning & Implementation
 
 ## Current Status (2026-01-24)
+
+**Previous Session**: Selective Profile Import with Task System (Phase 1 Complete)
+
+---
+
+## 🔄 RAW FETCH TO APICLIENT REFACTORING
+
+**Objective**: All frontend services should delegate HTTP calls to `apiClient` (Axios-based singleton) to ensure:
+- Authentication headers are automatically included
+- Correlation IDs are attached to all requests
+- Error handling is consistent
+- No duplicate auth header logic across services
+
+### Services to Refactor
+
+| Service | Fetch Calls | Status |
+|---------|-------------|--------|
+| printJobQueueService.ts | 1 (POST enqueue) | ✅ Complete |
+| slicerService.ts | 7 + XHR upload | ✅ Complete (XHR kept for progress) |
+| workersService.ts | 5 | ✅ Complete |
+| officialProfilesService.ts | 6 | ✅ Complete |
+| OrcaSlicerPage.tsx | 4 | ✅ Complete |
+| NewSliceJobPage.tsx | 3 | ✅ Complete |
+| ImportOfficialProfilesPage.tsx | 1 | ✅ Complete |
+| CloneProfilesModal.tsx | 2 | ✅ Complete |
+
+### Summary
+
+All services and components that were using raw `fetch()` have been refactored to use the centralized `apiClient`:
+
+1. **printJobQueueService.ts** - Now uses `apiClient.post()`
+2. **workersService.ts** - All 5 fetch calls replaced with `apiClient.get()`
+3. **officialProfilesService.ts** - All 6 fetch calls replaced with `apiClient.get()`/`apiClient.post()`
+4. **slicerService.ts** - 7 fetch calls replaced with apiClient; XHR retained for `uploadModel()` (progress tracking)
+5. **OrcaSlicerPage.tsx** - 4 fetch calls replaced with `apiClient` methods
+6. **NewSliceJobPage.tsx** - 3 fetch calls replaced with `apiClient` methods
+7. **ImportOfficialProfilesPage.tsx** - 1 fetch call replaced with `apiClient.getPrinters()`
+8. **CloneProfilesModal.tsx** - 2 fetch calls replaced with `apiClient.get()`/`apiClient.post()`
+
+### Verification
+
+- ✅ React build succeeds (14.04s)
+- ✅ All 499 React tests pass
+- ✅ No lint errors
+
+---
+
+## Previous Session Context (2026-01-24)
 
 **What's Working**:
 - ✅ UserTask entity and repository

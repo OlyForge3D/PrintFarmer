@@ -6,7 +6,7 @@ import { Button, Alert, Select, FormField, Checkbox } from '@/common/components/
 import { Download, Check } from 'lucide-react';
 import { officialProfilesService } from '@/services/officialProfilesService';
 import { PrinterBackend } from '@/types/api';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 
 interface PrinterListItem {
     id: string;
@@ -52,25 +52,14 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     const { data: printers = [] } = useQuery({
         queryKey: ['printers-for-profile-import'],
         queryFn: async () => {
-            const baseUrl = getApiBaseUrl();
-            const token = localStorage.getItem('auth-token');
-            const headers: HeadersInit = { 'Content-Type': 'application/json' };
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-
-            const res = await fetch(`${baseUrl}/printers`, { headers });
-            if (!res.ok) throw new Error('Failed to load printers');
-
-            const json = await res.json() as unknown[];
-            return json.map(p => {
-                const printer = p as { id?: string; name?: string; backend?: number; modelId?: string; modelName?: string };
-                return {
-                    id: printer.id || '',
-                    name: printer.name || 'Unknown',
-                    backend: printer.backend ?? 0,
-                    modelId: printer.modelId,
-                    modelName: printer.modelName
-                } as PrinterListItem;
-            });
+            const printerList = await apiClient.getPrinters();
+            return printerList.map(p => ({
+                id: p.id || '',
+                name: p.name || 'Unknown',
+                backend: p.backend ?? 0,
+                modelId: p.modelId,
+                modelName: p.modelName
+            } as PrinterListItem));
         },
         staleTime: 30_000
     });

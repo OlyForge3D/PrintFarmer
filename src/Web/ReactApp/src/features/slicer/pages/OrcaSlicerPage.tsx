@@ -10,9 +10,10 @@ import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { workersService } from '@/services/workersService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
+import { apiClient } from '@/services/api';
 import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
 import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
@@ -77,16 +78,14 @@ export const OrcaSlicerPage: React.FC = () => {
   const { data: printers = [] } = useQuery({
     queryKey: ['printers'],
     queryFn: async () => {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to load printers');
-      return res.json() as Promise<Array<{ 
+      const printerList = await apiClient.getPrinters();
+      return printerList as Array<{ 
         id: string; 
         name: string; 
         modelId?: string; 
         manufacturerName?: string; 
         modelName?: string;
-      }>>;
+      }>;
     },
     staleTime: 30_000
   });
@@ -95,10 +94,8 @@ export const OrcaSlicerPage: React.FC = () => {
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: async () => {
       if (!selectedPrinterId) return null;
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/printers/${selectedPrinterId}/details`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to load printer details');
-      return res.json() as Promise<{
+      const details = await apiClient.getPrinterDetails(selectedPrinterId);
+      return details as {
         id: string;
         name: string;
         manufacturerName?: string;
@@ -106,7 +103,7 @@ export const OrcaSlicerPage: React.FC = () => {
         modelMaxX?: number;
         modelMaxY?: number;
         modelMaxZ?: number;
-      }>;
+      };
     },
     enabled: !!selectedPrinterId,
     staleTime: 30_000
@@ -115,11 +112,8 @@ export const OrcaSlicerPage: React.FC = () => {
   const { data: models = [] } = useQuery<ModelListItem[], Error>({
     queryKey: ['modelsListBasic'],
     queryFn: async () => {
-      const apiBase = getApiBaseUrl();
-      const res = await fetch(`${apiBase}/3d-models`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(await res.text() || 'Failed to load models');
-      const json = await res.json();
-      return (json as unknown[]).map(obj => {
+      const response = await apiClient.get<unknown[]>('/3d-models');
+      return response.data.map(obj => {
         const m = obj as { id: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string };
         return {
           id: m.id,
@@ -242,14 +236,9 @@ export const OrcaSlicerPage: React.FC = () => {
         const formData = new FormData();
         formData.append('file', file);
         try {
+          const response = await apiClient.post<{ id: string; fileName: string }>('/3d-models/upload', formData);
+          const uploaded = response.data;
           const apiBase = getApiBaseUrl();
-          const res = await fetch(`${apiBase}/3d-models/upload`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: formData,
-          });
-          if (!res.ok) throw new Error('Upload failed');
-          const uploaded = await res.json() as { id: string; fileName: string };
           
           const ext = file.name.split('.').pop()?.toLowerCase() || 'stl';
           const newModel: LoadedModel = {
