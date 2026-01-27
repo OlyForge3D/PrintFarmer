@@ -6,6 +6,8 @@ export interface EnqueuePrintJobRequest {
   priority?: 'Low' | 'Normal' | 'High' | 'Urgent';
   requiredNozzleDiameter?: number;
   requiredMaterialType?: string;
+  /** Required printer model for auto-assign filtering (e.g., "QIDI X-Plus 4", "COREONEL") */
+  requiredPrinterModel?: string;
 }
 
 export interface PrintJobDto {

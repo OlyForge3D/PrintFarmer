@@ -24,19 +24,25 @@ public class JobQueueController(
     IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
-    /// Get queue overview with optional model filtering.
-    /// When model is specified, only returns printers compatible with that model (matching name or alias).
+    /// Get queue overview with optional compatibility filtering.
+    /// Filters printers by model, nozzle diameter, and/or material type.
+    /// All filtering is case-insensitive. Nozzle matching uses ±0.01mm tolerance.
     /// </summary>
-    /// <param name="model">Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")</param>
+    /// <param name="model">Optional printer model name or slicer alias (e.g., "COREONEL", "Prusa MK4")</param>
+    /// <param name="nozzle">Optional required nozzle diameter in mm (e.g., 0.4)</param>
+    /// <param name="material">Optional required material type (e.g., "PLA", "PCTG")</param>
     [HttpGet]
     [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<QueueOverviewDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<QueueOverviewDto>>> GetQueueAsync([FromQuery] string? model = null)
+    public async Task<ActionResult<IEnumerable<QueueOverviewDto>>> GetQueueAsync(
+        [FromQuery] string? model = null,
+        [FromQuery] decimal? nozzle = null,
+        [FromQuery] string? material = null)
     {
         try
         {
-            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(model, CancellationToken.None);
+            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(model, nozzle, material, CancellationToken.None);
             return Ok(dtos);
         }
         catch (Exception ex)

@@ -1597,12 +1597,17 @@ export class ApiClient {
   // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
   /**
-   * Get queue overview for available printers.
-   * When model is specified, only returns printers compatible with that model (matching name or alias).
-   * @param model Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")
+   * Get queue overview for available printers with compatibility filtering.
+   * All filtering is done server-side for consistency with auto-assign.
+   * @param model Optional printer model name or slicer alias (e.g., "COREONEL", "Prusa MK4")
+   * @param nozzle Optional required nozzle diameter in mm (e.g., 0.4)
+   * @param material Optional required material type (e.g., "PLA", "PCTG")
    */
-  async getQueueOverview(model?: string): Promise<QueueOverviewDto[]> {
-    const params = model ? { model } : {};
+  async getQueueOverview(model?: string, nozzle?: number, material?: string): Promise<QueueOverviewDto[]> {
+    const params: Record<string, string | number> = {};
+    if (model) params.model = model;
+    if (nozzle !== undefined) params.nozzle = nozzle;
+    if (material) params.material = material;
     const response = await this.client.get<QueueOverviewDto[]>("/job-queue", {
       params,
     });

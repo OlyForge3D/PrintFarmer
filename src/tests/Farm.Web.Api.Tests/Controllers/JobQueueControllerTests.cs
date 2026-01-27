@@ -51,7 +51,7 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<decimal?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(queueOverview);
 
         // Act
@@ -68,7 +68,7 @@ public class JobQueueControllerTests
     {
         // Arrange
         _queueServiceMock
-            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetQueueOverviewAsync(It.IsAny<string?>(), It.IsAny<decimal?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act

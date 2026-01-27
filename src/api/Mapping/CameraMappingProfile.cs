@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using Farm.Infrastructure;
 using Camera = Farm.Infrastructure.Domain.Camera;
 
