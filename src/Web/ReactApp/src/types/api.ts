@@ -1240,6 +1240,25 @@ export interface JobQueuePrintJob {
   updatedAt: Date;
 }
 
+/**
+ * Queue overview DTO - provides printer availability and queue status
+ * Used for displaying available printers when queueing a print job
+ */
+export interface QueueOverviewDto {
+  printerId: string;
+  printerName: string;
+  printerModel: string;
+  /** Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS") */
+  modelAliases?: string[];
+  isAvailable: boolean;
+  queuedJobsCount: number;
+  currentJobId?: string;
+  currentJobName?: string;
+  estimatedCompletionTime?: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+}
+
 // API response types
 export interface ApiResponse<T> {
   data: T;

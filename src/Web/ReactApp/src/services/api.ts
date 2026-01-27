@@ -41,6 +41,7 @@ import {
   PrinterFileDto,
   PrinterModelDto,
   QueuedPrintJobWithFileMetaDto,
+  QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
   StartDiscoveryRequest,
@@ -1594,6 +1595,19 @@ export class ApiClient {
   // ============ Job Queue methods ============
   // NOTE: This is the simpler job queue API for basic queue management.
   // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
+
+  /**
+   * Get queue overview for available printers.
+   * When model is specified, only returns printers compatible with that model (matching name or alias).
+   * @param model Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")
+   */
+  async getQueueOverview(model?: string): Promise<QueueOverviewDto[]> {
+    const params = model ? { model } : {};
+    const response = await this.client.get<QueueOverviewDto[]>("/job-queue", {
+      params,
+    });
+    return response.data;
+  }
 
   async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {
     const params = printerId ? { printerId } : {};

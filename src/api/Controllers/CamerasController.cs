@@ -64,41 +64,6 @@ public class CamerasController(
     }
 
     /// <summary>
-    /// Gets all cameras for display in the Camera View.
-    /// This includes both standalone cameras and printer-attached cameras that are enabled.
-    /// </summary>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>List of all cameras for display</returns>
-    /// <response code="200">Returns the list of display cameras</response>
-    /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
-    [HttpGet("display")]
-    [ProducesResponseType(typeof(IEnumerable<DisplayCameraDto>), 200)]
-    [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(CancellationToken ct)
-    {
-        try
-        {
-            if (!_startupStatus.IsReady)
-            {
-                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-            }
-
-            DisplayCameraDto[] cameras = await _cameraService.GetDisplayCamerasAsync(ct);
-            return Ok(cameras);
-        }
-        catch (InvalidOperationException)
-        {
-            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "[CamerasController] Exception in GetDisplayCamerasAsync: {Message}", ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
-        }
-    }
-
-    /// <summary>
     /// Gets all enabled standalone cameras.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>

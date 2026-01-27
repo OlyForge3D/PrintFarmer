@@ -1,9 +1,9 @@
 import React, { use, Suspense, useState, useMemo } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-import { queueService } from '@/services/queueService';
+import { apiClient } from '@/services/api';
 import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJobQueueService';
-import { GcodeFile } from '@/types/api';
+import { GcodeFile, QueueOverviewDto } from '@/types/api';
 
 interface Props {
   file: GcodeFile;
@@ -27,7 +27,7 @@ interface PrinterOption {
  * When a required model is specified, only fetches printers compatible with that model.
  */
 async function fetchPrinters(requiredModel?: string): Promise<PrinterOption[]> {
-  const list = await queueService.getQueueOverview(requiredModel);
+  const list = await apiClient.getQueueOverview(requiredModel);
   return list.map(p => ({
     id: p.printerId,
     name: p.printerName,

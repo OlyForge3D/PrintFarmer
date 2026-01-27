@@ -29,6 +29,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="model">Optional printer model name or slicer alias to filter by (e.g., "COREONEL", "Prusa MK4")</param>
     [HttpGet]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<QueueOverviewDto>), 200)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<QueueOverviewDto>>> GetQueueAsync([FromQuery] string? model = null)
@@ -85,6 +86,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job to retrieve.</param>
     [HttpGet("{id:guid}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
