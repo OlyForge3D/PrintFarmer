@@ -234,7 +234,7 @@ export const PrinterDashboard: React.FC = () => {
             {/* Maintenance Widgets */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <MaintenanceAlertsWidget maxAlerts={3} />
-              <MaintenanceOverviewWidget maxUpcoming={3} />
+              <MaintenanceOverviewWidget />
             </div>
 
             {/* System Health and Services */}

@@ -1779,3 +1779,59 @@ export interface BackgroundServicesSummary {
   servicesWithErrors: number;
   byCategory: Record<string, CategorySummary>;
 }
+
+// Camera Types - for standalone webcam management
+export interface CameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  createdAt: string;
+  updatedAt?: string;
+  isStandalone: boolean;
+}
+
+export interface CreateCameraDto {
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface UpdateCameraDto {
+  name?: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface ToggleCameraDto {
+  isEnabled: boolean;
+}
+
+// Combined camera view - shows both standalone and printer-attached cameras
+export interface DisplayCameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  isStandalone: boolean;
+  printerId?: string;
+  printerName?: string;
+  printerState?: string;
+  isPrinterOnline?: boolean;
+}

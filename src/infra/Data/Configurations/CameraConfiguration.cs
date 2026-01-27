@@ -1,0 +1,43 @@
+using Farm.Infrastructure.Domain;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Farm.Infrastructure.Data.Configurations;
+
+public class CameraConfiguration : IEntityTypeConfiguration<Camera>
+{
+    public void Configure(EntityTypeBuilder<Camera> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("Cameras");
+
+        builder.HasKey(c => c.Id);
+
+        builder.Property(c => c.Name)
+            .IsRequired()
+            .HasMaxLength(100);
+
+        builder.Property(c => c.Description)
+            .HasMaxLength(500);
+
+        builder.Property(c => c.StreamUrl)
+            .HasMaxLength(500);
+
+        builder.Property(c => c.SnapshotUrl)
+            .HasMaxLength(500);
+
+        builder.Property(c => c.Location)
+            .HasMaxLength(100);
+
+        builder.Property(c => c.IsEnabled)
+            .HasDefaultValue(true);
+
+        builder.Property(c => c.SortOrder)
+            .HasDefaultValue(0);
+
+        builder.HasIndex(c => c.Name);
+        builder.HasIndex(c => c.IsEnabled);
+        builder.HasIndex(c => c.SortOrder);
+    }
+}

@@ -25,7 +25,8 @@ import {
   LocationIcon,
   KeyIcon,
   DatabaseIcon,
-  CheckIcon
+  CheckIcon,
+  CameraIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -87,6 +88,11 @@ const navigation: NavigationElement[] = [
     icon: SpoolIcon
   },
   {
+    name: 'Cameras',
+    href: '/cameras',
+    icon: CameraIcon
+  },
+  {
     name: 'Maintenance',
     href: '/maintenance',
     icon: WrenchIcon,
@@ -121,6 +127,12 @@ const navigation: NavigationElement[] = [
     name: 'Tags',
     href: '/admin/tags',
     icon: TagIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Camera Admin',
+    href: '/admin/cameras',
+    icon: CameraIcon,
     requiredRole: 'farm_admin'
   },
   {

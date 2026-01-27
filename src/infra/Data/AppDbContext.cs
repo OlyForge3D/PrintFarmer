@@ -144,6 +144,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<MaintenanceAlert> MaintenanceAlerts => Set<MaintenanceAlert>();
 
+    // Cameras (standalone webcams not attached to printers)
+    public DbSet<Camera> Cameras => Set<Camera>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

@@ -40,6 +40,7 @@ import {
   PrinterFast,
   PrinterFileDto,
   PrinterModelDto,
+  QueuedPrintJobWithFileMetaDto,
   RegisterRequest,
   ResolveHostnameRequest,
   StartDiscoveryRequest,
@@ -2807,6 +2808,72 @@ export class ApiClient {
 
   async getApiKeySettings(): Promise<unknown> {
     const response = await this.client.get('/apikeys/settings');
+    return response.data;
+  }
+
+  // ============ Camera API methods ============
+  
+  /**
+   * Get all standalone cameras
+   */
+  async getAllCameras(): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.get('/cameras');
+    return response.data;
+  }
+
+  /**
+   * Get all enabled cameras (standalone only)
+   */
+  async getEnabledCameras(): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.get('/cameras/enabled');
+    return response.data;
+  }
+
+  /**
+   * Get combined display cameras (standalone + printer-attached)
+   * This is what should be shown in the Camera View
+   */
+  async getDisplayCameras(): Promise<import('@/types/api').DisplayCameraDto[]> {
+    const response = await this.client.get('/cameras/display');
+    return response.data;
+  }
+
+  /**
+   * Get a specific camera by ID
+   */
+  async getCameraById(id: string): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.get(`/cameras/${id}`);
+    return response.data;
+  }
+
+  /**
+   * Create a new standalone camera
+   */
+  async createCamera(request: import('@/types/api').CreateCameraDto): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.post('/cameras', request);
+    return response.data;
+  }
+
+  /**
+   * Update an existing camera
+   */
+  async updateCamera(id: string, request: import('@/types/api').UpdateCameraDto): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.put(`/cameras/${id}`, request);
+    return response.data;
+  }
+
+  /**
+   * Delete a camera
+   */
+  async deleteCamera(id: string): Promise<void> {
+    await this.client.delete(`/cameras/${id}`);
+  }
+
+  /**
+   * Toggle camera enabled status
+   */
+  async toggleCamera(id: string, isEnabled: boolean): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.patch(`/cameras/${id}/toggle`, { isEnabled });
     return response.data;
   }
 }

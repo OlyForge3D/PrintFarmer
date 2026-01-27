@@ -15,15 +15,6 @@ import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDis
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSkeleton';
 import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrinterCard';
-import { CameraCard } from '@/features/printers/components/CameraCard';
-import { 
-  GlassmorphismCard, 
-  SegmentedCard, 
-  StatusGlowCard, 
-  CompactDashboardCard, 
-  FlipCard, 
-  DrawerCard 
-} from '@/features/printers/components/ExperimentalPrinterCards';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
@@ -162,7 +153,8 @@ export function PrintersPage() {
     {
       key: 'v',
       handler: () => {
-        const modes: ViewMode[] = ['collapsed', 'camera', 'expandable', 'table', 'glass', 'segmented', 'statusGlow', 'dashboard', 'flip', 'drawer'];
+        //const modes: ViewMode[] = ['collapsed', 'expandable', 'table', 'glass', 'segmented', 'statusGlow', 'dashboard', 'flip', 'drawer'];
+        const modes: ViewMode[] = ['collapsed', 'expandable', 'table'];
         const currentIdx = modes.indexOf(viewMode);
         const nextMode = modes[(currentIdx + 1) % modes.length];
         setViewMode(nextMode);
@@ -343,15 +335,6 @@ export function PrintersPage() {
                 <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
                 <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
               </div>
-            ) : viewMode === 'camera' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
-                {userPrinters.map((p: Printer) => (
-                  <CameraCard
-                    key={p.id}
-                    printer={p}
-                  />
-                ))}
-              </div>
             ) : viewMode === 'collapsed' ? (
               <div className="flex gap-6 items-start min-w-0">
                 <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200 min-w-0">
@@ -368,6 +351,7 @@ export function PrintersPage() {
                   <div className="w-96 flex-shrink-0">
                     <PrinterDetailsSidebar
                       printerId={expandedPrinterId}
+                      printer={printersById[expandedPrinterId]}
                       onClose={() => setExpandedPrinterId(null)}
                     />
                   </div>
@@ -377,65 +361,6 @@ export function PrintersPage() {
               <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
                 {userPrinters.map((p) => (
                   <DetailedPrinterCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'glass' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <GlassmorphismCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'segmented' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <SegmentedCard
-                    key={p.id}
-                    printer={p}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'statusGlow' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <StatusGlowCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'dashboard' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <CompactDashboardCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'flip' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <FlipCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : viewMode === 'drawer' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <DrawerCard
                     key={p.id}
                     printer={p}
                     onEdit={() => handleEditPrinter(p)}
