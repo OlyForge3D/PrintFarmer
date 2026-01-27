@@ -80,11 +80,14 @@ namespace Farm.Web.Api.Services.Queue
                 : await _dataService.GetCompatiblePrintersAsync(requiredModel, ct);
 
             // Apply nozzle filter if specified (exact match with tolerance)
+            // Only printers with a matching nozzle configured are included
             if (requiredNozzle.HasValue)
             {
                 double required = (double)requiredNozzle.Value;
                 printers = printers
-                    .Where(p => p.Toolheads?.Any(t => t.NozzleModel != null && Math.Abs(t.NozzleModel.Diameter - required) <= 0.01) ?? false)
+                    .Where(p => p.Toolheads?.Any(t =>
+                        t.NozzleModel != null &&
+                        Math.Abs(t.NozzleModel.Diameter - required) <= 0.01) ?? false)
                     .ToList();
             }
 
@@ -100,7 +103,11 @@ namespace Farm.Web.Api.Services.Queue
 
             foreach (Printer printer in printers)
             {
-                List<PrintJob> queuedJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+                List<PrintJob> allJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+
+                // Count jobs with Queued or Assigned status for the QueuedJobsCount display
+                // Assigned = job is assigned to this printer but not yet printing
+                int queuedCount = allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned);
                 PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
 
                 // Get primary toolhead info (first toolhead or the one marked as primary)
@@ -127,10 +134,10 @@ namespace Farm.Web.Api.Services.Queue
                     PrinterModel = printer.Model?.Name ?? "Unknown",
                     ModelAliases = modelAliases,
                     IsAvailable = printer.IsAvailable,
-                    QueuedJobsCount = queuedJobs.Count,
+                    QueuedJobsCount = queuedCount,
                     CurrentJobId = currentJob?.Id,
                     CurrentJobName = currentJob?.Name,
-                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(queuedJobs, currentJob),
+                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(allJobs, currentJob),
                     NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                     SupportedMaterials = supportedMaterials
                 });

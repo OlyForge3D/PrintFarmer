@@ -5,6 +5,7 @@ import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 export interface QueueJobsTableProps {
   jobs: QueuedPrintJobWithFileMetaDto[];
   isLoading?: boolean;
+  dispatchingJobId?: string | null;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -16,6 +17,7 @@ export interface QueueJobsTableProps {
 export function QueueJobsTable({
   jobs,
   isLoading = false,
+  dispatchingJobId = null,
   onPause,
   onResume,
   onCancel,
@@ -39,7 +41,7 @@ export function QueueJobsTable({
     if (selectedJobs.size === jobs.length) {
       setSelectedJobs(new Set());
     } else {
-      setSelectedJobs(new Set(jobs.map((job) => job.id)));
+      setSelectedJobs(new Set(jobs.map((job) => job.job.id)));
     }
   };
 
@@ -188,8 +190,19 @@ export function QueueJobsTable({
                         }}
                         variant="primary"
                         size="sm"
+                        disabled={dispatchingJobId === jobId}
                       >
-                        Start Print
+                        {dispatchingJobId === jobId ? (
+                          <span className="flex items-center gap-1">
+                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Starting...
+                          </span>
+                        ) : (
+                          "Start Print"
+                        )}
                       </Button>
                     )}
                     {status === "Printing" && (

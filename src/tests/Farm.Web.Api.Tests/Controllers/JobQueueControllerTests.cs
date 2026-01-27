@@ -1,5 +1,6 @@
 ﻿using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Queue;
@@ -14,6 +15,8 @@ public class JobQueueControllerTests
     private readonly Mock<IJobQueueService> _queueServiceMock;
     private readonly Mock<IPrintJobManagementService> _printJobManagementServiceMock;
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<IPrintJobCompletionService> _printJobCompletionServiceMock;
+    private readonly Mock<IPrinterStatusCacheReader> _printerStatusCacheMock;
     private readonly JobQueueController _controller;
 
     public JobQueueControllerTests()
@@ -21,14 +24,26 @@ public class JobQueueControllerTests
         _queueServiceMock = new Mock<IJobQueueService>();
         _printJobManagementServiceMock = new Mock<IPrintJobManagementService>();
         _loggerMock = new Mock<IUnifiedLoggingService>();
-        _controller = new JobQueueController(_queueServiceMock.Object, _printJobManagementServiceMock.Object, _loggerMock.Object);
+        _printJobCompletionServiceMock = new Mock<IPrintJobCompletionService>();
+        _printerStatusCacheMock = new Mock<IPrinterStatusCacheReader>();
+        _controller = new JobQueueController(
+            _queueServiceMock.Object,
+            _printJobManagementServiceMock.Object,
+            _printJobCompletionServiceMock.Object,
+            _printerStatusCacheMock.Object,
+            _loggerMock.Object);
     }
 
     [Fact]
     public void Constructor_WithValidDependencies_CreatesInstance()
     {
         // Arrange & Act
-        var controller = new JobQueueController(_queueServiceMock.Object, _printJobManagementServiceMock.Object, _loggerMock.Object);
+        var controller = new JobQueueController(
+            _queueServiceMock.Object,
+            _printJobManagementServiceMock.Object,
+            _printJobCompletionServiceMock.Object,
+            _printerStatusCacheMock.Object,
+            _loggerMock.Object);
 
         // Assert
         Assert.NotNull(controller);

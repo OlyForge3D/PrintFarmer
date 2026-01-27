@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs.PrintQueue;
 using Microsoft.AspNetCore.Authorization;
@@ -21,6 +22,8 @@ namespace Farm.Web.Api.Controllers;
 public class JobQueueController(
     Services.Queue.IJobQueueService queueService,
     IPrintJobManagementService printJobManagementService,
+    IPrintJobCompletionService printJobCompletionService,
+    IPrinterStatusCacheReader printerStatusCache,
     IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
@@ -177,6 +180,37 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Cancel a job, stopping the print if currently printing.
+    /// Works for jobs in Queued, Assigned, Starting, Printing, or Paused status.
+    /// If the job is currently printing on a printer, this will send a cancel command to stop the print.
+    /// </summary>
+    /// <param name="id">The unique identifier of the job to cancel.</param>
+    [HttpPost("{id:guid}/cancel")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> CancelJobAsync(Guid id)
+    {
+        try
+        {
+            string? userId = User.Identity?.Name ?? "anonymous";
+            await printJobManagementService.CancelJobAsync(id.ToString(), userId, CancellationToken.None);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning($"Cannot cancel job {id}: {ex.Message}");
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, $"Error cancelling print job {id}");
+            return Problem("An error occurred while cancelling the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Delete a job from the queue
     /// </summary>
     /// <param name="id">The unique identifier of the job to delete.</param>
@@ -196,6 +230,42 @@ public class JobQueueController(
         {
             logger.LogError(ex, $"Error deleting print job {id}");
             return Problem("An error occurred while deleting the job", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Synchronize orphaned jobs that are stuck in "Printing" status but the printer is now idle.
+    /// This can happen if the API was restarted/redeployed while a print was in progress.
+    /// Checks the current printer state from the status cache and marks jobs as completed/failed accordingly.
+    /// </summary>
+    /// <returns>The number of jobs that were synchronized.</returns>
+    [HttpPost("sync-orphaned")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> SyncOrphanedJobsAsync()
+    {
+        try
+        {
+            logger.LogInformation("[JobQueueController] Manual sync of orphaned jobs requested");
+
+            // Create a lookup function that gets printer state from cache
+            string? LookupPrinterState(Guid printerId)
+            {
+                PrinterStatusDto? status = printerStatusCache.GetStatus(printerId);
+                return status?.State;
+            }
+
+            int syncedCount = await printJobCompletionService.SyncOrphanedPrintingJobsAsync(
+                LookupPrinterState,
+                CancellationToken.None);
+
+            return Ok(new { syncedCount, message = $"Synchronized {syncedCount} orphaned job(s)" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error synchronizing orphaned jobs");
+            return Problem("An error occurred while synchronizing orphaned jobs", statusCode: 500);
         }
     }
 }

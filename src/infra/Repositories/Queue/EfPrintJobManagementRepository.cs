@@ -141,8 +141,10 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     {
         List<PrintJob> allJobs = await _context.PrintJobs.ToListAsync(ct);
 
+        // Count both Queued and Assigned status as "queued" for display purposes
+        // Assigned = job is assigned to a printer but not yet printing
         return (
-            queued: allJobs.Count(j => j.Status == PrintJobStatus.Queued),
+            queued: allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned),
             printing: allJobs.Count(j => j.Status == PrintJobStatus.Printing),
             paused: allJobs.Count(j => j.Status == PrintJobStatus.Paused),
             completed: allJobs.Count(j => j.Status == PrintJobStatus.Completed),
@@ -158,9 +160,9 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .GroupBy(pj => pj.AssignedPrinter!.Model!.Name)
             .Select(g => new PrinterModelQueueStats(
                 g.Key,
-                g.Count(j => j.Status == PrintJobStatus.Queued),
+                g.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned),
                 g.Count(j => j.Status == PrintJobStatus.Printing),
-                g.Where(j => j.Status == PrintJobStatus.Queued).Min(j => (DateTime?)j.QueuedAt)))
+                g.Where(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned).Min(j => (DateTime?)j.QueuedAt)))
             .ToListAsync(ct);
     }
 
@@ -282,6 +284,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         return await _context.Printers
             .Include(p => p.Model)
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
     }

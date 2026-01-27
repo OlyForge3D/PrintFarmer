@@ -359,7 +359,18 @@ public interface IPrintersService
     Task<bool> ResumeAsync(Guid id, CancellationToken ct);
 
     /// <summary>
-    /// Immediately stops and cancels the currently running print job.
+    /// Gracefully cancels the currently running print job.
+    /// Uses CANCEL_PRINT macro on Moonraker, stop endpoint on PrusaLink, cancel command on OctoPrint.
+    /// Heaters will cool down and the print cannot be resumed after cancellation.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if cancel succeeded, false if backend unavailable or unsupported</returns>
+    Task<bool> CancelPrintAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Immediately stops and cancels the currently running print job using emergency stop (M112).
+    /// This is more aggressive than CancelPrintAsync - use only in emergencies.
     /// </summary>
     /// <param name="id">The printer ID</param>
     /// <param name="ct">Cancellation token</param>

@@ -596,7 +596,8 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
-    /// Cancel a job (remove from queue or stop printing)
+    /// Cancel a job (remove from queue or stop printing).
+    /// If the job is currently Printing or Paused, sends a cancel command to the printer.
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>
     /// <param name="userId">The unique identifier of the user cancelling the job.</param>
@@ -619,8 +620,34 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException($"Cannot cancel a {job.Status} job");
             }
 
+            // If the job is currently printing or paused on a printer, send cancel command to the printer
+            if ((job.Status == PrintJobStatus.Printing || job.Status == PrintJobStatus.Paused || job.Status == PrintJobStatus.Starting)
+                && job.AssignedPrinterId.HasValue)
+            {
+                _logger.LogInformation(
+                    "Job {JobId} is {Status} on printer {PrinterId}, sending cancel command to printer",
+                    jobId, job.Status, job.AssignedPrinterId.Value);
+
+                bool cancelSuccess = await _printersService.CancelPrintAsync(job.AssignedPrinterId.Value, cancellationToken);
+
+                if (cancelSuccess)
+                {
+                    _logger.LogInformation(
+                        "Successfully sent cancel command to printer {PrinterId} for job {JobId}",
+                        job.AssignedPrinterId.Value, jobId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Failed to send cancel command to printer {PrinterId} for job {JobId}. " +
+                        "Job will be marked as cancelled in database but printer may still be printing.",
+                        job.AssignedPrinterId.Value, jobId);
+                }
+            }
+
             job.Status = PrintJobStatus.Cancelled;
             job.UpdatedAt = DateTime.UtcNow;
+            job.ActualEndTime = DateTime.UtcNow;
 
             await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);

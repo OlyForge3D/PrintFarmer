@@ -97,6 +97,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
     }
@@ -114,11 +115,12 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
         // Normalize the search term for comparison
         string normalizedSearch = NormalizeModelName(modelNameOrAlias);
 
-        // Get all available printers with their models and aliases
+        // Get all available printers with their models, aliases, and toolhead details (including nozzle)
         List<Printer> allPrinters = await _db.Printers
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
 

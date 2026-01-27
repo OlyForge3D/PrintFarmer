@@ -1635,11 +1635,11 @@ export class ApiClient {
     return response.data;
   }
 
-  async cancelJob(jobId: string): Promise<void> {
-    await this.client.patch(`/job-queue/${jobId}/cancel`);
-  }
-
-  async deleteJob(jobId: string): Promise<void> {
+  /**
+   * Delete a print queue job from the queue.
+   * Cannot delete jobs that are currently printing.
+   */
+  async deletePrintQueueJob(jobId: string): Promise<void> {
     await this.client.delete(`/job-queue/${jobId}`);
   }
 
@@ -1649,7 +1649,7 @@ export class ApiClient {
    * @param jobId - The ID of the job to dispatch
    * @returns The updated job with Starting/Printing status
    */
-  async dispatchJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+  async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
     const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
       `/job-queue/${jobId}/dispatch`
     );
@@ -2683,16 +2683,17 @@ export class ApiClient {
   }
 
   /**
-   * Cancel a print job
+   * Cancel a print job - stops the print if currently printing.
+   * Sends a cancel command to the printer if the job is actively printing.
    */
   async cancelPrintQueueJob(jobId: string): Promise<void> {
-    await this.client.delete(`/job-queue/${jobId}`);
+    await this.client.post(`/job-queue/${jobId}/cancel`);
   }
 
   /**
-   * Rerun a completed job (add it back to queue)
+   * Rerun a completed print queue job (add it back to queue)
    */
-  async rerunJob(jobId: string): Promise<unknown> {
+  async rerunPrintQueueJob(jobId: string): Promise<unknown> {
     const response = await this.client.post(
       `/job-queue/${jobId}/rerun`
     );

@@ -47,6 +47,11 @@ public sealed class OctoPrintPollingService(
 
         public string? LastKnownState { get; set; }
 
+        /// <summary>
+        /// Previous state before the last update, used for detecting print completion transitions.
+        /// </summary>
+        public string? PreviousState { get; set; }
+
         public double? LastKnownProgress { get; set; }
 
         public string? LastKnownJobName { get; set; }
@@ -300,12 +305,24 @@ public sealed class OctoPrintPollingService(
                     OctoPrintStatusData? statusData = await wsAdapter.TryHttpPollingFallbackAsync(ct);
                     if (statusData != null)
                     {
+                        // Check for state transition from printing to idle/operational for job completion sync
+                        string? previousState = state.LastKnownState;
+                        bool stateChanged = statusData.State != previousState;
+
+                        // Update state tracking (including PreviousState for transition detection)
+                        state.PreviousState = previousState;
                         state.LastKnownIsOnline = statusData.IsOnline;
                         state.LastKnownState = statusData.State;
                         state.LastKnownProgress = statusData.Progress;
                         state.LastKnownJobName = statusData.JobName;
                         state.ConsecutiveFailures = 0;
                         state.LastApiState = "responding";
+
+                        // Check for print completion/failure transitions
+                        if (stateChanged && previousState != null && statusData.State != null)
+                        {
+                            await CheckAndSyncJobCompletionAsync(printerId, previousState, statusData.State, ct);
+                        }
 
                         // Create cache update (PrinterStatusDto - no HomedAxes)
                         var cacheUpdate = new PrinterStatusDto(
@@ -462,5 +479,50 @@ public sealed class OctoPrintPollingService(
         using IServiceScope scope = _scopeFactory.CreateScope();
         IPrintersRepository repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         return await repo.FindByIdAsync(printerId, ct);
+    }
+
+    /// <summary>
+    /// Checks for print completion/failure state transitions and synchronizes job status in database.
+    /// Called when printer state changes from "printing" to operational/finishing (completion) or error (failure).
+    /// </summary>
+    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    {
+        try
+        {
+            // Only act on transitions FROM "printing" state
+            if (!PrintJobCompletionService.IsPrintingState(previousState))
+            {
+                return;
+            }
+
+            _logger.LogInformation($"[OctoPrintPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+
+            // Create a new scope to get the scoped service
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IPrintJobCompletionService completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
+
+            if (PrintJobCompletionService.IsCompletionState(newState))
+            {
+                // Print completed successfully
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                if (marked)
+                {
+                    _logger.LogInformation($"[OctoPrintPollingService] Print job marked as completed for printer {printerId}");
+                }
+            }
+            else if (PrintJobCompletionService.IsFailureState(newState))
+            {
+                // Print failed
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                if (marked)
+                {
+                    _logger.LogWarning($"[OctoPrintPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[OctoPrintPollingService] Failed to sync job completion for printer {printerId}");
+        }
     }
 }

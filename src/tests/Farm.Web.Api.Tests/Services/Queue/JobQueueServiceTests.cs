@@ -172,6 +172,335 @@ public class JobQueueServiceTests
 
     #endregion
 
+    #region GetQueueOverviewAsync Filtering Tests
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithNozzleFilter_ReturnsOnlyMatchingPrinters()
+    {
+        // Arrange - Create printer with 0.4mm nozzle
+        var nozzleModel = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.4", Diameter = 0.4 };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModelId = nozzleModel.Id,
+            NozzleModel = nozzleModel,
+            SupportedMaterials = new[] { "PLA", "PETG" }
+        };
+        Printer printerWith04 = new PrinterBuilder()
+            .WithName("Printer 0.4mm")
+            .AsOnlineAndReady()
+            .Build();
+        printerWith04.Toolheads = new List<Toolhead> { toolhead };
+
+        // Create printer with 0.6mm nozzle
+        var nozzle06 = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.6", Diameter = 0.6 };
+        var toolhead06 = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModelId = nozzle06.Id,
+            NozzleModel = nozzle06,
+            SupportedMaterials = new[] { "PLA", "PETG" }
+        };
+        Printer printerWith06 = new PrinterBuilder()
+            .WithName("Printer 0.6mm")
+            .AsOnlineAndReady()
+            .Build();
+        printerWith06.Toolheads = new List<Toolhead> { toolhead06 };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printerWith04, printerWith06 });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter by 0.4mm nozzle
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
+
+        // Assert - Only 0.4mm printer returned
+        result.Should().HaveCount(1);
+        result.First().PrinterName.Should().Be("Printer 0.4mm");
+        result.First().NozzleDiameter.Should().BeApproximately(0.4, 0.01);
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithNozzleFilter_ExcludesPrintersWithoutNozzleConfigured()
+    {
+        // Arrange - Printer with no nozzle configured (NozzleModel is null)
+        var toolheadNoNozzle = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = null, // No nozzle configured
+            SupportedMaterials = new[] { "PLA" }
+        };
+        Printer printerNoNozzle = new PrinterBuilder()
+            .WithName("Printer No Nozzle")
+            .AsOnlineAndReady()
+            .Build();
+        printerNoNozzle.Toolheads = new List<Toolhead> { toolheadNoNozzle };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printerNoNozzle });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+
+        // Act - Filter by 0.4mm nozzle
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
+
+        // Assert - Printer without nozzle configured is excluded
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithNozzleFilter_UsesToleranceForMatching()
+    {
+        // Arrange - Printer with 0.401mm nozzle (within 0.01mm tolerance)
+        var nozzleModel = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.4", Diameter = 0.401 };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = nozzleModel,
+            SupportedMaterials = new[] { "PLA" }
+        };
+        Printer printer = new PrinterBuilder()
+            .WithName("Printer Within Tolerance")
+            .AsOnlineAndReady()
+            .Build();
+        printer.Toolheads = new List<Toolhead> { toolhead };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter by exactly 0.4mm
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
+
+        // Assert - Printer matches due to tolerance
+        result.Should().HaveCount(1);
+        result.First().PrinterName.Should().Be("Printer Within Tolerance");
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithMaterialFilter_ReturnsOnlyMatchingPrinters()
+    {
+        // Arrange - Printer that supports PCTG
+        var toolheadPCTG = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            SupportedMaterials = new[] { "PLA", "PETG", "PCTG", "ABS" }
+        };
+        Printer printerWithPCTG = new PrinterBuilder()
+            .WithName("PCTG Printer")
+            .AsOnlineAndReady()
+            .Build();
+        printerWithPCTG.Toolheads = new List<Toolhead> { toolheadPCTG };
+
+        // Printer that does NOT support PCTG
+        var toolheadNoPCTG = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            SupportedMaterials = new[] { "PLA", "PETG" }
+        };
+        Printer printerWithoutPCTG = new PrinterBuilder()
+            .WithName("Basic Printer")
+            .AsOnlineAndReady()
+            .Build();
+        printerWithoutPCTG.Toolheads = new List<Toolhead> { toolheadNoPCTG };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printerWithPCTG, printerWithoutPCTG });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter by PCTG material
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, "PCTG", CancellationToken.None);
+
+        // Assert - Only PCTG-capable printer returned
+        result.Should().HaveCount(1);
+        result.First().PrinterName.Should().Be("PCTG Printer");
+        result.First().SupportedMaterials.Should().Contain("PCTG");
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithMaterialFilter_IsCaseInsensitive()
+    {
+        // Arrange - Printer with "PCTG" in supported materials
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            SupportedMaterials = new[] { "PLA", "PCTG" }
+        };
+        Printer printer = new PrinterBuilder()
+            .WithName("Test Printer")
+            .AsOnlineAndReady()
+            .Build();
+        printer.Toolheads = new List<Toolhead> { toolhead };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter with lowercase "pctg"
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, null, "pctg", CancellationToken.None);
+
+        // Assert - Matches despite case difference
+        result.Should().HaveCount(1);
+        result.First().PrinterName.Should().Be("Test Printer");
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithModelFilter_CallsGetCompatiblePrinters()
+    {
+        // Arrange
+        var model = new PrinterModel { Id = Guid.NewGuid(), Name = "Qidi X-Plus 4" };
+        Printer printer = new PrinterBuilder()
+            .WithName("qp4-1")
+            .WithModel(model)
+            .AsOnlineAndReady()
+            .Build();
+
+        _mockDataService.Setup(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter by model name
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync("Qidi X-Plus 4", null, null, CancellationToken.None);
+
+        // Assert
+        _mockDataService.Verify(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()), Times.Once);
+        _mockDataService.Verify(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()), Times.Never);
+        result.Should().HaveCount(1);
+        result.First().PrinterModel.Should().Be("Qidi X-Plus 4");
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithAllFilters_AppliesAllFiltersTogether()
+    {
+        // Arrange - Printer that matches all criteria: Qidi model, 0.4mm nozzle, PCTG material
+        var model = new PrinterModel { Id = Guid.NewGuid(), Name = "QIDI X-Plus 4" };
+        var nozzleModel = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.4", Diameter = 0.4 };
+        var matchingToolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = nozzleModel,
+            SupportedMaterials = new[] { "PLA", "PETG", "PCTG" }
+        };
+        Printer matchingPrinter = new PrinterBuilder()
+            .WithName("qp4-1")
+            .WithModel(model)
+            .AsOnlineAndReady()
+            .Build();
+        matchingPrinter.Toolheads = new List<Toolhead> { matchingToolhead };
+
+        // Printer with wrong nozzle
+        var wrongNozzle = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.6", Diameter = 0.6 };
+        var wrongNozzleToolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = wrongNozzle,
+            SupportedMaterials = new[] { "PLA", "PETG", "PCTG" }
+        };
+        Printer wrongNozzlePrinter = new PrinterBuilder()
+            .WithName("qp4-2")
+            .WithModel(model)
+            .AsOnlineAndReady()
+            .Build();
+        wrongNozzlePrinter.Toolheads = new List<Toolhead> { wrongNozzleToolhead };
+
+        // Printer with wrong material
+        var wrongMaterialToolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = nozzleModel,
+            SupportedMaterials = new[] { "PLA", "PETG" } // No PCTG
+        };
+        Printer wrongMaterialPrinter = new PrinterBuilder()
+            .WithName("qp4-3")
+            .WithModel(model)
+            .AsOnlineAndReady()
+            .Build();
+        wrongMaterialPrinter.Toolheads = new List<Toolhead> { wrongMaterialToolhead };
+
+        // GetCompatiblePrintersAsync returns all Qidi printers (model filter)
+        _mockDataService.Setup(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { matchingPrinter, wrongNozzlePrinter, wrongMaterialPrinter });
+        _mockDataService.Setup(x => x.GetPrintJobsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrintJob>());
+        _mockDataService.Setup(x => x.GetCurrentJobForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+
+        // Act - Filter by all three: model, nozzle, material
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync("Qidi X-Plus 4", 0.4m, "PCTG", CancellationToken.None);
+
+        // Assert - Only the printer matching ALL criteria is returned
+        result.Should().HaveCount(1);
+        result.First().PrinterName.Should().Be("qp4-1");
+        result.First().NozzleDiameter.Should().BeApproximately(0.4, 0.01);
+        result.First().SupportedMaterials.Should().Contain("PCTG");
+    }
+
+    [Fact]
+    public async Task GetQueueOverviewAsync_WithNoMatchingPrinters_ReturnsEmptyList()
+    {
+        // Arrange - Printer that doesn't match the nozzle filter
+        var nozzleModel = new NozzleModelDefinition { Id = Guid.NewGuid(), Name = "Brass 0.8", Diameter = 0.8 };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            Name = "Primary",
+            IsPrimary = true,
+            NozzleModel = nozzleModel,
+            SupportedMaterials = new[] { "PLA" }
+        };
+        Printer printer = new PrinterBuilder()
+            .WithName("Test Printer")
+            .AsOnlineAndReady()
+            .Build();
+        printer.Toolheads = new List<Toolhead> { toolhead };
+
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        // Act - Filter by 0.4mm nozzle (printer has 0.8mm)
+        IReadOnlyList<QueueOverviewDto> result = await _sut.GetQueueOverviewAsync(null, 0.4m, null, CancellationToken.None);
+
+        // Assert - No matching printers
+        result.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region GetPrinterQueueAsync Tests
 
     [Fact]

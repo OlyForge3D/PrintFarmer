@@ -32,12 +32,13 @@ export function PrintQueueDashboardPage() {
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
+  const [dispatchingJobId, setDispatchingJobId] = useState<string | null>(null);
 
   // Keyboard navigation for job list (only for active tab)
   const { selectedIndex } = useKeyboardNavigation(
     jobs,
     (job: QueuedPrintJobWithFileMetaDto) => {
-      setSelectedJobId(job.id);
+      setSelectedJobId(job.job.id);
       setShowDetailPanel(true);
       setIsJobDetailsModalOpen(true);
     },
@@ -56,7 +57,7 @@ export function PrintQueueDashboardPage() {
       key: 'd',
       handler: () => {
         if (selectedIndex >= 0 && jobs[selectedIndex]) {
-          handleCancelJob(jobs[selectedIndex].id);
+          handleCancelJob(jobs[selectedIndex].job.id);
         }
       },
       description: 'Cancel selected job'
@@ -67,9 +68,9 @@ export function PrintQueueDashboardPage() {
         if (selectedIndex >= 0 && jobs[selectedIndex]) {
           const job = jobs[selectedIndex];
           if (job.job.status === 'Printing') {
-            await handlePauseJob(job.id);
+            await handlePauseJob(job.job.id);
           } else if (job.job.status === 'Paused') {
-            await handleResumeJob(job.id);
+            await handleResumeJob(job.job.id);
           }
         }
       },
@@ -82,7 +83,7 @@ export function PrintQueueDashboardPage() {
           const job = jobs[selectedIndex];
           // Only dispatch if job is in Queued or Assigned state and has an assigned printer
           if ((job.job.status === 'Queued' || job.job.status === 'Assigned') && job.assignedPrinter) {
-            await handleDispatchJob(job.id);
+            await handleDispatchJob(job.job.id);
           }
         }
       },
@@ -190,19 +191,22 @@ export function PrintQueueDashboardPage() {
   }, [loadJobs]);
 
   const handleDispatchJob = useCallback(async (jobId: string) => {
+    setDispatchingJobId(jobId);
     try {
-      await apiClient.dispatchJob(jobId);
+      await apiClient.dispatchPrintQueueJob(jobId);
       loadJobs(true);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to start print job";
       setError(errorMessage);
+    } finally {
+      setDispatchingJobId(null);
     }
   }, [loadJobs]);
 
   const handleRerunJob = async (jobId: string) => {
     try {
-      await apiClient.rerunJob(jobId);
+      await apiClient.rerunPrintQueueJob(jobId);
       setError(null);
       // Reload jobs to show the new job in the queue
       await loadJobs(true);
@@ -308,6 +312,7 @@ export function PrintQueueDashboardPage() {
                 <QueueJobsTable
                   jobs={jobs}
                   isLoading={loading}
+                  dispatchingJobId={dispatchingJobId}
                   onPause={handlePauseJob}
                   onResume={handleResumeJob}
                   onCancel={handleCancelJob}

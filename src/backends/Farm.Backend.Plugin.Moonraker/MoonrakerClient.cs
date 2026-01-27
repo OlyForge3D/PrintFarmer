@@ -656,6 +656,15 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "PAUSE", ct);
 
+    public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "CANCEL_PRINT", ct);
+
+    public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return CancelPrintAsync(baseUrl.ToString(), ct);
+    }
+
     public async Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "RESUME", ct);
 
@@ -876,6 +885,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/upload");
 
+            long streamLength = fileContent.CanSeek ? fileContent.Length : -1;
+            _logger.LogInformation($"[Moonraker] Uploading G-code file {fileName} to {uri}, stream length: {streamLength}");
+
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
             streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -883,10 +895,22 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
             using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                string responseBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                _logger.LogWarning($"[Moonraker] Upload failed with status {resp.StatusCode}: {responseBody}");
+            }
+            else
+            {
+                _logger.LogInformation($"[Moonraker] Upload succeeded for {fileName}");
+            }
+
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError($"[Moonraker] Exception during G-code upload for {fileName} to {baseUrl}: {ex.Message}");
             return false;
         }
     }
@@ -2434,7 +2458,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         => await ResumeAsync(baseUrl, ct);
 
     async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
-        => await EmergencyStopAsync(baseUrl, ct);
+        => await CancelPrintAsync(baseUrl, ct);
 
     /// <summary>
     /// ISupportsCamera implementations - get camera stream and snapshot URLs.

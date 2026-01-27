@@ -175,6 +175,7 @@ public sealed class MoonrakerSubscriptionService(
 
     /// <summary>
     /// Enumerates all enabled Moonraker-backed printers from the database and starts subscription loops for each.
+    /// Restarts subscription loops for printers that have exhausted reconnection attempts.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     private async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
@@ -194,6 +195,20 @@ public sealed class MoonrakerSubscriptionService(
 
         foreach (Printer? p in enabledPrinters)
         {
+            // Check if there's an existing subscription loop for this printer
+            if (_loops.TryGetValue(p.Id, out Task? existingTask))
+            {
+                // If the existing task has completed (either successfully or via exhausted retries),
+                // remove it so we can start a fresh subscription loop with reset retry count
+                if (existingTask.IsCompleted)
+                {
+                    _loops.TryRemove(p.Id, out _);
+                    _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
+                    _logger.LogInformation(
+                        $"Restarting subscription loop for printer {p.Name} ({p.Id}) - previous loop completed");
+                }
+            }
+
             _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
         }
 #pragma warning restore IDISP013
@@ -1223,9 +1238,14 @@ public sealed class MoonrakerSubscriptionService(
             stateValue = webhooksState;
         }
 
-        // Update persistent state
+        // Detect state transitions for job completion synchronization
+        string? previousState = state.PreviousState;
+        bool stateChanged = stateValue != null && stateValue != previousState;
+
+        // Update persistent state (including PreviousState tracking)
         if (stateValue != null)
         {
+            state.PreviousState = state.State;
             state.State = stateValue;
         }
 
@@ -1237,6 +1257,12 @@ public sealed class MoonrakerSubscriptionService(
         if (jobName != null)
         {
             state.JobName = jobName;
+        }
+
+        // Check for print completion/failure transitions and sync job status
+        if (stateChanged && previousState != null)
+        {
+            await CheckAndSyncJobCompletionAsync(printerId, previousState, stateValue!, ct);
         }
 
         // Emit state update event if any state/progress/jobName changed
@@ -1424,6 +1450,56 @@ public sealed class MoonrakerSubscriptionService(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Failed to send shutdown status for printer {printerId}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Checks for print completion/failure state transitions and synchronizes job status in database.
+    /// Called when printer state changes from "printing" to "standby/complete/idle" (completion)
+    /// or from "printing" to "error/cancelled" (failure).
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="previousState">The previous printer state.</param>
+    /// <param name="newState">The new printer state.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    {
+        try
+        {
+            // Only act on transitions FROM "printing" state
+            if (!PrintJobCompletionService.IsPrintingState(previousState))
+            {
+                return;
+            }
+
+            _logger.LogInformation($"[MoonrakerSubscriptionService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+
+            // Create a new scope to get the scoped service
+            using IServiceScope scope = scopeFactory.CreateScope();
+            IPrintJobCompletionService completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
+
+            if (PrintJobCompletionService.IsCompletionState(newState))
+            {
+                // Print completed successfully
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                if (marked)
+                {
+                    _logger.LogInformation($"[MoonrakerSubscriptionService] Print job marked as completed for printer {printerId}");
+                }
+            }
+            else if (PrintJobCompletionService.IsFailureState(newState))
+            {
+                // Print failed
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                if (marked)
+                {
+                    _logger.LogWarning($"[MoonrakerSubscriptionService] Print job marked as failed for printer {printerId} (state: {newState})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[MoonrakerSubscriptionService] Failed to sync job completion for printer {printerId}: {ex.Message}");
         }
     }
 

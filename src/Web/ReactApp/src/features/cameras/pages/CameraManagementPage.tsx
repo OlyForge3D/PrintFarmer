@@ -507,9 +507,9 @@ export function CameraManagementPage() {
                 ) : (
                   <div className="space-y-2">
                     {printersWithCameras.map((printer) => (
-                      <button
+                      <Button
                         key={printer.id}
-                        type="button"
+                        variant="unstyled"
                         onClick={() => handleImportFromPrinter(printer)}
                         className="w-full p-4 text-left rounded-lg border border-pf-border hover:border-pf-accent hover:bg-pf-bg-2 transition-colors"
                       >
@@ -535,7 +535,7 @@ export function CameraManagementPage() {
                           </div>
                           <DownloadIcon className="w-5 h-5 text-pf-accent flex-shrink-0" />
                         </div>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}

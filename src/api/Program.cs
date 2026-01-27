@@ -356,6 +356,9 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversi
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
 builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
 
+// Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
+builder.Services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
+
 // Job Scheduling Service (Phase 4.1)
 builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
 
@@ -450,6 +453,10 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSy
 // Maintenance Module - Maintenance Alert Engine
 builder.Services.Configure<Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings.SectionName));
 builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceAlertHostedService>();
+
+// Orphaned Job Sync - Runs once on startup to sync jobs stuck in "Printing" status
+// This handles cases where the API restarts while a print completes
+builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
 
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();

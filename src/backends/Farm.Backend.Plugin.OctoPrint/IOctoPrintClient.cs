@@ -8,7 +8,7 @@ using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.OctoPrint
 {
-    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload
+    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload, ISupportsControlOperations
     {
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
 
@@ -19,6 +19,20 @@ namespace Farm.Backend.Plugin.OctoPrint
         Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName);
 
         Task<bool> CancelJobAsync(string baseUrl, string apiKey);
+
+        /// <summary>
+        /// Pauses the current print job.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        Task<bool> PauseJobAsync(string baseUrl, string apiKey);
+
+        /// <summary>
+        /// Resumes a paused print job.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server</param>
+        /// <param name="apiKey">OctoPrint API key</param>
+        Task<bool> ResumeJobAsync(string baseUrl, string apiKey);
 
         Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
 

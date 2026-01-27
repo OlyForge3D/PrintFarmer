@@ -953,11 +953,11 @@ export function useQueuePrintJob() {
   });
 }
 
-export function useCancelJob() {
+export function useCancelPrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.cancelJob(jobId),
+    mutationFn: (jobId: string) => apiClient.cancelPrintQueueJob(jobId),
     onMutate: async (jobId) => {
       const allQueues = queryClient.getQueriesData<JobQueuePrintJob[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
@@ -981,11 +981,11 @@ export function useCancelJob() {
   });
 }
 
-export function useDeleteJob() {
+export function useDeletePrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.deleteJob(jobId),
+    mutationFn: (jobId: string) => apiClient.deletePrintQueueJob(jobId),
     onMutate: async (jobId) => {
       const allQueues = queryClient.getQueriesData<JobQueuePrintJob[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));

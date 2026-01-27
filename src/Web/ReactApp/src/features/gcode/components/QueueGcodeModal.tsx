@@ -4,6 +4,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJobQueueService';
 import { GcodeFile } from '@/types/api';
+import { CheckCircleIcon, PrinterIcon, ClockIcon } from '@/common/components/icons/MdiIcons';
 
 interface Props {
   file: GcodeFile;
@@ -65,6 +66,17 @@ function QueueGcodeModalInner({ file, printerPromise, isOpen, onClose }: {
 }
 
 /**
+ * Success state shown after job is queued
+ */
+type SuccessState = {
+  jobId: string;
+  printerName: string;
+  isStarting: boolean;
+  isStarted: boolean;
+  startError?: string;
+};
+
+/**
  * Content component with modal UI
  */
 function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose }: { 
@@ -78,33 +90,86 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const [selectedPrinter, setSelectedPrinter] = useState<string | undefined>(undefined);
   const [autoAssign, setAutoAssign] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [startNowLoading, setStartNowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successState, setSuccessState] = useState<SuccessState | null>(null);
+
+  const buildRequest = (): EnqueuePrintJobRequest => {
+    const req: EnqueuePrintJobRequest = {
+      gcodeFileId: file.id,
+      assignedPrinterId: autoAssign ? undefined : (selectedPrinter || undefined),
+      priority: 'Normal'
+    };
+
+    // Support extracted fields from lightweight GcodeFile
+    const requiredNozzle = file.extractedNozzleDiameter;
+    const requiredMaterial = file.extractedMaterial;
+    const requiredModelValue = file.extractedPrinterModel || file.extractedPrinterModelName;
+
+    if (typeof requiredNozzle === 'number') req.requiredNozzleDiameter = requiredNozzle;
+    if (typeof requiredMaterial === 'string' && requiredMaterial.length > 0) req.requiredMaterialType = requiredMaterial;
+    if (typeof requiredModelValue === 'string' && requiredModelValue.length > 0) req.requiredPrinterModel = requiredModelValue;
+
+    return req;
+  };
 
   const handleQueue = async () => {
     setLoading(true);
     setError(null);
     try {
-      const req: EnqueuePrintJobRequest = {
-        gcodeFileId: file.id,
-        assignedPrinterId: autoAssign ? undefined : (selectedPrinter || undefined),
-        priority: 'Normal'
-      };
-
-      // Support extracted fields from lightweight GcodeFile
-      const requiredNozzle = file.extractedNozzleDiameter;
-      const requiredMaterial = file.extractedMaterial;
-      const requiredModel = file.extractedPrinterModel || file.extractedPrinterModelName;
-
-      if (typeof requiredNozzle === 'number') req.requiredNozzleDiameter = requiredNozzle;
-      if (typeof requiredMaterial === 'string' && requiredMaterial.length > 0) req.requiredMaterialType = requiredMaterial;
-      if (typeof requiredModel === 'string' && requiredModel.length > 0) req.requiredPrinterModel = requiredModel;
-
-      await printJobQueueService.enqueue(req);
+      const req = buildRequest();
+      const result = await printJobQueueService.enqueue(req);
       setLoading(false);
-      onClose(true);
+      
+      // Show success state instead of closing
+      setSuccessState({
+        jobId: result.id,
+        printerName: result.assignedPrinterName || 'Unknown Printer',
+        isStarting: false,
+        isStarted: false
+      });
     } catch (err) {
       setLoading(false);
       setError(err instanceof Error ? err.message : 'Failed to queue job');
+    }
+  };
+
+  const handleQueueAndStart = async () => {
+    setStartNowLoading(true);
+    setError(null);
+    try {
+      const req = buildRequest();
+      const result = await printJobQueueService.enqueue(req);
+      
+      // Immediately dispatch the job
+      await apiClient.dispatchPrintQueueJob(result.id);
+      
+      setStartNowLoading(false);
+      setSuccessState({
+        jobId: result.id,
+        printerName: result.assignedPrinterName || 'Unknown Printer',
+        isStarting: false,
+        isStarted: true
+      });
+    } catch (err) {
+      setStartNowLoading(false);
+      setError(err instanceof Error ? err.message : 'Failed to queue and start job');
+    }
+  };
+
+  const handleStartNow = async () => {
+    if (!successState) return;
+    
+    setSuccessState({ ...successState, isStarting: true, startError: undefined });
+    try {
+      await apiClient.dispatchPrintQueueJob(successState.jobId);
+      setSuccessState({ ...successState, isStarting: false, isStarted: true });
+    } catch (err) {
+      setSuccessState({ 
+        ...successState, 
+        isStarting: false, 
+        startError: err instanceof Error ? err.message : 'Failed to start print'
+      });
     }
   };
 
@@ -118,19 +183,124 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const availablePrinters = printers.filter(p => p.isAvailable);
   const noAvailablePrinters = availablePrinters.length === 0;
 
+  // Success state - show after job is queued
+  if (successState) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={() => onClose(true)}
+        title={successState.isStarted ? "Print Started!" : "Job Queued Successfully!"}
+        footer={
+          <div className="flex gap-2 justify-end">
+            {!successState.isStarted && (
+              <Button 
+                variant="primary" 
+                onClick={handleStartNow}
+                disabled={successState.isStarting}
+              >
+                {successState.isStarting ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Starting...
+                  </span>
+                ) : (
+                  <>
+                    <PrinterIcon className="w-4 h-4" />
+                    Start Print Now
+                  </>
+                )}
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => onClose(true)}>
+              {successState.isStarted ? 'Done' : 'Close'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="text-center py-4">
+          <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${
+            successState.isStarted 
+              ? 'bg-pf-success-bg/20' 
+              : 'bg-pf-accent-bg/20'
+          }`}>
+            {successState.isStarted ? (
+              <PrinterIcon className="w-8 h-8 text-pf-success" />
+            ) : (
+              <CheckCircleIcon className="w-8 h-8 text-pf-accent" />
+            )}
+          </div>
+          
+          <div className="space-y-2">
+            <div className="text-lg font-medium text-pf-text-primary">
+              {file.name}
+            </div>
+            <div className="text-pf-text-secondary flex items-center justify-center gap-2">
+              <PrinterIcon className="w-4 h-4" />
+              {successState.printerName}
+            </div>
+            {successState.isStarted ? (
+              <div className="text-pf-success font-medium flex items-center justify-center gap-2 mt-4">
+                <CheckCircleIcon className="w-5 h-5" />
+                Print job dispatched to printer
+              </div>
+            ) : (
+              <div className="text-pf-text-tertiary flex items-center justify-center gap-2 mt-4">
+                <ClockIcon className="w-4 h-4" />
+                Waiting in queue
+              </div>
+            )}
+          </div>
+
+          {successState.startError && (
+            <div className="mt-4 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+              {successState.startError}
+            </div>
+          )}
+        </div>
+      </Modal>
+    );
+  }
+
+  // Normal queue form
   return (
     <Modal
       isOpen={isOpen}
       onClose={() => onClose(false)}
       title="Queue G-code for Printing"
       footer={
-        <div className="flex gap-2">
+        <div className="flex gap-2 justify-between w-full">
           <Button variant="secondary" onClick={() => onClose(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleQueue} disabled={loading || noPrintersAvailable || noAvailablePrinters}>
-            {loading ? 'Queueing…' : 'Queue for Print'}
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="secondary" 
+              onClick={handleQueue} 
+              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters}
+            >
+              {loading ? 'Queueing…' : 'Queue for Later'}
+            </Button>
+            <Button 
+              variant="primary" 
+              onClick={handleQueueAndStart} 
+              disabled={loading || startNowLoading || noPrintersAvailable || noAvailablePrinters}
+            >
+              {startNowLoading ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Starting...
+                </span>
+              ) : (
+                'Queue & Start Now'
+              )}
+            </Button>
+          </div>
         </div>
       }
     >

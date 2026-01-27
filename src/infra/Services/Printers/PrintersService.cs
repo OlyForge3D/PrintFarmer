@@ -1958,11 +1958,46 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if stop command succeeded, false if printer not found or backend unavailable</returns>
     /// <remarks>
-    /// Cancels the current print job completely (cannot be resumed).
-    /// Print head stays at current position; heaters cool down after stop.
-    /// This is an emergency stop - irreversible and immediate.
+    /// Gracefully cancels the current print job (cannot be resumed).
+    /// Uses CANCEL_PRINT macro on Moonraker, stop endpoint on PrusaLink, cancel command on OctoPrint.
+    /// Print head stays at current position; heaters cool down after cancel.
     /// Use PauseAsync if you want to resume later.
     /// Requires backend to support print control capability.
+    /// </remarks>
+    public async Task<bool> CancelPrintAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+
+            // Try print job control capability - calls CancelAsync which routes to backend-specific cancel
+            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
+                ? await controlClient!.CancelAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                : false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Failed to cancel print on printer {id}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Immediately stops the printer using emergency stop (M112).
+    /// </summary>
+    /// <param name="id">Unique printer identifier (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>True if emergency stop succeeded, false if printer not found or backend unavailable</returns>
+    /// <remarks>
+    /// This is more aggressive than CancelPrintAsync - sends M112 emergency stop command.
+    /// Use only in emergencies when normal cancel is insufficient.
+    /// May require firmware restart after use.
     /// </remarks>
     public async Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
@@ -1975,11 +2010,16 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
 
-            // Try print job control capability
-            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.CancelAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
-                : false;
+            // Send M112 emergency stop via gcode execution capability
+            if (client is ISupportsGcodeExecution gcodeClient)
+            {
+                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                return await gcodeClient.SendGcodeAsync(moonrakerUrl, "M112", ct).ConfigureAwait(false);
+            }
+
+            return false;
         }
         catch (Exception ex)
         {
