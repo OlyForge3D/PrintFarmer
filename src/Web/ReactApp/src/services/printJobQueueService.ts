@@ -44,5 +44,3 @@ export const printJobQueueService = {
     return handle<PrintJobDto>(res);
   }
 };
-
-export default printJobQueueService;

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import slicerProfilesService, { 
+import { 
+  slicerProfilesService,
   SlicerProfileListItem, 
   ExtendedProfilesResponse,
   ProcessProfileListItem, 

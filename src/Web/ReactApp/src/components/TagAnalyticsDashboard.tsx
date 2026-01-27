@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import tagService from '@/services/tagService';
+import { tagService } from '@/services/tagService';
 import { Card } from '@/common/components/ui/Card';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge } from '@/common/components/ui/Badge';

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePrinters, useJobQueue, usePrinterHistory } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircleIcon, AlertCircleIcon, DashboardIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
@@ -7,6 +8,12 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
 import { BackgroundServicesWidget } from '@/features/admin/components';
 import { TasksWidget } from '@/features/tasks';
+import { apiClient } from '@/services/api';
+
+interface MaintenanceAlertSettings {
+  enabled: boolean;
+  showOfflinePrinterAlerts: boolean;
+}
 
 interface StatsCardProps {
   title: string;
@@ -46,6 +53,14 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrinters();
+  
+  // Fetch maintenance alert settings to check if offline alerts are enabled
+  const { data: alertSettings } = useQuery({
+    queryKey: ['settings', 'MaintenanceAlerts'],
+    queryFn: () => apiClient.getSettings<MaintenanceAlertSettings>('MaintenanceAlerts'),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+  const showOfflineAlerts = alertSettings?.showOfflinePrinterAlerts ?? true;
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
@@ -117,15 +132,15 @@ export const PrinterDashboard: React.FC = () => {
           <div className="space-y-6">
             {/* Top row: Alerts and Pending Tasks */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Alerts Panel */}
-              {stats.offline > 0 || stats.maintenance > 0 ? (
+              {/* Alerts Panel - only show if there are alerts to display */}
+              {((showOfflineAlerts && stats.offline > 0) || stats.maintenance > 0) ? (
                 <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
                   <div className="flex items-center gap-2 mb-4">
                     <AlertCircleIcon className="h-5 w-5 text-pf-error-text" />
                     <h2 className="text-lg font-semibold text-pf-text-primary">Alerts</h2>
                   </div>
                   <div className="space-y-3">
-                    {stats.offline > 0 && (
+                    {showOfflineAlerts && stats.offline > 0 && (
                       <div className="flex items-start gap-2 p-3 bg-pf-error-bg rounded border border-pf-error-border">
                         <AlertCircleIcon className="h-4 w-4 text-pf-error-text flex-shrink-0 mt-0.5" />
                         <div>

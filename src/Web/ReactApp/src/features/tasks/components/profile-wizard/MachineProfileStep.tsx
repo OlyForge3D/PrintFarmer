@@ -128,9 +128,9 @@ export const MachineProfileStep: React.FC<MachineProfileStepProps> = ({
             <Button
               variant="secondary"
               onClick={onBack}
+              iconLeft={<ChevronLeft className="h-4 w-4 rotate-180" />} 
               className="flex items-center gap-2"
             >
-              <ChevronLeft className="h-4 w-4" />
               Back
             </Button>
           )}

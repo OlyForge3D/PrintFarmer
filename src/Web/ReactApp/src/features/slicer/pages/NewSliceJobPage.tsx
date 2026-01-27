@@ -2,7 +2,7 @@ import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'reac
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
-import slicerProfilesService from '@/services/slicerProfilesService';
+import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
 import * as signalR from '@microsoft/signalr';

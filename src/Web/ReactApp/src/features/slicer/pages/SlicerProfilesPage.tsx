@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
-import slicerProfilesService, {
+import {
+  slicerProfilesService,
   SlicerProfileListItem,
   HierarchicalProfilesResponse,
   PrinterModelProfilesDto,

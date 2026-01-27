@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
-import tagService from '@/services/tagService';
+import { tagService } from '@/services/tagService';
 
 /**
  * Tests for Phase 3D.5: Tag Analytics Dashboard
@@ -20,7 +20,7 @@ import tagService from '@/services/tagService';
 
 // Mock tagService
 vi.mock('@/services/tagService', () => ({
-  default: {
+  tagService: {
     getAnalytics: vi.fn(),
   },
 }));

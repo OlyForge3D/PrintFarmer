@@ -186,5 +186,3 @@ export const officialProfilesService = {
     return handle<ImportedProfileNamesDto>(res);
   },
 };
-
-export default officialProfilesService;

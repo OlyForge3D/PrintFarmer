@@ -15,7 +15,7 @@ import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDis
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSkeleton';
 import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrinterCard';
-import { PrinterCompactCard } from '@/features/printers/components/PrinterCompactCard';
+import { CameraCard } from '@/features/printers/components/CameraCard';
 import { 
   GlassmorphismCard, 
   SegmentedCard, 
@@ -162,7 +162,7 @@ export function PrintersPage() {
     {
       key: 'v',
       handler: () => {
-        const modes: ViewMode[] = ['collapsed', 'compact', 'expandable', 'table', 'glass', 'segmented', 'statusGlow', 'dashboard', 'flip', 'drawer'];
+        const modes: ViewMode[] = ['collapsed', 'camera', 'expandable', 'table', 'glass', 'segmented', 'statusGlow', 'dashboard', 'flip', 'drawer'];
         const currentIdx = modes.indexOf(viewMode);
         const nextMode = modes[(currentIdx + 1) % modes.length];
         setViewMode(nextMode);
@@ -175,10 +175,6 @@ export function PrintersPage() {
 
   const handleDeleteClick = (printers: Printer[]) => {
     setDeleteConfirmation({ isOpen: true, printers });
-  };
-
-  const handleDeleteSinglePrinter = (printer: Printer) => {
-    setDeleteConfirmation({ isOpen: true, printers: [printer] });
   };
 
   const handleDeleteConfirm = async () => {
@@ -291,27 +287,6 @@ export function PrintersPage() {
           {hasPermission('printers', 'admin') && (
             <>
               <PrinterImportExportControls />
-              <Button
-                variant="secondary"
-                aria-label="Refresh printer capabilities"
-                onClick={async () => {
-                  try {
-                    // Refresh capabilities for all printers
-                    if (!printers || printers.length === 0) {
-                      toast.info('No printers to refresh');
-                      return;
-                    }
-                    await Promise.all(printers.map(p => apiClient.refreshCameraUrls(p.id)));
-                    toast.success('Refreshed printer capabilities');
-                    await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                  } catch (err) {
-                    console.error('Failed to refresh capabilities', err);
-                    toast.error('Failed to refresh capabilities');
-                  }
-                }}
-              >
-                Refresh Capabilities
-              </Button>
             </>
           )}
         </div>
@@ -368,14 +343,12 @@ export function PrintersPage() {
                 <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
                 <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
               </div>
-            ) : viewMode === 'compact' ? (
+            ) : viewMode === 'camera' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
                 {userPrinters.map((p: Printer) => (
-                  <PrinterCompactCard
+                  <CameraCard
                     key={p.id}
                     printer={p}
-                    onEdit={(printer) => handleEditPrinter(printer)}
-                    onDelete={handleDeleteSinglePrinter}
                   />
                 ))}
               </div>
@@ -388,7 +361,6 @@ export function PrintersPage() {
                       printer={printer}
                       onExpand={() => setExpandedPrinterId(printer.id)}
                       onEdit={() => handleEditPrinter(printer)}
-                      onDelete={() => handleDeleteSinglePrinter(printer)}
                     />
                   ))}
                 </div>

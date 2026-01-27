@@ -10,11 +10,12 @@ import {
   mdiGauge,
   mdiFlipToBack,
   mdiArrowExpandDown,
+  mdiCamera,
 } from '@mdi/js';
 import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
 
 export type ViewMode = 
-  | 'compact' 
+  | 'camera' 
   | 'collapsed' 
   | 'expandable' 
   | 'table' 
@@ -34,7 +35,7 @@ interface ViewModeToggleProps {
  * Core view mode options for Printers page
  */
 const coreViewModes: ViewModeOption<ViewMode>[] = [
-  { mode: 'compact', icon: mdiViewGrid, title: 'Compact Cards' },
+  { mode: 'camera', icon: mdiCamera, title: 'Camera View' },
   { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
   { mode: 'expandable', icon: mdiViewComfy, title: 'Expandable Cards' },
   { mode: 'table', icon: mdiViewQuilt, title: 'Table View' },

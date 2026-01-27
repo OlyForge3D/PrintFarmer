@@ -2,7 +2,7 @@ import React, { use, Suspense, useState, useMemo } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { queueService } from '@/services/queueService';
-import printJobQueueService, { EnqueuePrintJobRequest } from '@/services/printJobQueueService';
+import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJobQueueService';
 import { GcodeFile } from '@/types/api';
 
 interface Props {

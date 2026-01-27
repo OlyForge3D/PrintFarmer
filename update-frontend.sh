@@ -46,7 +46,7 @@ else
 fi
 
 echo ""
-echo "=== Update Complete ==="
+echo "=== Update Complete at $(date '+%Y-%m-%d %H:%M:%S') ==="
 echo ""
 echo "✅ Frontend has been updated!"
 echo "   Container: $CONTAINER_NAME"

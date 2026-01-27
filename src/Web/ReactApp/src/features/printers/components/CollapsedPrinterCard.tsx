@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   HistoryIcon,
   FileIcon,
@@ -12,28 +13,49 @@ import {
   PanelRightIcon,
   ImageIcon,
   VideoIcon,
-  DeleteIcon
+  ClockIcon,
+  CheckCircleIcon,
+  PackageIcon,
+  ChevronDownIcon,
+  ChevronRightIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
-import { formatPrinterState } from '@/common/utils/printerStateDisplay';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { PrinterBackend, type Printer } from '@/types/api';
+import { maintenanceService } from '@/services/maintenanceService';
+
+/**
+ * Formats hours into a human-readable string (e.g., "12.5h" or "1,234h")
+ */
+function formatHours(hours: number | undefined | null): string {
+  const h = hours ?? 0;
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 100) return `${h.toFixed(1)}h`;
+  return `${Math.round(h).toLocaleString()}h`;
+}
+
+/**
+ * Formats filament usage (grams or kg)
+ */
+function formatFilament(grams: number | undefined | null): string {
+  const g = grams ?? 0;
+  if (g < 1000) return `${Math.round(g)}g`;
+  return `${(g / 1000).toFixed(1)}kg`;
+}
 
 interface CollapsedPrinterCardProps {
   printer: Printer;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
-  onDelete?: (printer: Printer) => void;
 }
 
 export function CollapsedPrinterCard({
   printer: printerProp,
   onExpand,
-  onEdit,
-  onDelete
+  onEdit
 }: CollapsedPrinterCardProps) {
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
@@ -41,6 +63,7 @@ export function CollapsedPrinterCard({
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
   // Use printer data directly (already contains merged realtime status from API)
@@ -54,18 +77,27 @@ export function CollapsedPrinterCard({
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  // State color classes
-  const getStateColorClasses = (isOnline: boolean, state: string): string => {
-    if (!isOnline) return 'bg-pf-offline text-pf-text-primary';
-    if (state.toLowerCase().includes('printing')) return 'bg-pf-printing text-pf-text-primary';
-    if (state.toLowerCase().includes('paused')) return 'bg-pf-paused text-pf-text-primary';
-    if (state.toLowerCase().includes('error')) return 'bg-pf-error text-pf-text-primary';
-    return 'bg-pf-idle text-pf-text-primary';
-  };
-  const stateColorClasses = getStateColorClasses(isOnline, state);
+  // Fetch printer statistics (cached, stale time 5 minutes)
+  const { data: stats } = useQuery({
+    queryKey: ['printerStatistics', printer.id],
+    queryFn: () => maintenanceService.getPrinterStatistics(printer.id),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: false, // Don't retry on failure (printer may not have stats yet)
+  });
 
-  const displayState = (state: string | undefined): string => {
-    return formatPrinterState(state);
+  const hasStats = stats && (stats.totalPrintHours > 0 || stats.totalJobsCompleted > 0 || stats.totalFilamentUsedGrams > 0);
+
+  // State color classes (matches DetailedPrinterCard)
+  const stateColorClasses = (() => {
+    if (!isOnline) return 'bg-slate-500 text-white';
+    if (isPrinting) return 'bg-pf-success-bg text-white font-bold';
+    if (isPaused) return 'bg-yellow-600 text-white';
+    if (isShutdown) return 'bg-red-600 text-white';
+    return 'bg-blue-600 text-white';
+  })();
+
+  const toCamelCase = (str: string): string => {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
   const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
@@ -85,24 +117,24 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors w-full max-w-sm overflow-hidden flex flex-col min-h-0">
+    <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full max-w-sm overflow-hidden flex flex-col min-h-0">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase truncate">
             {printer.name}
           </div>
-          {(printer.manufacturerName || printer.modelName) && (
+          {(printer.modelName) && (
             <div className="text-pf-text-secondary text-xs truncate">
-              {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
+              {`${printer.modelName || ''}`.trim()}
             </div>
           )}
         </div>
         
-        {/* Status pill - compact */}
+        {/* Status pill - matches DetailedPrinterCard */}
         <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${stateColorClasses}`}>
           {getBackendIcon(printer.backend)}
-          <span className="hidden sm:inline">{isOnline ? displayState(state) : 'Offline'}</span>
+          {isOnline ? toCamelCase(state) : 'Offline'}
         </div>
       </div>
 
@@ -187,19 +219,6 @@ export function CollapsedPrinterCard({
           iconCenter={<EditIcon className="h-4 w-4" />}
         >
         </Button>
-        
-        {/* Delete button */}
-        <Button
-          type="button"
-          variant="danger"
-          size="sm"
-          onClick={() => onDelete?.(printer)}
-          className="!p-1 !h-auto"
-          title="Delete printer"
-          aria-label="Delete printer"
-          iconCenter={<DeleteIcon className="h-4 w-4" />}
-        >
-        </Button>
       </div>
 
       {/* Control buttons */}
@@ -231,6 +250,43 @@ export function CollapsedPrinterCard({
           {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
         </ControlPadButton>
       </div>
+
+      {/* Print Statistics Section */}
+      {hasStats && stats && (
+        <div className="mb-2 bg-pf-bg-2 rounded overflow-hidden">
+          {/* Collapsible header */}
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={() => setShowStats(!showStats)}
+            className="!w-full !justify-start !gap-1 !px-2 !py-1.5 !h-auto text-xs text-pf-text-secondary hover:text-pf-text-primary"
+            aria-expanded={showStats}
+            aria-controls="printer-stats-content"
+            iconLeft={showStats ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronRightIcon className="w-3.5 h-3.5" />}
+          >
+            <span className="font-medium">Statistics</span>
+          </Button>
+          
+          {/* Stats content */}
+          {showStats && (
+            <div id="printer-stats-content" className="grid grid-cols-3 gap-1 py-2 px-1 text-center border-t border-pf-border/30">
+              <div className="flex flex-col items-center" title="Total print time">
+                <ClockIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+                <span className="text-xs font-medium text-pf-text-primary">{formatHours(stats.totalPrintHours ?? 0)}</span>
+              </div>
+              <div className="flex flex-col items-center" title="Jobs completed">
+                <CheckCircleIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+                <span className="text-xs font-medium text-pf-text-primary">{(stats.totalJobsCompleted ?? 0).toLocaleString()}</span>
+              </div>
+              <div className="flex flex-col items-center" title="Filament used">
+                <PackageIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
+                <span className="text-xs font-medium text-pf-text-primary">{formatFilament(stats.totalFilamentUsedGrams ?? 0)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Progress bar for active prints */}
       {(() => {

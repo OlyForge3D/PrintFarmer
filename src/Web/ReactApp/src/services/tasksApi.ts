@@ -105,5 +105,3 @@ export const tasksApi = {
     await apiClient.post(`/tasks/${taskId}/skip`);
   }
 };
-
-export default tasksApi;

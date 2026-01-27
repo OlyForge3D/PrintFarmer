@@ -108,4 +108,3 @@ class WorkersService {
 }
 
 export const workersService = new WorkersService();
-export default workersService;

@@ -152,5 +152,3 @@ export const slicerProfilesService = {
     return res.data;
   }
 };
-
-export default slicerProfilesService;
