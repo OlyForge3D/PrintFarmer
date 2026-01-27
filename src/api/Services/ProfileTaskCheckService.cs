@@ -75,6 +75,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
 
         IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
         IMachineModelProfileRepository machineModelProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineModelProfileRepository>();
+        IMachineProfileRepository machineProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
         IUserTaskService taskService = scope.ServiceProvider.GetRequiredService<IUserTaskService>();
         Catalog.ICatalogService catalogService = scope.ServiceProvider.GetRequiredService<Catalog.ICatalogService>();
 
@@ -103,13 +104,17 @@ public sealed class ProfileTaskCheckService : BackgroundService
                 Guid modelId = group.Key;
                 var modelPrinters = group.ToList();
 
-                // Check if this model has imported slicer profiles
-                MachineModelProfile? profile = await machineModelProfileRepo.GetByPrinterModelIdAsync(modelId, ct);
+                // Check if this model has imported slicer profiles (either MachineModelProfile OR MachineProfile)
+                // MachineModelProfile = base printer model profile (e.g., "Sovol SV08")
+                // MachineProfile = nozzle variant profiles (e.g., "Sovol SV08 0.4 nozzle")
+                // The wizard imports MachineProfile entries, so we need to check both
+                MachineModelProfile? modelProfile = await machineModelProfileRepo.GetByPrinterModelIdAsync(modelId, ct);
+                bool hasMachineProfiles = await machineProfileRepo.HasAnyForPrinterModelAsync(modelId, ct);
 
-                if (profile != null)
+                if (modelProfile != null || hasMachineProfiles)
                 {
                     // Model already has profiles imported, skip
-                    _logger.LogDebug($"[ProfileTaskCheck] Model {modelId} already has profiles, skipping");
+                    _logger.LogDebug($"[ProfileTaskCheck] Model {modelId} already has profiles (modelProfile: {modelProfile != null}, machineProfiles: {hasMachineProfiles}), skipping");
                     continue;
                 }
 

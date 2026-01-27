@@ -114,3 +114,34 @@ public class SelectiveProfileImportResultDto
     /// </summary>
     public string? Error { get; set; }
 }
+
+/// <summary>
+/// Result of bulk profile deletion operation.
+/// </summary>
+public class BulkDeleteResultDto
+{
+    /// <summary>
+    /// Number of machine profiles deleted.
+    /// </summary>
+    public int MachineProfilesDeleted { get; set; }
+
+    /// <summary>
+    /// Number of process profiles deleted.
+    /// </summary>
+    public int ProcessProfilesDeleted { get; set; }
+
+    /// <summary>
+    /// Number of filament profiles deleted.
+    /// </summary>
+    public int FilamentProfilesDeleted { get; set; }
+
+    /// <summary>
+    /// Total profiles deleted across all types.
+    /// </summary>
+    public int TotalDeleted => MachineProfilesDeleted + ProcessProfilesDeleted + FilamentProfilesDeleted;
+
+    /// <summary>
+    /// Number of profile IDs that were not found.
+    /// </summary>
+    public int NotFound { get; set; }
+}

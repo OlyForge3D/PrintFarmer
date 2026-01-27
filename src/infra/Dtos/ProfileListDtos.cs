@@ -131,3 +131,27 @@ public class ExtendedProfilesResponseDto
 
     public IList<MachineProfileListItemDto> MachineProfiles { get; set; } = new List<MachineProfileListItemDto>();
 }
+
+/// <summary>
+/// Response containing names of already-imported profiles for a printer model.
+/// Used by the import wizard to pre-check already-imported profiles.
+/// </summary>
+#pragma warning disable SA1402 // File may only contain a single type
+public class ImportedProfileNamesDto
+#pragma warning restore SA1402 // File may only contain a single type
+{
+    /// <summary>
+    /// Names of machine profiles already imported for the model
+    /// </summary>
+    public IList<string> MachineProfileNames { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Names of process profiles already imported for the model
+    /// </summary>
+    public IList<string> ProcessProfileNames { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Names of filament profiles already imported for the model
+    /// </summary>
+    public IList<string> FilamentProfileNames { get; set; } = new List<string>();
+}

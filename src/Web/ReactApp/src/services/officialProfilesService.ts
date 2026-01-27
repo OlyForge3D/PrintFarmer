@@ -1,6 +1,7 @@
 // Service for importing official slicer profiles for registered printers
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import { SlicerProfileListItem } from "./slicerProfilesService";
+import { ImportedProfileNamesDto } from "@/features/tasks/components/profile-wizard/types";
 
 export interface BulkProfileImportRequest {
   profileIds: string[];
@@ -167,6 +168,22 @@ export const officialProfilesService = {
       body: JSON.stringify(request),
     });
     return handle<SelectiveProfileImportResult>(res);
+  },
+
+  /**
+   * Get names of profiles already imported for a printer model.
+   * Used by the Profile Import Wizard to pre-check already-imported profiles.
+   * 
+   * @param modelId - The printer model ID from the catalog
+   * @returns Lists of imported machine, process, and filament profile names
+   */
+  async getImportedProfileNamesForModel(
+    modelId: string
+  ): Promise<ImportedProfileNamesDto> {
+    const res = await fetch(`${base}/imported-names/${modelId}`, {
+      headers: getAuthHeaders(),
+    });
+    return handle<ImportedProfileNamesDto>(res);
   },
 };
 

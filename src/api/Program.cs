@@ -729,8 +729,9 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Slicer registry events hub (worker registration, heartbeat, deregistration)
-// app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
+// Slicer registry events hub (worker registration, heartbeat, deregistration, profile import events)
+app.MapHub<SlicerHub>("/hubs/slicer-registry");
+
 // Slicer progress hub for job processing progress events
 app.MapHub<SlicerProgressHub>("/hubs/slicers");
 

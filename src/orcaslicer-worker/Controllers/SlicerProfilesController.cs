@@ -690,6 +690,37 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
             return StatusCode(500, new { error = "Failed to fetch filament profiles", message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Get template filament profiles from the OrcaFilamentLibrary.
+    /// These are universal profiles not tied to specific printers.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Universal filament profiles from OrcaFilamentLibrary</returns>
+    [HttpGet("filament/templates")]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), 200)]
+    public async Task<ActionResult<List<FilamentProfileDto>>> GetFilamentTemplatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation("Fetching OrcaFilamentLibrary template profiles");
+
+            IList<FilamentProfileDto> allFilaments = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+
+            // Return only OrcaFilamentLibrary profiles
+            List<FilamentProfileDto> result = allFilaments
+                .Where(f => (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} OrcaFilamentLibrary template profiles");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament templates: {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch filament templates", message = ex.Message });
+        }
+    }
 }
 
 /// <summary>

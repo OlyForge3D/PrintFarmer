@@ -382,6 +382,34 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Bulk deletes multiple profiles by ID, supporting all profile types (machine, process, filament).
+    /// </summary>
+    /// <param name="profileIds">Collection of profile IDs to delete</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>BulkDeleteResultDto with counts of deleted profiles by type</returns>
+    /// <remarks>
+    /// Profiles are looked up in machine, process, and filament tables.
+    /// Invalid or non-existent IDs are skipped (not treated as errors).
+    /// Requires farm_admin policy for access.
+    /// </remarks>
+    [HttpPost("bulk-delete")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: bulk delete profiles
+    [ProducesResponseType(typeof(BulkDeleteResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkDeleteProfilesAsync(
+        [FromBody] List<Guid>? profileIds,
+        CancellationToken ct)
+    {
+        if (profileIds is null || profileIds.Count == 0)
+        {
+            return BadRequest("At least one profile ID is required");
+        }
+
+        BulkDeleteResultDto result = await _profilesService.BulkDeleteProfilesAsync(profileIds, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Retrieves all process profiles with optional filtering by printer or slicer type.
     /// </summary>
     /// <param name="printerId">Optional printer ID to filter profiles by printer-specific compatibility</param>
@@ -917,6 +945,69 @@ public class ProfilesController(
         {
             _logger.LogError($"Error fetching filament profiles for machines: {ex.Message}");
             return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get template filament profiles from the OrcaFilamentLibrary.
+    /// These are universal profiles not tied to specific printers and serve as a starting point.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>Universal filament profiles from OrcaFilamentLibrary</returns>
+    /// <response code="200">Successfully fetched template filament profiles</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("filament/templates")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFilamentTemplatesAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentTemplatesAsync(httpClient, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament templates: {ex.Message}");
+            return StatusCode(500, $"Error fetching templates from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets names of profiles already imported for a specific printer model.
+    /// Used by the import wizard to show which profiles have already been imported.
+    /// </summary>
+    /// <param name="modelId">The printer model ID to check imported profiles for</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>DTO containing lists of imported machine, process, and filament profile names</returns>
+    /// <response code="200">Successfully retrieved imported profile names</response>
+    /// <response code="500">Internal server error</response>
+    [HttpGet("imported-names/{modelId:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ImportedProfileNamesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetImportedProfileNamesAsync(
+        Guid modelId,
+        CancellationToken ct)
+    {
+        try
+        {
+            ImportedProfileNamesDto result = await _profilesService.GetImportedProfileNamesForModelAsync(modelId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error getting imported profile names: {ex.Message}");
+            return StatusCode(500, $"Error getting imported profile names: {ex.Message}");
         }
     }
 

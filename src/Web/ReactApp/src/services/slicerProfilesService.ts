@@ -113,6 +113,14 @@ export interface HierarchicalProfilesResponse {
   processProfiles: Record<string, ProcessProfileListItem[]>;
 }
 
+export interface BulkDeleteResultDto {
+  machineProfilesDeleted: number;
+  processProfilesDeleted: number;
+  filamentProfilesDeleted: number;
+  totalDeleted: number;
+  notFound: number;
+}
+
 export const slicerProfilesService = {
   async listExtended(): Promise<ExtendedProfilesResponse> {
     const res = await apiClient.get<ExtendedProfilesResponse>('/slicer/profiles/extended');
@@ -138,6 +146,10 @@ export const slicerProfilesService = {
   },
   async setDefault(id: string): Promise<void> {
     await apiClient.post<void>(`/slicer/profiles/${id}/set-default`);
+  },
+  async bulkDelete(profileIds: string[]): Promise<BulkDeleteResultDto> {
+    const res = await apiClient.post<BulkDeleteResultDto>('/slicer/profiles/bulk-delete', profileIds);
+    return res.data;
   }
 };
 

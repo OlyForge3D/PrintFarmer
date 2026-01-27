@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import * as signalR from '@microsoft/signalr';
@@ -12,9 +13,9 @@ import slicerProfilesService, {
   MachineProfileListItem,
   ImportSlicerProfileRequest,
   SlicerProfileExtended,
-  SlicerProfileExportDto
+  SlicerProfileExportDto,
+  BulkDeleteResultDto
 } from '@/services/slicerProfilesService';
-import { officialProfilesService } from '@/services/officialProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon } from '@/common/components/icons/MdiIcons';
@@ -30,6 +31,7 @@ import { Modal } from '@/common/components/modals/Modal';
 
 export const SlicerProfilesPage: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   // Form state
   const [rawJson, setRawJson] = useState('');
@@ -64,10 +66,12 @@ export const SlicerProfilesPage: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [isReseedingProfiles] = useState(false);
   const [reseedModalOpen, setReseedModalOpen] = useState(false);
   const [reseedStatus, setReseedStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [reseedMessage, setReseedMessage] = useState<string>('Loading system profiles...');
+
+  // Selection state for bulk delete
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
 
   // Fetch available slicers
   const { data: availableSlicers = [] } = useQuery({
@@ -229,6 +233,28 @@ export const SlicerProfilesPage: React.FC = () => {
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
   });
+
+  const bulkDeleteMutation = useMutation<BulkDeleteResultDto, Error, string[]>({
+    mutationFn: async (ids) => slicerProfilesService.bulkDelete(ids),
+    onSuccess: (result) => {
+      setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
+      setSelectedProfileIds(new Set());
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+    },
+    onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
+  });
+
+  const handleToggleSelection = (id: string) => {
+    setSelectedProfileIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const exportProfile = async (id: string) => {
     setExportingId(id);
@@ -406,7 +432,15 @@ export const SlicerProfilesPage: React.FC = () => {
   };
 
   const renderProfileRow = (p: SlicerProfileListItem) => (
-    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={false}>
+    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={selectedProfileIds.has(p.id)}>
+      <td className="p-2">
+        <Checkbox
+          checked={selectedProfileIds.has(p.id)}
+          onChange={() => handleToggleSelection(p.id)}
+          label=""
+          aria-label={`Select ${p.name}`}
+        />
+      </td>
       <td className="p-2 font-medium">{p.name}</td>
       <td className="p-2">{p.slicerType}</td>
       <td className="p-2">{p.profileType === 'filament' ? (p as FilamentProfileListItem).material : p.profileType === 'machine' ? (p as MachineProfileListItem).manufacturer : '-'}</td>
@@ -520,6 +554,28 @@ export const SlicerProfilesPage: React.FC = () => {
     return visibleProfiles.slice(start, start + pageSize);
   }, [pageSize, safePageNumber, visibleProfiles]);
 
+  // Bulk selection handlers (must be after pagedProfiles is defined)
+  const handleSelectAll = () => {
+    if (selectedProfileIds.size === pagedProfiles.length && pagedProfiles.every(p => selectedProfileIds.has(p.id))) {
+      // Deselect all on current page
+      setSelectedProfileIds(new Set());
+    } else {
+      // Select all on current page
+      setSelectedProfileIds(new Set(pagedProfiles.map(p => p.id)));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedProfileIds.size === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedProfileIds.size} profile(s)?`)) return;
+    bulkDeleteMutation.mutate(Array.from(selectedProfileIds));
+  };
+
+  // Clear selection when switching tabs or filtering
+  React.useEffect(() => {
+    setSelectedProfileIds(new Set());
+  }, [activeTab, filterEngine, filterManufacturer, filterSource, searchQuery]);
+
   React.useEffect(() => {
     setPageNumber(1);
   }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineProfileId, selectedFilamentProfileId, selectedProcessProfileId]);
@@ -558,7 +614,7 @@ export const SlicerProfilesPage: React.FC = () => {
       }
 
       const hubConnection = builder
-        .withUrl(getHubUrl('/hubs/slicer'))
+        .withUrl(getHubUrl('/hubs/slicer-registry'))
         .withAutomaticReconnect()
         .build();
 
@@ -616,43 +672,11 @@ export const SlicerProfilesPage: React.FC = () => {
       <div className="flex flex-wrap gap-3 mb-4">
         <Button
           variant="secondary"
-          onClick={async () => {
-            setReseedModalOpen(true);
-            setReseedStatus('loading');
-            setReseedMessage('Loading system profiles...');
-            try {
-              const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
-              if (window.PrintFarmerDebug?.slicing) {
-                console.log('Force reseed result:', result);
-              }
-
-              if (result.imported === 0) {
-                let details = result.message || 'No profiles available from worker';
-                if (result.orcaslicerVersion) {
-                  details += ` (OrcaSlicer version: ${result.orcaslicerVersion})`;
-                }
-                setReseedStatus('error');
-                setReseedMessage(`⚠️ ${details}`);
-                setMessage(`⚠️ ${details}`);
-              } else {
-                setReseedStatus('success');
-                setReseedMessage(`✅ Successfully loaded ${result.imported} profile(s) from OrcaSlicer${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}`);
-                setMessage(`✅ System profiles loaded: ${result.imported} profile(s) from OrcaSlicer${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}.`);
-                qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-              }
-            } catch (error) {
-              const errorMsg = error instanceof Error ? error.message : 'Failed to load system profiles';
-              console.error('Force reseed error:', error);
-              setReseedStatus('error');
-              setReseedMessage(`❌ ${errorMsg}`);
-              setMessage(`❌ ${errorMsg}`);
-            }
-          }}
-          loading={isReseedingProfiles}
+          onClick={() => navigate('/profiles/import')}
           className="flex items-center gap-2"
           iconLeft={<UploadIcon className="w-4 h-4" />}
         >
-          Load System Profiles
+          Import Profiles...
         </Button>
         <Button
           variant="secondary"
@@ -874,11 +898,40 @@ export const SlicerProfilesPage: React.FC = () => {
             {!isLoading && (activeTab === 'filaments' || activeTab === 'processes') && !selectedMachineProfileId && (
               <div className="text-pf-text-muted text-sm">Select a machine model to view filament and process profiles.</div>
             )}
+            {/* Bulk actions bar */}
+            {selectedProfileIds.size > 0 && (
+              <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded">
+                <span className="text-sm text-pf-text-secondary">{selectedProfileIds.size} profile(s) selected</span>
+                <Button
+                  onClick={handleDeleteSelected}
+                  loading={bulkDeleteMutation.isPending}
+                  size="sm"
+                  variant="danger"
+                >
+                  Delete Selected
+                </Button>
+                <Button
+                  onClick={() => setSelectedProfileIds(new Set())}
+                  size="sm"
+                  variant="subtle"
+                >
+                  Clear Selection
+                </Button>
+              </div>
+            )}
             {!isLoading && getFilteredCount() > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-pf-bg-1 text-left">
+                      <th className="p-2 w-10">
+                        <Checkbox
+                          checked={pagedProfiles.length > 0 && pagedProfiles.every(p => selectedProfileIds.has(p.id))}
+                          onChange={handleSelectAll}
+                          label=""
+                          aria-label="Select all profiles on this page"
+                        />
+                      </th>
                       <th className="p-2">Name</th>
                       <th className="p-2">Engine</th>
                       <th className="p-2">Material/Manufacturer</th>

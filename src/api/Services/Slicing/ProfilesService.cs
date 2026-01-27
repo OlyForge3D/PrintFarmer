@@ -788,7 +788,18 @@ namespace Farm.Web.Api.Services.Slicing
                 MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
                 if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                 {
-                    return false; // Skipped
+                    // If the existing profile doesn't have a PrinterModelId but we have one, update it
+                    // This links the profile to the printer model the user is importing for
+                    if (printerModelId.HasValue && !existingProfile.PrinterModelId.HasValue)
+                    {
+                        existingProfile.PrinterModelId = printerModelId;
+                        existingProfile.UpdatedAt = DateTime.UtcNow;
+                        await _machineProfileRepo.UpdateAsync(existingProfile, ct);
+                        _logger.LogDebug($"Updated existing machine profile '{existingProfile.Name}' with PrinterModelId {printerModelId}");
+                        return true; // Treated as imported since we updated the link
+                    }
+
+                    return false; // Skipped - already linked or no model to link
                 }
             }
 
@@ -949,8 +960,12 @@ namespace Farm.Web.Api.Services.Slicing
                     return result;
                 }
 
-                // Find the manufacturer's profiles
-                if (!allProfiles.ByHierarchy.TryGetValue(request.ManufacturerName, out ManufacturerProfilesDto? manufacturerProfiles) ||
+                // Find the manufacturer's profiles (case-insensitive lookup)
+                string? matchedManufacturerKey = allProfiles.ByHierarchy.Keys
+                    .FirstOrDefault(k => string.Equals(k, request.ManufacturerName, StringComparison.OrdinalIgnoreCase));
+
+                if (matchedManufacturerKey == null ||
+                    !allProfiles.ByHierarchy.TryGetValue(matchedManufacturerKey, out ManufacturerProfilesDto? manufacturerProfiles) ||
                     manufacturerProfiles?.Models == null)
                 {
                     result.Error = $"Manufacturer '{request.ManufacturerName}' not found in worker profiles";
@@ -1786,6 +1801,79 @@ namespace Farm.Web.Api.Services.Slicing
         }
 
         /// <summary>
+        /// Fetches template filament profiles from OrcaFilamentLibrary (universal profiles).
+        /// </summary>
+        public async Task<IReadOnlyList<FilamentProfileDto>> GetFilamentTemplatesAsync(
+            HttpClient httpClient,
+            CancellationToken ct)
+        {
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                throw new HttpRequestException("OrcaSlicer worker not found in registry");
+            }
+
+            string url = $"{workerUrl}/api/profiles/filament/templates";
+            _logger.LogInformation($"Fetching filament templates from worker: {url}");
+
+            HttpResponseMessage response = await httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string error = await response.Content.ReadAsStringAsync(ct);
+                throw new HttpRequestException($"Worker returned {(int)response.StatusCode}: {error}", null, response.StatusCode);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(ct);
+            List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return profiles ?? new List<FilamentProfileDto>();
+        }
+
+        /// <inheritdoc />
+        public async Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(
+            Guid printerModelId,
+            CancellationToken ct)
+        {
+            _logger.LogInformation($"[GetImportedProfileNamesForModel] Getting imported profile names for model: {printerModelId}");
+
+            // Get all OrcaSlicer machine profiles for this model
+            IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetByEngineAsync(
+                SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+
+            List<string> machineNames = machineProfiles
+                .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name))
+                .Select(p => p.Name!)
+                .ToList();
+
+            // Get all OrcaSlicer process profiles for this model
+            IReadOnlyList<ProcessProfile> processProfiles = await _processProfileRepo.GetByEngineAsync(
+                SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+
+            List<string> processNames = processProfiles
+                .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name))
+                .Select(p => p.Name!)
+                .ToList();
+
+            // Get all OrcaSlicer filament profiles (filaments are global, not tied to model)
+            // We return all imported filament profile names since they're shared across models
+            IReadOnlyList<FilamentProfile> filamentProfiles = await _filamentProfileRepo.GetByEngineAsync(
+                SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+
+            List<string> filamentNames = filamentProfiles
+                .Where(p => !string.IsNullOrEmpty(p.Name))
+                .Select(p => p.Name!)
+                .ToList();
+
+            _logger.LogDebug($"[GetImportedProfileNamesForModel] Found {machineNames.Count} machines, {processNames.Count} processes, {filamentNames.Count} filaments for model {printerModelId}");
+
+            return new ImportedProfileNamesDto
+            {
+                MachineProfileNames = machineNames,
+                ProcessProfileNames = processNames,
+                FilamentProfileNames = filamentNames
+            };
+        }
+
+        /// <summary>
         /// Retrieves profiles that are compatible with a specific printer.
         /// </summary>
         /// <param name="printerId">The unique identifier of the printer</param>
@@ -2276,6 +2364,64 @@ namespace Farm.Web.Api.Services.Slicing
             _logger.LogInformation($"[DeleteProfileAsync] Successfully deleted profile: {profile.Name}");
 
             _logger.LogInformation($"Profile deleted: {id} - {profile.Name}");
+        }
+
+        /// <summary>
+        /// Deletes multiple profiles by ID, supporting all profile types (machine, process, filament).
+        /// </summary>
+        /// <param name="profileIds">Collection of profile IDs to delete</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>BulkDeleteResultDto with counts of deleted profiles by type</returns>
+        /// <remarks>
+        /// Profiles are looked up in machine, process, and filament tables.
+        /// Invalid or non-existent IDs are skipped (not treated as errors).
+        /// Returns counts of successfully deleted profiles by type.
+        /// </remarks>
+        public async Task<BulkDeleteResultDto> BulkDeleteProfilesAsync(IEnumerable<Guid> profileIds, CancellationToken ct)
+        {
+            var result = new BulkDeleteResultDto();
+            var idList = profileIds.ToList();
+            _logger.LogInformation($"[BulkDeleteProfilesAsync] Deleting {idList.Count} profiles");
+
+            foreach (var id in idList)
+            {
+                // Try machine profiles first
+                var machineProfile = await _machineProfileRepo.GetByIdAsync(id, ct);
+                if (machineProfile != null)
+                {
+                    await _machineProfileRepo.DeleteAsync(machineProfile, ct);
+                    result.MachineProfilesDeleted++;
+                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted machine profile: {machineProfile.Name}");
+                    continue;
+                }
+
+                // Try process profiles
+                var processProfile = await _repo.FindByIdAsync(id, ct);
+                if (processProfile != null)
+                {
+                    await _repo.RemoveAsync(processProfile, ct);
+                    result.ProcessProfilesDeleted++;
+                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted process profile: {processProfile.Name}");
+                    continue;
+                }
+
+                // Try filament profiles
+                var filamentProfile = await _filamentProfileRepo.GetByIdAsync(id, ct);
+                if (filamentProfile != null)
+                {
+                    await _filamentProfileRepo.DeleteAsync(filamentProfile, ct);
+                    result.FilamentProfilesDeleted++;
+                    _logger.LogDebug($"[BulkDeleteProfilesAsync] Deleted filament profile: {filamentProfile.Name}");
+                    continue;
+                }
+
+                // Not found in any table
+                result.NotFound++;
+                _logger.LogWarning($"[BulkDeleteProfilesAsync] Profile not found: {id}");
+            }
+
+            _logger.LogInformation($"[BulkDeleteProfilesAsync] Deleted {result.TotalDeleted} profiles (machine: {result.MachineProfilesDeleted}, process: {result.ProcessProfilesDeleted}, filament: {result.FilamentProfilesDeleted}, not found: {result.NotFound})");
+            return result;
         }
 
         /// <summary>

@@ -155,6 +155,15 @@ namespace Farm.Web.Api.Services.Slicing
         Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForModelAsync(HttpClient httpClient, string manufacturer, string model, CancellationToken ct);
 
         /// <summary>
+        /// Gets names of profiles already imported for a specific printer model.
+        /// Used by the import wizard to show which profiles have already been imported.
+        /// </summary>
+        /// <param name="printerModelId">The printer model ID to check imported profiles for</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>DTO containing lists of imported machine, process, and filament profile names</returns>
+        Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(Guid printerModelId, CancellationToken ct);
+
+        /// <summary>
         /// Fetches machine profiles by OrcaSlicer alias (printer_model) from the worker.
         /// The alias is the exact printer_model value (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400").
         /// </summary>
@@ -181,6 +190,14 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>List of filament profiles compatible with the specified machines</returns>
         Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(HttpClient httpClient, IEnumerable<string> machineNames, CancellationToken ct);
+
+        /// <summary>
+        /// Fetches template filament profiles from the OrcaFilamentLibrary (universal profiles).
+        /// </summary>
+        /// <param name="httpClient">HTTP client for worker communication</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of universal filament profiles from OrcaFilamentLibrary</returns>
+        Task<IReadOnlyList<FilamentProfileDto>> GetFilamentTemplatesAsync(HttpClient httpClient, CancellationToken ct);
 
         /// <summary>
         /// Gets system OrcaSlicer profiles available for import to a specific registered printer.
@@ -286,5 +303,18 @@ namespace Farm.Web.Api.Services.Slicing
         /// Throws KeyNotFoundException if profile not found.
         /// </remarks>
         Task DeleteProfileAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Deletes multiple profiles by ID, supporting all profile types (machine, process, filament).
+        /// </summary>
+        /// <param name="profileIds">Collection of profile IDs to delete</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>BulkDeleteResultDto with counts of deleted profiles by type</returns>
+        /// <remarks>
+        /// Profiles are looked up in machine, process, and filament tables.
+        /// Invalid or non-existent IDs are skipped (not treated as errors).
+        /// Returns counts of successfully deleted profiles by type.
+        /// </remarks>
+        Task<BulkDeleteResultDto> BulkDeleteProfilesAsync(IEnumerable<Guid> profileIds, CancellationToken ct);
     }
 }
