@@ -19,7 +19,6 @@ import {
   HistoryListResponse,
   HistoryTotals,
   HotendModelDefinition,
-  JobQueuePrintJob,
   ManufacturerDto,
   ManufacturersByContext,
   NozzleModelDefinition,
@@ -30,6 +29,7 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  QueuedPrintJobWithFileMetaDto,
   StartDiscoveryRequest,
   ToolheadModelDefinition,
   UpdateExtruderModelDto,
@@ -883,7 +883,7 @@ export function useRestartHarvestDiscovery() {
 
 // ============ Job Queue Hooks ============
 
-export function useJobQueue(printerId?: string, options?: QueryOptions<JobQueuePrintJob[]>) {
+export function useJobQueue(printerId?: string, options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>) {
   return useQuery({
     queryKey: queryKeys.jobQueue(printerId),
     queryFn: () => apiClient.getJobQueue(printerId),
@@ -905,46 +905,47 @@ export function useQueuePrintJob() {
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue() });
       const printerQueueKey = queryKeys.jobQueue(printerId);
       const globalQueueKey = queryKeys.jobQueue();
-      const prevPrinterQueue = queryClient.getQueryData<JobQueuePrintJob[]>(printerQueueKey);
-      const prevGlobalQueue = queryClient.getQueryData<JobQueuePrintJob[]>(globalQueueKey);
-      const temp: JobQueuePrintJob = {
-        id: `temp-${Date.now()}`,
-        printerId,
-        gcodeFileId,
-        gcodeFileName: 'Queuing...',
-        status: 0,
-        priority,
-        queuedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date()
-      } as JobQueuePrintJob;
+      const prevPrinterQueue = queryClient.getQueryData<QueuedPrintJobWithFileMetaDto[]>(printerQueueKey);
+      const prevGlobalQueue = queryClient.getQueryData<QueuedPrintJobWithFileMetaDto[]>(globalQueueKey);
+      const tempId = `temp-${Date.now()}`;
+      const temp: QueuedPrintJobWithFileMetaDto = {
+        job: {
+          id: tempId,
+          name: 'Queuing...',
+          gcodeFileId,
+          fileName: 'Queuing...',
+          assignedPrinterId: printerId,
+          status: 'Queued',
+          priority,
+          queuePosition: 0,
+          createdAtUtc: new Date().toISOString(),
+          updatedAtUtc: new Date().toISOString(),
+          queuedAtUtc: new Date().toISOString(),
+        },
+      };
       if (prevPrinterQueue) queryClient.setQueryData(printerQueueKey, [temp, ...prevPrinterQueue]); else queryClient.setQueryData(printerQueueKey, [temp]);
       if (prevGlobalQueue) queryClient.setQueryData(globalQueueKey, [temp, ...prevGlobalQueue]); else queryClient.setQueryData(globalQueueKey, [temp]);
-      return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey, tempId: temp.id };
+      return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey, tempId };
     },
     onError: (_e, vars, ctx) => {
       if (ctx?.prevPrinterQueue && ctx.printerQueueKey) {
         queryClient.setQueryData(ctx.printerQueueKey, ctx.prevPrinterQueue);
       } else if (ctx?.printerQueueKey) {
-        const cur = queryClient.getQueryData<JobQueuePrintJob[]>(ctx.printerQueueKey);
-        if (cur) queryClient.setQueryData(ctx.printerQueueKey, cur.filter(j => j.id !== ctx?.tempId && !j.id.startsWith('temp-')) || undefined);
+        const cur = queryClient.getQueryData<QueuedPrintJobWithFileMetaDto[]>(ctx.printerQueueKey);
+        if (cur) queryClient.setQueryData(ctx.printerQueueKey, cur.filter(j => j.job.id !== ctx?.tempId && !j.job.id.startsWith('temp-')) || undefined);
       }
       if (ctx?.prevGlobalQueue && ctx.globalQueueKey) {
         queryClient.setQueryData(ctx.globalQueueKey, ctx.prevGlobalQueue);
       } else if (ctx?.globalQueueKey) {
-        const cur = queryClient.getQueryData<JobQueuePrintJob[]>(ctx.globalQueueKey);
-        if (cur) queryClient.setQueryData(ctx.globalQueueKey, cur.filter(j => j.id !== ctx?.tempId && !j.id.startsWith('temp-')) || undefined);
+        const cur = queryClient.getQueryData<QueuedPrintJobWithFileMetaDto[]>(ctx.globalQueueKey);
+        if (cur) queryClient.setQueryData(ctx.globalQueueKey, cur.filter(j => j.job.id !== ctx?.tempId && !j.job.id.startsWith('temp-')) || undefined);
       }
       toast.error('Failed to queue print job');
     },
-    onSuccess: (job, vars, ctx) => {
-      const printerQueueKey = queryKeys.jobQueue(vars.printerId);
-      const globalQueueKey = queryKeys.jobQueue();
-      const upd = (key: readonly unknown[]) => {
-        const list = queryClient.getQueryData<JobQueuePrintJob[]>(key);
-        if (list) queryClient.setQueryData<JobQueuePrintJob[]>(key, list.map(j => (ctx?.tempId && j.id === ctx.tempId) ? job : j));
-      };
-      upd(printerQueueKey); upd(globalQueueKey);
+    onSuccess: (_job, vars) => {
+      // Invalidate and refetch to get proper server data instead of manual update
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue(vars.printerId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue() });
       toast.success('Print job queued');
     },
     onSettled: (_d, _e, vars) => {
@@ -960,17 +961,20 @@ export function useCancelPrintQueueJob() {
   return useMutation({
     mutationFn: (jobId: string) => apiClient.cancelPrintQueueJob(jobId),
     onMutate: async (jobId) => {
-      const allQueues = queryClient.getQueriesData<JobQueuePrintJob[]>({ queryKey: ['job-queue'] });
+      const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
         if (jobs) {
-          queryClient.setQueryData<JobQueuePrintJob[]>(key as readonly unknown[], jobs.map(j => j.id === jobId ? { ...j, status: 4, updatedAt: new Date() } : j));
+          queryClient.setQueryData<QueuedPrintJobWithFileMetaDto[]>(
+            key as readonly unknown[], 
+            jobs.map(j => j.job.id === jobId ? { ...j, job: { ...j.job, status: 'Cancelled', updatedAtUtc: new Date().toISOString() } } : j)
+          );
         }
       });
       return { snapshots };
     },
     onError: (_e, _id, ctx) => {
-      ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[]>(s.key as readonly unknown[], s.value));
+      ctx?.snapshots?.forEach(s => queryClient.setQueryData<QueuedPrintJobWithFileMetaDto[]>(s.key as readonly unknown[], s.value));
       toast.error('Failed to cancel job');
     },
     onSuccess: () => {
@@ -988,17 +992,17 @@ export function useDeletePrintQueueJob() {
   return useMutation({
     mutationFn: (jobId: string) => apiClient.deletePrintQueueJob(jobId),
     onMutate: async (jobId) => {
-      const allQueues = queryClient.getQueriesData<JobQueuePrintJob[]>({ queryKey: ['job-queue'] });
+      const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
         if (jobs) {
-          queryClient.setQueryData<JobQueuePrintJob[]>(key as readonly unknown[], jobs.filter(j => j.id !== jobId));
+          queryClient.setQueryData<QueuedPrintJobWithFileMetaDto[]>(key as readonly unknown[], jobs.filter(j => j.job.id !== jobId));
         }
       });
       return { snapshots };
     },
     onError: (_e, _id, ctx) => {
-      ctx?.snapshots?.forEach(s => queryClient.setQueryData<JobQueuePrintJob[]>(s.key as readonly unknown[], s.value));
+      ctx?.snapshots?.forEach(s => queryClient.setQueryData<QueuedPrintJobWithFileMetaDto[]>(s.key as readonly unknown[], s.value));
       toast.error('Failed to delete job');
     },
     onSuccess: () => {

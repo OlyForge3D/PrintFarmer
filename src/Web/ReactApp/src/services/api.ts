@@ -1614,11 +1614,26 @@ export class ApiClient {
     return response.data;
   }
 
-  async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {
-    const params = printerId ? { printerId } : {};
-    const response = await this.client.get<JobQueuePrintJob[]>("/job-queue", {
-      params,
-    });
+  /**
+   * Get all queued print jobs with file metadata.
+   * Uses the job-queue-analytics endpoint which returns actual job data.
+   * @param printerId Optional printer ID to filter jobs by printer
+   */
+  async getJobQueue(printerId?: string): Promise<QueuedPrintJobWithFileMetaDto[]> {
+    const params: Record<string, string | number> = { limit: 100 };
+    if (printerId) {
+      // Use the printer-specific endpoint
+      const response = await this.client.get<QueuedPrintJobWithFileMetaDto[]>(
+        `/job-queue-analytics/printer/${printerId}`,
+        { params: { limit: 100 } }
+      );
+      return response.data;
+    }
+    // Use the global queue endpoint
+    const response = await this.client.get<QueuedPrintJobWithFileMetaDto[]>(
+      "/job-queue-analytics",
+      { params }
+    );
     return response.data;
   }
 

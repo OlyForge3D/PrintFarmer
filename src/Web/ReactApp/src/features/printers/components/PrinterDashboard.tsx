@@ -176,14 +176,23 @@ export const PrinterDashboard: React.FC = () => {
                     <h2 className="text-lg font-semibold text-pf-text-primary">Active & Queued Jobs</h2>
                   </div>
                   <div className="space-y-3 max-h-64 overflow-y-auto">
-                    {globalQueue.slice(0, 5).map((job, idx) => (
-                      <div key={job.id} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
+                    {globalQueue.slice(0, 5).map((item) => (
+                      <div key={item.job.id} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-pf-text-primary truncate">{job.gcodeFileName}</p>
-                          <p className="text-xs text-pf-text-tertiary">Queue Position: {idx + 1}</p>
+                          <p className="text-sm font-medium text-pf-text-primary truncate">
+                            {item.gcodeFile?.name ?? item.job.fileName ?? item.job.name ?? 'Unknown Job'}
+                          </p>
+                          <p className="text-xs text-pf-text-tertiary">
+                            Queue Position: {item.job.queuePosition}
+                            {item.assignedPrinter && ` • ${item.assignedPrinter.name}`}
+                          </p>
                         </div>
-                        <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-pf-loading text-pf-text-primary whitespace-nowrap">
-                          Queued
+                        <span className={`ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                          item.job.status === 'Printing' 
+                            ? 'bg-pf-status-online-bg text-pf-status-online-text'
+                            : 'bg-pf-loading text-pf-text-primary'
+                        }`}>
+                          {item.job.status}
                         </span>
                       </div>
                     ))}

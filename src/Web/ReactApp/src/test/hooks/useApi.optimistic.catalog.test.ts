@@ -6,7 +6,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys, useCancelPrintQueueJob, useCreateManufacturer, useCreateModel, useDeletePrintQueueJob, useQueuePrintJob } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import { JobQueuePrintJob, JobQueueStatus, PrinterModelDto } from '@/types/api';
+import { PrinterModelDto, QueuedPrintJobWithFileMetaDto } from '@/types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -99,28 +99,44 @@ describe('optimistic manufacturer/model creation', () => {
 });
 
 describe('optimistic job cancel/delete', () => {
-  const seedJobs = (client: QueryClient, jobs: JobQueuePrintJob[]) => {
+  const createMockJob = (id: string): QueuedPrintJobWithFileMetaDto => ({
+    job: {
+      id,
+      name: 'Test Job',
+      gcodeFileId: 'f',
+      fileName: 'f.gcode',
+      assignedPrinterId: 'p1',
+      status: 'Queued',
+      priority: 0,
+      queuePosition: 1,
+      createdAtUtc: new Date().toISOString(),
+      updatedAtUtc: new Date().toISOString(),
+      queuedAtUtc: new Date().toISOString(),
+    },
+  });
+
+  const seedJobs = (client: QueryClient, jobs: QueuedPrintJobWithFileMetaDto[]) => {
     client.setQueryData(queryKeys.jobQueue(), jobs);
   };
 
   it('cancel job marks status and keeps after success', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    const job: JobQueuePrintJob = { id: 'job-x', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
+    const job = createMockJob('job-x');
     seedJobs(client, [job]);
     vi.spyOn(apiClient, 'cancelPrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); });
 
     const { result } = renderHook(() => useCancelPrintQueueJob(), { wrapper });
     await act(async () => { result.current.mutate('job-x'); });
 
-    const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(interim?.find(j => j.id === 'job-x')?.status).toBe(JobQueueStatus.Cancelled);
+    const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+    expect(interim?.find(j => j.job.id === 'job-x')?.job.status).toBe('Cancelled');
   });
 
   it('delete job removes from list', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    const job: JobQueuePrintJob = { id: 'job-y', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
+    const job = createMockJob('job-y');
     seedJobs(client, [job]);
 
     vi.spyOn(apiClient, 'deletePrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); });
@@ -128,8 +144,8 @@ describe('optimistic job cancel/delete', () => {
     const { result } = renderHook(() => useDeletePrintQueueJob(), { wrapper });
     await act(async () => { result.current.mutate('job-y'); });
 
-    const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(interim?.some(j => j.id === 'job-y')).toBe(false);
+    const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+    expect(interim?.some(j => j.job.id === 'job-y')).toBe(false);
   });
 
   it('queue job rollback on error', async () => {
@@ -139,43 +155,43 @@ describe('optimistic job cancel/delete', () => {
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
     await act(async () => { result.current.mutate({ printerId: 'p-err', gcodeFileId: 'f1' }); });
     const key = queryKeys.jobQueue('p-err');
-    const temp = client.getQueryData<JobQueuePrintJob[]>(key);
-    expect(temp?.some(j => j.id.startsWith('temp-'))).toBe(true);
+    const temp = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(key);
+    expect(temp?.some(j => j.job.id.startsWith('temp-'))).toBe(true);
     await waitFor(() => {
-      const after = client.getQueryData<JobQueuePrintJob[]>(key);
-      expect(after?.some(j => j.id.startsWith('temp-'))).toBe(false);
+      const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(key);
+      expect(after?.some(j => j.job.id.startsWith('temp-'))).toBe(false);
     });
   });
 
   it('cancel job rollback on error', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    const job: JobQueuePrintJob = { id: 'job-cancel-err', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
+    const job = createMockJob('job-cancel-err');
     client.setQueryData(queryKeys.jobQueue(), [job]);
     vi.spyOn(apiClient, 'cancelPrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('cancel fail'); });
     const { result } = renderHook(() => useCancelPrintQueueJob(), { wrapper });
     await act(async () => { result.current.mutate('job-cancel-err'); });
-    const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(interim?.find(j => j.id === 'job-cancel-err')?.status).toBe(JobQueueStatus.Cancelled);
+    const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+    expect(interim?.find(j => j.job.id === 'job-cancel-err')?.job.status).toBe('Cancelled');
     await waitFor(() => {
-      const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-      expect(after?.find(j => j.id === 'job-cancel-err')?.status).toBe(JobQueueStatus.Pending);
+      const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+      expect(after?.find(j => j.job.id === 'job-cancel-err')?.job.status).toBe('Queued');
     });
   });
 
   it('delete job rollback on error', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    const job: JobQueuePrintJob = { id: 'job-del-err', printerId: 'p1', gcodeFileId: 'f', gcodeFileName: 'f.gcode', status: JobQueueStatus.Pending, priority: 0, queuedAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as JobQueuePrintJob;
+    const job = createMockJob('job-del-err');
     client.setQueryData(queryKeys.jobQueue(), [job]);
     vi.spyOn(apiClient, 'deletePrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('delete fail'); });
     const { result } = renderHook(() => useDeletePrintQueueJob(), { wrapper });
     await act(async () => { result.current.mutate('job-del-err'); });
-    const interim = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-    expect(interim?.some(j => j.id === 'job-del-err')).toBe(false);
+    const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+    expect(interim?.some(j => j.job.id === 'job-del-err')).toBe(false);
     await waitFor(() => {
-      const after = client.getQueryData<JobQueuePrintJob[]>(queryKeys.jobQueue());
-      expect(after?.some(j => j.id === 'job-del-err')).toBe(true);
+      const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
+      expect(after?.some(j => j.job.id === 'job-del-err')).toBe(true);
     });
   });
 });
