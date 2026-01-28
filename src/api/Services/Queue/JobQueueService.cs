@@ -215,10 +215,26 @@ namespace Farm.Web.Api.Services.Queue
                 return null;
             }
 
-            Guid? assignedPrinterId = request.AssignedPrinterId;
+            // Merge request values with G-code file metadata (request takes precedence, G-code as fallback)
+            // This ensures the same matching logic works for:
+            // 1. OctoPrint upload+print (slicer sends values in request)
+            // 2. Manual queue from UI (may not include values - use G-code metadata)
+            // 3. Direct API calls (can specify overrides or rely on G-code metadata)
+            // Build effective request: request values take precedence, G-code metadata as fallback
+            QueuePrintJobDto effectiveRequest = new QueuePrintJobDto
+            {
+                GcodeFileId = request.GcodeFileId,
+                AssignedPrinterId = request.AssignedPrinterId,
+                Priority = request.Priority,
+                RequiredNozzleDiameter = request.RequiredNozzleDiameter ?? (decimal?)gcode.RequiredNozzleDiameter,
+                RequiredMaterialType = request.RequiredMaterialType ?? gcode.RequiredMaterial,
+                RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName
+            };
+
+            Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
             if (assignedPrinterId == null)
             {
-                assignedPrinterId = await FindBestAvailablePrinterAsync(request, ct);
+                assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, ct);
                 if (assignedPrinterId == null)
                 {
                     return null;

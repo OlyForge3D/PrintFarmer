@@ -17,6 +17,10 @@ import type {
   QueueStatsDto,
 } from "@/types/api";
 
+// localStorage keys for persisting user preferences
+const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
+const VALID_TABS = ['all-jobs', 'by-model', 'timing', 'history'] as const;
+
 export function PrintQueueDashboardPage() {
   const [jobs, setJobs] = useState<QueuedPrintJobWithFileMetaDto[]>([]);
   const [stats, setStats] = useState<QueueStatsDto | null>(null);
@@ -28,7 +32,18 @@ export function PrintQueueDashboardPage() {
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("all-jobs");
+  
+  // Persist active tab to localStorage
+  const [activeTab, setActiveTabState] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
+    return saved && VALID_TABS.includes(saved as typeof VALID_TABS[number]) ? saved : 'all-jobs';
+  });
+  
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
+  }, []);
+  
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
@@ -364,8 +379,8 @@ export function PrintQueueDashboardPage() {
             <QueueHistoryTab
               onRerun={handleRerunJob}
               onViewDetails={(jobId) => {
-                // TODO: Navigate to job details page
-              if (window.PrintFarmerDebug?.utilities) console.log("View job details:", jobId);
+                setSelectedJobId(jobId);
+                setIsJobDetailsModalOpen(true);
               }}
             />
           </Tabs.Panel>

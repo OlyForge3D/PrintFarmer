@@ -220,10 +220,13 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     /// </summary>
     /// <param name="id">The unique identifier of the gcode file</param>
     /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>The gcode file if found; otherwise null</returns>
+    /// <returns>The gcode file with PrinterModel loaded if found; otherwise null</returns>
     public async Task<GcodeFile?> GetGcodeFileAsync(Guid id, CancellationToken ct)
     {
-        return await _db.GcodeFiles.FindAsync(new object[] { id }, ct).AsTask();
+        // Include PrinterModel so we can use it for auto-assign when queueing jobs
+        return await _db.GcodeFiles
+            .Include(f => f.PrinterModel)
+            .FirstOrDefaultAsync(f => f.Id == id, ct);
     }
 
     /// <summary>

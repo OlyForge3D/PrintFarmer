@@ -30,6 +30,8 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     {
         return await _context.PrintJobs
             .Include(pj => pj.GcodeFile)
+            .Include(pj => pj.AssignedPrinter)
+                .ThenInclude(p => p!.Model)
             .FirstOrDefaultAsync(pj => pj.Id == id, ct);
     }
 
@@ -183,31 +185,79 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .ToListAsync(ct);
     }
 
-    public async Task<(List<PrintJob> jobs, int totalCount)> GetHistoryAsync(
+    public async Task<(List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds)> GetHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
+        List<string>? statuses = null,
+        DateTime? dateStart = null,
+        DateTime? dateEnd = null,
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
-                .ThenInclude(p => p!.Model)
-            .Where(pj => pj.Status == PrintJobStatus.Completed || pj.Status == PrintJobStatus.Failed);
+                .ThenInclude(p => p!.Model);
 
+        // Filter by statuses - default to completed/failed/cancelled if not specified
+        if (statuses != null && statuses.Count > 0)
+        {
+            List<PrintJobStatus> statusEnums = statuses
+                .Select(s => Enum.TryParse<PrintJobStatus>(s, ignoreCase: true, out var status) ? status : (PrintJobStatus?)null)
+                .Where(s => s.HasValue)
+                .Select(s => s!.Value)
+                .ToList();
+
+            if (statusEnums.Count > 0)
+            {
+                query = query.Where(pj => statusEnums.Contains(pj.Status));
+            }
+        }
+        else
+        {
+            // Default: show completed, failed, and cancelled jobs
+            query = query.Where(pj => pj.Status == PrintJobStatus.Completed ||
+                                      pj.Status == PrintJobStatus.Failed ||
+                                      pj.Status == PrintJobStatus.Cancelled);
+        }
+
+        // Filter by date range (use ActualEndTime for completed/failed, QueuedAt for cancelled)
+        if (dateStart.HasValue)
+        {
+            query = query.Where(pj => (pj.ActualEndTime ?? pj.QueuedAt) >= dateStart.Value);
+        }
+
+        if (dateEnd.HasValue)
+        {
+            query = query.Where(pj => (pj.ActualEndTime ?? pj.QueuedAt) <= dateEnd.Value);
+        }
+
+        // Calculate statistics for the entire filtered result set (before pagination)
         int totalCount = await query.CountAsync(ct);
+        int completedCount = await query.CountAsync(pj => pj.Status == PrintJobStatus.Completed, ct);
+        int failedCount = await query.CountAsync(pj => pj.Status == PrintJobStatus.Failed, ct);
+        int cancelledCount = await query.CountAsync(pj => pj.Status == PrintJobStatus.Cancelled, ct);
+
+        // Sum total print time (in seconds) for jobs with ActualPrintTime
+        // Note: We fetch the values and sum client-side to avoid EF Core translation issues with TimeSpan
+        List<TimeSpan> printTimes = await query
+            .Where(pj => pj.ActualPrintTime.HasValue)
+            .Select(pj => pj.ActualPrintTime!.Value)
+            .ToListAsync(ct);
+        long totalPrintTimeSeconds = printTimes.Sum(t => (long)t.TotalSeconds);
 
         query = sortBy.ToLowerInvariant() switch
         {
             "duration" => query.OrderByDescending(pj => pj.ActualPrintTime),
             "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.FileName : string.Empty),
             "status" => query.OrderBy(pj => pj.Status),
-            _ => query.OrderByDescending(pj => pj.ActualEndTime)
+            "oldest" => query.OrderBy(pj => pj.ActualEndTime ?? pj.QueuedAt),
+            _ => query.OrderByDescending(pj => pj.ActualEndTime ?? pj.QueuedAt)
         };
 
         List<PrintJob> jobs = await query.Skip(offset).Take(limit).ToListAsync(ct);
 
-        return (jobs, totalCount);
+        return (jobs, totalCount, completedCount, failedCount, cancelledCount, totalPrintTimeSeconds);
     }
 
     // ============= TIMELINE & HISTORY =============

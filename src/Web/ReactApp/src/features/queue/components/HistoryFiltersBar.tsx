@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
 
@@ -13,6 +13,8 @@ interface HistoryFiltersBarProps {
   onSortChange: (sort: "newest" | "oldest" | "duration" | "model") => void;
   onRefresh: () => Promise<void>;
   isLoading: boolean;
+  viewMode: "cards" | "table";
+  onViewModeChange: (mode: "cards" | "table") => void;
 }
 
 /**
@@ -23,6 +25,8 @@ interface HistoryFiltersBarProps {
  * - Date range picker (Start/End dates)
  * - Sort order selector
  * - Refresh button
+ * 
+ * Features collapsible design to save vertical space.
  */
 export default function HistoryFiltersBar({
   selectedStatuses,
@@ -35,7 +39,11 @@ export default function HistoryFiltersBar({
   onSortChange,
   onRefresh,
   isLoading,
+  viewMode,
+  onViewModeChange,
 }: HistoryFiltersBarProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   const handleStatusToggle = useCallback(
     (status: string) => {
       if (selectedStatuses.includes(status)) {
@@ -68,125 +76,190 @@ export default function HistoryFiltersBar({
     return date.toISOString().split("T")[0];
   };
 
+  const formatDateDisplay = (date: Date | null): string => {
+    if (!date) return "Any";
+    return date.toLocaleDateString();
+  };
+
+  // Build filter summary for collapsed view
+  const getFilterSummary = () => {
+    const parts: string[] = [];
+    
+    if (selectedStatuses.length === 3) {
+      parts.push("All statuses");
+    } else if (selectedStatuses.length > 0) {
+      parts.push(selectedStatuses.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(", "));
+    }
+    
+    if (dateStart || dateEnd) {
+      parts.push(`${formatDateDisplay(dateStart)} – ${formatDateDisplay(dateEnd)}`);
+    } else {
+      parts.push("All time");
+    }
+    
+    return parts.join(" • ");
+  };
+
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 space-y-4">
-      {/* Status Filter */}
-      <div>
-        <label className="block text-sm font-medium text-pf-text-primary mb-2">
-          Status
-        </label>
-        <div className="flex gap-2 flex-wrap">
-          {["completed", "failed", "cancelled"].map((status) => (
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg">
+      {/* Collapsed Header - Always Visible */}
+      <div className="p-3 flex items-center justify-between gap-4">
+        <Button
+          onClick={() => setIsExpanded(!isExpanded)}
+          variant="ghost"
+          className="flex items-center gap-2 text-left flex-1 min-w-0 justify-start px-0 hover:bg-transparent"
+          aria-expanded={isExpanded}
+          aria-controls="filter-content"
+        >
+          <span className="text-pf-text-secondary transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+            ▶
+          </span>
+          <span className="text-sm font-medium text-pf-text-primary">Filters</span>
+          <span className="text-xs text-pf-text-secondary truncate">{getFilterSummary()}</span>
+        </Button>
+        
+        {/* Quick actions always visible */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="hidden sm:flex gap-1">
+            {[
+              { label: "7d", days: 7 },
+              { label: "30d", days: 30 },
+              { label: "90d", days: 90 },
+              { label: "All", days: null },
+            ].map((range) => (
+              <Button
+                key={range.label}
+                onClick={() => handleQuickDateRange(range.days)}
+                variant="ghost"
+                size="sm"
+                className="px-2 py-1 text-xs bg-pf-bg-2 text-pf-text-secondary hover:bg-pf-bg-3 hover:text-pf-text-primary"
+              >
+                {range.label}
+              </Button>
+            ))}
+          </div>
+          {/* View Toggle */}
+          <div className="hidden sm:flex rounded border border-pf-border overflow-hidden flex-shrink-0">
             <Button
-              key={status}
-              onClick={() => handleStatusToggle(status)}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                selectedStatuses.includes(status)
-                  ? status === "completed"
-                    ? "bg-pf-success text-white"
-                    : status === "failed"
-                    ? "bg-pf-error text-white"
-                    : "bg-pf-warning text-white"
-                  : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
+              onClick={() => onViewModeChange("cards")}
+              variant="ghost"
+              size="sm"
+              className={`px-2 py-1 text-xs rounded-none ${
+                viewMode === "cards"
+                  ? "bg-pf-accent text-white hover:bg-pf-accent"
+                  : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
-              variant="subtle"
+              title="Card view"
             >
-              {status === "completed" && "✓ Completed"}
-              {status === "failed" && "✗ Failed"}
-              {status === "cancelled" && "◯ Cancelled"}
+              ▦
             </Button>
-          ))}
-        </div>
-      </div>
-
-      {/* Date Range Filter */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">
-            From Date
-          </label>
-          <input
-            type="date"
-            value={formatDateForInput(dateStart)}
-            onChange={(e) =>
-              onDateStartChange(
-                e.target.value ? new Date(e.target.value + "T00:00:00Z") : null
-              )
-            }
-            className="w-full px-3 py-2 border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">
-            To Date
-          </label>
-          <input
-            type="date"
-            value={formatDateForInput(dateEnd)}
-            onChange={(e) =>
-              onDateEndChange(
-                e.target.value ? new Date(e.target.value + "T23:59:59Z") : null
-              )
-            }
-            className="w-full px-3 py-2 border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
-          />
-        </div>
-      </div>
-
-      {/* Quick Date Range Buttons */}
-      <div>
-        <label className="block text-sm font-medium text-pf-text-primary mb-2">
-          Quick Range
-        </label>
-        <div className="flex gap-2 flex-wrap">
-          {[
-            { label: "7 Days", days: 7 },
-            { label: "30 Days", days: 30 },
-            { label: "90 Days", days: 90 },
-            { label: "All Time", days: null },
-          ].map((range) => (
             <Button
-              key={range.label}
-              onClick={() => handleQuickDateRange(range.days)}
-              className="px-3 py-1.5 rounded text-sm font-medium"
-              variant="secondary"
+              onClick={() => onViewModeChange("table")}
+              variant="ghost"
+              size="sm"
+              className={`px-2 py-1 text-xs rounded-none ${
+                viewMode === "table"
+                  ? "bg-pf-accent text-white hover:bg-pf-accent"
+                  : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
+              }`}
+              title="Table view"
             >
-              {range.label}
+              ☰
             </Button>
-          ))}
-        </div>
-      </div>
-
-      {/* Sort and Refresh */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">
-            Sort By
-          </label>
+          </div>
           <Select
             value={sortBy}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
+            className="text-xs py-1 px-2 w-auto flex-shrink-0"
           >
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
-            <option value="duration">Duration (Long First)</option>
-            <option value="model">Model Name</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="duration">Duration</option>
+            <option value="model">Model</option>
           </Select>
-        </div>
-        <div className="flex items-end">
           <Button
             onClick={onRefresh}
             disabled={isLoading}
             variant="secondary"
             size="sm"
-            className="w-full"
+            className="px-3 py-1 text-xs"
           >
-            {isLoading ? "Refreshing..." : "Refresh"}
+            {isLoading ? "..." : "↻"}
           </Button>
         </div>
       </div>
+
+      {/* Expandable Content */}
+      {isExpanded && (
+        <div id="filter-content" className="px-3 pb-3 pt-0 border-t border-pf-border space-y-3">
+          {/* Status + Date Range in one row on larger screens */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-3">
+            {/* Status Filter */}
+            <div>
+              <label className="block text-xs font-medium text-pf-text-secondary mb-1.5">
+                Status
+              </label>
+              <div className="flex gap-1.5 flex-wrap">
+                {["completed", "failed", "cancelled"].map((status) => (
+                  <Button
+                    key={status}
+                    onClick={() => handleStatusToggle(status)}
+                    variant="ghost"
+                    size="sm"
+                    className={`px-2 py-1 text-xs font-medium ${
+                      selectedStatuses.includes(status)
+                        ? status === "completed"
+                          ? "bg-pf-success text-white hover:bg-pf-success"
+                          : status === "failed"
+                          ? "bg-pf-error text-white hover:bg-pf-error"
+                          : "bg-pf-warning text-white hover:bg-pf-warning"
+                        : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
+                    }`}
+                  >
+                    {status === "completed" && "✓ Done"}
+                    {status === "failed" && "✗ Failed"}
+                    {status === "cancelled" && "◯ Cancelled"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Date Range */}
+            <div>
+              <label className="block text-xs font-medium text-pf-text-secondary mb-1.5">
+                From
+              </label>
+              <input
+                type="date"
+                value={formatDateForInput(dateStart)}
+                onChange={(e) =>
+                  onDateStartChange(
+                    e.target.value ? new Date(e.target.value + "T00:00:00Z") : null
+                  )
+                }
+                className="w-full px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-pf-text-secondary mb-1.5">
+                To
+              </label>
+              <input
+                type="date"
+                value={formatDateForInput(dateEnd)}
+                onChange={(e) =>
+                  onDateEndChange(
+                    e.target.value ? new Date(e.target.value + "T23:59:59Z") : null
+                  )
+                }
+                className="w-full px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

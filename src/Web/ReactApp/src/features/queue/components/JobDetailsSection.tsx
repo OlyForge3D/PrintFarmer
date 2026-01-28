@@ -7,8 +7,13 @@ export interface JobDetailsSectionProps {
     status: string;
     priority: number;
     queuePosition: number;
-    printerName: string;
+    printerName?: string;
+    printerModel?: string;
+    // Material and nozzle from backend (requiredMaterialType/requiredNozzleDiameter)
     materialType?: string;
+    requiredMaterialType?: string;
+    nozzleDiameter?: number;
+    requiredNozzleDiameter?: number;
   };
   isEditing: boolean;
   onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
@@ -82,13 +87,13 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
 
   if (isEditing) {
     return (
-      <div className="job-details-section editing">
-        <fieldset>
-          <legend>Basic Information</legend>
+      <div className="space-y-4">
+        <fieldset className="space-y-4">
+          <legend className="text-sm font-semibold text-pf-text-primary mb-3">Basic Information</legend>
 
-          <div className="form-group">
-            <label htmlFor="job-name">
-              Job Name <span className="required" aria-label="required">*</span>
+          <div className="space-y-1.5">
+            <label htmlFor="job-name" className="block text-sm font-medium text-pf-text-secondary">
+              Job Name <span className="text-pf-error" aria-label="required">*</span>
             </label>
             <input
               id="job-name"
@@ -97,20 +102,21 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               onChange={handleNameChange}
               maxLength={255}
               placeholder="Enter job name"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-invalid={!!errors.name}
               aria-describedby={errors.name ? 'name-error' : undefined}
             />
             {errors.name && (
-              <span id="name-error" className="error-message" role="alert">
+              <span id="name-error" className="text-xs text-pf-error" role="alert">
                 {errors.name}
               </span>
             )}
           </div>
 
-          <div className="form-group">
-            <label htmlFor="job-priority">
+          <div className="space-y-1.5">
+            <label htmlFor="job-priority" className="block text-sm font-medium text-pf-text-secondary">
               Priority
-              <span className="help-text">(0-100, higher = more urgent)</span>
+              <span className="ml-1 text-xs text-pf-text-muted">(0-100, higher = more urgent)</span>
             </label>
             <input
               id="job-priority"
@@ -120,18 +126,19 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               value={jobDetails.priority}
               onChange={handlePriorityChange}
               placeholder="Priority (0-100)"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-invalid={!!errors.priority}
               aria-describedby={errors.priority ? 'priority-error' : undefined}
             />
             {errors.priority && (
-              <span id="priority-error" className="error-message" role="alert">
+              <span id="priority-error" className="text-xs text-pf-error" role="alert">
                 {errors.priority}
               </span>
             )}
           </div>
 
-          <div className="form-group">
-            <label htmlFor="job-material">Material Type</label>
+          <div className="space-y-1.5">
+            <label htmlFor="job-material" className="block text-sm font-medium text-pf-text-secondary">Material Type</label>
             <input
               id="job-material"
               type="text"
@@ -139,6 +146,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               onChange={handleMaterialChange}
               placeholder="e.g., PLA, PETG, ABS"
               list="material-suggestions"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
             />
             <datalist id="material-suggestions">
               <option value="PLA" />
@@ -149,78 +157,93 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             </datalist>
           </div>
 
-          <div className="form-group read-only">
-            <label htmlFor="job-printer">Printer</label>
+          <div className="space-y-1.5 opacity-60">
+            <label htmlFor="job-printer" className="block text-sm font-medium text-pf-text-secondary">Printer</label>
             <input
               id="job-printer"
               type="text"
               value={jobDetails.printerName}
               disabled
               readOnly
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
-            <span className="read-only-hint">Cannot change printer after queuing</span>
+            <span className="text-xs text-pf-text-muted italic">Cannot change printer after queuing</span>
           </div>
 
-          <div className="form-group read-only">
-            <label htmlFor="job-status">Status</label>
+          <div className="space-y-1.5 opacity-60">
+            <label htmlFor="job-status" className="block text-sm font-medium text-pf-text-secondary">Status</label>
             <input
               id="job-status"
               type="text"
               value={jobDetails.status}
               disabled
               readOnly
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
-            <span className="read-only-hint">Status managed by system</span>
+            <span className="text-xs text-pf-text-muted italic">Status managed by system</span>
           </div>
 
-          <div className="form-group read-only">
-            <label htmlFor="job-position">Queue Position</label>
+          <div className="space-y-1.5 opacity-60">
+            <label htmlFor="job-position" className="block text-sm font-medium text-pf-text-secondary">Queue Position</label>
             <input
               id="job-position"
               type="text"
               value={jobDetails.queuePosition}
               disabled
               readOnly
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
-            <span className="read-only-hint">Use drag-and-drop to reorder</span>
+            <span className="text-xs text-pf-text-muted italic">Use drag-and-drop to reorder</span>
           </div>
         </fieldset>
       </div>
     );
   }
 
+  // Get material and nozzle from either new or legacy field names
+  const materialType = jobDetails.requiredMaterialType || jobDetails.materialType;
+  const nozzleDiameter = jobDetails.requiredNozzleDiameter || jobDetails.nozzleDiameter;
+
   return (
-    <div className="job-details-section view-only">
-      <div className="details-grid">
-        <div className="detail-row">
-          <span className="detail-label">Name</span>
-          <span className="detail-value">{jobDetails.name}</span>
+    <div className="space-y-1">
+      <dl className="grid grid-cols-1 gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Name</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.name}</dd>
         </div>
-        <div className="detail-row">
-          <span className="detail-label">Status</span>
-          <span className="detail-value">
-            <span className="status-badge" data-status={jobDetails.status.toLowerCase()}>
-              {jobDetails.status}
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Status</dt>
+          <dd className="text-sm mt-1 sm:mt-0">
+            <span 
+              className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                jobDetails.status.toLowerCase() === 'completed' ? 'bg-pf-success/20 text-pf-success' :
+                jobDetails.status.toLowerCase() === 'printing' ? 'bg-pf-accent/20 text-pf-accent' :
+                jobDetails.status.toLowerCase() === 'queued' ? 'bg-pf-warning/20 text-pf-warning' :
+                jobDetails.status.toLowerCase() === 'failed' ? 'bg-pf-error/20 text-pf-error' :
+                'bg-pf-bg-2 text-pf-text-secondary'
+              }`}
+            >
+              {jobDetails.status.toUpperCase()}
             </span>
-          </span>
+          </dd>
         </div>
-        <div className="detail-row">
-          <span className="detail-label">Priority</span>
-          <span className="detail-value">{jobDetails.priority}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Printer</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerName || <span className="text-pf-text-muted italic">Not assigned</span>}</dd>
         </div>
-        <div className="detail-row">
-          <span className="detail-label">Queue Position</span>
-          <span className="detail-value">{jobDetails.queuePosition}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Printer Model</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerModel || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
-        <div className="detail-row">
-          <span className="detail-label">Printer</span>
-          <span className="detail-value">{jobDetails.printerName}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Material Type</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{materialType || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
-        <div className="detail-row">
-          <span className="detail-label">Material Type</span>
-          <span className="detail-value">{jobDetails.materialType || 'Not specified'}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center py-2">
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Nozzle Diameter</dt>
+          <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
-      </div>
+      </dl>
     </div>
   );
 };

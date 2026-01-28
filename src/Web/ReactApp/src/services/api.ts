@@ -2634,16 +2634,51 @@ export class ApiClient {
   }
 
   /**
-   * Get queue history with pagination (analytics)
+   * Get queue history with pagination and filtering (analytics)
+   * @param limit Maximum number of results (default 50)
+   * @param offset Number of results to skip (default 0)
+   * @param sortBy Field to sort by (newest, oldest, duration, model)
+   * @param statuses Array of statuses to filter by (completed, failed, cancelled)
+   * @param dateStart Start date filter (ISO string)
+   * @param dateEnd End date filter (ISO string)
    */
   async getAnalyticsQueueHistory(
     limit: number = 50,
     offset: number = 0,
-    sortBy: string = "completedAtUtc"
-  ): Promise<unknown> {
-    const response = await this.client.get(`/job-queue-analytics/history`, {
-      params: { limit, offset, sortBy },
-    });
+    sortBy: string = "newest",
+    statuses?: string[],
+    dateStart?: string | null,
+    dateEnd?: string | null
+  ): Promise<{ 
+    entries: unknown[]; 
+    totalCount: number; 
+    currentPage: number; 
+    pageSize: number;
+    stats: {
+      totalCompleted: number;
+      totalFailed: number;
+      totalCancelled: number;
+      successRate: number;
+      averageDurationMinutes: number;
+      totalPrintTimeMinutes: number;
+    };
+  }> {
+    const params: Record<string, unknown> = { limit, offset, sortBy };
+    
+    // Add statuses as comma-separated string if provided
+    if (statuses && statuses.length > 0) {
+      params.statuses = statuses.join(',');
+    }
+    
+    // Add date filters if provided
+    if (dateStart) {
+      params.dateStart = dateStart;
+    }
+    if (dateEnd) {
+      params.dateEnd = dateEnd;
+    }
+    
+    const response = await this.client.get(`/job-queue-analytics/history`, { params });
     return response.data;
   }
 

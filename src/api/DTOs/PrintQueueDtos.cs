@@ -37,6 +37,16 @@ public class QueuedPrintJobDto
 
     public string? AssignedPrinterId { get; set; }
 
+    /// <summary>
+    /// Name of the assigned printer (denormalized for display)
+    /// </summary>
+    public string? PrinterName { get; set; }
+
+    /// <summary>
+    /// Model name of the assigned printer (denormalized for display)
+    /// </summary>
+    public string? PrinterModel { get; set; }
+
     public string Status { get; set; } = string.Empty;
 
     public int Priority { get; set; }
@@ -68,6 +78,16 @@ public class QueuedPrintJobDto
     public DateTime UpdatedAtUtc { get; set; }
 
     public DateTime QueuedAtUtc { get; set; }
+
+    /// <summary>
+    /// Notes/comments about this print job
+    /// </summary>
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Tags assigned to this job for organization
+    /// </summary>
+    public string[]? Tags { get; set; }
 }
 
 /// <summary>
@@ -265,6 +285,29 @@ public class QueueHistoryPageDto
     public int CurrentPage { get; set; }
 
     public int PageSize { get; set; }
+
+    /// <summary>
+    /// Statistics for the entire filtered result set (not just current page)
+    /// </summary>
+    public QueueHistoryStatsDto Stats { get; set; } = new();
+}
+
+/// <summary>
+/// Statistics for filtered history results
+/// </summary>
+public class QueueHistoryStatsDto
+{
+    public int TotalCompleted { get; set; }
+
+    public int TotalFailed { get; set; }
+
+    public int TotalCancelled { get; set; }
+
+    public int SuccessRate { get; set; }
+
+    public int AverageDurationMinutes { get; set; }
+
+    public long TotalPrintTimeMinutes { get; set; }
 }
 
 /// <summary>

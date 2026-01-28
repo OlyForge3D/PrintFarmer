@@ -56,11 +56,17 @@ public interface IPrintJobManagementService
     /// <param name="limit">Maximum number of history records to return.</param>
     /// <param name="offset">Number of records to skip for pagination.</param>
     /// <param name="sortBy">Field to sort results by.</param>
+    /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
+    /// <param name="dateStart">Optional start date filter (inclusive).</param>
+    /// <param name="dateEnd">Optional end date filter (inclusive).</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
+        List<string>? statuses = null,
+        DateTime? dateStart = null,
+        DateTime? dateEnd = null,
         CancellationToken cancellationToken = default);
 
     // ============= COMMAND OPERATIONS =============

@@ -150,17 +150,23 @@ public class PrintJobManagementService(
     /// <param name="limit">Maximum number of history entries to return.</param>
     /// <param name="offset">Number of entries to skip for pagination.</param>
     /// <param name="sortBy">Field to sort results by.</param>
+    /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
+    /// <param name="dateStart">Optional start date filter (inclusive).</param>
+    /// <param name="dateEnd">Optional end date filter (inclusive).</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueueHistoryPageDto> GetQueueHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
+        List<string>? statuses = null,
+        DateTime? dateStart = null,
+        DateTime? dateEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            (List<PrintJob> jobs, int totalCount) = await _repository.GetHistoryAsync(
-                limit, offset, sortBy, cancellationToken);
+            (List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds) =
+                await _repository.GetHistoryAsync(limit, offset, sortBy, statuses, dateStart, dateEnd, cancellationToken);
 
             var entries = jobs
                 .Select(pj => new QueueHistoryEntryDto
@@ -177,12 +183,26 @@ public class PrintJobManagementService(
                 })
                 .ToList();
 
+            // Calculate statistics for the full filtered result set
+            int total = completedCount + failedCount + cancelledCount;
+            int successRate = total > 0 ? (int)Math.Round((double)completedCount / total * 100) : 0;
+            int avgDurationMinutes = total > 0 ? (int)(totalPrintTimeSeconds / 60 / total) : 0;
+
             return new QueueHistoryPageDto
             {
                 Entries = entries,
                 TotalCount = totalCount,
                 CurrentPage = offset / limit,
-                PageSize = limit
+                PageSize = limit,
+                Stats = new QueueHistoryStatsDto
+                {
+                    TotalCompleted = completedCount,
+                    TotalFailed = failedCount,
+                    TotalCancelled = cancelledCount,
+                    SuccessRate = successRate,
+                    AverageDurationMinutes = avgDurationMinutes,
+                    TotalPrintTimeMinutes = totalPrintTimeSeconds / 60
+                }
             };
         }
         catch (Exception ex)
@@ -1049,6 +1069,12 @@ public class PrintJobManagementService(
             ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
             : null;
 
+        // Extract nozzle diameter and material type from metadata
+        decimal? nozzleDiameter = ExtractNozzleDiameterFromMetadata(historyJob.Metadata);
+        string? materialType = ExtractMaterialTypeFromMetadata(historyJob.Metadata);
+        TimeSpan? estimatedPrintTime = ExtractEstimatedPrintTimeFromMetadata(historyJob.Metadata);
+        double? estimatedFilamentUsage = ExtractEstimatedFilamentUsageFromMetadata(historyJob.Metadata);
+
         return new PrintJob
         {
             Id = Guid.NewGuid(),
@@ -1063,6 +1089,12 @@ public class PrintJobManagementService(
             CreatedAt = startTime,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = startTime,
+
+            // Nozzle and material from metadata
+            RequiredNozzleDiameter = nozzleDiameter,
+            RequiredMaterialType = materialType,
+            EstimatedPrintTime = estimatedPrintTime,
+            EstimatedFilamentUsage = estimatedFilamentUsage,
 
             // History seeding tracking
             ExternalJobId = historyJob.JobId,
@@ -1093,6 +1125,27 @@ public class PrintJobManagementService(
         existingJob.ActualEndTime = endTime;
         existingJob.ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null;
         existingJob.ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed / 1000.0 : null;
+
+        // Update nozzle and material from metadata if not already set
+        if (!existingJob.RequiredNozzleDiameter.HasValue)
+        {
+            existingJob.RequiredNozzleDiameter = ExtractNozzleDiameterFromMetadata(historyJob.Metadata);
+        }
+
+        if (string.IsNullOrEmpty(existingJob.RequiredMaterialType))
+        {
+            existingJob.RequiredMaterialType = ExtractMaterialTypeFromMetadata(historyJob.Metadata);
+        }
+
+        if (!existingJob.EstimatedPrintTime.HasValue)
+        {
+            existingJob.EstimatedPrintTime = ExtractEstimatedPrintTimeFromMetadata(historyJob.Metadata);
+        }
+
+        if (!existingJob.EstimatedFilamentUsage.HasValue)
+        {
+            existingJob.EstimatedFilamentUsage = ExtractEstimatedFilamentUsageFromMetadata(historyJob.Metadata);
+        }
 
         // Don't overwrite printer assignment or G-code file association
     }
@@ -1128,6 +1181,155 @@ public class PrintJobManagementService(
         return match?.Id;
     }
 
+    /// <summary>
+    /// Extracts nozzle diameter from Moonraker history metadata.
+    /// Moonraker returns metadata from gcode file, keys match slicer output.
+    /// </summary>
+    private static decimal? ExtractNozzleDiameterFromMetadata(Dictionary<string, object>? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        // Moonraker uses "nozzle_diameter" key from gcode metadata
+        // Can be a single value or array (for multi-extruder setups)
+        string[] keys = ["nozzle_diameter", "NozzleDiameter", "nozzleDiameter"];
+
+        foreach (string key in keys)
+        {
+            if (metadata.TryGetValue(key, out object? value))
+            {
+                return value switch
+                {
+                    decimal d => d,
+                    double d => (decimal)d,
+                    float f => (decimal)f,
+                    int i => i,
+                    long l => l,
+                    string s when decimal.TryParse(s, out decimal result) => result,
+                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
+                        jsonElement.GetArrayLength() > 0 && jsonElement[0].TryGetDecimal(out decimal first) ? first : null,
+                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDecimal(out decimal d) => d,
+                    _ => null
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts material/filament type from Moonraker history metadata.
+    /// </summary>
+    private static string? ExtractMaterialTypeFromMetadata(Dictionary<string, object>? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        // Moonraker uses various keys for material type
+        string[] keys = ["filament_type", "filament_name", "material", "MATERIAL", "Material"];
+
+        foreach (string key in keys)
+        {
+            if (metadata.TryGetValue(key, out object? value))
+            {
+                return value switch
+                {
+                    string s when !string.IsNullOrWhiteSpace(s) => s.Trim(),
+                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
+                        jsonElement.GetArrayLength() > 0 ? jsonElement[0].GetString()?.Trim() : null,
+                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.String =>
+                        jsonElement.GetString()?.Trim(),
+                    _ => null
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts estimated print time from Moonraker history metadata.
+    /// </summary>
+    private static TimeSpan? ExtractEstimatedPrintTimeFromMetadata(Dictionary<string, object>? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        // Moonraker uses "estimated_time" in seconds
+        string[] keys = ["estimated_time", "print_time", "EstimatedTime", "printTime"];
+
+        foreach (string key in keys)
+        {
+            if (metadata.TryGetValue(key, out object? value))
+            {
+                double? seconds = value switch
+                {
+                    double d => d,
+                    float f => f,
+                    int i => i,
+                    long l => l,
+                    decimal d => (double)d,
+                    string s when double.TryParse(s, out double result) => result,
+                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
+                    _ => null
+                };
+
+                if (seconds.HasValue && seconds.Value > 0)
+                {
+                    return TimeSpan.FromSeconds(seconds.Value);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts estimated filament usage from Moonraker history metadata (in mm or grams).
+    /// </summary>
+    private static double? ExtractEstimatedFilamentUsageFromMetadata(Dictionary<string, object>? metadata)
+    {
+        if (metadata == null)
+        {
+            return null;
+        }
+
+        // Moonraker uses "filament_total" for total filament in mm
+        string[] keys = ["filament_total", "filament_used", "FilamentTotal", "filamentTotal"];
+
+        foreach (string key in keys)
+        {
+            if (metadata.TryGetValue(key, out object? value))
+            {
+                double? mm = value switch
+                {
+                    double d => d,
+                    float f => f,
+                    int i => i,
+                    long l => l,
+                    decimal d => (double)d,
+                    string s when double.TryParse(s, out double result) => result,
+                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
+                    _ => null
+                };
+
+                if (mm.HasValue && mm.Value > 0)
+                {
+                    // Convert from mm to grams (approximate: 1m PLA = ~3g)
+                    return mm.Value / 1000.0;
+                }
+            }
+        }
+
+        return null;
+    }
+
     // ============= PRIVATE HELPERS =============
     private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
     {
@@ -1150,6 +1352,8 @@ public class PrintJobManagementService(
             GcodeFileId = job.GcodeFileId?.ToString(),
             FileName = job.GcodeFile?.Name, // Original filename for display (may be null if GcodeFile not loaded)
             AssignedPrinterId = job.AssignedPrinterId?.ToString(),
+            PrinterName = job.AssignedPrinter?.Name, // Denormalized printer name for display
+            PrinterModel = job.AssignedPrinter?.Model?.Name, // Denormalized printer model for display
             Status = job.Status.ToString(),
             Priority = job.Priority,
             QueuePosition = job.QueuePosition,
@@ -1163,6 +1367,7 @@ public class PrintJobManagementService(
             ActualPrintTimeSeconds = (int?)job.ActualPrintTime?.TotalSeconds,
             ActualFilamentUsageGrams = (int?)job.ActualFilamentUsage,
             FailureReason = job.FailureReason,
+            Notes = job.Notes,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt

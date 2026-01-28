@@ -98,12 +98,23 @@ public interface IPrintJobManagementRepository
     Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Get completed jobs for history with pagination.
+    /// Get completed jobs for history with pagination and filtering.
     /// </summary>
-    Task<(List<PrintJob> jobs, int totalCount)> GetHistoryAsync(
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="offset">Number of jobs to skip for pagination.</param>
+    /// <param name="sortBy">Field to sort by (completedAt, duration, name, status).</param>
+    /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
+    /// <param name="dateStart">Optional start date filter (inclusive).</param>
+    /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Tuple of paginated jobs, total count, and statistics for the full filtered set.</returns>
+    Task<(List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds)> GetHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
+        List<string>? statuses = null,
+        DateTime? dateStart = null,
+        DateTime? dateEnd = null,
         CancellationToken ct = default);
 
     // ============= TIMELINE & HISTORY =============

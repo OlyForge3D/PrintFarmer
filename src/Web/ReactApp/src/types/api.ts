@@ -1667,6 +1667,16 @@ export interface QueueHistoryPageDto {
   totalCount: number;
   currentPage: number;
   pageSize: number;
+  stats: QueueHistoryStatsDto;
+}
+
+export interface QueueHistoryStatsDto {
+  totalCompleted: number;
+  totalFailed: number;
+  totalCancelled: number;
+  successRate: number;
+  averageDurationMinutes: number;
+  totalPrintTimeMinutes: number;
 }
 
 export interface QueueHistoryEntryDto {

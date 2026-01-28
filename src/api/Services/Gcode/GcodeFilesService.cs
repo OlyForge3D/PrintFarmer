@@ -535,6 +535,8 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             // Return the virtual path using the display name (original filename), not the GUID
+            // Note: gcodeFile.PrinterModel navigation property is NOT loaded here, so we use ExtractedPrinterModelName
+            // which contains the raw extracted model name from the G-code file header.
             string virtualFilePath2 = CombineVirtual(virtualDir, gcodeFile.FileName);
             return new GcodeFileEntryDto(
                 Path: virtualFilePath2,
@@ -543,7 +545,25 @@ namespace Farm.Web.Api.Services.Gcode
                 FileSize: gcodeFile.FileSizeBytes,
                 UploadedAt: info.LastWriteTimeUtc,
                 IsDirectory: false,
-                Id: gcodeFile.Id.ToString());  // Include the file ID for OctoPrint upload and other lookups
+                Id: gcodeFile.Id.ToString(),
+                FileType: gcodeFile.FileType,
+                DirectoryId: null,
+                TargetModelName: gcodeFile.ExtractedPrinterModelName,  // Raw extracted model name
+                RequiredMaterial: gcodeFile.RequiredMaterial,
+                Tags: null,  // Tags not loaded during upload
+                ExtractedSlicerName: gcodeFile.SlicerName,
+                ExtractedSlicerVersion: gcodeFile.SlicerVersion,
+                ExtractedPrintTime: gcodeFile.EstimatedPrintTimeMinutes,
+                ExtractedFilamentLength: gcodeFile.EstimatedFilamentLengthMm,
+                ExtractedNozzleDiameter: gcodeFile.RequiredNozzleDiameter,
+                ExtractedMaterial: gcodeFile.RequiredMaterial,
+                ExtractedPrinterModel: gcodeFile.ExtractedPrinterModelName,  // Raw extracted model name (for printer matching)
+                ExtractedPrinterModelName: gcodeFile.ExtractedPrinterModelName,
+                ExtractedLayerHeight: gcodeFile.LayerHeight,
+                ExtractedInfill: gcodeFile.InfillPercentage,
+                ExtractedPerimeters: gcodeFile.Perimeters,
+                ExtractedHotendTemp: gcodeFile.PrintTemperature,
+                ExtractedBedTemp: gcodeFile.BedTemperature);
         }
 
         /// <summary>

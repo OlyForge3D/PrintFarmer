@@ -2,7 +2,7 @@
 import React from 'react';
 import clsx from 'clsx';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle' | 'link' | 'unstyled';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'ghost' | 'success' | 'tab' | 'toggle' | 'link' | 'unstyled';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -22,6 +22,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light hover:border-pf-border',
   danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
+  ghost: 'bg-transparent hover:bg-pf-bg-0/50 text-inherit border-transparent shadow-none',
   success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
   toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent',
