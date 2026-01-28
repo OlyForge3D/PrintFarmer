@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi, UserTask, TaskType, TaskPriority } from '@/services/tasksApi';
 import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -161,55 +162,45 @@ export function TasksWidget() {
     return null;
   }
 
-  return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl shadow-lg overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-pf-border flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <AlertCircleIcon className="h-5 w-5 text-pf-warning" />
-          <h3 className="text-sm font-semibold text-pf-text-primary">
-            Pending Tasks
-          </h3>
-          {tasks && tasks.length > 0 && (
-            <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
-              {tasks.length}
-            </span>
-          )}
-        </div>
-      </div>
+  const taskCount = tasks?.length ?? 0;
+  const badge = taskCount > 0 ? (
+    <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
+      {taskCount}
+    </span>
+  ) : undefined;
 
-      {/* Content */}
-      <div className="divide-y divide-pf-border">
-        {isLoading ? (
-          <div className="p-4">
-            <div className="animate-pulse space-y-3">
-              <div className="h-12 bg-pf-loading rounded" />
-              <div className="h-12 bg-pf-loading rounded" />
-            </div>
-          </div>
-        ) : error ? (
-          <div className="p-4 text-center text-pf-text-secondary text-sm">
-            Failed to load tasks
-          </div>
-        ) : tasks && tasks.length > 0 ? (
-          <div className="max-h-80 overflow-y-auto">
-            {tasks.map((task) => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                onSkip={(id) => skipMutation.mutate(id)}
-                onNavigate={handleNavigate}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="p-6 text-center">
-            <CheckCircleIcon className="h-8 w-8 text-pf-status-online-text mx-auto mb-2" />
-            <p className="text-sm text-pf-text-secondary">All caught up!</p>
-          </div>
-        )}
-      </div>
+  const emptyState = (
+    <div className="text-center py-6">
+      <CheckCircleIcon className="h-8 w-8 text-pf-status-online-text mx-auto mb-2" />
+      <p className="text-sm text-pf-text-secondary">All caught up!</p>
     </div>
+  );
+
+  return (
+    <DashboardWidget
+      title="Pending Tasks"
+      icon={AlertCircleIcon}
+      iconColorClass="text-pf-warning"
+      iconBgClass="bg-pf-warning/10"
+      badge={badge}
+      collapsible
+      storageKey="tasks-widget"
+      hasContent={taskCount > 0}
+      emptyState={emptyState}
+      isLoading={isLoading}
+      error={error ? 'Failed to load tasks' : undefined}
+    >
+      <div className="max-h-80 overflow-y-auto divide-y divide-pf-border -m-3">
+        {tasks?.map((task) => (
+          <TaskItem
+            key={task.id}
+            task={task}
+            onSkip={(id) => skipMutation.mutate(id)}
+            onNavigate={handleNavigate}
+          />
+        ))}
+      </div>
+    </DashboardWidget>
   );
 }
 

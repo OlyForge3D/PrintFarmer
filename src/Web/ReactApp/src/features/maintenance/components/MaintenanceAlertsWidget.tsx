@@ -9,11 +9,10 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
   WrenchIcon, 
-  AlertIcon, 
-  CheckCircleIcon,
-  ChevronRightIcon
+  CheckCircleIcon
 } from '@/common/components/icons/MdiIcons';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge } from '@/common/components/ui';
+import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 
 export interface MaintenanceAlertsWidgetProps {
@@ -58,113 +57,72 @@ export function MaintenanceAlertsWidget({
   const criticalCount = alerts.filter(a => a.severity >= 3).length;
   const totalCount = alerts.length;
 
-  if (isLoading) {
-    return (
-      <div className={`bg-pf-panel border border-pf-border rounded-xl p-4 ${className}`}>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="h-10 w-10 bg-pf-border rounded-lg animate-pulse" />
-          <div>
-            <div className="h-5 w-32 bg-pf-border rounded animate-pulse" />
-            <div className="h-4 w-24 bg-pf-border rounded animate-pulse mt-1" />
-          </div>
-        </div>
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-12 bg-pf-border/50 rounded-lg animate-pulse" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const subtitle = totalCount > 0 
+    ? `${totalCount} alert${totalCount !== 1 ? 's' : ''} active${criticalCount > 0 ? ` • ${criticalCount} critical` : ''}`
+    : 'All systems healthy';
 
-  if (error) {
-    return (
-      <div className={`bg-pf-panel border border-red-500/30 rounded-xl p-4 ${className}`}>
-        <div className="flex items-center gap-3 text-red-400">
-          <AlertIcon className="h-5 w-5" />
-          <span className="text-sm">Failed to load maintenance alerts</span>
-        </div>
-      </div>
-    );
-  }
+  const emptyState = (
+    <div className="text-center py-6">
+      <CheckCircleIcon className="h-10 w-10 text-green-500 mx-auto mb-2" />
+      <p className="text-sm text-pf-text-primary font-medium">No Active Alerts</p>
+      <p className="text-xs text-pf-text-tertiary mt-1">
+        Your fleet is running smoothly
+      </p>
+    </div>
+  );
 
   return (
-    <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-pf-border flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${criticalCount > 0 ? 'bg-red-500/20' : 'bg-pf-bg-2'}`}>
-            <WrenchIcon className={`h-5 w-5 ${criticalCount > 0 ? 'text-red-400' : 'text-pf-text-tertiary'}`} />
-          </div>
-          <div>
-            <h3 className="font-semibold text-pf-text-primary text-sm">
-              Maintenance Alerts
-            </h3>
-            <p className="text-xs text-pf-text-tertiary">
-              {totalCount > 0 
-                ? `${totalCount} alert${totalCount !== 1 ? 's' : ''} active${criticalCount > 0 ? ` • ${criticalCount} critical` : ''}`
-                : 'All systems healthy'
-              }
-            </p>
-          </div>
-        </div>
-        
-        <Link to="/maintenance">
-          <Button variant="subtle" size="sm">
-            View All
-            <ChevronRightIcon className="h-4 w-4 ml-1" />
-          </Button>
-        </Link>
-      </div>
-
-      {/* Alerts List */}
-      <div className="p-3">
-        {topAlerts.length === 0 ? (
-          <div className="text-center py-6">
-            <CheckCircleIcon className="h-10 w-10 text-green-500 mx-auto mb-2" />
-            <p className="text-sm text-pf-text-primary font-medium">No Active Alerts</p>
-            <p className="text-xs text-pf-text-tertiary mt-1">
-              Your fleet is running smoothly
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {topAlerts.map((alert) => {
-              const config = getSeverityConfig(alert.severity);
-              return (
-                <Link
-                  key={alert.id}
-                  to={`/maintenance?alert=${alert.id}`}
-                  className="block p-3 bg-pf-bg-1 rounded-lg border border-pf-border hover:bg-pf-border/30 transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${config.bgColor.replace('/20', '')}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium text-pf-text-primary truncate">
-                          {alert.title}
-                        </p>
-                        <Badge variant={alert.severity >= 3 ? 'error' : 'warning'} className="text-xs flex-shrink-0">
-                          {config.label}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-pf-text-tertiary mt-0.5 truncate">
-                        {alert.message}
-                      </p>
-                    </div>
+    <DashboardWidget
+      title="Maintenance Alerts"
+      subtitle={subtitle}
+      icon={WrenchIcon}
+      iconColorClass={criticalCount > 0 ? 'text-red-400' : 'text-pf-text-tertiary'}
+      iconBgClass={criticalCount > 0 ? 'bg-red-500/20' : 'bg-pf-bg-2'}
+      moreInfoLink="/maintenance"
+      moreInfoText="View All"
+      collapsible
+      storageKey="maintenance-alerts-widget"
+      hasContent={topAlerts.length > 0}
+      emptyState={emptyState}
+      className={className}
+      isLoading={isLoading}
+      error={error ? 'Failed to load maintenance alerts' : undefined}
+    >
+      <div className="space-y-2">
+        {topAlerts.map((alert) => {
+          const config = getSeverityConfig(alert.severity);
+          return (
+            <Link
+              key={alert.id}
+              to={`/maintenance?alert=${alert.id}`}
+              className="block p-3 bg-pf-bg-1 rounded-lg border border-pf-border hover:bg-pf-border/30 transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${config.bgColor.replace('/20', '')}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-pf-text-primary truncate">
+                      {alert.title}
+                    </p>
+                    <Badge variant={alert.severity >= 3 ? 'error' : 'warning'} className="text-xs flex-shrink-0">
+                      {config.label}
+                    </Badge>
                   </div>
-                </Link>
-              );
-            })}
+                  <p className="text-xs text-pf-text-tertiary mt-0.5 truncate">
+                    {alert.message}
+                  </p>
+                </div>
+              </div>
+            </Link>
+          );
+        })}
 
-            {totalCount > maxAlerts && (
-              <p className="text-xs text-center text-pf-text-tertiary py-2">
-                +{totalCount - maxAlerts} more alert{totalCount - maxAlerts !== 1 ? 's' : ''}
-              </p>
-            )}
-          </div>
+        {totalCount > maxAlerts && (
+          <p className="text-xs text-center text-pf-text-tertiary py-2">
+            +{totalCount - maxAlerts} more alert{totalCount - maxAlerts !== 1 ? 's' : ''}
+          </p>
         )}
       </div>
-    </div>
+    </DashboardWidget>
   );
 }

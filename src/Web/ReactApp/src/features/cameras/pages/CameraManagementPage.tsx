@@ -195,7 +195,7 @@ export function CameraManagementPage() {
       description: `Camera from ${printer.name} printer`,
       streamUrl: printer.cameraStreamUrl || '',
       snapshotUrl: printer.cameraSnapshotUrl || '',
-      location: printer.location || '',
+      location: '', // Printer doesn't have a location property
       sortOrder: cameras.length, // Add at the end
       isEnabled: true,
     });
@@ -422,7 +422,7 @@ export function CameraManagementPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
                         <Button
-                          variant="ghost"
+                          variant="subtle"
                           size="sm"
                           onClick={() => handleToggle(camera)}
                           title={camera.isEnabled ? 'Disable' : 'Enable'}
@@ -436,7 +436,7 @@ export function CameraManagementPage() {
                           }
                         />
                         <Button
-                          variant="ghost"
+                          variant="subtle"
                           size="sm"
                           onClick={() => handleEdit(camera)}
                           title="Edit"
@@ -444,7 +444,7 @@ export function CameraManagementPage() {
                           iconCenter={<EditIcon className="w-4 h-4" />}
                         />
                         <Button
-                          variant="ghost"
+                          variant="subtle"
                           size="sm"
                           onClick={() => handleDelete(camera.id)}
                           title="Delete"
@@ -463,12 +463,12 @@ export function CameraManagementPage() {
         {/* Delete confirmation modal */}
         <ConfirmationModal
           isOpen={!!cameraToDelete}
-          onClose={() => setCameraToDelete(null)}
+          onCancel={() => setCameraToDelete(null)}
           onConfirm={confirmDelete}
           title="Delete Camera"
           message="Are you sure you want to delete this camera? This action cannot be undone."
-          confirmLabel="Delete"
-          confirmVariant="danger"
+          confirmButtonText="Delete"
+          isDangerous
         />
 
         {/* Add from Printer modal */}
@@ -517,9 +517,6 @@ export function CameraManagementPage() {
                           <PrinterIcon className="w-8 h-8 text-pf-text-tertiary flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-pf-text-primary">{printer.name}</div>
-                            {printer.location && (
-                              <div className="text-sm text-pf-text-tertiary">{printer.location}</div>
-                            )}
                             <div className="text-xs text-pf-text-tertiary mt-1 space-y-0.5">
                               {printer.cameraStreamUrl && (
                                 <div className="truncate" title={printer.cameraStreamUrl}>

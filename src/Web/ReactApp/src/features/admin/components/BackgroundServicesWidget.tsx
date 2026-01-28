@@ -17,6 +17,7 @@ import {
   PauseIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { DashboardWidget } from '@/common/components/DashboardWidget';
 import type { BackgroundServiceStatus, BackgroundServicesSummary } from '@/types/api';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -235,96 +236,87 @@ export function BackgroundServicesWidget({
   const displayedServices = sortedServices.slice(0, maxServices);
   const hasMore = sortedServices.length > maxServices;
 
-  return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-5 shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <GearIcon className="h-5 w-5 text-pf-loading" />
-          <h2 className="text-lg font-semibold text-pf-text-primary">Background Services</h2>
-        </div>
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={isLoading}
-          className="p-1.5 rounded-lg"
-          aria-label="Refresh services"
-        >
-          <RefreshIcon
-            className={`h-4 w-4 text-pf-text-secondary ${isLoading ? 'animate-spin' : ''}`}
-          />
-        </Button>
-      </div>
+  const hasErrors = summary?.servicesWithErrors ?? 0 > 0;
+  const allRunning = summary ? summary.runningServices === summary.enabledServices : true;
 
-      {/* Content */}
-      {isLoading ? (
-        <div className="space-y-3" role="status" aria-label="Loading services">
-          <div className="h-12 bg-pf-loading/20 rounded-lg animate-pulse" />
-          <div className="h-12 bg-pf-loading/20 rounded-lg animate-pulse" />
-          <div className="h-12 bg-pf-loading/20 rounded-lg animate-pulse" />
-        </div>
-      ) : error ? (
-        <div className="p-4 bg-pf-error-bg border border-pf-error-border rounded-lg">
-          <div className="flex items-center gap-2">
-            <AlertCircleIcon className="h-4 w-4 text-pf-error-text" />
-            <p className="text-sm text-pf-error-text">Failed to load services status</p>
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Summary Stats */}
-          {summary && <SummaryStats summary={summary} />}
-
-          {/* Services List (unless compact) */}
-          {!compact && displayedServices.length > 0 && (
-            <div className="space-y-2">
-              {displayedServices.map((service) => (
-                <ServiceStatusRow key={service.serviceId} service={service} />
-              ))}
-              {hasMore && (
-                <p className="text-xs text-pf-text-tertiary text-center py-2">
-                  +{sortedServices.length - maxServices} more services
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Empty State */}
-          {displayedServices.length === 0 && (
-            <div className="text-center py-6">
-              <GearIcon className="h-8 w-8 text-pf-text-tertiary mx-auto mb-2" />
-              <p className="text-sm text-pf-text-tertiary">No background services registered</p>
-            </div>
-          )}
-
-          {/* Quick Status Indicator for Compact Mode */}
-          {compact && summary && (
-            <div className="flex items-center justify-center gap-2 mt-2">
-              {summary.servicesWithErrors > 0 ? (
-                <>
-                  <AlertCircleIcon className="h-4 w-4 text-pf-error-text" />
-                  <span className="text-sm text-pf-error-text">
-                    {summary.servicesWithErrors} service{summary.servicesWithErrors !== 1 ? 's' : ''} with errors
-                  </span>
-                </>
-              ) : summary.runningServices === summary.enabledServices ? (
-                <>
-                  <CheckCircleIcon className="h-4 w-4 text-pf-status-online-text" />
-                  <span className="text-sm text-pf-status-online-text">All services operational</span>
-                </>
-              ) : (
-                <>
-                  <PlayIcon className="h-4 w-4 text-pf-warning-text" />
-                  <span className="text-sm text-pf-warning-text">
-                    {summary.runningServices}/{summary.enabledServices} services running
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-        </>
-      )}
+  const emptyState = (
+    <div className="text-center py-6">
+      <GearIcon className="h-8 w-8 text-pf-text-tertiary mx-auto mb-2" />
+      <p className="text-sm text-pf-text-tertiary">No background services registered</p>
     </div>
+  );
+
+  const headerAction = (
+    <Button
+      variant="subtle"
+      size="sm"
+      onClick={() => refetch()}
+      disabled={isLoading}
+      className="p-1.5 rounded-lg"
+      aria-label="Refresh services"
+    >
+      <RefreshIcon
+        className={`h-4 w-4 text-pf-text-secondary ${isLoading ? 'animate-spin' : ''}`}
+      />
+    </Button>
+  );
+
+  return (
+    <DashboardWidget
+      title="Background Services"
+      icon={GearIcon}
+      iconColorClass={hasErrors ? 'text-pf-error-text' : allRunning ? 'text-pf-status-online-text' : 'text-pf-loading'}
+      iconBgClass={hasErrors ? 'bg-pf-error-bg' : allRunning ? 'bg-pf-status-online-bg' : 'bg-pf-bg-2'}
+      collapsible
+      storageKey="background-services-widget"
+      hasContent={displayedServices.length > 0 || (summary !== undefined)}
+      emptyState={emptyState}
+      isLoading={isLoading}
+      error={error ? 'Failed to load services status' : undefined}
+      headerAction={headerAction}
+    >
+      {/* Summary Stats */}
+      {summary && <SummaryStats summary={summary} />}
+
+      {/* Services List (unless compact) */}
+      {!compact && displayedServices.length > 0 && (
+        <div className="space-y-2">
+          {displayedServices.map((service) => (
+            <ServiceStatusRow key={service.serviceId} service={service} />
+          ))}
+          {hasMore && (
+            <p className="text-xs text-pf-text-tertiary text-center py-2">
+              +{sortedServices.length - maxServices} more services
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Quick Status Indicator for Compact Mode */}
+      {compact && summary && (
+        <div className="flex items-center justify-center gap-2 mt-2">
+          {summary.servicesWithErrors > 0 ? (
+            <>
+              <AlertCircleIcon className="h-4 w-4 text-pf-error-text" />
+              <span className="text-sm text-pf-error-text">
+                {summary.servicesWithErrors} service{summary.servicesWithErrors !== 1 ? 's' : ''} with errors
+              </span>
+            </>
+          ) : summary.runningServices === summary.enabledServices ? (
+            <>
+              <CheckCircleIcon className="h-4 w-4 text-pf-status-online-text" />
+              <span className="text-sm text-pf-status-online-text">All services operational</span>
+            </>
+          ) : (
+            <>
+              <PlayIcon className="h-4 w-4 text-pf-warning-text" />
+              <span className="text-sm text-pf-warning-text">
+                {summary.runningServices}/{summary.enabledServices} services running
+              </span>
+            </>
+          )}
+        </div>
+      )}
+    </DashboardWidget>
   );
 }
