@@ -40,7 +40,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
       hasContent={hasJobs}
       collapsible
       storageKey="active-jobs"
-      moreInfoLink="/queue"
+      moreInfoLink="/printQueue"
       moreInfoText="View Queue"
       className={className}
       emptyState={

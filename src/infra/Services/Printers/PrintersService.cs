@@ -112,6 +112,8 @@ public class PrintersService(
     /// Requires backend to implement IHistoryCapability interface.
     /// Currently supported by Moonraker and PrusaLink backends.
     /// Uses circuit breaker for fault tolerance against unavailable backends.
+    /// The 'since' parameter enables incremental seeding - Moonraker supports server-side filtering,
+    /// while OctoPrint requires client-side filtering.
     /// </remarks>
     public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
     {
@@ -124,7 +126,7 @@ public class PrintersService(
             // Use factory to get strongly-typed history client
             if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.ApiKey, ct).ConfigureAwait(false);
                 if (response == null)
                 {
                     _logger.LogWarning($"[History] No response from history API for printer {printerId}");
@@ -228,7 +230,7 @@ public class PrintersService(
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.ApiKey, ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);

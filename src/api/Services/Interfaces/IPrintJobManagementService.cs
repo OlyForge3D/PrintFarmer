@@ -257,13 +257,14 @@ public interface IPrintJobManagementService
     // ============= HISTORY OPERATIONS (Phase 2) =============
 
     /// <summary>
-    /// Seed print job history from printer history
+    /// Seed print job history from printer history APIs.
+    /// Fetches all available history (up to 10,000 jobs per printer) and uses
+    /// (ExternalJobId, SourcePrinterId) composite key to prevent duplicates.
+    /// Existing jobs are updated, new jobs are inserted (AddOrUpdate semantics).
     /// </summary>
-    /// <param name="printerIds">Optional list of printer identifiers to seed from.</param>
-    /// <param name="daysBack">Number of days back to seed history from.</param>
+    /// <param name="printerIds">Optional list of printer identifiers to seed from. If null, seeds from all enabled printers.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
-        int daysBack = 30,
         CancellationToken cancellationToken = default);
 }

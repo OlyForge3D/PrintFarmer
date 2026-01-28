@@ -2,6 +2,19 @@ import { Button, Checkbox, Select } from "@/common/components/ui";
 import { useState } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 
+/**
+ * Formats a duration in seconds to a human-readable string (e.g., "2h 30m" or "45m")
+ */
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
 export interface QueueJobsTableProps {
   jobs: QueuedPrintJobWithFileMetaDto[];
   isLoading?: boolean;
@@ -115,6 +128,8 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Printer</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Model</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Material</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Est. Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Filament</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Status</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Priority</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Actions</th>
@@ -130,6 +145,18 @@ export function QueueJobsTable({
             const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "-";
             const status = job.status || "Unknown";
             const priority = job.priority || 0;
+            
+            // Get estimated time from job or gcode file metadata
+            const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
+            const estimatedTimeDisplay = estimatedTimeSeconds 
+              ? formatDuration(estimatedTimeSeconds)
+              : "-";
+            
+            // Get filament usage from job or gcode file metadata (convert grams to display)
+            const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
+            const filamentDisplay = filamentGrams 
+              ? `${filamentGrams.toFixed(1)}g`
+              : "-";
 
             return (
               <tr
@@ -157,6 +184,8 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary">{printerName}</td>
                 <td className="px-4 py-3 text-pf-text-secondary">{model}</td>
                 <td className="px-4 py-3 text-pf-text-secondary">{material}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{estimatedTimeDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{filamentDisplay}</td>
                 <td className="px-4 py-3">
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(

@@ -339,6 +339,16 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .ToListAsync(ct);
     }
 
+    public async Task UpdatePrinterLastHistorySeedAsync(Guid printerId, DateTime lastSeedUtc, CancellationToken ct = default)
+    {
+        Printer? printer = await _context.Printers.FindAsync([printerId], ct);
+        if (printer != null)
+        {
+            printer.LastHistorySeedUtc = lastSeedUtc;
+            _ = await _context.SaveChangesAsync(ct);
+        }
+    }
+
     public async Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default)
     {
         List<string> externalIds = await _context.PrintJobs

@@ -34,17 +34,10 @@ public class HistorySeedingSettings : IAppSetting
     public int IntervalMinutes { get; set; } = 15;
 
     /// <summary>
-    /// Number of days of history to seed on each run. Default: 7
-    /// </summary>
-    [JsonPropertyName("daysBack")]
-    [SettingDisplay(Name = "Days Back", Description = "How many days of history to import from printers.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 365, Order = 3)]
-    public int DaysBack { get; set; } = 7;
-
-    /// <summary>
     /// Initial delay before first seeding run in seconds. Default: 60
     /// </summary>
     [JsonPropertyName("initialDelaySeconds")]
-    [SettingDisplay(Name = "Initial Delay (Seconds)", Description = "Delay before the first seeding run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 4)]
+    [SettingDisplay(Name = "Initial Delay (Seconds)", Description = "Delay before the first seeding run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 3)]
     public int InitialDelaySeconds { get; set; } = 60;
 }
 
@@ -91,7 +84,7 @@ public class HistorySeedingBackgroundService(
 
         _serviceMonitor.ReportEnabled(ServiceId, true);
         _logger.LogInformation(
-            $"History seeding service started. Interval: {settings.IntervalMinutes}m, Days back: {settings.DaysBack}, Initial delay: {settings.InitialDelaySeconds}s");
+            $"History seeding service started. Interval: {settings.IntervalMinutes}m, Initial delay: {settings.InitialDelaySeconds}s (fetches all available history)");
 
         // Initial delay to let the system stabilize
         await Task.Delay(TimeSpan.FromSeconds(settings.InitialDelaySeconds), stoppingToken);
@@ -110,7 +103,7 @@ public class HistorySeedingBackgroundService(
                 }
 
                 _serviceMonitor.ReportEnabled(ServiceId, true);
-                await SeedHistoryAsync(settings, stoppingToken);
+                await SeedHistoryAsync(stoppingToken);
                 _serviceMonitor.ReportSuccess(ServiceId, settings.IntervalMinutes * 60);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -139,7 +132,7 @@ public class HistorySeedingBackgroundService(
         _logger.LogInformation("[HistorySeedingService] Stopped");
     }
 
-    private async Task SeedHistoryAsync(HistorySeedingSettings settings, CancellationToken cancellationToken)
+    private async Task SeedHistoryAsync(CancellationToken cancellationToken)
     {
         _logger.LogDebug("[HistorySeedingService] Starting history seeding run");
 
@@ -148,7 +141,6 @@ public class HistorySeedingBackgroundService(
 
         await jobService.SeedHistoryFromPrintersAsync(
             printerIds: null, // Seed from all enabled printers
-            daysBack: settings.DaysBack,
             cancellationToken: cancellationToken);
 
         _logger.LogDebug("[HistorySeedingService] History seeding run completed");

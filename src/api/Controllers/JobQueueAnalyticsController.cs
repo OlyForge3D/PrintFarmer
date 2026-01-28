@@ -618,9 +618,11 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Seed queue history from printer APIs (Phase 2)
+    /// Seed queue history from printer APIs.
+    /// Fetches all available history (up to 10,000 jobs per printer) and uses
+    /// deduplication to prevent duplicates. Safe to call multiple times.
     /// </summary>
-    /// <param name="request">Optional request specifying printer IDs and days back to seed</param>
+    /// <param name="request">Optional request specifying printer IDs to seed from</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("history/seed")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
@@ -634,9 +636,8 @@ public class JobQueueAnalyticsController(
         try
         {
             List<string>? printerIds = request?.PrinterIds;
-            int daysBack = request?.DaysBack ?? 30;
 
-            await _printJobManagementService.SeedHistoryFromPrintersAsync(printerIds, daysBack, cancellationToken);
+            await _printJobManagementService.SeedHistoryFromPrintersAsync(printerIds, cancellationToken);
 
             return Accepted();
         }

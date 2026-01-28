@@ -190,6 +190,11 @@ public interface IPrintJobManagementRepository
     Task<GcodeFile?> FindGcodeFileByFilenameAsync(string filename, CancellationToken ct = default);
 
     /// <summary>
+    /// Update a printer's LastHistorySeedUtc timestamp (for incremental history seeding).
+    /// </summary>
+    Task UpdatePrinterLastHistorySeedAsync(Guid printerId, DateTime lastSeedUtc, CancellationToken ct = default);
+
+    /// <summary>
     /// Get the maximum queue position across all queued/printing jobs.
     /// </summary>
     Task<int> GetMaxQueuePositionAsync(CancellationToken ct = default);

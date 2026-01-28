@@ -2568,10 +2568,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="start">Index to start from for pagination.</param>
+    /// <param name="since">Filter to only return jobs started after this UTC timestamp.</param>
     /// <param name="apiKey">Optional API key for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, limit, start, ct: ct);
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryListAsync(baseUrl, limit, start, since: since, ct: ct);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
         => await GetHistoryJobAsync(baseUrl, jobId, ct);

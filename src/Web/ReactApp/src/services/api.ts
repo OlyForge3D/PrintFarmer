@@ -2724,12 +2724,13 @@ export class ApiClient {
   }
 
   /**
-   * Seed history from printer APIs
+   * Seed history from printer APIs.
+   * Fetches all available history and uses deduplication to prevent duplicates.
+   * Safe to call multiple times.
    */
-  async seedHistory(printerIds?: string[], daysBack: number = 30): Promise<void> {
+  async seedHistory(printerIds?: string[]): Promise<void> {
     await this.client.post(`/job-queue/history/seed`, {
       printerIds,
-      daysBack,
     });
   }
 

@@ -281,10 +281,15 @@ public interface ISupportsHistory
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="limit">Maximum number of history entries to return, or null for default limit</param>
     /// <param name="start">Starting index for pagination, or null to start from beginning</param>
+    /// <param name="since">Filter to only return jobs started after this UTC timestamp (for incremental seeding)</param>
     /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>HistoryListResponse containing paginated history entries, or null if history cannot be retrieved</returns>
-    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default);
+    /// <remarks>
+    /// The 'since' parameter enables incremental history seeding. Backends that support server-side
+    /// filtering (Moonraker) will use it directly. Backends that don't (OctoPrint) will filter client-side.
+    /// </remarks>
+    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Retrieves detailed information about a specific historical print job.

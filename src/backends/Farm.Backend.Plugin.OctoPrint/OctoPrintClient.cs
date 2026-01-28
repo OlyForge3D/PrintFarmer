@@ -1848,13 +1848,16 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     /// <summary>
     /// ISupportsHistory implementations - get and manage print history.
+    /// OctoPrint doesn't support server-side date filtering, so 'since' parameter is ignored.
+    /// Incremental filtering is handled by the caller (PrintJobManagementService).
     /// </summary>
     /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
     /// <param name="limit">Maximum number of history entries to return.</param>
     /// <param name="start">Starting index for pagination.</param>
+    /// <param name="since">Ignored - OctoPrint doesn't support server-side date filtering.</param>
     /// <param name="apiKey">API key for authentication.</param>
     /// <param name="ct">Cancellation token for async operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default)
         => await GetHistoryListAsync(baseUrl, apiKey ?? string.Empty, limit, start);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)

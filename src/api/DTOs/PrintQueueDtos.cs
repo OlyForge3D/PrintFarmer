@@ -177,13 +177,16 @@ public class QueueJobReorderMove
 }
 
 /// <summary>
-/// Request to seed history from printer APIs
+/// Request to seed history from printer APIs.
+/// Fetches all available history - no date filtering since the backend
+/// ISupportsHistory interface doesn't support it. Deduplication prevents duplicates.
 /// </summary>
 public class SeedQueueHistoryRequest
 {
+    /// <summary>
+    /// Optional list of printer IDs to seed from. If null/empty, seeds from all enabled printers.
+    /// </summary>
     public List<string>? PrinterIds { get; set; }
-
-    public int DaysBack { get; set; } = 30;
 }
 
 // ============= RESPONSE DTOs =============

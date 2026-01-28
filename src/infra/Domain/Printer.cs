@@ -203,4 +203,11 @@ public class Printer
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
+
+    /// <summary>
+    /// Timestamp of the most recent history job seeded from this printer.
+    /// Used for incremental seeding - only jobs newer than this are fetched on subsequent runs.
+    /// Null indicates no history has been seeded yet (triggers full initial seed).
+    /// </summary>
+    public DateTime? LastHistorySeedUtc { get; set; }
 }

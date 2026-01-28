@@ -823,19 +823,18 @@ public class PrintJobManagementService(
 
     /// <summary>
     /// Seed print job history from printer history APIs.
+    /// Fetches all available history (up to 10,000 jobs per printer) since the
+    /// ISupportsHistory interface doesn't support date filtering.
     /// Jobs are identified by (ExternalJobId, SourcePrinterId) composite key.
     /// Existing jobs are updated, new jobs are inserted (AddOrUpdate semantics).
     /// </summary>
     /// <param name="printerIds">Optional list of printer identifiers to seed from. If null, seeds from all printers.</param>
-    /// <param name="daysBack">Number of days of history to seed.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
-    /// <returns>Summary of seeding operation with counts of added and updated jobs.</returns>
     public async Task SeedHistoryFromPrintersAsync(
         List<string>? printerIds = null,
-        int daysBack = 30,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("[HistorySeed] Starting history seeding for last {DaysBack} days", daysBack);
+        _logger.LogInformation("[HistorySeed] Starting history seeding (fetching all available history)");
 
         int totalAdded = 0;
         int totalUpdated = 0;
@@ -858,8 +857,6 @@ public class PrintJobManagementService(
 
             _logger.LogInformation("[HistorySeed] Processing {PrinterCount} printer(s)", printers.Count);
 
-            DateTime sinceDate = DateTime.UtcNow.AddDays(-daysBack);
-
             foreach (Printer printer in printers)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -870,7 +867,7 @@ public class PrintJobManagementService(
                 try
                 {
                     (int added, int updated, int skipped) = await SeedHistoryFromSinglePrinterAsync(
-                        printer, sinceDate, cancellationToken);
+                        printer, cancellationToken);
 
                     totalAdded += added;
                     totalUpdated += updated;
@@ -901,24 +898,33 @@ public class PrintJobManagementService(
 
     /// <summary>
     /// Seeds history from a single printer using AddOrUpdate semantics.
+    /// Uses incremental seeding: first run fetches all history, subsequent runs
+    /// only fetch jobs newer than LastHistorySeedUtc (server-side for Moonraker,
+    /// client-side filtering for OctoPrint). This avoids re-fetching and
+    /// re-processing the entire history on every run.
     /// </summary>
     private async Task<(int Added, int Updated, int Skipped)> SeedHistoryFromSinglePrinterAsync(
         Printer printer,
-        DateTime sinceDate,
         CancellationToken cancellationToken)
     {
         int added = 0;
         int updated = 0;
         int skipped = 0;
 
+        bool isInitialSeed = !printer.LastHistorySeedUtc.HasValue;
+        DateTime? seedSinceUtc = printer.LastHistorySeedUtc;
+        DateTime latestJobTimestamp = printer.LastHistorySeedUtc ?? DateTime.MinValue;
+
         // Get history from printer via PrintersService
+        // Pass 'since' for incremental seeding - Moonraker will filter server-side,
+        // OctoPrint will return all and we filter client-side below.
         HistoryListResponse history = await _printersService.GetHistoryListAsync(
             printer.Id,
-            limit: 1000, // Reasonable limit per sync
+            limit: isInitialSeed ? 10000 : 1000, // Full fetch on initial, smaller on incremental
             start: 0,
-            since: sinceDate,
+            since: seedSinceUtc, // Pass last seed time for incremental fetching
             before: null,
-            order: "desc",
+            order: null,
             cancellationToken);
 
         if (history.Jobs.Length == 0)
@@ -928,8 +934,8 @@ public class PrintJobManagementService(
         }
 
         _logger.LogDebug(
-            "[HistorySeed] Retrieved {JobCount} history jobs from printer {PrinterName}",
-            history.Jobs.Length, printer.Name);
+            "[HistorySeed] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial})",
+            history.Jobs.Length, printer.Name, isInitialSeed);
 
         // Get all existing seeded jobs for this printer to check for duplicates
         HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
@@ -949,19 +955,45 @@ public class PrintJobManagementService(
                 continue;
             }
 
+            // Convert job timestamp for incremental filtering
+            DateTime jobTimestampUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+
+            // On incremental seed, skip jobs older than or equal to last seed timestamp.
+            // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).
+            // Moonraker already filters server-side via the 'since' parameter, but this acts as a safety net.
+            if (!isInitialSeed && seedSinceUtc.HasValue && jobTimestampUtc <= seedSinceUtc.Value)
+            {
+                skipped++;
+                continue;
+            }
+
+            // Track the latest job timestamp for updating LastHistorySeedUtc
+            if (jobTimestampUtc > latestJobTimestamp)
+            {
+                latestJobTimestamp = jobTimestampUtc;
+            }
+
             try
             {
                 if (existingExternalJobIds.Contains(historyJob.JobId))
                 {
-                    // Job exists - update it
-                    PrintJob? existingJob = await _repository.GetByExternalIdAsync(
-                        printer.Id, historyJob.JobId, cancellationToken);
-
-                    if (existingJob != null)
+                    // Job exists - update it (only on initial seed or if somehow we see it again)
+                    if (isInitialSeed)
                     {
-                        UpdatePrintJobFromHistory(existingJob, historyJob);
-                        existingJob.UpdatedAt = DateTime.UtcNow;
-                        updated++;
+                        PrintJob? existingJob = await _repository.GetByExternalIdAsync(
+                            printer.Id, historyJob.JobId, cancellationToken);
+
+                        if (existingJob != null)
+                        {
+                            UpdatePrintJobFromHistory(existingJob, historyJob);
+                            existingJob.UpdatedAt = DateTime.UtcNow;
+                            updated++;
+                        }
+                    }
+                    else
+                    {
+                        // On incremental, skip already-known jobs
+                        skipped++;
                     }
                 }
                 else
@@ -989,6 +1021,16 @@ public class PrintJobManagementService(
         if (added > 0 || updated > 0)
         {
             await _repository.SaveChangesAsync(cancellationToken);
+        }
+
+        // Update the printer's last seed timestamp if we processed any jobs
+        if (latestJobTimestamp > (printer.LastHistorySeedUtc ?? DateTime.MinValue))
+        {
+            printer.LastHistorySeedUtc = latestJobTimestamp;
+            await _repository.UpdatePrinterLastHistorySeedAsync(printer.Id, latestJobTimestamp, cancellationToken);
+            _logger.LogDebug(
+                "[HistorySeed] Updated LastHistorySeedUtc for printer {PrinterName} to {Timestamp}",
+                printer.Name, latestJobTimestamp);
         }
 
         return (added, updated, skipped);
