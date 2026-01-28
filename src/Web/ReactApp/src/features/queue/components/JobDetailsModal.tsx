@@ -397,13 +397,13 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                           <div className="text-center p-3 bg-pf-bg-0 rounded-md">
                             <p className="text-xs text-pf-text-muted mb-1">Estimated</p>
                             <p className="text-xl font-bold text-pf-text-primary">
-                              {displayDetails.estimatedFilamentUsageGrams ? `${displayDetails.estimatedFilamentUsageGrams}g` : '—'}
+                              {displayDetails.estimatedFilamentUsageGrams != null ? `${displayDetails.estimatedFilamentUsageGrams.toFixed(2)}g` : '—'}
                             </p>
                           </div>
                           <div className="text-center p-3 bg-pf-bg-0 rounded-md">
                             <p className="text-xs text-pf-text-muted mb-1">Actual</p>
                             <p className="text-xl font-bold text-pf-text-primary">
-                              {displayDetails.actualFilamentUsageGrams ? `${displayDetails.actualFilamentUsageGrams}g` : '—'}
+                              {displayDetails.actualFilamentUsageGrams != null ? `${displayDetails.actualFilamentUsageGrams.toFixed(2)}g` : '—'}
                             </p>
                           </div>
                         </div>

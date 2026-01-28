@@ -61,7 +61,7 @@ public class QueuedPrintJobDto
 
     public int? EstimatedPrintTimeSeconds { get; set; }
 
-    public int? EstimatedFilamentUsageGrams { get; set; }
+    public double? EstimatedFilamentUsageGrams { get; set; }
 
     public DateTime? ActualStartTimeUtc { get; set; }
 
@@ -69,7 +69,7 @@ public class QueuedPrintJobDto
 
     public int? ActualPrintTimeSeconds { get; set; }
 
-    public int? ActualFilamentUsageGrams { get; set; }
+    public double? ActualFilamentUsageGrams { get; set; }
 
     public string? FailureReason { get; set; }
 

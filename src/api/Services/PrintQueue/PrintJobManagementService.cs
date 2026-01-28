@@ -1085,7 +1085,7 @@ public class PrintJobManagementService(
             ActualStartTime = startTime,
             ActualEndTime = endTime,
             ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null,
-            ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed / 1000.0 : null, // mm to grams approximation
+            ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed * 0.003 : null, // mm to grams: ~3g per meter for 1.75mm filament
             CreatedAt = startTime,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = startTime,
@@ -1124,7 +1124,7 @@ public class PrintJobManagementService(
         existingJob.ActualStartTime = startTime;
         existingJob.ActualEndTime = endTime;
         existingJob.ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null;
-        existingJob.ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed / 1000.0 : null;
+        existingJob.ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed * 0.003 : null; // mm to grams: ~3g per meter for 1.75mm filament
 
         // Update nozzle and material from metadata if not already set
         if (!existingJob.RequiredNozzleDiameter.HasValue)
@@ -1321,8 +1321,8 @@ public class PrintJobManagementService(
 
                 if (mm.HasValue && mm.Value > 0)
                 {
-                    // Convert from mm to grams (approximate: 1m PLA = ~3g)
-                    return mm.Value / 1000.0;
+                    // Convert from mm to grams (approximate: 1m of 1.75mm PLA = ~3g)
+                    return mm.Value * 0.003;
                 }
             }
         }
@@ -1361,11 +1361,11 @@ public class PrintJobManagementService(
             RequiredMaterialType = job.RequiredMaterialType,
             RequiredCapabilities = job.RequiredCapabilities,
             EstimatedPrintTimeSeconds = (int?)job.EstimatedPrintTime?.TotalSeconds,
-            EstimatedFilamentUsageGrams = (int?)job.EstimatedFilamentUsage,
+            EstimatedFilamentUsageGrams = job.EstimatedFilamentUsage,
             ActualStartTimeUtc = job.ActualStartTime,
             ActualEndTimeUtc = job.ActualEndTime,
             ActualPrintTimeSeconds = (int?)job.ActualPrintTime?.TotalSeconds,
-            ActualFilamentUsageGrams = (int?)job.ActualFilamentUsage,
+            ActualFilamentUsageGrams = job.ActualFilamentUsage,
             FailureReason = job.FailureReason,
             Notes = job.Notes,
             CreatedAtUtc = job.CreatedAt,
