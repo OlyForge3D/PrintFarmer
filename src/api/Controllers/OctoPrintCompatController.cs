@@ -47,8 +47,31 @@ namespace Farm.Web.Api.Controllers
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
         [HttpPost("files/local")]
         [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
-        public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId, [FromQuery] bool print = false)
+        public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId)
         {
+            // OctoPrint API sends 'print' and 'select' as form fields, not query params
+            // We need to read form first to get these values
+            bool print = false;
+            bool select = false;
+
+            if (Request.HasFormContentType)
+            {
+                // Check form fields for print/select (OctoPrint sends these as form fields)
+                if (Request.Form.TryGetValue("print", out var printValue))
+                {
+                    print = printValue.ToString().Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (Request.Form.TryGetValue("select", out var selectValue))
+                {
+                    select = selectValue.ToString().Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            _logger.LogInformation(
+                "OctoPrint upload request: ContentType={ContentType}, ContentLength={ContentLength}, print={Print}, select={Select}, printerId={PrinterId}",
+                Request.ContentType, Request.ContentLength, print, select, printerId);
+
             // API key validation handled by [OctoPrintApiKey] filter at controller level
 
             // Rate limiting: key by apiKey if present otherwise by remote IP
@@ -63,15 +86,28 @@ namespace Farm.Web.Api.Controllers
                 return StatusCode(429, new { message = "Rate limit exceeded" });
             }
 
-            if (!Request.HasFormContentType || Request.Form.Files.Count == 0)
+            if (!Request.HasFormContentType)
             {
-                return BadRequest(new { message = "No file uploaded" });
+                _logger.LogWarning("OctoPrint upload rejected: not multipart/form-data. ContentType={ContentType}", Request.ContentType);
+                return BadRequest(new { message = "No file uploaded - expected multipart/form-data" });
+            }
+
+            if (Request.Form.Files.Count == 0)
+            {
+                _logger.LogWarning(
+                    "OctoPrint upload rejected: no files in form. Form keys: [{FormKeys}]",
+                    string.Join(", ", Request.Form.Keys));
+                return BadRequest(new { message = "No file uploaded - no files in form" });
             }
 
             IFormFile file = Request.Form.Files[0];
+            _logger.LogInformation(
+                "OctoPrint upload file received: Name={FileName}, Length={Length}, ContentType={ContentType}, FormFieldName={FieldName}",
+                file.FileName, file.Length, file.ContentType, file.Name);
 
             if (file.Length == 0)
             {
+                _logger.LogWarning("OctoPrint upload rejected: file is empty");
                 return BadRequest(new { message = "Uploaded file is empty" });
             }
 
@@ -82,8 +118,27 @@ namespace Farm.Web.Api.Controllers
             {
                 var uploadSettings = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadSettings)) as Farm.Web.Api.Services.IGcodeUploadSettings;
                 var quotaService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.IGcodeUploadQuotaService)) as Farm.Web.Api.Services.IGcodeUploadQuotaService;
-                GcodeFileEntryDto uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings!, quotaService!, HttpContext.RequestAborted);
-                _logger.LogInformation("OctoPrint upload saved: {File} name={Name}", file.FileName, uploadDto.FileName);
+
+                _logger.LogDebug(
+                    "OctoPrint upload: uploadSettings={HasSettings}, quotaService={HasQuota}",
+                    uploadSettings != null,
+                    quotaService != null);
+
+                if (uploadSettings == null)
+                {
+                    _logger.LogError("OctoPrint upload failed: IGcodeUploadSettings not registered in DI");
+                    return StatusCode(500, new { message = "Upload configuration missing" });
+                }
+
+                if (quotaService == null)
+                {
+                    _logger.LogError("OctoPrint upload failed: IGcodeUploadQuotaService not registered in DI");
+                    return StatusCode(500, new { message = "Upload quota service missing" });
+                }
+
+                _logger.LogDebug("OctoPrint upload: calling UploadFileAsync for {FileName}", file.FileName);
+                GcodeFileEntryDto uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings, quotaService, HttpContext.RequestAborted);
+                _logger.LogInformation("OctoPrint upload saved: {File} name={Name}, id={Id}", file.FileName, uploadDto.FileName, uploadDto.Id);
 
                 if (print)
                 {
@@ -94,34 +149,67 @@ namespace Farm.Web.Api.Controllers
                         return StatusCode(500, new { message = "Uploaded file not indexed yet" });
                     }
 
+                    // Note: The printerId query param is for OctoPrint API compatibility but is typically null
+                    // since slicers don't know PrintFarmer's internal printer IDs.
+                    // Instead, we use the extracted printer model from the G-code to auto-match printers.
+                    // The job queue service will find the best available printer based on:
+                    // - RequiredPrinterModel (from G-code header, e.g., "COREONEL", "X1 Carbon")
+                    // - RequiredNozzleDiameter (from G-code header)
+                    // - RequiredMaterialType (from G-code header)
                     var enqueueReq = new QueuePrintJobDto
                     {
                         GcodeFileId = gcodeFileGuid,
-                        AssignedPrinterId = printerId,
+                        AssignedPrinterId = printerId, // Usually null - auto-assign based on model match
                         Priority = PrintJobPriority.Normal,
                         RequiredNozzleDiameter = (decimal?)uploadDto.ExtractedNozzleDiameter,
-                        RequiredMaterialType = uploadDto.RequiredMaterial
+                        RequiredMaterialType = uploadDto.RequiredMaterial ?? uploadDto.ExtractedMaterial,
+                        RequiredPrinterModel = uploadDto.ExtractedPrinterModel // Key for printer matching!
                     };
+
+                    _logger.LogInformation(
+                        "OctoPrint upload+print: Enqueueing job for file={FileName}, model={Model}, nozzle={Nozzle}mm, material={Material}",
+                        file.FileName,
+                        enqueueReq.RequiredPrinterModel ?? "(any)",
+                        enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
+                        enqueueReq.RequiredMaterialType ?? "(any)");
 
                     JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, HttpContext.RequestAborted);
                     if (job is null)
                     {
-                        return StatusCode(500, new { message = "Failed to create print job" });
+                        _logger.LogWarning(
+                            "OctoPrint upload+print: No compatible printer found for model={Model}, nozzle={Nozzle}, material={Material}",
+                            enqueueReq.RequiredPrinterModel ?? "(any)",
+                            enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
+                            enqueueReq.RequiredMaterialType ?? "(any)");
+                        return StatusCode(500, new { message = "Failed to create print job - no compatible printer available" });
                     }
 
-                    // Create a pending approval entry so the job must be approved before scheduling
-                    var approvalService = HttpContext.RequestServices.GetService(typeof(Farm.Web.Api.Services.PrintJobs.IPrintApprovalService)) as Farm.Web.Api.Services.PrintJobs.IPrintApprovalService;
-                    Guid approvalId = await approvalService!.CreatePendingApprovalAsync(job.Id, printerId, User?.Identity?.Name);
+                    _logger.LogInformation(
+                        "OctoPrint upload+print: file={FileName}, jobId={JobId}, assignedPrinter={PrinterName} ({PrinterId})",
+                        file.FileName, job.Id, job.AssignedPrinterName, job.AssignedPrinterId);
 
-                    return Accepted(new { file = uploadDto, jobId = job.Id, approvalId = approvalId, status = "PendingApproval" });
+                    return Accepted(new { file = uploadDto, jobId = job.Id, status = "Queued", assignedPrinter = job.AssignedPrinterName });
                 }
 
                 return Ok(new { file = uploadDto });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process OctoPrint upload");
-                return StatusCode(500, new { message = "Upload failed" });
+                _logger.LogError(
+                    ex,
+                    "OctoPrint upload failed for file {FileName} ({Length} bytes). ExceptionType={ExceptionType}, Message={Message}",
+                    file.FileName, file.Length, ex.GetType().Name, ex.Message);
+
+                // Log inner exception if present
+                if (ex.InnerException != null)
+                {
+                    _logger.LogError(
+                        "OctoPrint upload inner exception: Type={InnerType}, Message={InnerMessage}",
+                        ex.InnerException.GetType().Name, ex.InnerException.Message);
+                }
+
+                // Include more detail in dev/debug scenarios
+                return StatusCode(500, new { message = "Upload failed", error = ex.Message });
             }
         }
 #pragma warning restore S6932
