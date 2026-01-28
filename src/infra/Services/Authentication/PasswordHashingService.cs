@@ -1,9 +1,23 @@
 ﻿namespace Farm.Infrastructure.Services.Authentication;
 
+/// <summary>
+/// Service for securely hashing and verifying user passwords using BCrypt.
+/// </summary>
 public interface IPasswordHashingService
 {
+    /// <summary>
+    /// Hashes a plaintext password using BCrypt.
+    /// </summary>
+    /// <param name="password">The plaintext password to hash.</param>
+    /// <returns>The BCrypt hashed password.</returns>
     string HashPassword(string password);
 
+    /// <summary>
+    /// Verifies a plaintext password against a BCrypt hash.
+    /// </summary>
+    /// <param name="password">The plaintext password to verify.</param>
+    /// <param name="hashedPassword">The BCrypt hash to verify against.</param>
+    /// <returns>True if the password matches the hash, false otherwise.</returns>
     bool VerifyPassword(string password, string hashedPassword);
 }
 

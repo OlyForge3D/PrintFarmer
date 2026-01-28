@@ -6,22 +6,54 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Repositories.Tags;
 
+/// <summary>
+/// Repository interface for tag management and object-tag associations.
+/// Provides CRUD operations for tags and object-agnostic tag assignment.
+/// </summary>
 public interface ITagRepository
 {
-    // Basic CRUD
+    /// <summary>
+    /// Gets a tag by its unique identifier.
+    /// </summary>
+    /// <param name="id">The tag's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The tag if found, otherwise null.</returns>
     Task<Tag?> GetByIdAsync(Guid id, CancellationToken ct);
 
+    /// <summary>
+    /// Gets a tag by its name (case-sensitive).
+    /// </summary>
+    /// <param name="name">The tag name to search for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The tag if found, otherwise null.</returns>
     Task<Tag?> GetByNameAsync(string name, CancellationToken ct);
 
+    /// <summary>
+    /// Gets all tags in the system.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Read-only list of all tags.</returns>
     Task<IReadOnlyList<Tag>> ListAllAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Adds a new tag to the repository.
+    /// </summary>
+    /// <param name="tag">The tag entity to add.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task AddAsync(Tag tag, CancellationToken ct);
 
+    /// <summary>
+    /// Removes a tag from the repository.
+    /// </summary>
+    /// <param name="tag">The tag entity to remove.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task RemoveAsync(Tag tag, CancellationToken ct);
 
+    /// <summary>
+    /// Persists pending changes to the database.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     Task SaveChangesAsync(CancellationToken ct);
-
-    // Object-agnostic tag assignment (works with any object type)
 
     /// <summary>
     /// Check if an object has a specific tag (object-agnostic).
@@ -101,8 +133,19 @@ public interface ITagRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Guid>> GetAllObjectsOfTypeAsync(string objectType, CancellationToken ct);
 
-    // Tag analytics
+    /// <summary>
+    /// Gets the count of objects associated with a tag.
+    /// </summary>
+    /// <param name="tagId">The tag's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The number of objects using this tag.</returns>
     Task<int> GetTagUsageCountAsync(Guid tagId, CancellationToken ct);
 
+    /// <summary>
+    /// Gets the timestamp when a tag was last assigned to an object.
+    /// </summary>
+    /// <param name="tagId">The tag's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The last usage timestamp, or null if never used.</returns>
     Task<DateTime?> GetTagLastUsedAtAsync(Guid tagId, CancellationToken ct);
 }

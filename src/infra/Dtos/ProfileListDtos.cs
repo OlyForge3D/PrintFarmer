@@ -1,24 +1,33 @@
 ﻿namespace Farm.Infrastructure;
 
 /// <summary>
-/// Base interface for profile list items
+/// Base interface for profile list items used in slicer profile listings.
+/// Provides common properties shared across all profile types (process, filament, machine).
 /// </summary>
 public interface IProfileListItem
 {
+    /// <summary>Gets the unique identifier of the profile.</summary>
     Guid Id { get; }
 
+    /// <summary>Gets the display name of the profile.</summary>
     string Name { get; }
 
+    /// <summary>Gets the slicer type this profile is for (e.g., "OrcaSlicer", "PrusaSlicer").</summary>
     string SlicerType { get; }
 
+    /// <summary>Gets a value indicating whether this is the default profile for its type.</summary>
     bool IsDefault { get; }
 
+    /// <summary>Gets a value indicating whether this is a system-provided profile.</summary>
     bool IsSystem { get; }
 
+    /// <summary>Gets a value indicating whether this profile is publicly shared.</summary>
     bool IsPublic { get; }
 
+    /// <summary>Gets the content hash for change detection and caching.</summary>
     string Hash { get; }
 
+    /// <summary>Gets the profile type identifier (e.g., "process", "filament", "machine").</summary>
     string ProfileType { get; }
 }
 

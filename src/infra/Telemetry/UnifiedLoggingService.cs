@@ -6,27 +6,98 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Telemetry;
 
+/// <summary>
+/// Service for unified structured logging with telemetry correlation support.
+/// Provides consistent logging across the application with metadata and correlation ID tracking.
+/// </summary>
 public interface IUnifiedLoggingService
 {
+    /// <summary>
+    /// Logs a debug-level message.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogDebug(string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs a debug-level message with an exception.
+    /// </summary>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogDebug(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs an information-level message.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogInformation(string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs a warning-level message.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogWarning(string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs a warning-level message with an exception.
+    /// </summary>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogWarning(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs an error-level message.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogError(string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs an error-level message with an exception.
+    /// </summary>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogError(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs a critical-level message.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogCritical(string message, string? correlationId = null, object? metadata = null);
 
+    /// <summary>
+    /// Logs a critical-level message with an exception.
+    /// </summary>
+    /// <param name="exception">The exception to log.</param>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
     void LogCritical(Exception exception, string message, string? correlationId = null, object? metadata = null);
 
-    // Context-aware logging
+    /// <summary>
+    /// Logs a message with full context including category and additional context object.
+    /// </summary>
+    /// <param name="level">The log level.</param>
+    /// <param name="category">The log category for grouping.</param>
+    /// <param name="message">The message to log.</param>
+    /// <param name="correlationId">Optional correlation ID for request tracing.</param>
+    /// <param name="metadata">Optional structured metadata to include.</param>
+    /// <param name="context">Optional additional context object.</param>
+    /// <param name="exception">Optional exception to include.</param>
     void LogWithContext(LogLevel level, string category, string message, string? correlationId = null, object? metadata = null, object? context = null, Exception? exception = null);
 }
 

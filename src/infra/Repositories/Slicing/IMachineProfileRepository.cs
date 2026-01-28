@@ -7,18 +7,42 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 /// </summary>
 public interface IMachineProfileRepository
 {
+    /// <summary>Gets a machine profile by ID.</summary>
+    /// <param name="id">The profile identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<MachineProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Gets machine profiles for a slicer engine with optional user filtering.</summary>
+    /// <param name="engine">The slicer engine type.</param>
+    /// <param name="includeSystem">Whether to include system profiles.</param>
+    /// <param name="userId">Optional user ID to filter by.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<MachineProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default);
 
+    /// <summary>Gets a machine profile by its content hash.</summary>
+    /// <param name="hash">The profile content hash.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<MachineProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
 
+    /// <summary>Adds a new machine profile.</summary>
+    /// <param name="profile">The profile to add.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task AddAsync(MachineProfile profile, CancellationToken ct = default);
 
+    /// <summary>Updates an existing machine profile.</summary>
+    /// <param name="profile">The profile to update.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task UpdateAsync(MachineProfile profile, CancellationToken ct = default);
 
+    /// <summary>Deletes a machine profile.</summary>
+    /// <param name="profile">The profile to delete.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task DeleteAsync(MachineProfile profile, CancellationToken ct = default);
 
+    /// <summary>Deletes all system profiles for a slicer engine.</summary>
+    /// <param name="engine">The slicer engine type.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of profiles deleted.</returns>
     Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
 
     /// <summary>

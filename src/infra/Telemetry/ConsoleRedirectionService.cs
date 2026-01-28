@@ -3,14 +3,32 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Telemetry;
 
+/// <summary>
+/// Service for redirecting console output to the unified logging system.
+/// Captures stdout and stderr and routes them through structured logging.
+/// </summary>
 public interface IConsoleRedirectionService
 {
+    /// <summary>
+    /// Redirects Console.Out and Console.Error to the unified logging system.
+    /// </summary>
     void RedirectConsoleOutput();
 
+    /// <summary>
+    /// Restores the original console output streams.
+    /// </summary>
     void RestoreConsoleOutput();
 
+    /// <summary>
+    /// Writes a line to both the unified logger and original console output.
+    /// </summary>
+    /// <param name="message">The message to write.</param>
     void WriteLine(string message);
 
+    /// <summary>
+    /// Writes an error message to both the unified logger and original console error.
+    /// </summary>
+    /// <param name="message">The error message to write.</param>
     void WriteError(string message);
 }
 

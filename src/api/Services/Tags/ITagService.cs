@@ -6,6 +6,9 @@ using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Tags
 {
+    /// <summary>
+    /// Service for managing tags and tag assignments to objects (polymorphic tagging system).
+    /// </summary>
     public interface ITagService
     {
         /// <summary>
