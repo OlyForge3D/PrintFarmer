@@ -17,7 +17,9 @@ import {
   SlicerProfileExportDto,
   BulkDeleteResultDto,
   CloneSingleProfileRequest,
-  CloneSingleProfileResponse
+  CloneSingleProfileResponse,
+  UploadProfileRequest,
+  CustomProfile
 } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
@@ -46,6 +48,13 @@ export const SlicerProfilesPage: React.FC = () => {
   const [isPublic, setIsPublic] = useState(true);
   // import form visibility handled via modal state `isImportModalOpen`
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Upload custom profile modal state
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadRawJson, setUploadRawJson] = useState('');
+  const [uploadName, setUploadName] = useState('');
+  const [uploadProfileType, setUploadProfileType] = useState<'machine' | 'filament' | 'process'>('process');
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Tab state - 'machines', 'filaments', 'processes'
   const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes'>('machines');
@@ -256,6 +265,33 @@ export const SlicerProfilesPage: React.FC = () => {
     },
     onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
   });
+
+  // Upload custom profile mutation - creates a new custom profile from raw JSON
+  const uploadProfileMutation = useMutation<CustomProfile, Error, UploadProfileRequest>({
+    mutationFn: async (request) => slicerProfilesService.uploadProfile(request),
+    onSuccess: (result) => {
+      setMessage(`Created custom profile: ${result.name}`);
+      setUploadRawJson('');
+      setUploadName('');
+      setUploadError(null);
+      setIsUploadModalOpen(false);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+    },
+    onError: (err) => setUploadError(err.message)
+  });
+
+  const onUploadCustomProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadRawJson.trim()) {
+      setUploadError('Raw JSON is required');
+      return;
+    }
+    uploadProfileMutation.mutate({
+      rawJson: uploadRawJson,
+      profileType: uploadProfileType,
+      name: uploadName || undefined
+    });
+  };
 
   const handleToggleSelection = (id: string) => {
     setSelectedProfileIds(prev => {
@@ -720,6 +756,14 @@ export const SlicerProfilesPage: React.FC = () => {
         >
           Export Orca Bundle
         </Button>
+        <Button
+          variant="primary"
+          onClick={() => setIsUploadModalOpen(true)}
+          className="flex items-center gap-2"
+          iconLeft={<UploadIcon className="w-4 h-4" />}
+        >
+          Upload Custom Profile
+        </Button>
       </div>
 
       <div className="space-y-4">
@@ -1081,6 +1125,74 @@ export const SlicerProfilesPage: React.FC = () => {
             </label>
           </div>
           {importError && <Alert type="error">{importError}</Alert>}
+        </form>
+      </Modal>
+
+      {/* Upload Custom Profile Modal */}
+      <Modal
+        isOpen={isUploadModalOpen}
+        onClose={() => {
+          setIsUploadModalOpen(false);
+          setUploadError(null);
+        }}
+        title="Upload Custom Profile"
+        isDisabled={uploadProfileMutation.isPending}
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button
+              variant="secondary"
+              onClick={() => setIsUploadModalOpen(false)}
+              disabled={uploadProfileMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              form="upload-profile-form"
+              type="submit"
+              loading={uploadProfileMutation.isPending}
+              variant="primary"
+            >
+              Upload Profile
+            </Button>
+          </div>
+        }
+      >
+        <form id="upload-profile-form" onSubmit={onUploadCustomProfile} className="space-y-4">
+          <p className="text-sm text-pf-text-secondary mb-4">
+            Upload a custom profile from raw JSON. This creates a user-owned profile that you can edit or delete.
+          </p>
+
+          <FormField label="Profile Type" required>
+            <Select
+              aria-label="Profile type"
+              value={uploadProfileType}
+              onChange={e => setUploadProfileType(e.target.value as 'machine' | 'filament' | 'process')}
+            >
+              <option value="process">Process (Quality/Speed)</option>
+              <option value="filament">Filament (Material)</option>
+              <option value="machine">Machine (Printer)</option>
+            </Select>
+          </FormField>
+
+          <FormField label="Raw Profile JSON" required helper="Paste OrcaSlicer profile JSON.">
+            <Textarea
+              placeholder={'{\n  "layer_height": 0.2,\n  "infill_density": "15%",\n  ...\n}'}
+              value={uploadRawJson}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setUploadRawJson(e.target.value)}
+              rows={10}
+            />
+          </FormField>
+
+          <FormField label="Name" helper="Optional; derived automatically from JSON if left blank.">
+            <Input
+              type="text"
+              placeholder="Custom profile name"
+              value={uploadName}
+              onChange={e => setUploadName(e.target.value)}
+            />
+          </FormField>
+
+          {uploadError && <Alert type="error">{uploadError}</Alert>}
         </form>
       </Modal>
 
