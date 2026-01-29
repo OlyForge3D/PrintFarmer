@@ -1348,9 +1348,11 @@ public class PrintJobManagementService(
         return new QueuedPrintJobDto
         {
             Id = job.Id.ToString(),
-            Name = job.Name,
+            // Name = original filename for display (prefer GcodeFile.Name, fallback to job.Name for history-seeded jobs)
+            Name = job.GcodeFile?.Name ?? job.Name,
             GcodeFileId = job.GcodeFileId?.ToString(),
-            FileName = job.GcodeFile?.Name, // Original filename for display (may be null if GcodeFile not loaded)
+            // FileName = internal GUID-based path (null for history-seeded jobs without GcodeFile)
+            FileName = job.GcodeFile?.FileName,
             AssignedPrinterId = job.AssignedPrinterId?.ToString(),
             PrinterName = job.AssignedPrinter?.Name, // Denormalized printer name for display
             PrinterModel = job.AssignedPrinter?.Model?.Name, // Denormalized printer model for display

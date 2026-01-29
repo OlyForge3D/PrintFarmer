@@ -180,7 +180,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
       <Modal
         isOpen={isOpen}
         onClose={handleClose}
-        title={displayDetails ? (displayDetails.fileName || displayDetails.name) : 'Job Details'}
+        title="Job Details"
         size="lg"
         footer={footerContent}
         closeOnBackdrop={false}
@@ -359,7 +359,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                           </svg>
                           File
                         </h3>
-                        <p className="text-sm font-mono text-pf-text-primary break-all">{displayDetails.fileName || <span className="italic text-pf-text-muted">Unknown</span>}</p>
+                        <p className="text-sm font-mono text-pf-text-primary break-all">{displayDetails.name || <span className="italic text-pf-text-muted">Unknown</span>}</p>
                       </div>
                     </div>
 
