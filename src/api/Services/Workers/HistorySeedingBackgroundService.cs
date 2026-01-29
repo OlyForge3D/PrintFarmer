@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
