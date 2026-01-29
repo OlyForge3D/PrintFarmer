@@ -1,4 +1,4 @@
-import type { MachineProfileListItem } from '@/services/slicerProfilesService';
+import type { MachineProfileListItem, PrinterModelProfilesDto } from '@/services/slicerProfilesService';
 import type { PrinterForSlicing } from '../components/job/PrinterSlicerSelector';
 
 /**
@@ -91,19 +91,22 @@ export function findHierarchyManufacturer(
 
 /**
  * Find model key in hierarchy that matches printer model.
+ * The hierarchy uses GUIDs as keys but models have a 'name' property with the actual name.
+ * Returns the KEY (GUID) to use for accessing the model in the hierarchy.
  */
 export function findHierarchyModel(
   printerModel: string | undefined,
-  hierarchyModels: string[]
+  modelsRecord: Record<string, PrinterModelProfilesDto> | undefined
 ): string | undefined {
-  if (!printerModel) return undefined;
+  if (!printerModel || !modelsRecord) return undefined;
   
   const modelLower = printerModel.toLowerCase();
   const modelWords = modelLower.split(/[\s\-_]+/).filter(w => w.length > 2);
   
-  // Score each hierarchy model
-  const scoredModels = hierarchyModels.map(hModel => {
-    const hModelLower = hModel.toLowerCase();
+  // Score each hierarchy model by its NAME property, but return the KEY
+  const scoredModels = Object.entries(modelsRecord).map(([key, modelData]) => {
+    const hModelName = modelData.name || key; // Use name property, fallback to key
+    const hModelLower = hModelName.toLowerCase();
     let score = 0;
     
     // Exact match
@@ -118,8 +121,8 @@ export function findHierarchyModel(
       });
     }
     
-    return { model: hModel, score };
+    return { key, name: hModelName, score };
   }).filter(m => m.score > 0).sort((a, b) => b.score - a.score);
   
-  return scoredModels[0]?.model;
+  return scoredModels[0]?.key;
 }

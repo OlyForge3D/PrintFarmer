@@ -274,74 +274,81 @@ export const NewSliceJobPage: React.FC = () => {
     return modelData?.processProfiles ?? [];
   }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
 
-  // Reset cascading selections when parent changes
-  useEffect(() => {
-    setSelectedPrinterModel('');
-    setSelectedMachineProfileId('');
-    setSelectedFilamentProfileId('');
-    setSelectedProcessPresetId('');
-  }, [selectedManufacturer]);
-
-  useEffect(() => {
-    setSelectedMachineProfileId('');
-    setSelectedFilamentProfileId('');
-    setSelectedProcessPresetId('');
-  }, [selectedPrinterModel]);
+  // Note: Previous cascading reset effects were removed because they conflicted
+  // with the printer-first flow. The auto-match effect now handles setting all
+  // values atomically when a printer is selected, so we don't need to reset
+  // child selections when parent changes.
 
   // Auto-match slicer profiles when a printer is selected (printer-first flow)
+  // This effect sets manufacturer, model, and machine profile all at once based on the selected printer
   useEffect(() => {
     if (!selectedPrinterForSlicing || !hierarchyProfiles?.byHierarchy) return;
     
     const mfgName = selectedPrinterForSlicing.manufacturerName;
     const modelName = selectedPrinterForSlicing.modelName;
     
-    if (!mfgName || !modelName) return;
+    if (!mfgName || !modelName) {
+      // Clear selections if printer has no manufacturer/model info
+      setSelectedManufacturer('');
+      setSelectedPrinterModel('');
+      setSelectedMachineProfileId('');
+      return;
+    }
     
     // Find matching manufacturer in hierarchy
     const hierarchyMfrs = Object.keys(hierarchyProfiles.byHierarchy);
     const matchedMfr = findHierarchyManufacturer(mfgName, hierarchyMfrs);
     
-    if (matchedMfr && matchedMfr !== selectedManufacturer) {
-      setSelectedManufacturer(matchedMfr);
+    if (!matchedMfr) {
+      // No matching manufacturer in slicer profiles
+      setSelectedManufacturer('');
+      setSelectedPrinterModel('');
+      setSelectedMachineProfileId('');
+      return;
     }
     
+    // Set manufacturer
+    setSelectedManufacturer(matchedMfr);
+    
     // Find matching model in hierarchy
-    if (matchedMfr) {
-      const mfgData = hierarchyProfiles.byHierarchy[matchedMfr];
-      const hierarchyModels = Object.keys(mfgData?.models || {});
-      const matchedModel = findHierarchyModel(modelName, hierarchyModels);
-      
-      if (matchedModel && matchedModel !== selectedPrinterModel) {
-        setSelectedPrinterModel(matchedModel);
-      }
-      
-      // Auto-match machine profile by nozzle diameter
-      if (matchedModel && mfgData?.models?.[matchedModel]?.machineProfiles) {
-        const machineProfiles = mfgData.models[matchedModel].machineProfiles;
-        const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
-        
-        // Find profile with matching nozzle diameter
-        if (nozzle) {
-          const nozzleTolerance = 0.01;
-          const matchedProfile = machineProfiles.find(p => 
-            p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
-          );
-          if (matchedProfile && matchedProfile.id !== selectedMachineProfileId) {
-            setSelectedMachineProfileId(matchedProfile.id);
-          }
-        } else if (machineProfiles.length > 0 && !selectedMachineProfileId) {
-          // Default to first profile if no nozzle info
-          setSelectedMachineProfileId(machineProfiles[0].id);
-        }
+    // Note: models are keyed by GUID, but have a 'name' property with the actual model name
+    const mfgData = hierarchyProfiles.byHierarchy[matchedMfr];
+    const matchedModel = findHierarchyModel(modelName, mfgData?.models);
+    
+    if (!matchedModel) {
+      // No matching model in slicer profiles
+      setSelectedPrinterModel('');
+      setSelectedMachineProfileId('');
+      return;
+    }
+    
+    // Set model
+    setSelectedPrinterModel(matchedModel);
+    
+    // Auto-match machine profile by nozzle diameter
+    const machineProfiles = mfgData?.models?.[matchedModel]?.machineProfiles ?? [];
+    const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
+    
+    if (machineProfiles.length === 0) {
+      setSelectedMachineProfileId('');
+      return;
+    }
+    
+    // Find profile with matching nozzle diameter
+    if (nozzle) {
+      const nozzleTolerance = 0.01;
+      const matchedProfile = machineProfiles.find(p => 
+        p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
+      );
+      if (matchedProfile) {
+        setSelectedMachineProfileId(matchedProfile.id);
+        return;
       }
     }
-  }, [
-    selectedPrinterForSlicing,
-    hierarchyProfiles,
-    selectedManufacturer,
-    selectedPrinterModel,
-    selectedMachineProfileId
-  ]);
+    
+    // Default to first profile if no nozzle match
+    setSelectedMachineProfileId(machineProfiles[0].id);
+  }, [selectedPrinterForSlicing, hierarchyProfiles]);
 
   // Filter profiles for the selected printer
   const printerProcessProfiles = useMemo(() => {
