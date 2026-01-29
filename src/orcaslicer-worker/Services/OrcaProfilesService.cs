@@ -38,6 +38,11 @@ public class OrcaProfilesService : ISlicerProfilesService
     private Dictionary<string, List<MachineProfileDto>>? _machinesByManufacturerCache;
     private readonly Lock _machineCacheLock = new();
 
+    // Cache for profile name → full path lookups, built from manufacturer manifests
+    // Key: manufacturer name, Value: dictionary of profile name → full file path
+    private readonly Dictionary<string, Dictionary<string, string>> _profilePathLookupCache = new();
+    private readonly Lock _pathLookupCacheLock = new();
+
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
     private List<MachineModelProfileDto>? _allMachineModelProfilesCache;
     private List<MachineProfileDto>? _allMachineProfilesCache;
@@ -668,12 +673,14 @@ public class OrcaProfilesService : ISlicerProfilesService
                 string? inheritedProfileName = inheritsElem.GetString();
                 if (!string.IsNullOrWhiteSpace(inheritedProfileName))
                 {
-                    // Find the parent profile in the same directory
-                    string? profileDir = Path.GetDirectoryName(filePath);
-                    string parentProfilePath = Path.Combine(profileDir ?? string.Empty, $"{inheritedProfileName}.json");
+                    // Search for parent profile - OrcaSlicer stores profiles in nested subdirectories
+                    // (e.g., filament/P1P/child.json) but base profiles are in parent folder (filament/base.json)
+                    string? parentProfilePath = FindParentProfile(filePath, inheritedProfileName);
 
-                    if (File.Exists(parentProfilePath))
+                    if (parentProfilePath != null && File.Exists(parentProfilePath))
                     {
+                        _logger.LogInformation($"Resolving inheritance: '{inheritedProfileName}' → '{parentProfilePath}'");
+
                         // Recursively load parent chain first (so parents are added before children)
                         if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
                         {
@@ -681,6 +688,10 @@ public class OrcaProfilesService : ISlicerProfilesService
 
                             // Don't fail - continue with what we have
                         }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Parent profile '{inheritedProfileName}' not found for '{filePath}' (resolved to: {parentProfilePath ?? "null"})");
                     }
                 }
             }
@@ -808,6 +819,134 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
+    /// <summary>
+    /// Find a parent profile by looking up its name in the manufacturer's manifest file.
+    /// The {Manufacturer}.json file contains name → sub_path mappings for all profiles.
+    /// </summary>
+    private string? FindParentProfile(string childFilePath, string parentProfileName)
+    {
+        // Extract manufacturer from path: /profiles/{Manufacturer}/filament/child.json → {Manufacturer}
+        string? manufacturerDir = GetManufacturerDirectory(childFilePath);
+        if (manufacturerDir == null)
+        {
+            _logger.LogDebug($"Could not determine manufacturer directory for '{childFilePath}'");
+            return null;
+        }
+
+        string manufacturerName = Path.GetFileName(manufacturerDir);
+
+        // Build or retrieve the profile path lookup for this manufacturer
+        Dictionary<string, string>? lookup = GetOrBuildProfilePathLookup(manufacturerName, manufacturerDir);
+        if (lookup == null)
+        {
+            _logger.LogDebug($"No manifest found for manufacturer '{manufacturerName}'");
+            return null;
+        }
+
+        // Look up the parent profile name in the manifest
+        if (lookup.TryGetValue(parentProfileName, out string? parentPath))
+        {
+            return parentPath;
+        }
+
+        // Not found in manifest - this is expected for some base profiles that may be shared
+        _logger.LogDebug($"Parent profile '{parentProfileName}' not found in {manufacturerName} manifest");
+        return null;
+    }
+
+    /// <summary>
+    /// Extract the manufacturer directory from a profile file path.
+    /// Example: /profiles/BBL/filament/P1P/child.json → /profiles/BBL
+    /// </summary>
+    private string? GetManufacturerDirectory(string filePath)
+    {
+        // Walk up from the file to find the manufacturer directory (direct child of _orcaProfilesPath)
+        string? currentDir = Path.GetDirectoryName(filePath);
+
+        while (!string.IsNullOrEmpty(currentDir))
+        {
+            string? parentDir = Path.GetDirectoryName(currentDir);
+            if (parentDir != null && Path.GetFullPath(parentDir) == Path.GetFullPath(_orcaProfilesPath))
+            {
+                // currentDir is a direct child of profiles root - this is the manufacturer directory
+                return currentDir;
+            }
+
+            if (parentDir == currentDir)
+            {
+                break; // Reached root
+            }
+
+            currentDir = parentDir;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Build or retrieve the profile name → full path lookup dictionary for a manufacturer.
+    /// Parses the {Manufacturer}.json manifest and builds mappings from all profile lists.
+    /// </summary>
+    private Dictionary<string, string>? GetOrBuildProfilePathLookup(string manufacturerName, string manufacturerDir)
+    {
+        lock (_pathLookupCacheLock)
+        {
+            if (_profilePathLookupCache.TryGetValue(manufacturerName, out Dictionary<string, string>? cached))
+            {
+                return cached;
+            }
+        }
+
+        // Build the lookup from the manifest file
+        string manifestPath = Path.Combine(_orcaProfilesPath, $"{manufacturerName}.json");
+        if (!File.Exists(manifestPath))
+        {
+            _logger.LogDebug($"Manifest file not found: {manifestPath}");
+            return null;
+        }
+
+        ManufacturerBundleDto? bundle = ParseManufacturerBundle(manifestPath);
+        if (bundle == null)
+        {
+            return null;
+        }
+
+        Dictionary<string, string> lookup = new(StringComparer.Ordinal);
+
+        // Add all profile types to the lookup
+        AddProfileEntriesToLookup(bundle.MachineModelList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.MachineList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.FilamentList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.ProcessList, manufacturerDir, lookup);
+
+        lock (_pathLookupCacheLock)
+        {
+            _profilePathLookupCache[manufacturerName] = lookup;
+        }
+
+        _logger.LogDebug($"Built profile path lookup for {manufacturerName}: {lookup.Count} entries");
+        return lookup;
+    }
+
+    /// <summary>
+    /// Add profile entries from a manifest list to the lookup dictionary.
+    /// </summary>
+    private static void AddProfileEntriesToLookup(
+        IList<ManufacturerBundleProfileEntry> entries,
+        string manufacturerDir,
+        Dictionary<string, string> lookup)
+    {
+        foreach (ManufacturerBundleProfileEntry entry in entries)
+        {
+            if (!string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(entry.SubPath))
+            {
+                // sub_path is relative to the manufacturer directory
+                string fullPath = Path.Combine(manufacturerDir, entry.SubPath);
+                lookup[entry.Name] = fullPath;
+            }
+        }
+    }
+
     private static string EscapeJsonKey(string key)
     {
         return key.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
@@ -876,16 +1015,16 @@ public class OrcaProfilesService : ISlicerProfilesService
         // 4. Profile name parsing (e.g., "Generic ABS @System" -> "ABS")
         if (root.TryGetProperty("filament_type", out JsonElement typeElem))
         {
-            profile.Material = typeElem.GetString() ?? "PLA";
+            profile.Material = ParseStringValue(typeElem) ?? "PLA";
         }
         else if (root.TryGetProperty("material", out JsonElement matElem))
         {
-            profile.Material = matElem.GetString() ?? "PLA";
+            profile.Material = ParseStringValue(matElem) ?? "PLA";
         }
         else if (root.TryGetProperty("inherits", out JsonElement inheritsElem))
         {
             // Parse material from inherits like "fdm_filament_abs", "fdm_filament_petg", etc.
-            string? inherits = inheritsElem.GetString();
+            string? inherits = ParseStringValue(inheritsElem);
             profile.Material = ExtractMaterialFromInherits(inherits) ?? ExtractMaterialFromName(profile.Name) ?? "Other";
         }
         else
@@ -899,7 +1038,12 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.NozzleTemperature = ParseIntValue(nozzleElem) ?? 210;
         }
 
-        if (root.TryGetProperty("bed_temperature", out JsonElement bedElem))
+        // OrcaSlicer uses hot_plate_temp for bed temperature, fall back to bed_temperature
+        if (root.TryGetProperty("hot_plate_temp", out JsonElement hotPlateElem))
+        {
+            profile.BedTemperature = ParseIntValue(hotPlateElem) ?? 60;
+        }
+        else if (root.TryGetProperty("bed_temperature", out JsonElement bedElem))
         {
             profile.BedTemperature = ParseIntValue(bedElem) ?? 60;
         }
@@ -918,7 +1062,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            string? condition = conditionElem.GetString();
+            string? condition = ParseStringValue(conditionElem);
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -971,7 +1115,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            string? condition = conditionElem.GetString();
+            string? condition = ParseStringValue(conditionElem);
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -1009,6 +1153,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             return int.TryParse(elem.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int val) ? val : null;
         }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            // OrcaSlicer stores many values as single-element arrays like ["260"]
+            JsonElement firstElem = elem[0];
+            return ParseIntValue(firstElem);
+        }
 
         return null;
     }
@@ -1022,6 +1172,31 @@ public class OrcaProfilesService : ISlicerProfilesService
         else if (elem.ValueKind == JsonValueKind.String)
         {
             return double.TryParse(elem.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val) ? val : null;
+        }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            // OrcaSlicer stores many values as single-element arrays like ["0.2"]
+            JsonElement firstElem = elem[0];
+            return ParseDoubleValue(firstElem);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Safely parse a string value from a JsonElement that could be a string or array.
+    /// OrcaSlicer stores many values as single-element arrays like ["PLA"].
+    /// </summary>
+    private static string? ParseStringValue(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.String)
+        {
+            return elem.GetString();
+        }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            JsonElement firstElem = elem[0];
+            return ParseStringValue(firstElem);
         }
 
         return null;
