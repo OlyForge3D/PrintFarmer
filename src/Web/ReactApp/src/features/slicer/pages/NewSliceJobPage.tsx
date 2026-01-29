@@ -9,10 +9,15 @@ import { apiClient } from '@/services/api';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
-import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
+import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
+import {
+  findHierarchyManufacturer,
+  findHierarchyModel,
+  getPrimaryNozzleDiameter
+} from '../utils/profileMatcher';
 import type { MaterialType, MaterialPreset } from '@/types/slicer';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -78,7 +83,6 @@ export const NewSliceJobPage: React.FC = () => {
   const [priority, setPriority] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
   const [isCloneProfilesModalOpen, setIsCloneProfilesModalOpen] = useState(false);
   const stlFile = useSTLFile();
@@ -141,35 +145,51 @@ export const NewSliceJobPage: React.FC = () => {
     return options;
   }, [availableSlicers, getSlicerTypeName]);
 
-  // Fetch printers for dropdown
-  const { data: printers = [] } = useQuery({
+  // Fetch printers for dropdown - includes data needed for profile matching
+  const { data: printers = [], isLoading: isPrintersLoading } = useQuery({
     queryKey: ['printers'],
     queryFn: async () => {
       const printerList = await apiClient.getPrinters();
-      return printerList as Array<{ id: string; name: string; model?: string; modelId?: string; manufacturerName?: string; modelName?: string }>;
+      // Map to PrinterForSlicing format (basic Printer type - no nozzle/toolhead data)
+      return printerList.map(p => ({
+        id: p.id,
+        name: p.name,
+        manufacturerId: p.manufacturerId,
+        manufacturerName: p.manufacturerName,
+        modelId: p.modelId,
+        modelName: p.modelName,
+        thumbnailUrl: p.thumbnailUrl,
+        isOnline: p.isOnline
+      })) as PrinterForSlicing[];
     },
     staleTime: 30_000
   });
 
-  // Fetch full printer details including bed dimensions when a printer is selected
+  // Fetch full printer details including bed dimensions and toolheads when a printer is selected
   const { data: selectedPrinterDetails } = useQuery({
     queryKey: ['printerDetails', selectedPrinterId],
     queryFn: async () => {
       if (!selectedPrinterId) return null;
       const details = await apiClient.getPrinterDetails(selectedPrinterId);
-      return details as {
-        id: string;
-        name: string;
-        manufacturerName?: string;
-        modelName?: string;
-        modelMaxX?: number;
-        modelMaxY?: number;
-        modelMaxZ?: number;
-      };
+      return details;
     },
     enabled: !!selectedPrinterId,
     staleTime: 30_000
   });
+
+  // Merge basic printer info with detailed info including toolheads
+  const selectedPrinterForSlicing = useMemo((): PrinterForSlicing | undefined => {
+    const basic = printers.find(p => p.id === selectedPrinterId);
+    if (!basic) return undefined;
+    
+    // Merge with details to get toolheads and nozzle info
+    return {
+      ...basic,
+      toolheads: selectedPrinterDetails?.toolheads,
+      // Get nozzle from primary toolhead if available
+      nozzleDiameter: selectedPrinterDetails?.toolheads?.[0]?.nozzleDiameter
+    };
+  }, [printers, selectedPrinterId, selectedPrinterDetails]);
 
   // Get selected printer basic info from list
   const selectedPrinter = useMemo(() => {
@@ -284,6 +304,61 @@ export const NewSliceJobPage: React.FC = () => {
     setSelectedFilamentProfileId('');
     setSelectedProcessPresetId('');
   }, [selectedPrinterModel]);
+
+  // Auto-match slicer profiles when a printer is selected (printer-first flow)
+  useEffect(() => {
+    if (!selectedPrinterForSlicing || !hierarchyProfiles?.byHierarchy) return;
+    
+    const mfgName = selectedPrinterForSlicing.manufacturerName;
+    const modelName = selectedPrinterForSlicing.modelName;
+    
+    if (!mfgName || !modelName) return;
+    
+    // Find matching manufacturer in hierarchy
+    const hierarchyMfrs = Object.keys(hierarchyProfiles.byHierarchy);
+    const matchedMfr = findHierarchyManufacturer(mfgName, hierarchyMfrs);
+    
+    if (matchedMfr && matchedMfr !== selectedManufacturer) {
+      setSelectedManufacturer(matchedMfr);
+    }
+    
+    // Find matching model in hierarchy
+    if (matchedMfr) {
+      const mfgData = hierarchyProfiles.byHierarchy[matchedMfr];
+      const hierarchyModels = Object.keys(mfgData?.models || {});
+      const matchedModel = findHierarchyModel(modelName, hierarchyModels);
+      
+      if (matchedModel && matchedModel !== selectedPrinterModel) {
+        setSelectedPrinterModel(matchedModel);
+      }
+      
+      // Auto-match machine profile by nozzle diameter
+      if (matchedModel && mfgData?.models?.[matchedModel]?.machineProfiles) {
+        const machineProfiles = mfgData.models[matchedModel].machineProfiles;
+        const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
+        
+        // Find profile with matching nozzle diameter
+        if (nozzle) {
+          const nozzleTolerance = 0.01;
+          const matchedProfile = machineProfiles.find(p => 
+            p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
+          );
+          if (matchedProfile && matchedProfile.id !== selectedMachineProfileId) {
+            setSelectedMachineProfileId(matchedProfile.id);
+          }
+        } else if (machineProfiles.length > 0 && !selectedMachineProfileId) {
+          // Default to first profile if no nozzle info
+          setSelectedMachineProfileId(machineProfiles[0].id);
+        }
+      }
+    }
+  }, [
+    selectedPrinterForSlicing,
+    hierarchyProfiles,
+    selectedManufacturer,
+    selectedPrinterModel,
+    selectedMachineProfileId
+  ]);
 
   // Filter profiles for the selected printer
   const printerProcessProfiles = useMemo(() => {
@@ -550,9 +625,27 @@ export const NewSliceJobPage: React.FC = () => {
             </Select>
           </div>
 
-          {/* CASCADING PROFILE SELECTION - OrcaSlicer-style */}
+          {/* PRINTER SELECTION - Select from registered printers first */}
+          <PrinterSlicerSelector
+            printers={printers}
+            isLoading={isPrintersLoading}
+            selectedPrinterId={selectedPrinterId}
+            onPrinterChange={(printerId) => {
+              setSelectedPrinterId(printerId);
+              // Auto-match will happen via the effect above
+            }}
+            className="bg-pf-panel border border-pf-border rounded-lg p-4"
+          />
+
+          {/* CASCADING PROFILE SELECTION - Auto-populated when printer selected */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">Printer Profile</label>
+            <label className="block text-sm font-semibold text-pf-text">Slicer Profile</label>
+            {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName && (
+              <p className="text-xs text-pf-text-muted mb-2">
+                Auto-matched for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
+                {selectedPrinterForSlicing.nozzleDiameter && ` • ${selectedPrinterForSlicing.nozzleDiameter}mm nozzle`}
+              </p>
+            )}
             
             {/* Manufacturer Selection */}
             <div>
@@ -606,46 +699,6 @@ export const NewSliceJobPage: React.FC = () => {
                 <p className="text-xs text-amber-500 mt-1">No machine profiles available for this model</p>
               )}
             </div>
-          </div>
-
-          {/* TARGET PRINTER - Optional, for print queue */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Target Printer (Optional)</label>
-            {selectedPrinter ? (
-              <div className="space-y-2">
-                <div className="p-3 bg-pf-bg-0 rounded border border-pf-border">
-                  <p className="font-medium text-pf-text">{selectedPrinter.name}</p>
-                  {selectedPrinter.modelName && (
-                    <p className="text-sm text-pf-text-muted">
-                      {selectedPrinter.manufacturerName && `${selectedPrinter.manufacturerName} • `}
-                      {selectedPrinter.modelName}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  onClick={() => setIsPrinterSelectorOpen(true)}
-                  variant="secondary"
-                  size="sm"
-                  className="w-full"
-                >
-                  Change Printer
-                </Button>
-              </div>
-            ) : (
-              <Button
-                type="button"
-                onClick={() => setIsPrinterSelectorOpen(true)}
-                variant="secondary"
-                size="sm"
-                className="w-full"
-              >
-                Select Target Printer
-              </Button>
-            )}
-            <p className="text-xs text-pf-text-muted mt-2">
-              Select a specific printer to send the sliced G-code to
-            </p>
           </div>
 
           {/* FILAMENT PROFILE - from slicer profiles */}
@@ -966,15 +1019,6 @@ export const NewSliceJobPage: React.FC = () => {
           }}
         />
       )}
-
-      {/* Printer Selector Modal */}
-      <PrinterSelectorModal
-        isOpen={isPrinterSelectorOpen}
-        printers={printers}
-        selectedPrinterId={selectedPrinterId}
-        onSelect={(printerId) => setSelectedPrinterId(printerId)}
-        onClose={() => setIsPrinterSelectorOpen(false)}
-      />
     </PageTemplate>
   );
 };
