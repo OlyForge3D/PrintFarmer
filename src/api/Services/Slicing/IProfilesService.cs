@@ -117,6 +117,18 @@ namespace Farm.Web.Api.Services.Slicing
         Task<object> ForceReseedSystemProfilesFromWorkerAsync(HttpClient httpClient, CancellationToken ct);
 
         /// <summary>
+        /// Deletes all system profiles (IsSystem=true) from the database.
+        /// This is used for Phase 3 cleanup to remove duplicated system profiles.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Object containing counts of deleted machine, process, and filament profiles</returns>
+        /// <remarks>
+        /// After this operation, system profiles should only be fetched from OrcaSlicer worker.
+        /// Custom profiles (IsSystem=false) are preserved.
+        /// </remarks>
+        Task<object> DeleteAllSystemProfilesAsync(CancellationToken ct);
+
+        /// <summary>
         /// Fetches available OrcaSlicer profiles directly from the worker service.
         /// </summary>
         /// <param name="httpClient">HTTP client for worker communication</param>

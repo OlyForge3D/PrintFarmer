@@ -441,7 +441,9 @@ namespace Farm.Web.Api.Services.Slicing
         {
             string? manufacturerFilter = string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer.Trim();
 
-            IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+            // Phase 3: Only return custom profiles (IsSystem=false) from database
+            // System profiles are fetched directly from OrcaSlicer worker on-demand
+            IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
 
             MachineProfile? selectedMachine = null;
             if (machineProfileId.HasValue)
@@ -482,7 +484,8 @@ namespace Farm.Web.Api.Services.Slicing
                 .ThenBy(m => m.Name)
                 .ToList();
 
-            IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+            // Phase 3: Only return custom profiles (IsSystem=false)
+            IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
             IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll;
 
             // If a specific machine profile is selected, filter by CompatiblePrinters field
@@ -507,7 +510,8 @@ namespace Farm.Web.Api.Services.Slicing
 
             List<ProcessProfile> processProfiles = processProfilesFiltered.OrderBy(p => p.Name).ToList();
 
-            IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+            // Phase 3: Only return custom profiles (IsSystem=false)
+            IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
             IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll;
 
             // Filter filaments by CompatiblePrinters if a specific machine is selected
@@ -1606,6 +1610,39 @@ namespace Farm.Web.Api.Services.Slicing
                 modelsProcessed = catalogModelNames.Count,
                 orcaslicerVersion = orcaVersion,
                 message = $"Force-reseeded {imported} system OrcaSlicer profiles from {catalogManufacturerNames.Count} catalog manufacturers and {catalogModelNames.Count} printer models (deleted {deletedCount} old, skipped {skipped} duplicates)"
+            };
+        }
+
+        /// <summary>
+        /// Deletes all system profiles (IsSystem=true) from the database.
+        /// This is used for Phase 3 cleanup to remove duplicated system profiles.
+        /// After this operation, system profiles should only be fetched from OrcaSlicer worker.
+        /// </summary>
+        /// <param name="ct">Cancellation token for the async operation</param>
+        /// <returns>Object containing counts of deleted machine, process, and filament profiles</returns>
+        /// <remarks>
+        /// Custom profiles (IsSystem=false) are preserved. This operation is idempotent.
+        /// </remarks>
+        public async Task<object> DeleteAllSystemProfilesAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[Phase3Cleanup] Starting deletion of all system profiles from database");
+
+            int deletedMachineCount = await _machineProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
+            int deletedProcessCount = await _processProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
+            int deletedFilamentCount = await _filamentProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
+
+            int totalDeleted = deletedMachineCount + deletedProcessCount + deletedFilamentCount;
+
+            _logger.LogInformation(
+                $"[Phase3Cleanup] Completed deletion: {deletedMachineCount} machine, {deletedProcessCount} process, {deletedFilamentCount} filament profiles (total: {totalDeleted})");
+
+            return new
+            {
+                machineProfilesDeleted = deletedMachineCount,
+                processProfilesDeleted = deletedProcessCount,
+                filamentProfilesDeleted = deletedFilamentCount,
+                totalDeleted,
+                message = $"Deleted {totalDeleted} system profiles ({deletedMachineCount} machine, {deletedProcessCount} process, {deletedFilamentCount} filament). System profiles will now be served from OrcaSlicer worker."
             };
         }
 

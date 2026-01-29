@@ -669,6 +669,35 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Delete all system profiles (IsSystem=true) from the database.
+    /// Phase 3 cleanup: removes duplicated system profiles from PostgreSQL.
+    /// After this operation, system profiles are served only from OrcaSlicer worker.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Counts of deleted machine, process, and filament profiles</returns>
+    /// <response code="200">System profiles deleted successfully</response>
+    /// <response code="401">Unauthorized - authentication required</response>
+    /// <response code="403">Forbidden - farm_admin authorization policy required</response>
+    [HttpDelete("system/cleanup")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile management
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> DeleteAllSystemProfilesAsync(CancellationToken ct)
+    {
+        try
+        {
+            object result = await _profilesService.DeleteAllSystemProfilesAsync(ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting system profiles");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Error deleting profiles: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Fetch available OrcaSlicer profiles from the OrcaSlicer worker service for administrative review.
     /// Discovers all profiles available in the running worker's local OrcaSlicer installation and prepares them for bulk import.
     /// </summary>

@@ -113,6 +113,51 @@ export interface HierarchicalProfilesResponse {
   processProfiles: Record<string, ProcessProfileListItem[]>;
 }
 
+// === Worker Hierarchy Types (Phase 3 - Hybrid Architecture) ===
+// These types match the OrcaSlicer worker's AllProfilesResponseDto
+
+/**
+ * Printer model profiles structure from OrcaSlicer worker.
+ * Contains associated machine, filament, and process profiles for a specific printer model.
+ */
+export interface WorkerPrinterModelProfilesDto {
+  name: string;
+  machineProfiles?: OrcaMachineProfile[];
+  filamentProfiles?: OrcaFilamentProfile[];
+  processProfiles?: OrcaProcessProfile[];
+}
+
+/**
+ * Manufacturer profiles structure from OrcaSlicer worker.
+ * Contains all models for a manufacturer with their associated profiles.
+ */
+export interface WorkerManufacturerProfilesDto {
+  name: string;
+  models: Record<string, WorkerPrinterModelProfilesDto>;
+}
+
+/**
+ * Complete profile hierarchy from OrcaSlicer worker.
+ * This is the response from GET /slicer/profiles/worker-hierarchy.
+ */
+export interface WorkerHierarchyResponse {
+  byHierarchy: Record<string, WorkerManufacturerProfilesDto>;
+  machineProfiles?: Record<string, OrcaMachineProfile[]>;
+  filamentProfiles?: Record<string, OrcaFilamentProfile[]>;
+  processProfiles?: Record<string, OrcaProcessProfile[]>;
+}
+
+/**
+ * Result from deleting all system profiles.
+ */
+export interface DeleteSystemProfilesResult {
+  machineProfilesDeleted: number;
+  processProfilesDeleted: number;
+  filamentProfilesDeleted: number;
+  totalDeleted: number;
+  message: string;
+}
+
 export interface BulkDeleteResultDto {
   machineProfilesDeleted: number;
   processProfilesDeleted: number;
@@ -394,5 +439,30 @@ export const slicerProfilesService = {
    */
   async deleteCustomProfile(id: string): Promise<void> {
     await apiClient.post<BulkDeleteResultDto>('/slicer/profiles/bulk-delete', [id]);
+  },
+
+  // === Hybrid Architecture Methods (Phase 3) ===
+  // These methods support the hybrid architecture where system profiles come from
+  // OrcaSlicer worker and custom profiles come from the database.
+
+  /**
+   * Fetch the complete profile hierarchy from OrcaSlicer worker.
+   * Returns system profiles directly from the worker without database storage.
+   * @returns Worker hierarchy with system profiles organized by manufacturer and model
+   */
+  async getWorkerHierarchy(): Promise<WorkerHierarchyResponse> {
+    const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/worker-hierarchy');
+    return res.data;
+  },
+
+  /**
+   * Delete all system profiles (IsSystem=true) from the database.
+   * Phase 3 cleanup: After calling this, system profiles are only served from OrcaSlicer worker.
+   * Requires admin authorization.
+   * @returns Counts of deleted profiles
+   */
+  async deleteAllSystemProfiles(): Promise<DeleteSystemProfilesResult> {
+    const res = await apiClient.delete<DeleteSystemProfilesResult>('/slicer/profiles/system/cleanup');
+    return res.data;
   }
 };
