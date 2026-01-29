@@ -316,5 +316,58 @@ namespace Farm.Web.Api.Services.Slicing
         /// Returns counts of successfully deleted profiles by type.
         /// </remarks>
         Task<BulkDeleteResultDto> BulkDeleteProfilesAsync(IEnumerable<Guid> profileIds, CancellationToken ct);
+
+        /// <summary>
+        /// Clones a single profile to create a user-owned custom copy.
+        /// </summary>
+        /// <param name="request">Clone request with source profile ID, type, and optional custom name</param>
+        /// <param name="userId">ID of the user creating the clone</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>CloneSingleProfileResponseDto with details of the created profile</returns>
+        /// <remarks>
+        /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+        /// The cloned profile copies all settings from the source but gets a new ID.
+        /// Throws KeyNotFoundException if source profile not found.
+        /// Throws ArgumentException if profile type is invalid.
+        /// </remarks>
+        Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct);
+
+        /// <summary>
+        /// Uploads a custom profile from raw JSON content.
+        /// </summary>
+        /// <param name="request">Upload request with raw JSON, profile type, and optional name</param>
+        /// <param name="userId">ID of the user uploading the profile</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>CustomProfileDto with details of the created profile</returns>
+        /// <remarks>
+        /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+        /// Parses the raw JSON to extract profile properties.
+        /// Throws ArgumentException if rawJson or profileType is invalid.
+        /// </remarks>
+        Task<CustomProfileDto> UploadCustomProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct);
+
+        /// <summary>
+        /// Lists all custom profiles owned by a specific user.
+        /// </summary>
+        /// <param name="userId">ID of the user to list profiles for</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>CustomProfilesListResponseDto with profiles and summary counts</returns>
+        Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct);
+
+        /// <summary>
+        /// Updates a custom profile's properties.
+        /// </summary>
+        /// <param name="profileId">ID of the profile to update</param>
+        /// <param name="request">Update request with optional new name, rawJson, or description</param>
+        /// <param name="userId">ID of the user requesting the update (for ownership validation)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>CustomProfileDto with updated profile details</returns>
+        /// <remarks>
+        /// Only non-null fields in the request will be updated.
+        /// Throws KeyNotFoundException if profile not found.
+        /// Throws UnauthorizedAccessException if user doesn't own the profile.
+        /// Throws InvalidOperationException if trying to update a system profile.
+        /// </remarks>
+        Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct);
     }
 }

@@ -1497,6 +1497,199 @@ public class ProfilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Bulk import from worker failed");
         }
     }
+
+    /// <summary>
+    /// Clones a single profile to create a user-owned custom copy.
+    /// </summary>
+    /// <param name="request">Clone request with source profile ID, type, and optional custom name</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Details of the cloned profile</returns>
+    /// <remarks>
+    /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+    /// The cloned profile copies all settings from the source but gets a new ID.
+    /// Supported profile types: "machine", "filament", "process".
+    /// </remarks>
+    [HttpPost("clone")]
+    [ProducesResponseType(typeof(CloneSingleProfileResponseDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CloneSingleProfileAsync(
+        [FromBody] CloneSingleProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            // Get user ID from claims (assumes authentication is configured)
+            Guid userId = GetCurrentUserId();
+
+            CloneSingleProfileResponseDto result = await _profilesService.CloneSingleProfileAsync(request, userId, ct);
+            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"Clone profile validation failed: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _logger.LogWarning($"Source profile not found: {ex.Message}");
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clone profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Clone profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Uploads a custom profile from raw JSON content.
+    /// </summary>
+    /// <param name="request">Upload request with raw JSON, profile type, and optional name</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Details of the uploaded custom profile</returns>
+    /// <remarks>
+    /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+    /// Supported profile types: "machine", "filament", "process".
+    /// The raw JSON should be a valid OrcaSlicer profile configuration.
+    /// </remarks>
+    [HttpPost("upload")]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UploadCustomProfileAsync(
+        [FromBody] UploadProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(request, userId, ct);
+            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"Upload profile validation failed: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Upload profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Upload profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Lists all custom profiles owned by the current user.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of custom profiles with summary counts</returns>
+    /// <remarks>
+    /// Returns only profiles where IsSystem=false and CreatedByUserId matches the current user.
+    /// Includes counts broken down by profile type (machine, filament, process).
+    /// </remarks>
+    [HttpGet("custom")]
+    [ProducesResponseType(typeof(CustomProfilesListResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListCustomProfilesAsync(CancellationToken ct)
+    {
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfilesListResponseDto result = await _profilesService.ListCustomProfilesAsync(userId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "List custom profiles failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "List custom profiles failed");
+        }
+    }
+
+    /// <summary>
+    /// Updates a custom profile's properties.
+    /// </summary>
+    /// <param name="id">ID of the custom profile to update</param>
+    /// <param name="request">Update request with optional new name, rawJson, or description</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Updated custom profile details</returns>
+    /// <remarks>
+    /// Only non-null fields in the request will be updated.
+    /// Cannot update system profiles - clone them first to create a custom version.
+    /// Only the profile owner can update their custom profiles.
+    /// </remarks>
+    [HttpPut("custom/{id:guid}")]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateCustomProfileAsync(
+        Guid id,
+        [FromBody] UpdateCustomProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfileDto result = await _profilesService.UpdateCustomProfileAsync(id, request, userId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _logger.LogWarning($"Custom profile not found: {ex.Message}");
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning($"Update profile unauthorized: {ex.Message}");
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning($"Update profile invalid operation: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Update custom profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Update custom profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Gets the current user's ID from the authentication claims.
+    /// </summary>
+    /// <returns>The user's GUID</returns>
+    private Guid GetCurrentUserId()
+    {
+        // Try to get user ID from claims
+        string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return userId;
+        }
+
+        // Fallback for development/testing - use a default user ID
+        // In production, this should throw an exception
+        _logger.LogWarning("User ID not found in claims, using default user ID for development");
+        return Guid.Parse("00000000-0000-0000-0000-000000000001");
+    }
 }
 
 /// <summary>

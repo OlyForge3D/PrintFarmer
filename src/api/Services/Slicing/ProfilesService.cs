@@ -2567,5 +2567,517 @@ namespace Farm.Web.Api.Services.Slicing
                 return null;
             }
         }
+
+        /// <inheritdoc />
+        public async Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            string profileType = request.ProfileType?.ToLowerInvariant() ?? string.Empty;
+
+            return profileType switch
+            {
+                "process" => await CloneProcessProfileAsync(request, userId, ct),
+                "filament" => await CloneFilamentProfileAsync(request, userId, ct),
+                "machine" => await CloneMachineProfileAsync(request, userId, ct),
+                _ => throw new ArgumentException($"Invalid profile type: '{request.ProfileType}'. Must be 'machine', 'filament', or 'process'.")
+            };
+        }
+
+        private async Task<CloneSingleProfileResponseDto> CloneProcessProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            ProcessProfile? source = await _processProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
+            if (source == null)
+            {
+                throw new KeyNotFoundException($"Process profile with ID {request.SourceProfileId} not found.");
+            }
+
+            string newName = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : $"{source.Name} (Custom)";
+
+            ProcessProfile clone = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = newName,
+                Description = source.Description,
+                SlicerType = source.SlicerType,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                LayerHeight = source.LayerHeight,
+                InfillPercentage = source.InfillPercentage,
+                PrintSpeed = source.PrintSpeed,
+                EnableSupports = source.EnableSupports,
+                Quality = source.Quality,
+                AdvancedSettings = source.AdvancedSettings,
+                SlicerVersion = source.SlicerVersion,
+                RawJson = source.RawJson,
+                SettingsJson = source.SettingsJson,
+                Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
+                CompatiblePrinters = source.CompatiblePrinters,
+                PrinterModelId = source.PrinterModelId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _processProfileRepo.AddAsync(clone, ct);
+            _logger.LogInformation($"Cloned process profile '{source.Name}' to '{newName}' for user {userId}");
+
+            return new CloneSingleProfileResponseDto
+            {
+                Id = clone.Id,
+                Name = clone.Name,
+                ProfileType = "process",
+                IsSystem = false
+            };
+        }
+
+        private async Task<CloneSingleProfileResponseDto> CloneFilamentProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            FilamentProfile? source = await _filamentProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
+            if (source == null)
+            {
+                throw new KeyNotFoundException($"Filament profile with ID {request.SourceProfileId} not found.");
+            }
+
+            string newName = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : $"{source.Name} (Custom)";
+
+            FilamentProfile clone = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = newName,
+                Description = source.Description,
+                SlicerType = source.SlicerType,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                Material = source.Material,
+                Manufacturer = source.Manufacturer,
+                NozzleTemperature = source.NozzleTemperature,
+                BedTemperature = source.BedTemperature,
+                PrintSpeed = source.PrintSpeed,
+                SlicerVersion = source.SlicerVersion,
+                RawJson = source.RawJson,
+                SettingsJson = source.SettingsJson,
+                Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
+                CompatiblePrinters = source.CompatiblePrinters,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _filamentProfileRepo.AddAsync(clone, ct);
+            _logger.LogInformation($"Cloned filament profile '{source.Name}' to '{newName}' for user {userId}");
+
+            return new CloneSingleProfileResponseDto
+            {
+                Id = clone.Id,
+                Name = clone.Name,
+                ProfileType = "filament",
+                IsSystem = false
+            };
+        }
+
+        private async Task<CloneSingleProfileResponseDto> CloneMachineProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            MachineProfile? source = await _machineProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
+            if (source == null)
+            {
+                throw new KeyNotFoundException($"Machine profile with ID {request.SourceProfileId} not found.");
+            }
+
+            string newName = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : $"{source.Name} (Custom)";
+
+            MachineProfile clone = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = newName,
+                Description = source.Description,
+                SlicerType = source.SlicerType,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                Manufacturer = source.Manufacturer,
+                SlicerVersion = source.SlicerVersion,
+                RawJson = source.RawJson,
+                SettingsJson = source.SettingsJson,
+                Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
+                PrinterModelId = source.PrinterModelId,
+                MachineModelProfileId = source.MachineModelProfileId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _machineProfileRepo.AddAsync(clone, ct);
+            _logger.LogInformation($"Cloned machine profile '{source.Name}' to '{newName}' for user {userId}");
+
+            return new CloneSingleProfileResponseDto
+            {
+                Id = clone.Id,
+                Name = clone.Name,
+                ProfileType = "machine",
+                IsSystem = false
+            };
+        }
+
+        /// <inheritdoc />
+        public async Task<CustomProfileDto> UploadCustomProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (string.IsNullOrWhiteSpace(request.RawJson))
+            {
+                throw new ArgumentException("RawJson is required.");
+            }
+
+            string profileType = request.ProfileType?.ToLowerInvariant() ?? string.Empty;
+
+            return profileType switch
+            {
+                "process" => await UploadProcessProfileAsync(request, userId, ct),
+                "filament" => await UploadFilamentProfileAsync(request, userId, ct),
+                "machine" => await UploadMachineProfileAsync(request, userId, ct),
+                _ => throw new ArgumentException($"Invalid profile type: '{request.ProfileType}'. Must be 'machine', 'filament', or 'process'.")
+            };
+        }
+
+        private async Task<CustomProfileDto> UploadProcessProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            // Parse the raw JSON to extract profile name if not provided
+            string name = request.Name ?? "Uploaded Profile";
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(request.RawJson);
+                if (string.IsNullOrWhiteSpace(request.Name) && doc.RootElement.TryGetProperty("name", out JsonElement nameElem))
+                {
+                    name = nameElem.GetString() ?? name;
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new ArgumentException($"Invalid JSON: {ex.Message}");
+            }
+
+            ProcessProfile profile = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                SlicerType = SlicerType.OrcaSlicer,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                RawJson = request.RawJson,
+                Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _processProfileRepo.AddAsync(profile, ct);
+            _logger.LogInformation($"Uploaded process profile '{name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "process",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
+
+        private async Task<CustomProfileDto> UploadFilamentProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            string name = request.Name ?? "Uploaded Filament";
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(request.RawJson);
+                if (string.IsNullOrWhiteSpace(request.Name) && doc.RootElement.TryGetProperty("name", out JsonElement nameElem))
+                {
+                    name = nameElem.GetString() ?? name;
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new ArgumentException($"Invalid JSON: {ex.Message}");
+            }
+
+            FilamentProfile profile = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                SlicerType = SlicerType.OrcaSlicer,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                RawJson = request.RawJson,
+                Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _filamentProfileRepo.AddAsync(profile, ct);
+            _logger.LogInformation($"Uploaded filament profile '{name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "filament",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
+
+        private async Task<CustomProfileDto> UploadMachineProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            string name = request.Name ?? "Uploaded Machine";
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(request.RawJson);
+                if (string.IsNullOrWhiteSpace(request.Name) && doc.RootElement.TryGetProperty("name", out JsonElement nameElem))
+                {
+                    name = nameElem.GetString() ?? name;
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new ArgumentException($"Invalid JSON: {ex.Message}");
+            }
+
+            MachineProfile profile = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                SlicerType = SlicerType.OrcaSlicer,
+                IsSystem = false,
+                IsPublic = false,
+                CreatedByUserId = userId,
+                RawJson = request.RawJson,
+                Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _machineProfileRepo.AddAsync(profile, ct);
+            _logger.LogInformation($"Uploaded machine profile '{name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "machine",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
+
+        /// <inheritdoc />
+        public async Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct)
+        {
+            List<CustomProfileDto> profiles = [];
+
+            // Get custom process profiles
+            IReadOnlyList<ProcessProfile> processProfiles = await _processProfileRepo.GetByUserAsync(userId, ct);
+            foreach (ProcessProfile p in processProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
+            {
+                profiles.Add(new CustomProfileDto
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    ProfileType = "process",
+                    IsSystem = false,
+                    CreatedAt = p.CreatedAt,
+                    UpdatedAt = p.UpdatedAt,
+                    RawJson = p.RawJson
+                });
+            }
+
+            // Get custom filament profiles
+            IReadOnlyList<FilamentProfile> filamentProfiles = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
+            foreach (FilamentProfile p in filamentProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
+            {
+                profiles.Add(new CustomProfileDto
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    ProfileType = "filament",
+                    IsSystem = false,
+                    CreatedAt = p.CreatedAt,
+                    UpdatedAt = p.UpdatedAt,
+                    RawJson = p.RawJson
+                });
+            }
+
+            // Get custom machine profiles
+            IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
+            foreach (MachineProfile p in machineProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
+            {
+                profiles.Add(new CustomProfileDto
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    ProfileType = "machine",
+                    IsSystem = false,
+                    CreatedAt = p.CreatedAt,
+                    UpdatedAt = p.UpdatedAt,
+                    RawJson = p.RawJson
+                });
+            }
+
+            return new CustomProfilesListResponseDto
+            {
+                Profiles = profiles,
+                TotalCount = profiles.Count,
+                ProcessProfileCount = profiles.Count(p => p.ProfileType == "process"),
+                FilamentProfileCount = profiles.Count(p => p.ProfileType == "filament"),
+                MachineProfileCount = profiles.Count(p => p.ProfileType == "machine")
+            };
+        }
+
+        /// <inheritdoc />
+        public async Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            // Try to find the profile in each table
+            ProcessProfile? processProfile = await _processProfileRepo.GetByIdAsync(profileId, ct);
+            if (processProfile != null)
+            {
+                return await UpdateProcessProfileAsync(processProfile, request, userId, ct);
+            }
+
+            FilamentProfile? filamentProfile = await _filamentProfileRepo.GetByIdAsync(profileId, ct);
+            if (filamentProfile != null)
+            {
+                return await UpdateFilamentProfileAsync(filamentProfile, request, userId, ct);
+            }
+
+            MachineProfile? machineProfile = await _machineProfileRepo.GetByIdAsync(profileId, ct);
+            if (machineProfile != null)
+            {
+                return await UpdateMachineProfileAsync(machineProfile, request, userId, ct);
+            }
+
+            throw new KeyNotFoundException($"Profile with ID {profileId} not found.");
+        }
+
+        private async Task<CustomProfileDto> UpdateProcessProfileAsync(ProcessProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            if (profile.IsSystem)
+            {
+                throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
+            }
+
+            if (profile.CreatedByUserId != userId)
+            {
+                throw new UnauthorizedAccessException("You do not have permission to update this profile.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                profile.Name = request.Name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.RawJson))
+            {
+                profile.RawJson = request.RawJson;
+                profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
+            }
+
+            profile.UpdatedAt = DateTime.UtcNow;
+            await _processProfileRepo.UpdateAsync(profile, ct);
+            _logger.LogInformation($"Updated process profile '{profile.Name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "process",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
+
+        private async Task<CustomProfileDto> UpdateFilamentProfileAsync(FilamentProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            if (profile.IsSystem)
+            {
+                throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
+            }
+
+            if (profile.CreatedByUserId != userId)
+            {
+                throw new UnauthorizedAccessException("You do not have permission to update this profile.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                profile.Name = request.Name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.RawJson))
+            {
+                profile.RawJson = request.RawJson;
+                profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
+            }
+
+            profile.UpdatedAt = DateTime.UtcNow;
+            await _filamentProfileRepo.UpdateAsync(profile, ct);
+            _logger.LogInformation($"Updated filament profile '{profile.Name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "filament",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
+
+        private async Task<CustomProfileDto> UpdateMachineProfileAsync(MachineProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+        {
+            if (profile.IsSystem)
+            {
+                throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
+            }
+
+            if (profile.CreatedByUserId != userId)
+            {
+                throw new UnauthorizedAccessException("You do not have permission to update this profile.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                profile.Name = request.Name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.RawJson))
+            {
+                profile.RawJson = request.RawJson;
+                profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
+            }
+
+            profile.UpdatedAt = DateTime.UtcNow;
+            await _machineProfileRepo.UpdateAsync(profile, ct);
+            _logger.LogInformation($"Updated machine profile '{profile.Name}' for user {userId}");
+
+            return new CustomProfileDto
+            {
+                Id = profile.Id,
+                Name = profile.Name,
+                ProfileType = "machine",
+                IsSystem = false,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt,
+                RawJson = profile.RawJson
+            };
+        }
     }
 }

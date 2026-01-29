@@ -182,6 +182,70 @@ export interface ForMachinesRequest {
   machineNames: string[];
 }
 
+// === Custom Profile Management Types (Phase 2) ===
+
+/**
+ * Request to clone a single profile.
+ */
+export interface CloneSingleProfileRequest {
+  sourceProfileId: string;
+  profileType: 'machine' | 'filament' | 'process';
+  name?: string;
+}
+
+/**
+ * Response from cloning a single profile.
+ */
+export interface CloneSingleProfileResponse {
+  id: string;
+  name: string;
+  profileType: 'machine' | 'filament' | 'process';
+  isSystem: boolean;
+}
+
+/**
+ * Request to upload a custom profile.
+ */
+export interface UploadProfileRequest {
+  rawJson: string;
+  profileType: 'machine' | 'filament' | 'process';
+  name?: string;
+}
+
+/**
+ * A user's custom profile (IsSystem=false).
+ */
+export interface CustomProfile {
+  id: string;
+  name: string;
+  profileType: 'machine' | 'filament' | 'process';
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  description?: string;
+  rawJson?: string;
+}
+
+/**
+ * Request to update a custom profile.
+ */
+export interface UpdateCustomProfileRequest {
+  rawJson?: string;
+  name?: string;
+  description?: string;
+}
+
+/**
+ * Response listing user's custom profiles.
+ */
+export interface CustomProfilesListResponse {
+  profiles: CustomProfile[];
+  totalCount: number;
+  machineProfileCount: number;
+  processProfileCount: number;
+  filamentProfileCount: number;
+}
+
 export const slicerProfilesService = {
   async listExtended(): Promise<ExtendedProfilesResponse> {
     const res = await apiClient.get<ExtendedProfilesResponse>('/slicer/profiles/extended');
@@ -278,5 +342,57 @@ export const slicerProfilesService = {
   async getFilamentTemplates(): Promise<OrcaFilamentProfile[]> {
     const res = await apiClient.get<OrcaFilamentProfile[]>('/slicer/profiles/filament/templates');
     return res.data;
+  },
+
+  // === Custom Profile Management Methods (Phase 2) ===
+  // These methods manage user-owned custom profiles stored in the database
+
+  /**
+   * Clone a single profile to create a user-owned custom copy.
+   * @param request - Clone request with source ID, type, and optional name
+   * @returns The newly created custom profile
+   */
+  async cloneProfile(request: CloneSingleProfileRequest): Promise<CloneSingleProfileResponse> {
+    const res = await apiClient.post<CloneSingleProfileResponse>('/slicer/profiles/clone', request);
+    return res.data;
+  },
+
+  /**
+   * Upload a custom profile from raw JSON content.
+   * @param request - Upload request with raw JSON, type, and optional name
+   * @returns The created custom profile
+   */
+  async uploadProfile(request: UploadProfileRequest): Promise<CustomProfile> {
+    const res = await apiClient.post<CustomProfile>('/slicer/profiles/upload', request);
+    return res.data;
+  },
+
+  /**
+   * List all custom profiles owned by the current user.
+   * @returns List of custom profiles with summary counts
+   */
+  async listCustomProfiles(): Promise<CustomProfilesListResponse> {
+    const res = await apiClient.get<CustomProfilesListResponse>('/slicer/profiles/custom');
+    return res.data;
+  },
+
+  /**
+   * Update a custom profile's properties.
+   * @param id - Profile ID to update
+   * @param request - Update request with optional name, rawJson, or description
+   * @returns The updated custom profile
+   */
+  async updateCustomProfile(id: string, request: UpdateCustomProfileRequest): Promise<CustomProfile> {
+    const res = await apiClient.put<CustomProfile>(`/slicer/profiles/custom/${id}`, request);
+    return res.data;
+  },
+
+  /**
+   * Delete a custom profile.
+   * Uses the existing bulk delete endpoint with a single ID.
+   * @param id - Profile ID to delete
+   */
+  async deleteCustomProfile(id: string): Promise<void> {
+    await apiClient.post<BulkDeleteResultDto>('/slicer/profiles/bulk-delete', [id]);
   }
 };
