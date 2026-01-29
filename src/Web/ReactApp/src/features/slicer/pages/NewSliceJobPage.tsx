@@ -2,22 +2,22 @@ import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'reac
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
-import { slicerProfilesService } from '@/services/slicerProfilesService';
+import { 
+  slicerProfilesService,
+  type OrcaMachineProfile,
+  type OrcaFilamentProfile,
+  type OrcaProcessProfile
+} from '@/services/slicerProfilesService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
 import { apiClient } from '@/services/api';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
-import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
-import {
-  findHierarchyManufacturer,
-  findHierarchyModel,
-  getPrimaryNozzleDiameter
-} from '../utils/profileMatcher';
+import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
@@ -225,127 +225,109 @@ export const NewSliceJobPage: React.FC = () => {
     return { url: undefined, format: undefined };
   }, [selectedPrinterWithDetails?.manufacturerName, selectedPrinterWithDetails?.modelName]);
 
-  // Fetch process profiles using React Query
-  const { data: processProfilesData } = useQuery({
-    queryKey: ['slicerProfiles'],
-    queryFn: () => slicerProfilesService.listExtended(),
-    staleTime: 15_000
+  // === INCREMENTAL PROFILE LOADING (Phase 1) ===
+  // Instead of loading all 3000+ profiles upfront, we load incrementally:
+  // 1. Machine profiles loaded when printer is selected (using printer's modelId)
+  // 2. Filament/process profiles loaded when machine profile is selected
+
+  // Get selected printer's model ID for profile queries
+  const selectedPrinterModelId = useMemo(() => {
+    return selectedPrinter?.modelId || null;
+  }, [selectedPrinter]);
+
+  // Fetch machine profiles for the selected printer's model
+  const { data: machineProfilesData = [], isLoading: isMachineProfilesLoading } = useQuery<OrcaMachineProfile[]>({
+    queryKey: ['machineProfilesForModel', selectedPrinterModelId],
+    queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!),
+    enabled: !!selectedPrinterModelId,
+    staleTime: 30_000
   });
 
-  // Fetch hierarchical profiles for ProfileSelector component
-  const { data: hierarchyProfiles } = useQuery({
-    queryKey: ['slicerProfilesHierarchy'],
-    queryFn: () => slicerProfilesService.listHierarchical(),
-    staleTime: 15_000
+  // Get the selected machine profile object
+  const selectedMachineProfile = useMemo(() => {
+    if (!selectedMachineProfileId || !machineProfilesData?.length) return null;
+    return machineProfilesData.find(p => p.name === selectedMachineProfileId) || null;
+  }, [selectedMachineProfileId, machineProfilesData]);
+
+  // Machine names for filament/process queries (just the selected machine)
+  const selectedMachineNames = useMemo(() => {
+    if (!selectedMachineProfile?.name) return [];
+    return [selectedMachineProfile.name];
+  }, [selectedMachineProfile]);
+
+  // Fetch filament profiles compatible with selected machine
+  const { data: filamentProfilesData = [], isLoading: isFilamentProfilesLoading } = useQuery<OrcaFilamentProfile[]>({
+    queryKey: ['filamentProfilesForMachines', selectedMachineNames],
+    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames),
+    enabled: selectedMachineNames.length > 0,
+    staleTime: 30_000
   });
 
-  // === Cascading Profile Selection Computed Values ===
-  // Note: Manufacturer and Model are now derived from selected printer via auto-matching effect
+  // Fetch process profiles compatible with selected machine
+  const { data: processProfilesData = [], isLoading: isProcessProfilesLoading } = useQuery<OrcaProcessProfile[]>({
+    queryKey: ['processProfilesForMachines', selectedMachineNames],
+    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames),
+    enabled: selectedMachineNames.length > 0,
+    staleTime: 30_000
+  });
 
-  // Get machine profiles for selected printer model
+  // Combined loading state for profile queries
+  // Combined loading state for profile queries
+  const isProfilesLoading = isMachineProfilesLoading || isFilamentProfilesLoading || isProcessProfilesLoading;
+
+  // === Profile Selection Computed Values (Incremental Loading) ===
+  // Machine profiles are loaded when printer is selected (via modelId query)
+  // Filament/Process profiles are loaded when machine profile is selected
+
+  // Machine profiles for the selected printer (from incremental query)
   const availableMachineProfiles = useMemo(() => {
-    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
-    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
-    const modelData = mfgData?.models?.[selectedPrinterModel];
-    return modelData?.machineProfiles ?? [];
-  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
+    return machineProfilesData ?? [];
+  }, [machineProfilesData]);
 
-  // Get filament profiles for selected printer model (filtered by compatiblePrinters)
-  const availableFilamentProfiles = useMemo(() => {
-    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
-    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
-    const modelData = mfgData?.models?.[selectedPrinterModel];
-    return modelData?.filamentProfiles ?? [];
-  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
-
-  // Get process profiles for selected printer model (filtered by compatiblePrinters)
+  // Process profiles for the selected machine (from incremental query)
   const availableProcessProfiles = useMemo(() => {
-    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
-    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
-    const modelData = mfgData?.models?.[selectedPrinterModel];
-    return modelData?.processProfiles ?? [];
-  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
+    return processProfilesData ?? [];
+  }, [processProfilesData]);
 
-  // Note: Previous cascading reset effects were removed because they conflicted
-  // with the printer-first flow. The auto-match effect now handles setting all
-  // values atomically when a printer is selected, so we don't need to reset
-  // child selections when parent changes.
-
-  // Auto-match slicer profiles when a printer is selected (printer-first flow)
-  // This effect sets manufacturer, model, and machine profile all at once based on the selected printer
+  // Auto-select machine profile when printer is selected and machine profiles are loaded
+  // This effect uses nozzle diameter matching when available
   useEffect(() => {
-    if (!selectedPrinterForSlicing || !hierarchyProfiles?.byHierarchy) return;
-    
+    if (!selectedPrinterForSlicing || !machineProfilesData?.length) return;
+
+    // Set manufacturer/model from printer for display purposes
     const mfgName = selectedPrinterForSlicing.manufacturerName;
     const modelName = selectedPrinterForSlicing.modelName;
+    setSelectedManufacturer(mfgName || '');
+    setSelectedPrinterModel(modelName || '');
     
-    if (!mfgName || !modelName) {
-      // Clear selections if printer has no manufacturer/model info
-      setSelectedManufacturer('');
-      setSelectedPrinterModel('');
-      setSelectedMachineProfileId('');
-      return;
-    }
-    
-    // Find matching manufacturer in hierarchy
-    const hierarchyMfrs = Object.keys(hierarchyProfiles.byHierarchy);
-    const matchedMfr = findHierarchyManufacturer(mfgName, hierarchyMfrs);
-    
-    if (!matchedMfr) {
-      // No matching manufacturer in slicer profiles
-      setSelectedManufacturer('');
-      setSelectedPrinterModel('');
-      setSelectedMachineProfileId('');
-      return;
-    }
-    
-    // Set manufacturer
-    setSelectedManufacturer(matchedMfr);
-    
-    // Find matching model in hierarchy
-    // Note: models are keyed by GUID, but have a 'name' property with the actual model name
-    const mfgData = hierarchyProfiles.byHierarchy[matchedMfr];
-    const matchedModel = findHierarchyModel(modelName, mfgData?.models);
-    
-    if (!matchedModel) {
-      // No matching model in slicer profiles
-      setSelectedPrinterModel('');
-      setSelectedMachineProfileId('');
-      return;
-    }
-    
-    // Set model
-    setSelectedPrinterModel(matchedModel);
-    
-    // Auto-match machine profile by nozzle diameter
-    const machineProfiles = mfgData?.models?.[matchedModel]?.machineProfiles ?? [];
+    // Get nozzle diameter from printer's primary toolhead
     const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
     
-    if (machineProfiles.length === 0) {
-      setSelectedMachineProfileId('');
+    if (!nozzle) {
+      // No nozzle info, select first available machine profile
+      if (machineProfilesData[0]) {
+        setSelectedMachineProfileId(machineProfilesData[0].name);
+      }
       return;
     }
     
-    // Find profile with matching nozzle diameter
-    if (nozzle) {
-      const nozzleTolerance = 0.01;
-      const matchedProfile = machineProfiles.find(p => 
-        p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
-      );
-      if (matchedProfile) {
-        setSelectedMachineProfileId(matchedProfile.id);
-        return;
-      }
-    }
+    // Find profile with matching nozzle diameter (within tolerance)
+    const nozzleTolerance = 0.01;
+    const matchedProfile = machineProfilesData.find((p: OrcaMachineProfile) =>
+      p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
+    );
     
-    // Default to first profile if no nozzle match
-    setSelectedMachineProfileId(machineProfiles[0].id);
-  }, [selectedPrinterForSlicing, hierarchyProfiles]);
+    if (matchedProfile) {
+      setSelectedMachineProfileId(matchedProfile.name);
+    } else if (machineProfilesData[0]) {
+      // Default to first profile if no nozzle match
+      setSelectedMachineProfileId(machineProfilesData[0].name);
+    }
+  }, [selectedPrinterForSlicing, machineProfilesData]);
 
-  // Filter profiles for the selected printer
+  // Filter profiles for the selected printer - use incremental process profiles
   const printerProcessProfiles = useMemo(() => {
-    // Return all process profiles from the extended response
-    return processProfilesData?.processProfiles ?? [];
+    return processProfilesData ?? [];
   }, [processProfilesData]);
 
   // Check if printer has no profiles - show clone suggestion
@@ -363,27 +345,25 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [shouldSuggestCloneProfiles, isCloneProfilesModalOpen]);
 
-  // Machine profiles for profile selection
+  // Machine profiles for profile selection - use incremental machine profiles
   const machineProfiles = useMemo(() => {
-    return processProfilesData?.machineProfiles ?? [];
-  }, [processProfilesData]);
+    return machineProfilesData ?? [];
+  }, [machineProfilesData]);
 
-  // Filament profiles from hierarchy API grouped by material type for display
+  // Filament profiles grouped by material type for display
   const filamentProfilesByMaterial = useMemo(() => {
-    // Use model-specific profiles if available, otherwise use global "All" profiles
-    const profiles = availableFilamentProfiles.length > 0 
-      ? availableFilamentProfiles 
-      : (hierarchyProfiles?.filamentProfiles?.['All'] ?? []);
+    // Use filament profiles from incremental query (already filtered by machine)
+    const profiles = filamentProfilesData ?? [];
     
     // Group profiles by material type
-    const grouped: Record<string, typeof profiles> = {};
+    const grouped: Record<string, OrcaFilamentProfile[]> = {};
     for (const profile of profiles) {
       const mat = profile.material || 'Other';
       if (!grouped[mat]) grouped[mat] = [];
       grouped[mat].push(profile);
     }
     return grouped;
-  }, [availableFilamentProfiles, hierarchyProfiles]);
+  }, [filamentProfilesData]);
 
   // Available material types from the profiles (sorted alphabetically)
   const availableMaterialTypes = useMemo(() => {
@@ -398,10 +378,8 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Flat list of all available filament profiles for lookup
   const allFilamentProfiles = useMemo(() => {
-    return availableFilamentProfiles.length > 0 
-      ? availableFilamentProfiles 
-      : (hierarchyProfiles?.filamentProfiles?.['All'] ?? []);
-  }, [availableFilamentProfiles, hierarchyProfiles]);
+    return filamentProfilesData ?? [];
+  }, [filamentProfilesData]);
 
   // Fetch models for picker
   const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
@@ -526,7 +504,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Get selected filament profile details for display
   const selectedFilamentProfile = useMemo(() => {
-    return allFilamentProfiles.find(p => p.id === selectedFilamentProfileId);
+    return allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId]);
 
   const submitMutation = useMutation({
@@ -646,7 +624,10 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">Machine Profile</label>
+            <label className="block text-sm font-semibold text-pf-text">
+              Machine Profile
+              {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
+            </label>
             
             {/* Show printer info when selected */}
             {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
@@ -664,12 +645,12 @@ export const NewSliceJobPage: React.FC = () => {
             <Select
               value={selectedMachineProfileId}
               onChange={e => setSelectedMachineProfileId(e.target.value)}
-              disabled={!selectedPrinterId || availableMachineProfiles.length === 0}
-              className={`w-full ${!selectedPrinterId ? 'opacity-50' : ''}`}
+              disabled={!selectedPrinterId || availableMachineProfiles.length === 0 || isMachineProfilesLoading}
+              className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
             >
-              <option value="">-- Select Machine Profile --</option>
+              <option value="">{isMachineProfilesLoading ? '-- Loading... --' : '-- Select Machine Profile --'}</option>
               {availableMachineProfiles.map(profile => (
-                <option key={profile.id} value={profile.id}>
+                <option key={profile.name} value={profile.name}>
                   {profile.name}
                   {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
                 </option>
@@ -722,7 +703,7 @@ export const NewSliceJobPage: React.FC = () => {
                     >
                       <option value="">-- Select Profile --</option>
                       {filteredFilamentProfiles.map(profile => (
-                        <option key={profile.id} value={profile.id}>
+                        <option key={profile.name} value={profile.name}>
                           {profile.name}
                         </option>
                       ))}
@@ -739,7 +720,10 @@ export const NewSliceJobPage: React.FC = () => {
               </>
             ) : (
               <div className="text-sm text-pf-text-muted italic">
-                Loading filament profiles...
+                {isMachineProfilesLoading ? 'Loading machine profiles...' : 
+                 selectedMachineProfileId && isFilamentProfilesLoading ? 'Loading filament profiles...' :
+                 !selectedMachineProfileId ? 'Select a machine profile to see filament options' :
+                 'No filament profiles available'}
               </div>
             )}
           </div>
@@ -755,28 +739,18 @@ export const NewSliceJobPage: React.FC = () => {
               >
                 <option value="">-- Select Process Profile --</option>
                 {availableProcessProfiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
+                  <option key={profile.name} value={profile.name}>
                     {profile.name} - {profile.quality} ({profile.layerHeight}mm)
                   </option>
                 ))}
               </Select>
-            ) : hierarchyProfiles ? (
-              <ProfileSelector
-                hierarchyData={hierarchyProfiles}
-                selectedProfileId={selectedProcessPresetId}
-                onChange={setSelectedProcessPresetId}
-              />
             ) : (
-              <Select
-                value={selectedProcessPresetId}
-                onChange={e => setSelectedProcessPresetId(e.target.value)}
-                className="w-full"
-              >
-                <option value="">-- Select Process Profile --</option>
-                {printerProcessProfiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </Select>
+              <div className="text-sm text-pf-text-muted italic">
+                {isMachineProfilesLoading ? 'Loading machine profiles...' : 
+                 selectedMachineProfileId && isProcessProfilesLoading ? 'Loading process profiles...' :
+                 !selectedMachineProfileId ? 'Select a machine profile to see process options' :
+                 'No process profiles available'}
+              </div>
             )}
           </div>
 
@@ -892,7 +866,7 @@ export const NewSliceJobPage: React.FC = () => {
                     <Select value={selectedProfileId} onChange={e => setSelectedProfileId(e.target.value)}>
                       <option value="">-- Select --</option>
                       {machineProfiles.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.slicerType})</option>
+                        <option key={p.name} value={p.name}>{p.name} ({p.manufacturer})</option>
                       ))}
                     </Select>
                   ) : (
