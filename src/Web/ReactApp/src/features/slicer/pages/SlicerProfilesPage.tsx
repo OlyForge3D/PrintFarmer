@@ -15,11 +15,13 @@ import {
   ImportSlicerProfileRequest,
   SlicerProfileExtended,
   SlicerProfileExportDto,
-  BulkDeleteResultDto
+  BulkDeleteResultDto,
+  CloneSingleProfileRequest,
+  CloneSingleProfileResponse
 } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
-import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon } from '@/common/components/icons/MdiIcons';
+import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
@@ -243,6 +245,16 @@ export const SlicerProfilesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
     },
     onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
+  });
+
+  // Clone profile mutation - creates a custom copy of a system profile
+  const cloneProfileMutation = useMutation<CloneSingleProfileResponse, Error, CloneSingleProfileRequest>({
+    mutationFn: async (request) => slicerProfilesService.cloneProfile(request),
+    onSuccess: (result) => {
+      setMessage(`Created custom profile: ${result.name}`);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+    },
+    onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
   });
 
   const handleToggleSelection = (id: string) => {
@@ -469,6 +481,18 @@ export const SlicerProfilesPage: React.FC = () => {
             size="sm"
             variant="secondary"
           >{exportingId === p.id ? 'Exporting...' : 'Export'}</Button>
+          <Button
+            onClick={() => cloneProfileMutation.mutate({
+              sourceProfileId: p.id,
+              profileType: p.profileType
+            })}
+            loading={cloneProfileMutation.isPending}
+            size="sm"
+            variant="secondary"
+            title="Clone to My Profiles"
+          >
+            <CopyIcon className="w-4 h-4" />
+          </Button>
         </div>
       </td>
     </SelectableRow>
