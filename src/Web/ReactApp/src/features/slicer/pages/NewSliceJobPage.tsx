@@ -49,6 +49,13 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
 
+  // === Cascading Profile Selection (OrcaSlicer-style) ===
+  // Flow: Manufacturer → Printer Model → Machine Profile → Filament/Process filtered by machine
+  const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
+  const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('');
+  const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
+  const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
+
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<BasicSlicerSettings>(DEFAULT_BASIC_SETTINGS);
 
@@ -84,22 +91,55 @@ export const NewSliceJobPage: React.FC = () => {
     refetchInterval: 15_000,
   });
 
-  // Slicer info with version
+  // Map slicer type enum to display names
+  // API returns slicerType as number: 0=Unknown, 1=OrcaSlicer, 2=PrusaSlicer
+  const getSlicerTypeName = useCallback((slicerType: string | number | undefined): string => {
+    if (slicerType === 1 || slicerType === 'OrcaSlicer') return 'OrcaSlicer';
+    if (slicerType === 2 || slicerType === 'PrusaSlicer') return 'PrusaSlicer';
+    return 'Unknown';
+  }, []);
+
+  // Slicer info with version - shows slicer type name, not worker name
   const slicerInfo = useMemo(() => {
-    const slicer = availableSlicers.find(s => s.slicerType === (selectedSlicerId === 1 ? 'PrusaSlicer' : 'OrcaSlicer'));
+    const slicer = availableSlicers.find(s => {
+      const typeName = getSlicerTypeName(s.slicerType);
+      return (selectedSlicerId === 1 && typeName === 'OrcaSlicer') ||
+             (selectedSlicerId === 2 && typeName === 'PrusaSlicer');
+    });
+    const typeName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
     return {
-      name: slicer?.name || (selectedSlicerId === 1 ? 'PrusaSlicer' : 'OrcaSlicer'),
+      name: typeName,
       version: slicer?.version || 'Unknown',
       engine: selectedSlicerId
     };
-  }, [selectedSlicerId, availableSlicers]);
+  }, [selectedSlicerId, availableSlicers, getSlicerTypeName]);
 
+  // Deduplicate slicers by type and show type name (not worker name)
   const engineOptions = useMemo(() => {
-    return availableSlicers.map(slicer => ({
-      label: `${slicer.name || slicer.slicerType || 'Unknown'} v${slicer.version || '?'}`,
-      value: slicer.slicerType === 'PrusaSlicer' ? 1 : slicer.slicerType === 'OrcaSlicer' ? 2 : 0
-    }));
-  }, [availableSlicers]);
+    const seenTypes = new Set<string>();
+    const options: { label: string; value: number }[] = [];
+    
+    for (const slicer of availableSlicers) {
+      const typeName = getSlicerTypeName(slicer.slicerType);
+      if (typeName !== 'Unknown' && !seenTypes.has(typeName)) {
+        seenTypes.add(typeName);
+        options.push({
+          label: `${typeName} ${slicer.version || ''}`.trim(),
+          value: typeName === 'OrcaSlicer' ? 1 : 2
+        });
+      }
+    }
+    
+    // If no slicers available, show defaults
+    if (options.length === 0) {
+      return [
+        { label: 'OrcaSlicer', value: 1 },
+        { label: 'PrusaSlicer', value: 2 }
+      ];
+    }
+    
+    return options;
+  }, [availableSlicers, getSlicerTypeName]);
 
   // Fetch printers for dropdown
   const { data: printers = [] } = useQuery({
@@ -186,6 +226,65 @@ export const NewSliceJobPage: React.FC = () => {
     queryFn: () => slicerProfilesService.listHierarchical(),
     staleTime: 15_000
   });
+
+  // === Cascading Profile Selection Computed Values ===
+  
+  // Extract available manufacturers from hierarchy
+  const availableManufacturers = useMemo(() => {
+    if (!hierarchyProfiles?.byHierarchy) return [];
+    return Object.keys(hierarchyProfiles.byHierarchy).sort();
+  }, [hierarchyProfiles]);
+
+  // Extract available printer models for selected manufacturer
+  const availablePrinterModels = useMemo(() => {
+    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer) return [];
+    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
+    if (!mfgData?.models) return [];
+    return Object.entries(mfgData.models).map(([modelKey, modelData]) => ({
+      key: modelKey,
+      name: modelData.name,
+      modelId: modelData.modelId
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [hierarchyProfiles, selectedManufacturer]);
+
+  // Get machine profiles for selected printer model
+  const availableMachineProfiles = useMemo(() => {
+    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
+    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
+    const modelData = mfgData?.models?.[selectedPrinterModel];
+    return modelData?.machineProfiles ?? [];
+  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
+
+  // Get filament profiles for selected printer model (filtered by compatiblePrinters)
+  const availableFilamentProfiles = useMemo(() => {
+    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
+    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
+    const modelData = mfgData?.models?.[selectedPrinterModel];
+    return modelData?.filamentProfiles ?? [];
+  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
+
+  // Get process profiles for selected printer model (filtered by compatiblePrinters)
+  const availableProcessProfiles = useMemo(() => {
+    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer || !selectedPrinterModel) return [];
+    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
+    const modelData = mfgData?.models?.[selectedPrinterModel];
+    return modelData?.processProfiles ?? [];
+  }, [hierarchyProfiles, selectedManufacturer, selectedPrinterModel]);
+
+  // Reset cascading selections when parent changes
+  useEffect(() => {
+    setSelectedPrinterModel('');
+    setSelectedMachineProfileId('');
+    setSelectedFilamentProfileId('');
+    setSelectedProcessPresetId('');
+  }, [selectedManufacturer]);
+
+  useEffect(() => {
+    setSelectedMachineProfileId('');
+    setSelectedFilamentProfileId('');
+    setSelectedProcessPresetId('');
+  }, [selectedPrinterModel]);
+
   // Filter profiles for the selected printer
   const printerProcessProfiles = useMemo(() => {
     // Return all process profiles from the extended response
@@ -341,7 +440,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Update temps when filament changes
   const applyFilamentMaterial = (material: MaterialType) => {
     setSelectedFilamentMaterial(material);
-    setCustomSettings(prev => ({
+    setSlicerSettings(prev => ({
       ...prev,
       nozzleTemp: MATERIAL_PRESETS[material].nozzleTemp,
       bedTemp: MATERIAL_PRESETS[material].bedTemp,
@@ -451,9 +550,67 @@ export const NewSliceJobPage: React.FC = () => {
             </Select>
           </div>
 
-          {/* PRINTER SELECTION Modal Trigger */}
+          {/* CASCADING PROFILE SELECTION - OrcaSlicer-style */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+            <label className="block text-sm font-semibold text-pf-text">Printer Profile</label>
+            
+            {/* Manufacturer Selection */}
+            <div>
+              <label className="block text-xs text-pf-text-muted mb-1">Manufacturer</label>
+              <Select
+                value={selectedManufacturer}
+                onChange={e => setSelectedManufacturer(e.target.value)}
+                className="w-full"
+              >
+                <option value="">-- Select Manufacturer --</option>
+                {availableManufacturers.map(mfg => (
+                  <option key={mfg} value={mfg}>{mfg}</option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Printer Model Selection */}
+            <div>
+              <label className="block text-xs text-pf-text-muted mb-1">Printer Model</label>
+              <Select
+                value={selectedPrinterModel}
+                onChange={e => setSelectedPrinterModel(e.target.value)}
+                disabled={!selectedManufacturer}
+                className={`w-full ${!selectedManufacturer ? 'opacity-50' : ''}`}
+              >
+                <option value="">-- Select Printer Model --</option>
+                {availablePrinterModels.map(model => (
+                  <option key={model.key} value={model.key}>{model.name}</option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Machine Profile Selection (nozzle variants) */}
+            <div>
+              <label className="block text-xs text-pf-text-muted mb-1">Machine Profile</label>
+              <Select
+                value={selectedMachineProfileId}
+                onChange={e => setSelectedMachineProfileId(e.target.value)}
+                disabled={!selectedPrinterModel || availableMachineProfiles.length === 0}
+                className={`w-full ${!selectedPrinterModel ? 'opacity-50' : ''}`}
+              >
+                <option value="">-- Select Machine Profile --</option>
+                {availableMachineProfiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                    {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
+                  </option>
+                ))}
+              </Select>
+              {selectedPrinterModel && availableMachineProfiles.length === 0 && (
+                <p className="text-xs text-amber-500 mt-1">No machine profiles available for this model</p>
+              )}
+            </div>
+          </div>
+
+          {/* TARGET PRINTER - Optional, for print queue */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Printer</label>
+            <label className="block text-sm font-semibold text-pf-text mb-2">Target Printer (Optional)</label>
             {selectedPrinter ? (
               <div className="space-y-2">
                 <div className="p-3 bg-pf-bg-0 rounded border border-pf-border">
@@ -479,36 +636,72 @@ export const NewSliceJobPage: React.FC = () => {
               <Button
                 type="button"
                 onClick={() => setIsPrinterSelectorOpen(true)}
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 className="w-full"
               >
-                Select Printer
+                Select Target Printer
               </Button>
+            )}
+            <p className="text-xs text-pf-text-muted mt-2">
+              Select a specific printer to send the sliced G-code to
+            </p>
+          </div>
+
+          {/* FILAMENT PROFILE - from slicer profiles */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
+            <label className="block text-sm font-semibold text-pf-text mb-2">Filament Profile</label>
+            {availableFilamentProfiles.length > 0 ? (
+              <Select
+                value={selectedFilamentProfileId}
+                onChange={e => setSelectedFilamentProfileId(e.target.value)}
+                className="w-full"
+              >
+                <option value="">-- Select Filament Profile --</option>
+                {availableFilamentProfiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name} ({profile.material})
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <>
+                <Select
+                  value={selectedFilamentMaterial}
+                  onChange={e => applyFilamentMaterial(e.target.value as MaterialType)}
+                  className="w-full"
+                >
+                  {Object.keys(filamentProfiles).map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </Select>
+                <div className="text-xs text-pf-text-muted mt-2">
+                  {MATERIAL_PRESETS[selectedFilamentMaterial].nozzleTemp}°C nozzle, {MATERIAL_PRESETS[selectedFilamentMaterial].bedTemp}°C bed
+                </div>
+                {selectedPrinterModel && (
+                  <p className="text-xs text-amber-500 mt-1">No filament profiles for this model - using presets</p>
+                )}
+              </>
             )}
           </div>
 
-          {/* FILAMENT / MATERIAL PROFILE - Shows slicer + custom profiles */}
+          {/* PROCESS PROFILE - filtered by selected machine */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Filament</label>
-            <Select
-              value={selectedFilamentMaterial}
-              onChange={e => applyFilamentMaterial(e.target.value as MaterialType)}
-              className="w-full"
-            >
-              {Object.keys(filamentProfiles).map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </Select>
-            <div className="text-xs text-pf-text-muted mt-2">
-              {MATERIAL_PRESETS[selectedFilamentMaterial].nozzleTemp}°C nozzle, {MATERIAL_PRESETS[selectedFilamentMaterial].bedTemp}°C bed
-            </div>
-          </div>
-
-          {/* PROCESS PRESETS - Profile Selector */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-3">Process Profile</label>
-            {hierarchyProfiles ? (
+            <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
+            {availableProcessProfiles.length > 0 ? (
+              <Select
+                value={selectedProcessPresetId}
+                onChange={e => setSelectedProcessPresetId(e.target.value)}
+                className="w-full"
+              >
+                <option value="">-- Select Process Profile --</option>
+                {availableProcessProfiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name} - {profile.quality} ({profile.layerHeight}mm)
+                  </option>
+                ))}
+              </Select>
+            ) : hierarchyProfiles ? (
               <ProfileSelector
                 hierarchyData={hierarchyProfiles}
                 selectedProfileId={selectedProcessPresetId}

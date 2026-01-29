@@ -349,6 +349,8 @@ ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
 ENV Worker__WorkingDirectory=/app/temp
+# Inject actual OrcaSlicer version for registration (overrides appsettings default)
+ENV SlicerRegistry__Version=${ORCASLICER_VERSION}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
