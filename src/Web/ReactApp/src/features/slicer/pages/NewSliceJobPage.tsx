@@ -18,7 +18,6 @@ import {
   findHierarchyModel,
   getPrimaryNozzleDiameter
 } from '../utils/profileMatcher';
-import type { MaterialType, MaterialPreset } from '@/types/slicer';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
@@ -32,15 +31,7 @@ const ModelViewer3D = React.lazy(() =>
   import('@/features/models3d/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
 );
 
-const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
-  'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },
-  'PETG': { name: 'PETG', nozzleTemp: 240, bedTemp: 80 },
-  'ABS': { name: 'ABS', nozzleTemp: 245, bedTemp: 100 },
-  'TPU': { name: 'TPU', nozzleTemp: 225, bedTemp: 60 },
-  'Nylon': { name: 'Nylon', nozzleTemp: 260, bedTemp: 80 },
-  'Carbon': { name: 'Carbon', nozzleTemp: 250, bedTemp: 90 },
-  'Other': { name: 'Other', nozzleTemp: 220, bedTemp: 60 }
-};
+// Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
@@ -51,7 +42,8 @@ export const NewSliceJobPage: React.FC = () => {
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
-  const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
+  // Material type filter for filament profile selection
+  const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<string>('');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
 
   // === Cascading Profile Selection (OrcaSlicer-style) ===
@@ -376,10 +368,40 @@ export const NewSliceJobPage: React.FC = () => {
     return processProfilesData?.machineProfiles ?? [];
   }, [processProfilesData]);
 
-  // Filament profiles - combination of slicer profiles + custom for printer
-  const filamentProfiles = useMemo(() => {
-    return MATERIAL_PRESETS;
-  }, []);
+  // Filament profiles from hierarchy API grouped by material type for display
+  const filamentProfilesByMaterial = useMemo(() => {
+    // Use model-specific profiles if available, otherwise use global "All" profiles
+    const profiles = availableFilamentProfiles.length > 0 
+      ? availableFilamentProfiles 
+      : (hierarchyProfiles?.filamentProfiles?.['All'] ?? []);
+    
+    // Group profiles by material type
+    const grouped: Record<string, typeof profiles> = {};
+    for (const profile of profiles) {
+      const mat = profile.material || 'Other';
+      if (!grouped[mat]) grouped[mat] = [];
+      grouped[mat].push(profile);
+    }
+    return grouped;
+  }, [availableFilamentProfiles, hierarchyProfiles]);
+
+  // Available material types from the profiles (sorted alphabetically)
+  const availableMaterialTypes = useMemo(() => {
+    return Object.keys(filamentProfilesByMaterial).sort();
+  }, [filamentProfilesByMaterial]);
+
+  // Filament profiles filtered by selected material type
+  const filteredFilamentProfiles = useMemo(() => {
+    if (!selectedFilamentMaterial) return [];
+    return filamentProfilesByMaterial[selectedFilamentMaterial] ?? [];
+  }, [filamentProfilesByMaterial, selectedFilamentMaterial]);
+
+  // Flat list of all available filament profiles for lookup
+  const allFilamentProfiles = useMemo(() => {
+    return availableFilamentProfiles.length > 0 
+      ? availableFilamentProfiles 
+      : (hierarchyProfiles?.filamentProfiles?.['All'] ?? []);
+  }, [availableFilamentProfiles, hierarchyProfiles]);
 
   // Fetch models for picker
   const { data: models = [], error: modelsError } = useQuery<ModelListItem[], Error>({
@@ -502,15 +524,10 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [requiredCapabilitiesJson]);
 
-  // Update temps when filament changes
-  const applyFilamentMaterial = (material: MaterialType) => {
-    setSelectedFilamentMaterial(material);
-    setSlicerSettings(prev => ({
-      ...prev,
-      nozzleTemp: MATERIAL_PRESETS[material].nozzleTemp,
-      bedTemp: MATERIAL_PRESETS[material].bedTemp,
-    }));
-  };
+  // Get selected filament profile details for display
+  const selectedFilamentProfile = useMemo(() => {
+    return allFilamentProfiles.find(p => p.id === selectedFilamentProfileId);
+  }, [allFilamentProfiles, selectedFilamentProfileId]);
 
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
@@ -668,40 +685,62 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* FILAMENT PROFILE - from slicer profiles */}
-          <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Filament Profile</label>
-            {availableFilamentProfiles.length > 0 ? (
-              <Select
-                value={selectedFilamentProfileId}
-                onChange={e => setSelectedFilamentProfileId(e.target.value)}
-                className="w-full"
-              >
-                <option value="">-- Select Filament Profile --</option>
-                {availableFilamentProfiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name} ({profile.material})
-                  </option>
-                ))}
-              </Select>
-            ) : (
+          {/* FILAMENT PROFILE - two-step selection: material type then profile */}
+          <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
+            <label className="block text-sm font-semibold text-pf-text">Filament Profile</label>
+            
+            {allFilamentProfiles.length > 0 ? (
               <>
-                <Select
-                  value={selectedFilamentMaterial}
-                  onChange={e => applyFilamentMaterial(e.target.value as MaterialType)}
-                  className="w-full"
-                >
-                  {Object.keys(filamentProfiles).map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </Select>
-                <div className="text-xs text-pf-text-muted mt-2">
-                  {MATERIAL_PRESETS[selectedFilamentMaterial].nozzleTemp}°C nozzle, {MATERIAL_PRESETS[selectedFilamentMaterial].bedTemp}°C bed
+                {/* Side-by-side: Material Type + Profile Selection */}
+                <div className="flex gap-2">
+                  {/* Material Type Selection */}
+                  <div className="w-1/3">
+                    <label className="block text-xs text-pf-text-muted mb-1">Material</label>
+                    <Select
+                      value={selectedFilamentMaterial}
+                      onChange={e => {
+                        setSelectedFilamentMaterial(e.target.value);
+                        setSelectedFilamentProfileId(''); // Reset profile when material changes
+                      }}
+                      className="w-full"
+                    >
+                      <option value="">--</option>
+                      {availableMaterialTypes.map(mat => (
+                        <option key={mat} value={mat}>{mat}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {/* Filament Profile Selection (filtered by material) */}
+                  <div className="flex-1">
+                    <label className="block text-xs text-pf-text-muted mb-1">Profile</label>
+                    <Select
+                      value={selectedFilamentProfileId}
+                      onChange={e => setSelectedFilamentProfileId(e.target.value)}
+                      disabled={!selectedFilamentMaterial}
+                      className={`w-full ${!selectedFilamentMaterial ? 'opacity-50' : ''}`}
+                    >
+                      <option value="">-- Select Profile --</option>
+                      {filteredFilamentProfiles.map(profile => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
                 </div>
-                {selectedPrinterModel && (
-                  <p className="text-xs text-amber-500 mt-1">No filament profiles for this model - using presets</p>
+
+                {/* Show selected profile's temperature info */}
+                {selectedFilamentProfile && (
+                  <div className="text-xs text-pf-text-muted">
+                    {selectedFilamentProfile.nozzleTemperature ?? 210}°C nozzle, {selectedFilamentProfile.bedTemperature ?? 60}°C bed
+                  </div>
                 )}
               </>
+            ) : (
+              <div className="text-sm text-pf-text-muted italic">
+                Loading filament profiles...
+              </div>
             )}
           </div>
 
