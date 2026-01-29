@@ -8,6 +8,9 @@ import type {
   ProcessProfileListItem 
 } from '@/services/slicerProfilesService';
 
+// Re-export imported types for convenience
+export type { MaterialType, MaterialPreset } from '@/types/slicer';
+
 // Slicer engine option for dropdown
 export interface SlicerEngineOption {
   label: string;

@@ -248,24 +248,7 @@ export const NewSliceJobPage: React.FC = () => {
   });
 
   // === Cascading Profile Selection Computed Values ===
-  
-  // Extract available manufacturers from hierarchy
-  const availableManufacturers = useMemo(() => {
-    if (!hierarchyProfiles?.byHierarchy) return [];
-    return Object.keys(hierarchyProfiles.byHierarchy).sort();
-  }, [hierarchyProfiles]);
-
-  // Extract available printer models for selected manufacturer
-  const availablePrinterModels = useMemo(() => {
-    if (!hierarchyProfiles?.byHierarchy || !selectedManufacturer) return [];
-    const mfgData = hierarchyProfiles.byHierarchy[selectedManufacturer];
-    if (!mfgData?.models) return [];
-    return Object.entries(mfgData.models).map(([modelKey, modelData]) => ({
-      key: modelKey,
-      name: modelData.name,
-      modelId: modelData.modelId
-    })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [hierarchyProfiles, selectedManufacturer]);
+  // Note: Manufacturer and Model are now derived from selected printer via auto-matching effect
 
   // Get machine profiles for selected printer model
   const availableMachineProfiles = useMemo(() => {
@@ -637,68 +620,45 @@ export const NewSliceJobPage: React.FC = () => {
             className="bg-pf-panel border border-pf-border rounded-lg p-4"
           />
 
-          {/* CASCADING PROFILE SELECTION - Auto-populated when printer selected */}
+          {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">Slicer Profile</label>
-            {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName && (
+            <label className="block text-sm font-semibold text-pf-text">Machine Profile</label>
+            
+            {/* Show printer info when selected */}
+            {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
               <p className="text-xs text-pf-text-muted mb-2">
-                Auto-matched for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
+                Profiles for {selectedPrinterForSlicing.manufacturerName} {selectedPrinterForSlicing.modelName}
                 {selectedPrinterForSlicing.nozzleDiameter && ` • ${selectedPrinterForSlicing.nozzleDiameter}mm nozzle`}
               </p>
+            ) : (
+              <p className="text-xs text-amber-500 mb-2">
+                Select a printer above to see available machine profiles
+              </p>
             )}
-            
-            {/* Manufacturer Selection */}
-            <div>
-              <label className="block text-xs text-pf-text-muted mb-1">Manufacturer</label>
-              <Select
-                value={selectedManufacturer}
-                onChange={e => setSelectedManufacturer(e.target.value)}
-                className="w-full"
-              >
-                <option value="">-- Select Manufacturer --</option>
-                {availableManufacturers.map(mfg => (
-                  <option key={mfg} value={mfg}>{mfg}</option>
-                ))}
-              </Select>
-            </div>
-
-            {/* Printer Model Selection */}
-            <div>
-              <label className="block text-xs text-pf-text-muted mb-1">Printer Model</label>
-              <Select
-                value={selectedPrinterModel}
-                onChange={e => setSelectedPrinterModel(e.target.value)}
-                disabled={!selectedManufacturer}
-                className={`w-full ${!selectedManufacturer ? 'opacity-50' : ''}`}
-              >
-                <option value="">-- Select Printer Model --</option>
-                {availablePrinterModels.map(model => (
-                  <option key={model.key} value={model.key}>{model.name}</option>
-                ))}
-              </Select>
-            </div>
 
             {/* Machine Profile Selection (nozzle variants) */}
-            <div>
-              <label className="block text-xs text-pf-text-muted mb-1">Machine Profile</label>
-              <Select
-                value={selectedMachineProfileId}
-                onChange={e => setSelectedMachineProfileId(e.target.value)}
-                disabled={!selectedPrinterModel || availableMachineProfiles.length === 0}
-                className={`w-full ${!selectedPrinterModel ? 'opacity-50' : ''}`}
-              >
-                <option value="">-- Select Machine Profile --</option>
-                {availableMachineProfiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                    {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
-                  </option>
-                ))}
-              </Select>
-              {selectedPrinterModel && availableMachineProfiles.length === 0 && (
-                <p className="text-xs text-amber-500 mt-1">No machine profiles available for this model</p>
-              )}
-            </div>
+            <Select
+              value={selectedMachineProfileId}
+              onChange={e => setSelectedMachineProfileId(e.target.value)}
+              disabled={!selectedPrinterId || availableMachineProfiles.length === 0}
+              className={`w-full ${!selectedPrinterId ? 'opacity-50' : ''}`}
+            >
+              <option value="">-- Select Machine Profile --</option>
+              {availableMachineProfiles.map(profile => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                  {profile.nozzleDiameter ? ` (${profile.nozzleDiameter}mm)` : ''}
+                </option>
+              ))}
+            </Select>
+            {selectedPrinterId && availableMachineProfiles.length === 0 && selectedManufacturer && selectedPrinterModel && (
+              <p className="text-xs text-amber-500 mt-1">No machine profiles available for this printer model</p>
+            )}
+            {selectedPrinterId && !selectedManufacturer && (
+              <p className="text-xs text-amber-500 mt-1">
+                No matching slicer profiles found for this printer's manufacturer
+              </p>
+            )}
           </div>
 
           {/* FILAMENT PROFILE - from slicer profiles */}
