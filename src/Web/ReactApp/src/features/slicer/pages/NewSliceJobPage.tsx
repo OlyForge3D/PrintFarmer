@@ -271,6 +271,27 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 30_000
   });
 
+  // === CUSTOM PROFILES (Hybrid Architecture) ===
+  // Fetch user's custom profiles to merge with system profiles
+  const { data: customProfilesData } = useQuery({
+    queryKey: ['customProfiles'],
+    queryFn: () => slicerProfilesService.listCustomProfiles(),
+    staleTime: 30_000
+  });
+
+  // Filter custom profiles by type for each selector
+  const customMachineProfiles = useMemo(() => {
+    return customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
+  }, [customProfilesData]);
+
+  const customFilamentProfiles = useMemo(() => {
+    return customProfilesData?.profiles?.filter(p => p.profileType === 'filament') ?? [];
+  }, [customProfilesData]);
+
+  const customProcessProfiles = useMemo(() => {
+    return customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
+  }, [customProfilesData]);
+
   // Combined loading state for profile queries
   // Combined loading state for profile queries
   const isProfilesLoading = isMachineProfilesLoading || isFilamentProfilesLoading || isProcessProfilesLoading;
@@ -641,14 +662,25 @@ export const NewSliceJobPage: React.FC = () => {
               </p>
             )}
 
-            {/* Machine Profile Selection (nozzle variants) */}
+            {/* Machine Profile Selection (nozzle variants) - Custom profiles first, then system presets */}
             <Select
               value={selectedMachineProfileId}
               onChange={e => setSelectedMachineProfileId(e.target.value)}
-              disabled={!selectedPrinterId || availableMachineProfiles.length === 0 || isMachineProfilesLoading}
+              disabled={!selectedPrinterId || (availableMachineProfiles.length === 0 && customMachineProfiles.length === 0) || isMachineProfilesLoading}
               className={`w-full ${!selectedPrinterId || isMachineProfilesLoading ? 'opacity-50' : ''}`}
             >
               <option value="">{isMachineProfilesLoading ? '-- Loading... --' : '-- Select Machine Profile --'}</option>
+              {/* Custom profiles first (no label needed per OrcaSlicer pattern) */}
+              {customMachineProfiles.map(profile => (
+                <option key={`custom-${profile.id}`} value={profile.name}>
+                  {profile.name}
+                </option>
+              ))}
+              {/* System presets divider - only show if there are system profiles */}
+              {availableMachineProfiles.length > 0 && (
+                <option disabled className="text-pf-text-muted">────── System presets ──────</option>
+              )}
+              {/* System profiles */}
               {availableMachineProfiles.map(profile => (
                 <option key={profile.name} value={profile.name}>
                   {profile.name}
@@ -692,16 +724,27 @@ export const NewSliceJobPage: React.FC = () => {
                     </Select>
                   </div>
 
-                  {/* Filament Profile Selection (filtered by material) */}
+                  {/* Filament Profile Selection (filtered by material) - Custom profiles first, then system presets */}
                   <div className="flex-1">
                     <label className="block text-xs text-pf-text-muted mb-1">Profile</label>
                     <Select
                       value={selectedFilamentProfileId}
                       onChange={e => setSelectedFilamentProfileId(e.target.value)}
-                      disabled={!selectedFilamentMaterial}
-                      className={`w-full ${!selectedFilamentMaterial ? 'opacity-50' : ''}`}
+                      disabled={!selectedFilamentMaterial && customFilamentProfiles.length === 0}
+                      className={`w-full ${!selectedFilamentMaterial && customFilamentProfiles.length === 0 ? 'opacity-50' : ''}`}
                     >
                       <option value="">-- Select Profile --</option>
+                      {/* Custom profiles first (no label needed per OrcaSlicer pattern) */}
+                      {customFilamentProfiles.map(profile => (
+                        <option key={`custom-${profile.id}`} value={profile.name}>
+                          {profile.name}
+                        </option>
+                      ))}
+                      {/* System presets divider - only show if there are system profiles */}
+                      {filteredFilamentProfiles.length > 0 && (
+                        <option disabled className="text-pf-text-muted">────── System presets ──────</option>
+                      )}
+                      {/* System profiles */}
                       {filteredFilamentProfiles.map(profile => (
                         <option key={profile.name} value={profile.name}>
                           {profile.name}
@@ -728,16 +771,27 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* PROCESS PROFILE - filtered by selected machine */}
+          {/* PROCESS PROFILE - Custom profiles first, then system presets */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
-            {availableProcessProfiles.length > 0 ? (
+            {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
               <Select
                 value={selectedProcessPresetId}
                 onChange={e => setSelectedProcessPresetId(e.target.value)}
                 className="w-full"
               >
                 <option value="">-- Select Process Profile --</option>
+                {/* Custom profiles first (no label needed per OrcaSlicer pattern) */}
+                {customProcessProfiles.map(profile => (
+                  <option key={`custom-${profile.id}`} value={profile.name}>
+                    {profile.name}
+                  </option>
+                ))}
+                {/* System presets divider - only show if there are system profiles */}
+                {availableProcessProfiles.length > 0 && (
+                  <option disabled className="text-pf-text-muted">────── System presets ──────</option>
+                )}
+                {/* System profiles */}
                 {availableProcessProfiles.map(profile => (
                   <option key={profile.name} value={profile.name}>
                     {profile.name} - {profile.quality} ({profile.layerHeight}mm)
