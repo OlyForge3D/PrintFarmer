@@ -2641,6 +2641,10 @@ ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
 ENABLE_PGADMIN=$ENABLE_PGADMIN
 
+# Developer Security Options
+# DevMode Auth Bypass - allows GET requests to skip authentication (Development only!)
+DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
+
 # Observability & Monitoring Configuration
 INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
 INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
@@ -3521,10 +3525,24 @@ configure_additional() {
         ENABLE_SWAGGER="true"
         ENABLE_DETAILED_LOGGING="true"
         print_info "Development mode: Swagger UI and detailed logging enabled"
+        
+        # Ask about DevMode auth bypass for easier debugging
+        echo
+        echo -e "${YELLOW}Developer Security Option:${NC}"
+        echo "DevMode Auth Bypass allows GET requests to skip authentication for easier debugging."
+        echo "This should NEVER be enabled in production - it bypasses security for read operations."
+        prompt_yes_no "Enable DevMode Auth Bypass (GET requests skip auth)?" "yes" "DEVMODE_BYPASS_AUTH_CHOICE"
+        if [ "$DEVMODE_BYPASS_AUTH_CHOICE" = "yes" ]; then
+            DEVMODE_BYPASS_AUTH="true"
+            print_warning "⚠️  DevMode Auth Bypass ENABLED - GET requests will skip authentication"
+        else
+            DEVMODE_BYPASS_AUTH="false"
+        fi
     else
         ENABLE_SWAGGER="false"
         ENABLE_DETAILED_LOGGING="false"
-        print_info "Production mode: Swagger UI and detailed logging disabled"
+        DEVMODE_BYPASS_AUTH="false"
+        print_info "Production mode: Swagger UI, detailed logging, and auth bypass disabled"
     fi
     
     echo
@@ -4074,6 +4092,9 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
+
+# Developer Security Options (Development only!)
+DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}

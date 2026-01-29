@@ -21,6 +21,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api;
+using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
@@ -565,6 +566,7 @@ builder.Services.AddAuthorization(options =>
 
 // Register authorization handlers
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
 #pragma warning disable S1075 // URIs should not be hardcoded
