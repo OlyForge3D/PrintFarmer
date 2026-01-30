@@ -3,6 +3,9 @@
 # Build Folders
 bin/
 obj/
+# Malformed Windows-style paths (literal backslashes)
+*\\Debug/
+*\\Release/
 
 # Visual Studio 
 .vs/

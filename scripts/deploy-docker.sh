@@ -632,9 +632,11 @@ ensure_database_passwords() {
             update_kv_file "$ENV_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
             update_kv_file "$ENV_FILE" "DB_PASSWORD" "$DB_PASSWORD"
 
-            local conn="Host=postgres;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
+            local conn="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
             update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$conn"
+            update_kv_file "$ENV_FILE" "CONNECTION_STRING" "$conn"
             set_exported_env_var "ConnectionStrings__Default" "$conn"
+            set_exported_env_var "CONNECTION_STRING" "$conn"
 
             if [ -f "$CONFIG_FILE" ]; then
                 update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
@@ -806,8 +808,8 @@ generate_jwt_key() {
 
 generate_deployment_config() {
     local architecture="$1"
-    local include_monitoring="${2:-false}"
-    local include_telemetry="${3:-false}"
+    local include_monitoring="${2:-true}"  # Default to true
+    local include_telemetry="${3:-true}"   # Default to true
     local include_security="${4:-false}"
     local include_registry="${5:-false}"
     local include_discovery="${6:-false}"
@@ -819,12 +821,13 @@ generate_deployment_config() {
     local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
     local generator_args=("--architecture" "$architecture")
     
-    # Add optional services based on configuration
-    if [ "$include_monitoring" = "true" ]; then
-        generator_args+=("--include-monitoring")
+    # Monitoring and telemetry: pass exclude flags if disabled, include flags if enabled
+    # Generator defaults to enabled, so we only need to pass exclude when false
+    if [ "$include_monitoring" = "false" ]; then
+        generator_args+=("--exclude-monitoring")
     fi
-    if [ "$include_telemetry" = "true" ]; then
-        generator_args+=("--include-telemetry")
+    if [ "$include_telemetry" = "false" ]; then
+        generator_args+=("--exclude-telemetry")
     fi
     if [ "$include_security" = "true" ]; then
         generator_args+=("--include-security")
@@ -2314,8 +2317,10 @@ MANUAL IMAGE MANAGEMENT OPTIONS (Advanced):
 
 COMPOSE GENERATOR OPTIONS:
         --architecture ARCH Architecture to deploy (monolithic|microservices)
-        --include-monitoring Include monitoring stack (Prometheus, Grafana)
-        --include-telemetry Include telemetry/observability (OpenTelemetry)
+        --exclude-monitoring Disable monitoring stack (Prometheus, Grafana) - enabled by default
+        --exclude-telemetry Disable telemetry/observability (OpenTelemetry, Jaeger) - enabled by default
+        --include-monitoring Legacy flag - monitoring now included by default
+        --include-telemetry Legacy flag - telemetry now included by default
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
         --include-discovery Include network printer discovery service (microservices only)
@@ -2646,8 +2651,10 @@ ENABLE_PGADMIN=$ENABLE_PGADMIN
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Observability & Monitoring Configuration
-INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
-INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+# Monitoring and telemetry are now ENABLED by default for production deployments
+# Use --exclude-monitoring or --exclude-telemetry to disable
+INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
+INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
 INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
 INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
 INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
@@ -3228,7 +3235,7 @@ configure_database() {
                 fi
                 prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
                 DB_PASSWORD="$POSTGRES_PASSWORD"
-                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
                 INCLUDE_POSTGRES="yes"
                 ;;
             2|sqlserver|"SQL Server")
@@ -3318,7 +3325,7 @@ configure_database() {
                 POSTGRES_USER="postgres"
                 POSTGRES_PASSWORD="postgres"
                 DB_PASSWORD="postgres"
-                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
                 INCLUDE_POSTGRES="yes"
                 ;;
         esac
@@ -3509,8 +3516,9 @@ configure_additional() {
     print_header "⚙️  Additional Configuration"
     
     # Initialize monitoring/observability variables with defaults if not already set
-    INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
-    INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+    # Monitoring and telemetry are NOW ENABLED BY DEFAULT for production observability
+    INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
+    INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
     INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
     INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
     ENABLE_ELASTIC_STACK=${ENABLE_ELASTIC_STACK:-}
@@ -3978,7 +3986,7 @@ EOF
             echo "POSTGRES_USER=$POSTGRES_USER" >> "$ENV_FILE"
             echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> "$ENV_FILE"
             echo "POSTGRES_PORT=$POSTGRES_PORT" >> "$ENV_FILE"
-            CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+            CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
             ;;
         sqlserver)
             SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
@@ -4049,7 +4057,9 @@ EOF
     # The application reads only ConnectionStrings__Default and determines the provider
     # from the DB_PROVIDER environment variable. Provider-specific keys are not used.
     echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
+    echo "CONNECTION_STRING=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     set_exported_env_var "ConnectionStrings__Default" "$CONNECTION_STRING_TO_WRITE"
+    set_exported_env_var "CONNECTION_STRING" "$CONNECTION_STRING_TO_WRITE"
     
     # Generate monitoring service credentials
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
@@ -4092,6 +4102,9 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
+
+# Profile Task Check - auto-disable when slicing workers are disabled
+PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" || echo "false")
 
 # Developer Security Options (Development only!)
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
@@ -6708,11 +6721,23 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --include-monitoring)
+            # Legacy flag - monitoring now on by default
             CLI_INCLUDE_MONITORING=true
             shift
             ;;
         --include-telemetry)
+            # Legacy flag - telemetry now on by default
             CLI_INCLUDE_TELEMETRY=true
+            shift
+            ;;
+        --exclude-monitoring)
+            # Opt-out of monitoring stack
+            CLI_INCLUDE_MONITORING=false
+            shift
+            ;;
+        --exclude-telemetry)
+            # Opt-out of telemetry stack
+            CLI_INCLUDE_TELEMETRY=false
             shift
             ;;
         --include-security)

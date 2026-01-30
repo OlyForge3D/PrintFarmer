@@ -66,14 +66,15 @@ public static class ServiceCollectionExtensions
         {
             if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
             {
-                _ = options.UseSqlServer(connectionString);
+                _ = options.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
             }
             else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
             {
-                _ = options.UseNpgsql(connectionString);
+                _ = options.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
             }
             else
             {
+                // SQLite: Development only - uses EnsureCreated, no migrations
                 _ = options.UseSqlite(connectionString);
             }
         });
@@ -84,11 +85,11 @@ public static class ServiceCollectionExtensions
         DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
         if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
-            _ = optionsBuilder.UseSqlServer(connectionString);
+            _ = optionsBuilder.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
         }
         else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
         {
-            _ = optionsBuilder.UseNpgsql(connectionString);
+            _ = optionsBuilder.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
         }
         else
         {

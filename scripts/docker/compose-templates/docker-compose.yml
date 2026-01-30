@@ -1,11 +1,45 @@
 # PrintFarmer - Monolithic Deployment
 # All services on single docker-compose, single host network
+# Multi-container "monolith" - single deployment unit with separate containers for each service
+# Database is always a separate container (PostgreSQL default, SQL Server optional)
 # NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
 # from docker-compose.common.yml during deployment
+# NOTE: Database service is replaced by compose-generator.sh based on --db-provider flag
 
 name: printfarmer
 
 services:
+  # Database service placeholder - replaced by compose-generator.sh with provider-specific config
+  # Supports: PostgreSQL (default), SQL Server
+  database:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: printfarmer-database
+    environment:
+      # PostgreSQL (default)
+      POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
+      POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # SQL Server (when using mcr.microsoft.com/mssql/server:2022-latest)
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: ${MSSQL_PID:-Developer}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      printfarmer-network:
+        aliases:
+          - postgres
+          - database
+    volumes:
+      - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   # .NET API Backend - Multi-stage build for efficiency
   api:
     build:
@@ -16,11 +50,14 @@ services:
     container_name: printfarmer-api
     ports:
       - "5245:5245" # HTTP API / SignalR (bind host 5245 -> container 5245)
+    depends_on:
+      database:
+        condition: service_healthy
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5245
-      - DB_PROVIDER=Sqlite
-      - ConnectionStrings__Default=Data Source=/data/farm.db
+      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
+      - ConnectionStrings__Default=${CONNECTION_STRING}
       - DB_STARTUP_TIMEOUT=${DB_STARTUP_TIMEOUT:-120}
       - DB_CONNECTION_RETRY_COUNT=${DB_CONNECTION_RETRY_COUNT:-3}
       - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}
@@ -51,6 +88,8 @@ services:
       - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
+      # Profile task check - disable when slicing workers are not enabled
+      - ProfileTaskCheck__Enabled=${PROFILE_TASK_CHECK_ENABLED:-true}
     volumes:
       - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
@@ -62,24 +101,27 @@ services:
     healthcheck: *api-healthcheck
 
   # React Frontend with Nginx - Multi-stage build
+  # NOTE: No external port binding - nginx-proxy handles all external traffic
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.multistage
       target: frontend-runtime
       args:
-        VITE_API_BASE_URL: "http://localhost:${API_PORT:-5245}/api"
-        VITE_SIGNALR_PRINTERS_URL: "http://localhost:${API_PORT:-5245}/hubs/printers"
-        VITE_SIGNALR_HARVEST_URL: "http://localhost:${API_PORT:-5245}/hubs/harvest"
+        # Build-time args baked into React bundle - use relative paths for nginx proxy routing
+        VITE_API_BASE_URL: /api
+        VITE_SIGNALR_PRINTERS_URL: /hubs/printers
+        VITE_SIGNALR_HARVEST_URL: /hubs/harvest
     image: printfarmer-frontend
     container_name: printfarmer-frontend
-    ports:
-      - "${HTTP_PORT:-3000}:80"
+    # No external ports - nginx-proxy routes traffic to this container
+    expose:
+      - "80"
     environment:
-      # Point directly at API (no nginx proxy needed in local dev stack script)
-      - VITE_API_BASE_URL=http://localhost:5245/api
-      - VITE_SIGNALR_PRINTERS_URL=http://localhost:5245/hubs/printers
-      - VITE_SIGNALR_HARVEST_URL=http://localhost:5245/hubs/harvest
+      # Runtime env vars (for reference, but React reads build-time args)
+      - VITE_API_BASE_URL=/api
+      - VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+      - VITE_SIGNALR_HARVEST_URL=/hubs/harvest
     networks:
       - printfarmer-network
     depends_on:
@@ -87,14 +129,14 @@ services:
         condition: service_healthy
     healthcheck: *frontend-healthcheck
 
-  # Optional: Load balancer / Reverse proxy
+  # Reverse proxy - single entry point for all external traffic
   nginx-proxy:
     image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: printfarmer-nginx-proxy
     ports:
-      - "8080:80"
+      - "${HTTP_PORT:-8080}:80"
     volumes:
-      - ./deploy/nginx/nginx-microservices.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/nginx-monolithic.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - api

@@ -60,10 +60,13 @@ The deployment script (`../deploy-docker.sh`) now:
 ## Configuration Management
 
 The deployment script intelligently selects and combines:
-- **Base services**: API, frontend, database, Redis
-- **Optional services**: Workers, monitoring, telemetry, security
+- **Base services**: API, frontend, nginx-proxy
+- **Database**: PostgreSQL (default) or SQL Server - always a separate container
+- **Observability**: Prometheus + Grafana (monitoring), OpenTelemetry + Jaeger (telemetry) - enabled by default
+- **Optional services**: Workers, security, registry, discovery
 - **Environment-specific**: Development overrides, production optimizations
-- **Database providers**: PostgreSQL, SQL Server, MySQL, SQLite
+
+**Note**: SQLite is NOT supported for Docker deployments. All Docker deployments require a proper database container (PostgreSQL or SQL Server) for production reliability.
 
 ## Benefits of This Structure
 
