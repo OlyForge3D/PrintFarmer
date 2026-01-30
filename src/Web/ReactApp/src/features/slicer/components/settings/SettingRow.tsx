@@ -16,7 +16,7 @@ const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) 
 );
 
 interface BaseSettingRowProps {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   label: string;
   description?: string;
   tooltip?: string;
