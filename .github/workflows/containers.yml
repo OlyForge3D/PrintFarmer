@@ -65,12 +65,22 @@ jobs:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ steps.image-name.outputs.name }}
           tags: |
+            # Branch-based tags
             type=ref,event=branch
-            type=ref,event=tag
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            # Git SHA for traceability
+            type=sha,prefix=sha-
+            # Development tag for main branch (NOT latest!)
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            # Release candidate tag for release branch
+            type=raw,value=rc,enable=${{ github.ref == 'refs/heads/release' }}
+            # Semantic version tags for releases (from git tags)
             type=semver,pattern={{version}},prefix=v
             type=semver,pattern={{major}}.{{minor}},prefix=v
+            # ONLY tag as 'latest' for semver releases (git tags), NOT branches
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          flavor: |
+            # Don't auto-add 'latest' - we control it explicitly above
+            latest=false
 
       - name: Select Dockerfile / context
         id: paths
