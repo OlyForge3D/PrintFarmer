@@ -75,21 +75,22 @@ jobs:
       - name: Select Dockerfile / context
         id: paths
         run: |
+          # Dockerfiles are in the dockerfiles/ directory
           if [ "${{ matrix.component }}" = "api" ]; then
-            echo "dockerfile=Dockerfile.api" >> $GITHUB_OUTPUT
+            echo "dockerfile=dockerfiles/Dockerfile.api" >> $GITHUB_OUTPUT
             echo "context=./" >> $GITHUB_OUTPUT
             echo "target=api-runtime" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.component }}" = "printer-discovery" ]; then
-            echo "dockerfile=Dockerfile.multistage" >> $GITHUB_OUTPUT
+            echo "dockerfile=dockerfiles/Dockerfile.multistage" >> $GITHUB_OUTPUT
             echo "context=./" >> $GITHUB_OUTPUT
             echo "target=printer-discovery-runtime" >> $GITHUB_OUTPUT
           else
             # Frontend build (React)
-            if [ -f Dockerfile.frontend ]; then
-              echo "dockerfile=Dockerfile.frontend" >> $GITHUB_OUTPUT
+            if [ -f dockerfiles/Dockerfile.frontend ]; then
+              echo "dockerfile=dockerfiles/Dockerfile.frontend" >> $GITHUB_OUTPUT
               echo "context=./" >> $GITHUB_OUTPUT
             else
-              echo "dockerfile=Dockerfile.react" >> $GITHUB_OUTPUT
+              echo "dockerfile=dockerfiles/Dockerfile.react" >> $GITHUB_OUTPUT
               echo "context=./" >> $GITHUB_OUTPUT
             fi
             echo "target=frontend-runtime" >> $GITHUB_OUTPUT
