@@ -55,7 +55,11 @@ jobs:
           else
             TAG_FROM_REF=''
           fi
-          TAG=${RELEASE_TAG:-$INPUT_TAG:-$TAG_FROM_REF}
+          # Determine final TAG (release > input > tag push)
+          # Use explicit fallback chain instead of nested parameter expansion
+          TAG="${RELEASE_TAG}"
+          if [ -z "$TAG" ]; then TAG="${INPUT_TAG}"; fi
+          if [ -z "$TAG" ]; then TAG="${TAG_FROM_REF}"; fi
 
           # Try to obtain release notes/body for the chosen tag (if any)
           RELEASE_BODY=''

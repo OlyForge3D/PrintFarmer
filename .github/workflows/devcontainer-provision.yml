@@ -17,13 +17,21 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install Node.js 22
+      - name: Install Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '24.x'
 
       - name: Make post-create executable
         run: chmod +x .devcontainer/post-create.sh
+
+      - name: Create .env.template if missing
+        run: |
+          # Create a minimal .env.template if it doesn't exist (required by post-create.sh)
+          if [ ! -f ".env.template" ]; then
+            echo "# PrintFarmer Environment Template" > .env.template
+            echo "# Created automatically for CI" >> .env.template
+          fi
 
       - name: Run devcontainer post-create verification
         run: |

@@ -35,6 +35,8 @@ node_modules/
 # Environment files
 .env
 .env.*
+!.env.template
+!.env.example
 .deploy-config
 
 # Docker generated files (created by deployment script)
