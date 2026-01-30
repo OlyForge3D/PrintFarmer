@@ -202,7 +202,7 @@ jobs:
 
       - name: Security Scan (Trivy)
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: 'table'
@@ -212,7 +212,7 @@ jobs:
 
       - name: Security Scan (Trivy JSON)
         if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: 'json'
