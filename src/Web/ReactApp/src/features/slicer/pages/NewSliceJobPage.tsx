@@ -313,6 +313,33 @@ export const NewSliceJobPage: React.FC = () => {
     return processProfilesData ?? [];
   }, [processProfilesData]);
 
+  // Group process profiles by quality level for better UX
+  const processProfilesByQuality = useMemo(() => {
+    const profiles = processProfilesData ?? [];
+    const qualityOrder = ['fine', 'standard', 'draft', 'speed'];
+    const grouped: Record<string, typeof profiles> = {};
+    
+    for (const profile of profiles) {
+      const quality = (profile.quality ?? 'other').toLowerCase();
+      if (!grouped[quality]) {
+        grouped[quality] = [];
+      }
+      grouped[quality].push(profile);
+    }
+    
+    // Sort groups by quality order, with unknown qualities at the end
+    const sortedEntries = Object.entries(grouped).sort(([a], [b]) => {
+      const indexA = qualityOrder.indexOf(a);
+      const indexB = qualityOrder.indexOf(b);
+      // If not in order list, put at end
+      const posA = indexA === -1 ? 999 : indexA;
+      const posB = indexB === -1 ? 999 : indexB;
+      return posA - posB;
+    });
+    
+    return sortedEntries;
+  }, [processProfilesData]);
+
   // Auto-select machine profile when printer is selected and machine profiles are loaded
   // This effect uses nozzle diameter matching when available
   useEffect(() => {
@@ -795,7 +822,7 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
 
-          {/* PROCESS PROFILE - Custom profiles first, then system presets */}
+          {/* PROCESS PROFILE - Custom profiles first, then system presets grouped by quality */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
             {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
@@ -807,22 +834,23 @@ export const NewSliceJobPage: React.FC = () => {
                 <option value="">-- Select Process Profile --</option>
                 {/* Custom profiles first with ★ indicator */}
                 {customProcessProfiles.length > 0 && (
-                  <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                  <optgroup label="★ My Profiles">
+                    {customProcessProfiles.map(profile => (
+                      <option key={`custom-${profile.id}`} value={profile.name}>
+                        ★ {profile.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 )}
-                {customProcessProfiles.map(profile => (
-                  <option key={`custom-${profile.id}`} value={profile.name}>
-                    ★ {profile.name}
-                  </option>
-                ))}
-                {/* System presets divider - only show if there are system profiles */}
-                {availableProcessProfiles.length > 0 && (
-                  <option disabled className="text-pf-text-muted">── System Presets ──</option>
-                )}
-                {/* System profiles */}
-                {availableProcessProfiles.map(profile => (
-                  <option key={profile.name} value={profile.name}>
-                    {profile.name} - {profile.quality} ({profile.layerHeight}mm)
-                  </option>
+                {/* System presets grouped by quality level */}
+                {processProfilesByQuality.map(([quality, profiles]) => (
+                  <optgroup key={quality} label={quality.charAt(0).toUpperCase() + quality.slice(1)}>
+                    {profiles.map(profile => (
+                      <option key={profile.name} value={profile.name}>
+                        {profile.name} ({profile.layerHeight}mm)
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </Select>
             ) : (
