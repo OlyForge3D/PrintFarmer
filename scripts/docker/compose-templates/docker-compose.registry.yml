@@ -1,22 +1,35 @@
-# Docker Compose override for local registry deployment
-# This file modifies the base docker-compose.yml to use images from a local registry
+# Docker Compose override for container registry deployment
+# This file modifies the base docker-compose.yml to use images from a container registry
+# instead of building locally. Supports GitHub Container Registry (GHCR) or custom registries.
 # 
-# Usage:
-#   1. Set your registry host: export REGISTRY_HOST=192.168.1.100:5000
-#   2. Deploy: docker compose -f docker-compose.yml -f docker-compose.registry.yml up
+# Usage with deploy-docker.sh (RECOMMENDED):
+#   ./scripts/deploy-docker.sh --use-registry                    # Use latest from GHCR
+#   ./scripts/deploy-docker.sh --use-registry --registry-tag v1.2.3  # Specific version
+#   ./scripts/deploy-docker.sh --use-registry --registry-host my-registry.com --registry-tag latest
 #
-# Or use environment file:
-#   echo "REGISTRY_HOST=192.168.1.100:5000" > .env.registry
-#   docker compose --env-file .env.registry -f docker-compose.yml -f docker-compose.registry.yml up
+# Manual usage with docker compose:
+#   1. Set your registry: export REGISTRY_HOST=ghcr.io/jpapiez
+#   2. Set image tag: export REGISTRY_IMAGE_TAG=latest
+#   3. Deploy: docker compose -f docker-compose.yml -f docker-compose.registry.yml up
+#
+# Available tags (created by GitHub Actions):
+#   - latest           Latest build from main branch
+#   - <branch-name>    Branch name (e.g., main, release)
+#   - sha-<commit>     Git commit SHA
+#   - v<version>       Semantic version from git tag (e.g., v1.2.3)
 
 services:
-  # Override worker to use registry image  
-  orcaslicer-worker:
-    image: ${REGISTRY_HOST}/printfarmer-orcaslicer-worker:latest
-  # Optional: Override API if you build and push it to registry
+  # Override API to use registry image
   api:
-    image: ${REGISTRY_HOST}/printfarmer-api:latest
-  # Optional: Override React frontend if you build and push it to registry  
-  web:
-    image: ${REGISTRY_HOST}/printfarmer-web:latest
-    # Use pre-built web image from registry; do not provide a build section
+    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-api:${REGISTRY_IMAGE_TAG:-latest}
+    build: !reset null
+    
+  # Override React frontend to use registry image
+  frontend:
+    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-frontend:${REGISTRY_IMAGE_TAG:-latest}
+    build: !reset null
+    
+  # Override printer-discovery to use registry image (when included)
+  printer-discovery:
+    image: ${REGISTRY_HOST:-ghcr.io/jpapiez}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG:-latest}
+    build: !reset null

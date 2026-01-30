@@ -12,6 +12,7 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
   API_IMAGE_NAME: printfarmer-api
   FRONTEND_IMAGE_NAME: printfarmer-frontend
+  DISCOVERY_IMAGE_NAME: printfarmer-printer-discovery
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        component: [ api, frontend ]
+        component: [ api, frontend, printer-discovery ]
       fail-fast: false
     steps:
       - name: Checkout
@@ -46,12 +47,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image name for component
+        id: image-name
+        run: |
+          if [ "${{ matrix.component }}" = "api" ]; then
+            echo "name=${{ env.API_IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.component }}" = "printer-discovery" ]; then
+            echo "name=${{ env.DISCOVERY_IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ env.FRONTEND_IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.component == 'api' && env.API_IMAGE_NAME || env.FRONTEND_IMAGE_NAME }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ steps.image-name.outputs.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -66,6 +78,11 @@ jobs:
           if [ "${{ matrix.component }}" = "api" ]; then
             echo "dockerfile=Dockerfile.api" >> $GITHUB_OUTPUT
             echo "context=./" >> $GITHUB_OUTPUT
+            echo "target=api-runtime" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.component }}" = "printer-discovery" ]; then
+            echo "dockerfile=Dockerfile.multistage" >> $GITHUB_OUTPUT
+            echo "context=./" >> $GITHUB_OUTPUT
+            echo "target=printer-discovery-runtime" >> $GITHUB_OUTPUT
           else
             # Frontend build (React)
             if [ -f Dockerfile.frontend ]; then
@@ -75,6 +92,7 @@ jobs:
               echo "dockerfile=Dockerfile.react" >> $GITHUB_OUTPUT
               echo "context=./" >> $GITHUB_OUTPUT
             fi
+            echo "target=frontend-runtime" >> $GITHUB_OUTPUT
           fi
 
       - name: Load security policy
@@ -92,6 +110,7 @@ jobs:
         with:
           context: ${{ steps.paths.outputs.context }}
           file: ${{ steps.paths.outputs.dockerfile }}
+          target: ${{ steps.paths.outputs.target }}
           push: ${{ github.event_name != 'pull_request' }}
           platforms: ${{ env.PLATFORMS }}
           tags: ${{ steps.meta.outputs.tags }}

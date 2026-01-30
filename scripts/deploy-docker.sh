@@ -67,6 +67,13 @@ BUILD_VERBOSITY="${BUILD_VERBOSITY:-quiet}"
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
+# Registry deployment: pull pre-built images from container registry instead of building locally
+USE_REGISTRY=false
+# Registry host (default: GitHub Container Registry)
+REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io/jpapiez}"
+# Image version tag (default: latest, or specify semver like v1.2.3, branch name, or SHA)
+REGISTRY_IMAGE_TAG="${REGISTRY_IMAGE_TAG:-latest}"
+
 # Validation flag: check storage permissions without deploying
 VALIDATE_STORAGE_ONLY=false
 
@@ -2327,6 +2334,27 @@ COMPOSE GENERATOR OPTIONS:
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
+REGISTRY DEPLOYMENT OPTIONS:
+    Use pre-built images from GitHub Container Registry instead of building locally.
+    Images are built and pushed via GitHub Actions on push to main/release or tags.
+    
+    --use-registry              Pull pre-built images from container registry (skip local builds)
+    --registry-host HOST        Registry host (default: ghcr.io/jpapiez)
+    --registry-tag TAG          Image tag to pull (default: latest)
+    
+    VERSION CONTROL:
+      Tags are automatically created by GitHub Actions:
+        latest          - Latest build from main branch
+        <branch>        - Branch name (e.g., main, release, feat/new-feature)
+        sha-<commit>    - Git commit SHA (e.g., sha-abc1234)
+        v<version>      - Semantic version from git tag (e.g., v1.2.3, v1.2)
+      
+      Examples:
+        --registry-tag latest              # Latest from main branch
+        --registry-tag main                # Explicit main branch
+        --registry-tag v1.2.3              # Specific release version
+        --registry-tag sha-abc1234         # Specific commit
+
 VERIFY / UTILITY OPTIONS:
     --verify-deployment   Run verification steps only against an existing deployment (no generation/start)
     --validate-storage    Check external storage directory permissions (useful for troubleshooting)
@@ -2409,6 +2437,26 @@ EXAMPLES:
     
     # Non-interactive deployment with all options
     ./scripts/deploy-docker.sh --non-interactive --architecture microservices --include-monitoring --include-telemetry --include-security --include-discovery
+
+    # === REGISTRY DEPLOYMENT (Pre-built images from GitHub) ===
+    
+    # Deploy using latest pre-built images from GitHub Container Registry
+    ./scripts/deploy-docker.sh --use-registry
+    
+    # Deploy a specific version (git tag)
+    ./scripts/deploy-docker.sh --use-registry --registry-tag v1.2.3
+    
+    # Deploy from a specific branch
+    ./scripts/deploy-docker.sh --use-registry --registry-tag main
+    
+    # Deploy a specific commit (SHA)
+    ./scripts/deploy-docker.sh --use-registry --registry-tag sha-abc1234
+    
+    # Deploy from a custom registry host
+    ./scripts/deploy-docker.sh --use-registry --registry-host my-registry.example.com:5000 --registry-tag latest
+    
+    # Non-interactive registry deployment
+    ./scripts/deploy-docker.sh --non-interactive --use-registry --registry-tag v1.0.0
 
 DEPLOYMENT MODES:
     1. Monolithic      - All services in one container (simplest)
@@ -4579,7 +4627,83 @@ deploy_containers() {
         compose_cmd+=( -f docker-compose.override.yml )
     fi
 
-    if [ "$DRY_RUN" = "true" ]; then
+    # Registry deployment: pull pre-built images instead of building locally
+    if [ "$USE_REGISTRY" = "true" ]; then
+        print_header "📦 Using Pre-built Images from Registry"
+        print_info "Registry: $REGISTRY_HOST"
+        print_info "Tag: $REGISTRY_IMAGE_TAG"
+        
+        # Export registry variables for compose file
+        export REGISTRY_HOST
+        export REGISTRY_IMAGE_TAG
+        
+        # Write these to .env so they persist
+        update_kv_file "$ENV_FILE" "REGISTRY_HOST" "$REGISTRY_HOST"
+        update_kv_file "$ENV_FILE" "REGISTRY_IMAGE_TAG" "$REGISTRY_IMAGE_TAG"
+        
+        # Create registry override file that uses pre-built images
+        local registry_override="docker-compose.registry-override.yml"
+        cat > "$registry_override" << EOF
+# Auto-generated: Pull images from container registry instead of building
+# Registry: ${REGISTRY_HOST}
+# Tag: ${REGISTRY_IMAGE_TAG}
+
+services:
+  api:
+    image: ${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}
+    
+  frontend:
+    image: ${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}
+EOF
+
+        # Add printer-discovery if discovery is enabled
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
+            cat >> "$registry_override" << EOF
+    
+  printer-discovery:
+    image: ${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}
+EOF
+        fi
+
+        print_info "Created registry override: $registry_override"
+        compose_cmd+=( -f "$registry_override" )
+        
+        # Pull images from registry
+        print_info "Pulling images from registry..."
+        local images_to_pull=(
+            "${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}"
+            "${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}"
+        )
+        
+        # Add printer-discovery if enabled
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
+            images_to_pull+=("${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}")
+        fi
+        
+        local pull_failed=false
+        for img in "${images_to_pull[@]}"; do
+            print_info "  Pulling $img..."
+            if ! docker pull "$img"; then
+                print_error "Failed to pull: $img"
+                pull_failed=true
+            else
+                print_success "  ✓ Pulled $img"
+            fi
+        done
+        
+        if [ "$pull_failed" = "true" ]; then
+            print_error "Some images failed to pull from registry"
+            print_info "Make sure you have access to the registry and the images exist"
+            print_info "Available tags: latest, main, release, v1.0.0, sha-<commit>"
+            exit 1
+        fi
+        
+        print_success "All images pulled from registry"
+        
+        # Skip the local build process
+        print_info "Skipping local build (using registry images)"
+        
+    elif [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
     else
         # ----- Prepare optional slicer assets ---------------------------------
@@ -6746,6 +6870,34 @@ while [ $# -gt 0 ]; do
             ;;
         --include-registry)
             CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --use-registry)
+            USE_REGISTRY=true
+            shift
+            ;;
+        --registry-host)
+            if [ -n "${2:-}" ]; then
+                REGISTRY_HOST="$2"
+                shift 2
+            else
+                echo "Missing value for --registry-host" >&2; exit 2
+            fi
+            ;;
+        --registry-host=*)
+            REGISTRY_HOST="${1#--registry-host=}"
+            shift
+            ;;
+        --registry-tag)
+            if [ -n "${2:-}" ]; then
+                REGISTRY_IMAGE_TAG="$2"
+                shift 2
+            else
+                echo "Missing value for --registry-tag" >&2; exit 2
+            fi
+            ;;
+        --registry-tag=*)
+            REGISTRY_IMAGE_TAG="${1#--registry-tag=}"
             shift
             ;;
         --output-dir)
