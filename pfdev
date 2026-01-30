@@ -96,7 +96,8 @@ build_image() {
     cd "$REPO_ROOT"
     # Force cache invalidation by removing the image first
     docker rmi "printfarmer-$service:latest" 2>/dev/null || true
-    DOCKER_BUILDKIT=1 docker compose build --no-cache --pull "$service"
+    # Don't use --pull since we use local upgraded base images
+    DOCKER_BUILDKIT=1 docker compose build --no-cache "$service"
     
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))

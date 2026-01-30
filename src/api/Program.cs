@@ -21,6 +21,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api;
+using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
@@ -203,6 +204,14 @@ catch
 // Also skip telemetry when running under the 'Testing' environment to avoid external exporters
 if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
 {
+    // Determine console exporter setting once, outside lambdas, so both tracing and metrics can access it
+    bool enableConsoleExporter = builder.Configuration.GetValue<bool>("OpenTelemetry:ConsoleExporter:Enabled", false);
+    if (!enableConsoleExporter)
+    {
+        string? consoleEnv = Environment.GetEnvironmentVariable("OTEL_CONSOLE_EXPORTER");
+        enableConsoleExporter = string.Equals(consoleEnv, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     _ = builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
@@ -243,8 +252,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
         })
         .AddSource("PrintFarmer.*");
 
-        // Add console exporter for development
-        if (builder.Environment.IsDevelopment())
+        // Add console exporter only if explicitly enabled (disabled by default to avoid log flooding)
+        if (enableConsoleExporter)
         {
             _ = tracing.AddConsoleExporter();
         }
@@ -273,8 +282,8 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
                .AddMeter("PrintFarmer.Slicing")
                .AddMeter("PrintFarmer.API");
 
-        // Add console exporter for development
-        if (builder.Environment.IsDevelopment())
+        // Add console exporter only if explicitly enabled (same as tracing)
+        if (enableConsoleExporter)
         {
             _ = metrics.AddConsoleExporter();
         }
@@ -355,6 +364,9 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversi
 // Print Job Management Service (renamed from PrintQueueService)
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobManagementRepository>();
 builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintJobManagementService, Farm.Api.Services.PrintQueue.PrintJobManagementService>();
+
+// Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
+builder.Services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
 
 // Job Scheduling Service (Phase 4.1)
 builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
@@ -451,6 +463,15 @@ builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSy
 builder.Services.Configure<Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Maintenance.MaintenanceAlertSettings.SectionName));
 builder.Services.AddHostedService<Farm.Web.Api.Services.Maintenance.MaintenanceAlertHostedService>();
 
+// Orphaned Job Sync - Runs once on startup to sync jobs stuck in "Printing" status
+// This handles cases where the API restarts while a print completes
+builder.Services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
+
+// History Seeding - Periodically seeds job history from connected printers
+// This captures jobs dispatched outside of PrintFarmer (e.g., via Mainsail/Fluidd)
+builder.Services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
+
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
 
@@ -545,6 +566,7 @@ builder.Services.AddAuthorization(options =>
 
 // Register authorization handlers
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
 
 // Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
 #pragma warning disable S1075 // URIs should not be hardcoded
@@ -729,8 +751,9 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Slicer registry events hub (worker registration, heartbeat, deregistration)
-// app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
+// Slicer registry events hub (worker registration, heartbeat, deregistration, profile import events)
+app.MapHub<SlicerHub>("/hubs/slicer-registry");
+
 // Slicer progress hub for job processing progress events
 app.MapHub<SlicerProgressHub>("/hubs/slicers");
 

@@ -328,5 +328,3 @@ class TagService {
 
 // Export singleton instance
 export const tagService = new TagService();
-
-export default tagService;

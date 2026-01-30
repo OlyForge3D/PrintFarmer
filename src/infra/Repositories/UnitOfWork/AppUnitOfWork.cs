@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Cameras;
 using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
@@ -22,6 +23,7 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 #pragma warning restore CA2213
+    private ICameraRepository? _cameraRepository;
     private IGcodeRepository? _gcodeRepository;
     private IHarvestRepository? _harvestRepository;
     private IPrintersRepository? _printersRepository;
@@ -30,6 +32,12 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
     private ILocationRepository? _locationRepository;
     private IQueueRepository? _queueRepository;
     private ITagRepository? _tagRepository;
+
+    /// <summary>
+    /// Lazy-initializes the Camera repository, reusing the same DbContext.
+    /// For standalone cameras not attached to printers.
+    /// </summary>
+    public ICameraRepository Cameras => _cameraRepository ??= new EfCameraRepository(_db);
 
     /// <summary>
     /// Lazy-initializes the G-code repository, reusing the same DbContext.

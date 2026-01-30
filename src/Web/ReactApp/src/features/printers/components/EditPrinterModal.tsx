@@ -294,7 +294,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     if (toolheads.length > 0) {
       setExpandedToolheads(new Set(toolheads.map(th => th.id!)));
     }
-  }, [toolheads.length]);
+  }, [toolheads]);
 
   const handleInputChange = (field: keyof UpdatePrinterDto, value: unknown) => {
     setFormData(prev => prev ? { ...prev, [field]: value } : prev);

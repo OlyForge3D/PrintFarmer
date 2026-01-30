@@ -448,7 +448,6 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             Backend: PrinterBackend.SDCP,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,

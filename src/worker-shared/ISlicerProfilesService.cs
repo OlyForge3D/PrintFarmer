@@ -9,7 +9,15 @@ namespace Farm.Slicer.Worker.Core;
 public interface ISlicerProfilesService
 {
     /// <summary>
+    /// Discover and list all available machine model profiles (base templates from machine_model_list).
+    /// These are NOT directly instantiatable - they define base printer models like "Sovol SV08".
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<IList<MachineModelProfileDto>> ListAvailableMachineModelProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Discover and list all available machine profiles from the slicer's local installation.
+    /// These are the actual selectable profiles with nozzle sizes like "Sovol SV08 0.4 nozzle".
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default);

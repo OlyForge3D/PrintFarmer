@@ -240,7 +240,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   };
 
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border w-full min-w-[23rem]`}>
+    <div className={`rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 w-full min-w-[23rem]`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -248,9 +248,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
               {printer.name}
             </div>
-            {(printer.manufacturerName || printer.modelName) && (
+            {(printer.modelName) && (
               <div className="text-pf-text-secondary text-xs">
-                {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
+                {`${printer.modelName || ''}`.trim()}
               </div>
             )}
             <div className="flex items-center gap-2 mb-1">
@@ -276,7 +276,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                 iconCenter={<CameraIcon className="h-4 w-4" />}
               >
-        </Button>
+              </Button>
             </div>
             {showCamera && (
               <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
@@ -326,7 +326,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             aria-label="Edit details"
             iconCenter={<EditIcon className="h-4 w-4" />}
           >
-        </Button>
+          </Button>
           {onDismiss && (
             <Button
               type="button"

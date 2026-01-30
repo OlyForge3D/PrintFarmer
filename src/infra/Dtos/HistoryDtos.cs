@@ -10,8 +10,10 @@ namespace Farm.Infrastructure;
 /// </summary>
 public class HistoryListResponse
 {
+    [JsonPropertyName("count")]
     public int Count { get; set; }
 
+    [JsonPropertyName("jobs")]
     public HistoryJob[] Jobs { get; set; } = [];
 }
 
@@ -20,31 +22,44 @@ public class HistoryListResponse
 /// </summary>
 public class HistoryJob
 {
+    [JsonPropertyName("job_id")]
     public string JobId { get; set; } = string.Empty;
 
+    [JsonPropertyName("exists")]
     public bool Exists { get; set; }
 
+    [JsonPropertyName("end_time")]
     public double? EndTime { get; set; }
 
+    [JsonPropertyName("filament_used")]
     public double FilamentUsed { get; set; }
 
+    [JsonPropertyName("filename")]
     public string Filename { get; set; } = string.Empty;
 
+    [JsonPropertyName("metadata")]
     [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO used for JSON serialization; setter required for deserialization")]
     public Dictionary<string, object> Metadata { get; set; } = [];
 
+    [JsonPropertyName("print_duration")]
     public double PrintDuration { get; set; }
 
+    [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
 
+    [JsonPropertyName("start_time")]
     public double StartTime { get; set; }
 
+    [JsonPropertyName("total_duration")]
     public double TotalDuration { get; set; }
 
+    [JsonPropertyName("user")]
     public string User { get; set; } = string.Empty;
 
+    [JsonPropertyName("auxiliary_data")]
     public AuxiliaryData[]? AuxiliaryData { get; set; }
 
+    [JsonPropertyName("thumbnail_url")]
     public string? ThumbnailUrl { get; set; }
 }
 

@@ -6,7 +6,6 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
@@ -25,10 +24,10 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IMachineProfileRepository> machineProfileRepo = new(MockBehavior.Loose);
             Mock<IFilamentProfileRepository> filamentProfileRepo = new(MockBehavior.Loose);
             Mock<IUnitOfWork> unitOfWork = new(MockBehavior.Loose);
-            Mock<IWorkerRepository> workerRepository = new(MockBehavior.Loose);
             Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
             Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
             Mock<IHubContext<SlicerHub>> hubContext = new(MockBehavior.Loose);
+            Mock<ISlicersService> slicersService = new(MockBehavior.Loose);
 
             return new ProfilesService(
                 repo,
@@ -37,10 +36,10 @@ namespace Farm.Web.Api.Tests.Services
                 machineProfileRepo.Object,
                 filamentProfileRepo.Object,
                 unitOfWork.Object,
-                workerRepository.Object,
                 catalogService.Object,
                 parsingService.Object,
-                hubContext.Object);
+                hubContext.Object,
+                slicersService.Object);
         }
 
         // NOTE: Tests using non-existent CreateSlicerProfileDto DTO have been removed.

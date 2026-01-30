@@ -76,7 +76,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   };
 
   // Import selected files logic - returns result for external callers
-  const handleImportSelected = async (): Promise<{ success: boolean; imported: number; skipped: number; failed: number }> => {
+  const handleImportSelected = useCallback(async (): Promise<{ success: boolean; imported: number; skipped: number; failed: number }> => {
     if (selected.size === 0) return { success: false, imported: 0, skipped: 0, failed: 0 };
     setIsImporting(true);
     try {
@@ -176,7 +176,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
     } finally {
       setIsImporting(false);
     }
-  };
+  }, [selected, operationId, files, onImportComplete, onFilesImported]);
 
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
@@ -184,7 +184,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
     getSelectedCount: () => selected.size,
     getFileCount: () => files.length,
     isImporting: () => isImporting,
-  }), [selected, files, isImporting]);
+  }), [selected, files, isImporting, handleImportSelected]);
 
   // Skip a file (call backend and update UI)
   const handleSkipFile = async (fileId: string) => {

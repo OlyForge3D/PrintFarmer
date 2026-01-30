@@ -20,7 +20,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     ISupportsCamera,
     ISupportsPrinterInformation,
     ISupportsHistory,
-    ISupportsTemperatureControl
+    ISupportsTemperatureControl,
+    ISupportsControlOperations
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
@@ -277,6 +278,46 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
+    public async Task<bool> PauseJobAsync(string baseUrl, string apiKey)
+    {
+        baseUrl = NormalizeBaseUrl(baseUrl);
+        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        request.Headers.Add("X-Api-Key", apiKey);
+        var payload = new { command = "pause", action = "pause" };
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        try
+        {
+            HttpResponseMessage response = await SendWithRetryAsync(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            LogError("Pause job failed", ex);
+            throw;
+        }
+    }
+
+    public async Task<bool> ResumeJobAsync(string baseUrl, string apiKey)
+    {
+        baseUrl = NormalizeBaseUrl(baseUrl);
+        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        request.Headers.Add("X-Api-Key", apiKey);
+        var payload = new { command = "pause", action = "resume" };
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        try
+        {
+            HttpResponseMessage response = await SendWithRetryAsync(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            LogError("Resume job failed", ex);
+            throw;
+        }
+    }
+
     public Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey)
     {
         // OctoPrint camera stream is typically a static URL, not an API call
@@ -507,7 +548,6 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             Backend: PrinterBackend.OctoPrint,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
@@ -1808,13 +1848,16 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     /// <summary>
     /// ISupportsHistory implementations - get and manage print history.
+    /// OctoPrint doesn't support server-side date filtering, so 'since' parameter is ignored.
+    /// Incremental filtering is handled by the caller (PrintJobManagementService).
     /// </summary>
     /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
     /// <param name="limit">Maximum number of history entries to return.</param>
     /// <param name="start">Starting index for pagination.</param>
+    /// <param name="since">Ignored - OctoPrint doesn't support server-side date filtering.</param>
     /// <param name="apiKey">API key for authentication.</param>
     /// <param name="ct">Cancellation token for async operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default)
         => await GetHistoryListAsync(baseUrl, apiKey ?? string.Empty, limit, start);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
@@ -1836,4 +1879,19 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <param name="ct">Cancellation token for async operation.</param>
     async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
         => await SetTemperaturesAsync(baseUrl, apiKey ?? string.Empty, hotendTemp, bedTemp);
+
+    /// <summary>
+    /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the OctoPrint server.</param>
+    /// <param name="apiKey">API key for authentication.</param>
+    /// <param name="ct">Cancellation token for async operation.</param>
+    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await PauseJobAsync(baseUrl, apiKey ?? string.Empty);
+
+    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await ResumeJobAsync(baseUrl, apiKey ?? string.Empty);
+
+    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await CancelJobAsync(baseUrl, apiKey ?? string.Empty);
 }

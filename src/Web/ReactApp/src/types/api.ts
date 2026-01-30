@@ -77,6 +77,7 @@ export interface Printer {
   manufacturerName?: string;
   modelId?: string;
   modelName?: string;
+  motionType?: MotionType;
   progress?: number;
   jobName?: string;
   thumbnailUrl?: string;
@@ -1240,6 +1241,25 @@ export interface JobQueuePrintJob {
   updatedAt: Date;
 }
 
+/**
+ * Queue overview DTO - provides printer availability and queue status
+ * Used for displaying available printers when queueing a print job
+ */
+export interface QueueOverviewDto {
+  printerId: string;
+  printerName: string;
+  printerModel: string;
+  /** Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS") */
+  modelAliases?: string[];
+  isAvailable: boolean;
+  queuedJobsCount: number;
+  currentJobId?: string;
+  currentJobName?: string;
+  estimatedCompletionTime?: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
+}
+
 // API response types
 export interface ApiResponse<T> {
   data: T;
@@ -1648,6 +1668,16 @@ export interface QueueHistoryPageDto {
   totalCount: number;
   currentPage: number;
   pageSize: number;
+  stats: QueueHistoryStatsDto;
+}
+
+export interface QueueHistoryStatsDto {
+  totalCompleted: number;
+  totalFailed: number;
+  totalCancelled: number;
+  successRate: number;
+  averageDurationMinutes: number;
+  totalPrintTimeMinutes: number;
 }
 
 export interface QueueHistoryEntryDto {
@@ -1778,4 +1808,60 @@ export interface BackgroundServicesSummary {
   disabledServices: number;
   servicesWithErrors: number;
   byCategory: Record<string, CategorySummary>;
+}
+
+// Camera Types - for standalone webcam management
+export interface CameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  createdAt: string;
+  updatedAt?: string;
+  isStandalone: boolean;
+}
+
+export interface CreateCameraDto {
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface UpdateCameraDto {
+  name?: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface ToggleCameraDto {
+  isEnabled: boolean;
+}
+
+// Combined camera view - shows both standalone and printer-attached cameras
+export interface DisplayCameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  isStandalone: boolean;
+  printerId?: string;
+  printerName?: string;
+  printerState?: string;
+  isPrinterOnline?: boolean;
 }

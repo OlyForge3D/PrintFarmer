@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Telemetry;
@@ -40,21 +40,23 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
-    IValidator<CreatePrinterDto> validator,
+    IValidator<CreatePrinterFromDiscoveryDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
-    IHttpClientFactory httpClientFactory)
+    IHttpClientFactory httpClientFactory,
+    Services.Slicing.ISlicersService slicersService)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly Farm.Infrastructure.Repositories.Catalog.ICatalogRepository _catalogRepository = catalogRepository;
-    private readonly IValidator<CreatePrinterDto> _validator = validator;
+    private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
 #pragma warning disable CA1823 // Avoid unused private fields
@@ -449,7 +451,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> BulkCreateAsync(
-        [FromBody] CreatePrinterDto[] printers,
+        [FromBody] CreatePrinterFromDiscoveryDto[] printers,
         [FromQuery] string? duplicateHandling = "skip",
         CancellationToken ct = default)
     {
@@ -768,7 +770,6 @@ public class PrintersController(
             p.CameraStreamUrl,
             p.CameraSnapshotUrl,
             p.OriginalServerUrl,
-            p.IpAddress,
             p.BackendPort,
             p.FrontendPort,
             capabilitiesDto,
@@ -791,7 +792,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterDto dto, CancellationToken ct)
+    public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -813,6 +814,36 @@ public class PrintersController(
 
         // Delegate creation/business logic to the service
         PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+
+        // Import slicer profiles for this printer's model (pull-based, on-demand import)
+        // Only imports if profiles don't already exist for this model
+        // Use the input DTO since it has ModelId, and the result DTO only has names
+        Guid? modelId = dto.ModelId;
+        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
+        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
+
+        if (modelId.HasValue && modelId.Value != Guid.Empty)
+        {
+            try
+            {
+                int imported = await _slicersService.ImportProfilesForModelAsync(
+                    modelId.Value,
+                    modelName,
+                    manufacturerName,
+                    ct);
+
+                if (imported > 0)
+                {
+                    _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail printer creation if profile import fails
+                _logger.LogWarning($"Failed to import profiles for {modelName}: {ex.Message}");
+            }
+        }
+
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
     }
 
@@ -897,11 +928,11 @@ public class PrintersController(
                     $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
 
                 // Check if printer already exists by IP address
-                Printer? existing = await _printersService.FindByIpAddressAsync(discovered.ServerUrl, ct);
+                Printer? existing = await _printersService.FindByServerUrlAsync(discovered.ServerUrl, ct);
 
                 if (existing != null)
                 {
-                    _logger.LogInformation($"Printer already registered: {existing.Name} (IP: {existing.IpAddress})");
+                    _logger.LogInformation($"Printer already registered: {existing.Name} (ServerUrl: {existing.ServerUrl})");
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -912,7 +943,7 @@ public class PrintersController(
                 }
 
                 // Create new printer from discovered data, preserving all discovered metadata
-                CreatePrinterDto createDto = CreatePrinterDto.FromDiscovered(discovered);
+                CreatePrinterFromDiscoveryDto createDto = CreatePrinterFromDiscoveryDto.FromDiscovered(discovered);
 
                 ValidationResult validationResult = await _validator.ValidateAsync(createDto, ct);
                 if (!validationResult.IsValid)
@@ -927,6 +958,28 @@ public class PrintersController(
                 registered.Add(created);
 
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+
+                // Import slicer profiles for this printer's model (pull-based, on-demand import)
+                if (createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                {
+                    try
+                    {
+                        int imported = await _slicersService.ImportProfilesForModelAsync(
+                            createDto.ModelId.Value,
+                            createDto.NewModelName ?? created.ModelName ?? "Unknown",
+                            createDto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown",
+                            ct);
+
+                        if (imported > 0)
+                        {
+                            _logger.LogInformation($"Imported {imported} slicer profiles for {created.ModelName}");
+                        }
+                    }
+                    catch (Exception profileEx)
+                    {
+                        _logger.LogWarning($"Failed to import profiles for {created.ModelName}: {profileEx.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1003,7 +1056,6 @@ public class PrintersController(
             Backend: (PrinterBackend)printer.Backend,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
@@ -1225,7 +1277,6 @@ public class PrintersController(
             ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
             p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
             p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
-            p.IpAddress = resolveResp.ResolvedIp;
         }
 
         // Track if model changed for template application
@@ -1367,7 +1418,6 @@ public class PrintersController(
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress,
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
@@ -2190,7 +2240,6 @@ public class PrintersController(
                 name = printer.Name,
                 serverUrl = printer.ServerUrl,
                 originalServerUrl = printer.OriginalServerUrl,
-                ipAddress = printer.IpAddress,
                 backend = printer.Backend,
                 apiKey = printer.ApiKey,
                 cameraStreamUrl = printer.CameraStreamUrl,
@@ -2317,7 +2366,6 @@ public class PrintersController(
                     name = printer.Name,
                     serverUrl = printer.ServerUrl,
                     originalServerUrl = printer.OriginalServerUrl,
-                    ipAddress = printer.IpAddress,
                     backend = printer.Backend,
                     apiKey = printer.ApiKey,
                     cameraStreamUrl = printer.CameraStreamUrl,

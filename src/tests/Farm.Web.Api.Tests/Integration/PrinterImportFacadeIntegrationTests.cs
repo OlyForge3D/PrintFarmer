@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -168,13 +169,13 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
 
         string jsonContent = JsonSerializer.Serialize(new[]
         {
-            new CreatePrinterDto
+            new CreatePrinterFromDiscoveryDto
             {
                 Name = "JsonPrinter1",
                 IpAddress = "192.168.1.110",
                 Backend = PrinterBackend.Moonraker
             },
-            new CreatePrinterDto
+            new CreatePrinterFromDiscoveryDto
             {
                 Name = "JsonPrinter2",
                 IpAddress = "192.168.1.111",

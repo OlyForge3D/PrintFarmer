@@ -353,16 +353,16 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
   if (!isExpanded) {
     // Collapsed view - matching Blazor structure
     return (
-      <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[26rem] max-w-[26rem] overflow-hidden flex flex-col min-h-0">
+      <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 min-w-[26rem] max-w-[26rem] overflow-hidden flex flex-col min-h-0">
         <div className="flex justify-between items-start mb-4 gap-4">
           <div className="flex justify-between items-start flex-1 gap-4">
             <div className="flex-1">
               <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
                 {printer.name}
               </div>
-              {(printer.manufacturerName || printer.modelName) && (
+              {(printer.modelName) && (
                 <div className="text-pf-text-secondary text-sm mb-1">
-                  {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
+                  {`${printer.modelName || ''}`.trim()}
                 </div>
               )}
               <div className="flex items-center gap-2 mb-1">

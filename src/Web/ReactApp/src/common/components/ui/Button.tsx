@@ -2,7 +2,7 @@
 import React from 'react';
 import clsx from 'clsx';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle' | 'link';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'ghost' | 'success' | 'tab' | 'toggle' | 'link' | 'unstyled';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -22,10 +22,12 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light hover:border-pf-border',
   danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
+  ghost: 'bg-transparent hover:bg-pf-bg-0/50 text-inherit border-transparent shadow-none',
   success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
   toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent',
-  link: 'bg-transparent text-pf-primary hover:underline border-transparent px-0 py-0 shadow-none'
+  link: 'bg-transparent text-pf-primary hover:underline border-transparent px-0 py-0 shadow-none',
+  unstyled: '' // No default styles - fully controlled by className prop
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -58,13 +60,15 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     : '';
 
   // Link variant should not apply size padding classes
-  const applySizeClasses = variant !== 'link';
+  // Unstyled variant should not apply any base styles
+  const applySizeClasses = variant !== 'link' && variant !== 'unstyled';
+  const applyBaseStyles = variant !== 'unstyled';
 
   return (
     <button
       ref={ref}
       className={clsx(
-        'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
+        applyBaseStyles && 'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],
         tabActiveClasses,

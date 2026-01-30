@@ -1,6 +1,6 @@
 ---
 agent: 'agent'
-tools: ['changes', 'search/codebase', 'edit/editFiles', 'problems', 'runCommands']
+tools: ['search/changes', 'search/codebase', 'edit/editFiles', 'read/problems', 'execute/getTerminalOutput','execute/runInTerminal','read/terminalLastCommand','read/terminalSelection']
 description: 'Get best practices for Entity Framework Core'
 ---
 

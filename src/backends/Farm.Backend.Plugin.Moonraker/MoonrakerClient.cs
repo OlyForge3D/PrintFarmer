@@ -567,7 +567,6 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             Backend: PrinterBackend.Moonraker,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             SpoolInfo: spoolInfo,
@@ -656,6 +655,15 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
     public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "PAUSE", ct);
+
+    public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "CANCEL_PRINT", ct);
+
+    public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return CancelPrintAsync(baseUrl.ToString(), ct);
+    }
 
     public async Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "RESUME", ct);
@@ -877,6 +885,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/upload");
 
+            long streamLength = fileContent.CanSeek ? fileContent.Length : -1;
+            _logger.LogInformation($"[Moonraker] Uploading G-code file {fileName} to {uri}, stream length: {streamLength}");
+
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
             streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -884,10 +895,22 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
             using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                string responseBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                _logger.LogWarning($"[Moonraker] Upload failed with status {resp.StatusCode}: {responseBody}");
+            }
+            else
+            {
+                _logger.LogInformation($"[Moonraker] Upload succeeded for {fileName}");
+            }
+
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError($"[Moonraker] Exception during G-code upload for {fileName} to {baseUrl}: {ex.Message}");
             return false;
         }
     }
@@ -2435,7 +2458,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         => await ResumeAsync(baseUrl, ct);
 
     async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
-        => await EmergencyStopAsync(baseUrl, ct);
+        => await CancelPrintAsync(baseUrl, ct);
 
     /// <summary>
     /// ISupportsCamera implementations - get camera stream and snapshot URLs.
@@ -2545,10 +2568,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="start">Index to start from for pagination.</param>
+    /// <param name="since">Filter to only return jobs started after this UTC timestamp.</param>
     /// <param name="apiKey">Optional API key for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, limit, start, ct: ct);
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryListAsync(baseUrl, limit, start, since: since, ct: ct);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
         => await GetHistoryJobAsync(baseUrl, jobId, ct);

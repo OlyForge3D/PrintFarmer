@@ -103,7 +103,7 @@ public interface IPrintersRepository
     /// <param name="serverUrl">The server URL to search for.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The printer if found, otherwise null.</returns>
-    Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+    Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct);
 
     /// <summary>
     /// Detaches all tracked entities to prevent concurrent operation errors.

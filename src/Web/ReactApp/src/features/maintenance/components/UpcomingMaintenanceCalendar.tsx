@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { Button } from '@/common/components/ui';
 import { 
   format, 
   startOfMonth, 
@@ -24,7 +25,6 @@ import {
   endOfWeek
 } from 'date-fns';
 import { ChevronLeftIcon, ChevronRightIcon, CalendarIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
 
 export interface UpcomingMaintenanceCalendarProps {
@@ -69,16 +69,14 @@ function DayCell({ date, tasks, isCurrentMonth, isSelected, onClick }: DayCellPr
   const hasTasks = tasks.length > 0;
 
   return (
-    <button
+    <Button
+      variant={isSelected ? 'tab' : 'subtle'}
       type="button"
       onClick={onClick}
       className={`
-        relative h-12 sm:h-16 p-1 text-sm border-b border-r border-pf-border
-        transition-colors duration-150
+        relative h-12 sm:h-16 p-1 text-sm border-b border-r border-pf-border rounded-none
         ${isCurrentMonth ? 'bg-pf-bg-1' : 'bg-pf-bg-2'}
-        ${isSelected ? 'ring-2 ring-pf-accent ring-inset' : ''}
         ${hasTasks ? 'hover:bg-pf-accent/10' : 'hover:bg-pf-border/30'}
-        focus:outline-none focus:ring-2 focus:ring-pf-accent focus:ring-inset
       `}
       aria-label={`${format(date, 'MMMM d, yyyy')}${hasTasks ? `, ${tasks.length} maintenance task${tasks.length !== 1 ? 's' : ''}` : ''}`}
     >
@@ -113,7 +111,7 @@ function DayCell({ date, tasks, isCurrentMonth, isSelected, onClick }: DayCellPr
       {hasOverdue && (
         <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
       )}
-    </button>
+    </Button>
   );
 }
 

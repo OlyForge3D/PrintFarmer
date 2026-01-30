@@ -39,7 +39,14 @@ public static class Program
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
-        _ = builder.Services.AddSingleton<ISlicerProfilesService, OrcaProfilesService>(); // generic profiles interface, implemented by OrcaSlicer
+
+        // Profile services - use SQLite-cached service for fast queries
+        _ = builder.Services.AddSingleton<CachedOrcaProfilesService>(sp =>
+        {
+            IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+            return new CachedOrcaProfilesService(logger);
+        });
+        _ = builder.Services.AddSingleton<ISlicerProfilesService>(sp => sp.GetRequiredService<CachedOrcaProfilesService>());
         _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed

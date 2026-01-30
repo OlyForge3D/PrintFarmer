@@ -42,12 +42,12 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             return null;
         }
 
-        // Try exact match with slicer type first
+        // Try exact match with slicer type first (case-insensitive)
         if (!string.IsNullOrEmpty(slicerType))
         {
             Guid exactMatch = await _dbContext.PrinterModelAliases
                 .AsNoTracking()
-                .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == slicerType)
+                .Where(a => EF.Functions.Collate(a.SlicerModelName, "NOCASE") == slicerModelName && a.SlicerType == slicerType)
                 .Select(a => a.PrinterModelId)
                 .FirstOrDefaultAsync();
 
@@ -57,10 +57,10 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             }
         }
 
-        // Fall back to slicer-agnostic alias (SlicerType is null)
+        // Fall back to slicer-agnostic alias (SlicerType is null, case-insensitive)
         Guid genericMatch = await _dbContext.PrinterModelAliases
             .AsNoTracking()
-            .Where(a => a.SlicerModelName == slicerModelName && a.SlicerType == null)
+            .Where(a => EF.Functions.Collate(a.SlicerModelName, "NOCASE") == slicerModelName && a.SlicerType == null)
             .Select(a => a.PrinterModelId)
             .FirstOrDefaultAsync();
 

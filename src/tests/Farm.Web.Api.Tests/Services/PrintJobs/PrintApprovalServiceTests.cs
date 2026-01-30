@@ -280,7 +280,7 @@ public class PrintApprovalServiceTests : IDisposable
             });
         }
 
-        public Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, CancellationToken ct)
+        public Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, decimal? requiredNozzle, string? requiredMaterial, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<QueueOverviewDto>>(new List<QueueOverviewDto>());
 
         public Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct)

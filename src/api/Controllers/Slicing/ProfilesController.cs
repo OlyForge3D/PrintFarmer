@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -44,10 +45,12 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Authorize] // All endpoints require authentication
 public class ProfilesController(
     IUnifiedLoggingService logger,
-    IProfilesService profilesService) : ControllerBase
+    IProfilesService profilesService,
+    Services.Catalog.ICatalogService catalogService) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IProfilesService _profilesService = profilesService;
+    private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
 
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -196,6 +199,7 @@ public class ProfilesController(
     /// Used for populating UI selectors and providing detailed profile information for job configuration.
     /// </remarks>
     [HttpGet("extended")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
@@ -207,6 +211,55 @@ public class ProfilesController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to list extended profiles");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list profiles");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves profiles organized in a hierarchical structure by manufacturer and machine model.
+    /// </summary>
+    /// <param name="manufacturer">Optional filter to retrieve only profiles for a specific manufacturer</param>
+    /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>HierarchicalProfilesResponseDto containing profiles organized by manufacturer → model → profiles</returns>
+    /// <remarks>
+    /// This endpoint provides a hierarchical view of profiles that reflects the real-world organization:
+    /// - Top level: Manufacturer (e.g., "Prusa", "Sovol")
+    /// - Second level: Model (e.g., "Prusa CORE One", "Sovol SV08")
+    /// - Third level: Individual profiles with compatibility information
+    ///
+    /// Both filters are optional and work together with AND logic:
+    /// - If manufacturer is specified: Returns only that manufacturer's profiles
+    /// - If machineProfileId is specified: Returns only compatible profiles for that machine
+    /// - If both are specified: Both filters apply
+    /// - If neither is specified: Returns all profiles in hierarchy
+    ///
+    /// Used for populating the Slicer Profiles admin page with organized profile listings.
+    /// </remarks>
+    [HttpGet("hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(HierarchicalProfilesResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListHierarchyAsync(
+        [FromQuery] string? manufacturer = null,
+        [FromQuery] Guid? machineProfileId = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            HierarchicalProfilesResponseDto response = await _profilesService.ListHierarchyAsync(manufacturer, machineProfileId, ct);
+            return Ok(response);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list hierarchical profiles");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list profiles");
         }
     }
@@ -329,6 +382,34 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Bulk deletes multiple profiles by ID, supporting all profile types (machine, process, filament).
+    /// </summary>
+    /// <param name="profileIds">Collection of profile IDs to delete</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>BulkDeleteResultDto with counts of deleted profiles by type</returns>
+    /// <remarks>
+    /// Profiles are looked up in machine, process, and filament tables.
+    /// Invalid or non-existent IDs are skipped (not treated as errors).
+    /// Requires farm_admin policy for access.
+    /// </remarks>
+    [HttpPost("bulk-delete")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: bulk delete profiles
+    [ProducesResponseType(typeof(BulkDeleteResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkDeleteProfilesAsync(
+        [FromBody] List<Guid>? profileIds,
+        CancellationToken ct)
+    {
+        if (profileIds is null || profileIds.Count == 0)
+        {
+            return BadRequest("At least one profile ID is required");
+        }
+
+        BulkDeleteResultDto result = await _profilesService.BulkDeleteProfilesAsync(profileIds, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Retrieves all process profiles with optional filtering by printer or slicer type.
     /// </summary>
     /// <param name="printerId">Optional printer ID to filter profiles by printer-specific compatibility</param>
@@ -345,6 +426,7 @@ public class ProfilesController(
     /// and printer capabilities. Returns empty list if no profiles match the filter criteria.
     /// </remarks>
     [HttpGet]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {
@@ -587,6 +669,35 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Delete all system profiles (IsSystem=true) from the database.
+    /// Phase 3 cleanup: removes duplicated system profiles from PostgreSQL.
+    /// After this operation, system profiles are served only from OrcaSlicer worker.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Counts of deleted machine, process, and filament profiles</returns>
+    /// <response code="200">System profiles deleted successfully</response>
+    /// <response code="401">Unauthorized - authentication required</response>
+    /// <response code="403">Forbidden - farm_admin authorization policy required</response>
+    [HttpDelete("system/cleanup")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile management
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> DeleteAllSystemProfilesAsync(CancellationToken ct)
+    {
+        try
+        {
+            object result = await _profilesService.DeleteAllSystemProfilesAsync(ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting system profiles");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Error deleting profiles: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Fetch available OrcaSlicer profiles from the OrcaSlicer worker service for administrative review.
     /// Discovers all profiles available in the running worker's local OrcaSlicer installation and prepares them for bulk import.
     /// </summary>
@@ -660,6 +771,272 @@ public class ProfilesController(
         {
             _logger.LogError($"Error fetching profiles from OrcaSlicer worker: {ex.Message}");
             return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get the full profile hierarchy from OrcaSlicer worker organized by manufacturer and model.
+    /// Proxies the worker's /api/profiles endpoint which returns all available profiles.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy</returns>
+    /// <response code="200">Successfully fetched profiles hierarchy from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("worker-hierarchy")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetWorkerProfilesHierarchyAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            AllProfilesResponseDto? profiles = await _profilesService.GetWorkerProfilesHierarchyAsync(httpClient, ct);
+            return Ok(profiles ?? new AllProfilesResponseDto());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching profiles hierarchy from OrcaSlicer worker: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
+    /// This endpoint proxies requests to the worker's /api/profiles/machine/{manufacturer}/{model} endpoint.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="manufacturer">Manufacturer name (e.g., "Elegoo", "Prusa")</param>
+    /// <param name="model">Model name (e.g., "Centauri Carbon", "CORE One")</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of machine profiles matching the manufacturer and model</returns>
+    /// <response code="200">Successfully fetched machine profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("machine/{manufacturer}/{model}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMachineProfilesForModelAsync(
+        [FromServices] HttpClient httpClient,
+        string manufacturer,
+        string model,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching machine profiles for {manufacturer}/{model}: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get machine profiles for a printer model by its catalog ID.
+    /// This endpoint looks up the OrcaSlicer alias for the model and fetches matching profiles.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="modelId">The printer model ID from the catalog</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of machine profiles matching the model's OrcaSlicer alias</returns>
+    /// <response code="200">Successfully fetched machine profiles from OrcaSlicer worker</response>
+    /// <response code="404">Printer model not found or no OrcaSlicer alias configured</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("machine/for-model/{modelId:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMachineProfilesForModelIdAsync(
+        [FromServices] HttpClient httpClient,
+        Guid modelId,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Get the printer model
+            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
+            if (model == null)
+            {
+                return NotFound($"Printer model with ID {modelId} not found");
+            }
+
+            // Get OrcaSlicer alias for this model - this IS the printer_model value
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(modelId, ct);
+            SlicerModelAliasDto? orcaAlias = aliases.FirstOrDefault(a => a.SlicerType == "OrcaSlicer");
+
+            // The alias is the exact printer_model value to query (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400")
+            // If no alias exists, we cannot fetch profiles
+            if (orcaAlias == null || string.IsNullOrWhiteSpace(orcaAlias.SlicerModelName))
+            {
+                _logger.LogWarning($"No OrcaSlicer alias configured for model {model.Name}");
+                return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
+            }
+
+            string printerModel = orcaAlias.SlicerModelName;
+            _logger.LogInformation($"Fetching machine profiles for model {model.Name} using OrcaSlicer alias: {printerModel}");
+
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesByAliasAsync(
+                httpClient, printerModel, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching machine profiles for model {modelId}: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get process profiles compatible with specific machine profiles from the OrcaSlicer worker.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="request">Request containing list of machine profile names</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of process profiles compatible with the specified machines</returns>
+    /// <response code="200">Successfully fetched process profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("process/for-machines")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
+        [FromServices] HttpClient httpClient,
+        [FromBody] ForMachinesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching process profiles for machines: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get filament profiles compatible with specific machine profiles from the OrcaSlicer worker.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="request">Request containing list of machine profile names</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>List of filament profiles compatible with the specified machines</returns>
+    /// <response code="200">Successfully fetched filament profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("filament/for-machines")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
+        [FromServices] HttpClient httpClient,
+        [FromBody] ForMachinesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament profiles for machines: {ex.Message}");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get template filament profiles from the OrcaFilamentLibrary.
+    /// These are universal profiles not tied to specific printers and serve as a starting point.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for making requests to the worker service</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>Universal filament profiles from OrcaFilamentLibrary</returns>
+    /// <response code="200">Successfully fetched template filament profiles</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("filament/templates")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFilamentTemplatesAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentTemplatesAsync(httpClient, ct);
+            return Ok(profiles);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament templates: {ex.Message}");
+            return StatusCode(500, $"Error fetching templates from worker: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets names of profiles already imported for a specific printer model.
+    /// Used by the import wizard to show which profiles have already been imported.
+    /// </summary>
+    /// <param name="modelId">The printer model ID to check imported profiles for</param>
+    /// <param name="ct">Cancellation token for aborting the request</param>
+    /// <returns>DTO containing lists of imported machine, process, and filament profile names</returns>
+    /// <response code="200">Successfully retrieved imported profile names</response>
+    /// <response code="500">Internal server error</response>
+    [HttpGet("imported-names/{modelId:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ImportedProfileNamesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetImportedProfileNamesAsync(
+        Guid modelId,
+        CancellationToken ct)
+    {
+        try
+        {
+            ImportedProfileNamesDto result = await _profilesService.GetImportedProfileNamesForModelAsync(modelId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error getting imported profile names: {ex.Message}");
+            return StatusCode(500, $"Error getting imported profile names: {ex.Message}");
         }
     }
 
@@ -828,6 +1205,116 @@ public class ProfilesController(
         {
             _logger.LogError(ex, "Bulk import failed");
             return StatusCode(StatusCodes.Status500InternalServerError, "Bulk import failed");
+        }
+    }
+
+    /// <summary>
+    /// Import selected profiles from OrcaSlicer worker for a specific printer model.
+    /// This endpoint is used by the Profile Import Wizard to import user-selected profiles.
+    /// </summary>
+    /// <param name="modelId">
+    /// The unique identifier (GUID) of the printer model in the catalog.
+    /// The model must exist and have an OrcaSlicer alias configured.
+    /// </param>
+    /// <param name="request">
+    /// Selective import request containing:
+    /// - ManufacturerName: The manufacturer name matching the OrcaSlicer bundle (e.g., "Prusa", "Elegoo")
+    /// - SelectedMachineProfiles: List of machine profile names to import
+    /// - SelectedProcessProfiles: List of process profile names to import
+    /// - SelectedFilamentProfiles: List of filament profile names to import
+    /// </param>
+    /// <param name="ct">Cancellation token for aborting the import operation</param>
+    /// <returns>
+    /// Returns SelectiveProfileImportResultDto containing:
+    /// - MachineProfilesImported: Number of machine profiles imported
+    /// - ProcessProfilesImported: Number of process profiles imported
+    /// - FilamentProfilesImported: Number of filament profiles imported
+    /// - TotalImported: Sum of all imported profiles
+    /// - Skipped: Number of profiles skipped (duplicates)
+    /// - Error: Error message if import failed, null otherwise
+    /// </returns>
+    /// <remarks>
+    /// This endpoint implements the Profile Import Wizard workflow:
+    /// 1. User creates a printer and gets a task to import profiles
+    /// 2. User navigates to Profile Import Wizard
+    /// 3. Wizard fetches available profiles from OrcaSlicer worker
+    /// 4. User selects which profiles to import
+    /// 5. This endpoint is called to persist the selected profiles
+    /// 6. Task is marked complete and wizard navigates back to dashboard
+    ///
+    /// Import behavior:
+    /// - Profiles are fetched from OrcaSlicer worker on demand
+    /// - Deduplication is performed by profile hash (SHA256)
+    /// - Imported profiles are marked as system profiles (IsSystem=true, IsPublic=true)
+    /// - Profiles are associated with the specified printer model
+    ///
+    /// Error handling:
+    /// - Returns 404 if printer model not found
+    /// - Returns 503 if OrcaSlicer worker unavailable
+    /// - Returns partial results if some profiles fail to import
+    /// </remarks>
+    /// <response code="200">Import completed (check TotalImported and Error for details)</response>
+    /// <response code="400">Bad request - missing manufacturer name or empty profile lists</response>
+    /// <response code="401">Unauthorized - authentication required</response>
+    /// <response code="403">Forbidden - farm_admin authorization policy required</response>
+    /// <response code="404">Printer model not found</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("import-selected-for-model/{modelId:guid}")]
+    [Authorize(Policy = "farm_admin")]
+    [ProducesResponseType(typeof(SelectiveProfileImportResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ImportSelectedProfilesForModelAsync(
+        Guid modelId,
+        [FromBody] SelectiveProfileImportRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ManufacturerName))
+        {
+            return BadRequest("ManufacturerName is required");
+        }
+
+        try
+        {
+            // Validate that the model exists
+            PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
+            if (model == null)
+            {
+                return NotFound($"Printer model with ID {modelId} not found");
+            }
+
+            _logger.LogInformation($"Importing selected profiles for model {model.Name} (manufacturer: {request.ManufacturerName})");
+
+            SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                if (result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
+                    result.Error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, result.Error);
+                }
+            }
+
+            return Ok(result);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning($"OrcaSlicer worker unavailable: {ex.Message}");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error importing profiles for model {modelId}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Profile import failed");
         }
     }
 
@@ -1039,4 +1526,208 @@ public class ProfilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, "Bulk import from worker failed");
         }
     }
+
+    /// <summary>
+    /// Clones a single profile to create a user-owned custom copy.
+    /// </summary>
+    /// <param name="request">Clone request with source profile ID, type, and optional custom name</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Details of the cloned profile</returns>
+    /// <remarks>
+    /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+    /// The cloned profile copies all settings from the source but gets a new ID.
+    /// Supported profile types: "machine", "filament", "process".
+    /// </remarks>
+    [HttpPost("clone")]
+    [ProducesResponseType(typeof(CloneSingleProfileResponseDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CloneSingleProfileAsync(
+        [FromBody] CloneSingleProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            // Get user ID from claims (assumes authentication is configured)
+            Guid userId = GetCurrentUserId();
+
+            CloneSingleProfileResponseDto result = await _profilesService.CloneSingleProfileAsync(request, userId, ct);
+            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"Clone profile validation failed: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _logger.LogWarning($"Source profile not found: {ex.Message}");
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clone profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Clone profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Uploads a custom profile from raw JSON content.
+    /// </summary>
+    /// <param name="request">Upload request with raw JSON, profile type, and optional name</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Details of the uploaded custom profile</returns>
+    /// <remarks>
+    /// Creates a new profile with IsSystem=false and CreatedByUserId set to the current user.
+    /// Supported profile types: "machine", "filament", "process".
+    /// The raw JSON should be a valid OrcaSlicer profile configuration.
+    /// </remarks>
+    [HttpPost("upload")]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UploadCustomProfileAsync(
+        [FromBody] UploadProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(request, userId, ct);
+            return CreatedAtAction(nameof(GetProfileAsync), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning($"Upload profile validation failed: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Upload profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Upload profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Lists all custom profiles owned by the current user.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of custom profiles with summary counts</returns>
+    /// <remarks>
+    /// Returns only profiles where IsSystem=false and CreatedByUserId matches the current user.
+    /// Includes counts broken down by profile type (machine, filament, process).
+    /// </remarks>
+    [HttpGet("custom")]
+    [ProducesResponseType(typeof(CustomProfilesListResponseDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListCustomProfilesAsync(CancellationToken ct)
+    {
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfilesListResponseDto result = await _profilesService.ListCustomProfilesAsync(userId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "List custom profiles failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "List custom profiles failed");
+        }
+    }
+
+    /// <summary>
+    /// Updates a custom profile's properties.
+    /// </summary>
+    /// <param name="id">ID of the custom profile to update</param>
+    /// <param name="request">Update request with optional new name, rawJson, or description</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Updated custom profile details</returns>
+    /// <remarks>
+    /// Only non-null fields in the request will be updated.
+    /// Cannot update system profiles - clone them first to create a custom version.
+    /// Only the profile owner can update their custom profiles.
+    /// </remarks>
+    [HttpPut("custom/{id:guid}")]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateCustomProfileAsync(
+        Guid id,
+        [FromBody] UpdateCustomProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfileDto result = await _profilesService.UpdateCustomProfileAsync(id, request, userId, ct);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _logger.LogWarning($"Custom profile not found: {ex.Message}");
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning($"Update profile unauthorized: {ex.Message}");
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning($"Update profile invalid operation: {ex.Message}");
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Update custom profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Update custom profile failed");
+        }
+    }
+
+    /// <summary>
+    /// Gets the current user's ID from the authentication claims.
+    /// </summary>
+    /// <returns>The user's GUID</returns>
+    private Guid GetCurrentUserId()
+    {
+        // Try to get user ID from claims
+        string? userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return userId;
+        }
+
+        // Fallback for development/testing - use a default user ID
+        // In production, this should throw an exception
+        _logger.LogWarning("User ID not found in claims, using default user ID for development");
+        return Guid.Parse("00000000-0000-0000-0000-000000000001");
+    }
+}
+
+/// <summary>
+/// Request DTO for fetching profiles compatible with specific machines.
+/// </summary>
+public record ForMachinesRequest
+{
+    /// <summary>
+    /// List of machine profile names to find compatible profiles for.
+    /// </summary>
+    public IReadOnlyList<string> MachineNames { get; init; } = Array.Empty<string>();
 }

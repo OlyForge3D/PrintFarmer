@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Discovery;
 
 namespace Farm.Infrastructure;
 
@@ -67,5 +68,5 @@ public record LocationSummaryDto(
 /// </summary>
 public class LocationDetailsDto : LocationDto
 {
-    public PrinterInfoDto[] Printers { get; set; } = [];
+    public DiscoveryPrinterInfoDto[] Printers { get; set; } = [];
 }

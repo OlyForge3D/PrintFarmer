@@ -123,22 +123,25 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
     }
 
     /// <summary>
-    /// Finds a printer by its IP address efficiently using a direct database query.
-    /// Extracts the IP from the ServerUrl and matches against the stored IpAddress field.
+    /// Finds a printer by its ServerUrl efficiently using a direct database query.
     /// This is much more efficient than loading all printers into memory.
     /// </summary>
-    /// <param name="serverUrl">The server URL containing the IP address to search for.</param>
+    /// <param name="serverUrl">The server URL to search for.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
-    public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+    public async Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct)
     {
-        // Extract IP address from ServerUrl (format: http://ip or http://hostname)
-        // Strip http/https and port (if any) to get just the host
-        string inputHost = serverUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).Split(':')[0];
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return null;
+        }
 
-        // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
+        // Normalize the URL for comparison (strip trailing slashes)
+        string normalizedUrl = serverUrl.TrimEnd('/');
+
+        // Query directly by ServerUrl - much more efficient than GetAllAsync + FirstOrDefault
         return await _db.Printers
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.IpAddress == inputHost, ct);
+            .FirstOrDefaultAsync(p => p.ServerUrl == normalizedUrl || p.ServerUrl == serverUrl, ct);
     }
 
     /// <summary>

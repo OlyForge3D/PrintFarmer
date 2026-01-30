@@ -34,6 +34,11 @@ internal sealed class PrinterState
 
     public string? State { get; set; }
 
+    /// <summary>
+    /// Tracks the previous state for detecting state transitions (e.g., printing → standby).
+    /// </summary>
+    public string? PreviousState { get; set; }
+
     public double? Progress { get; set; }
 
     public string? JobName { get; set; }

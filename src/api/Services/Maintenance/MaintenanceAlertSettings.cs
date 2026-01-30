@@ -57,4 +57,12 @@ public class MaintenanceAlertSettings : IAppSetting
     [JsonPropertyName("enableSignalRNotifications")]
     [SettingDisplay(Name = "Enable SignalR Notifications", Description = "Send real-time notifications when maintenance alerts are created", InputType = SettingInputType.Boolean)]
     public bool EnableSignalRNotifications { get; set; } = true;
+
+    /// <summary>
+    /// Whether to show alerts when printers go offline in the dashboard.
+    /// When disabled, offline printers will not be shown in the Alerts panel.
+    /// </summary>
+    [JsonPropertyName("showOfflinePrinterAlerts")]
+    [SettingDisplay(Name = "Show Offline Printer Alerts", Description = "Display alerts in the dashboard when printers are offline", InputType = SettingInputType.Boolean)]
+    public bool ShowOfflinePrinterAlerts { get; set; } = true;
 }

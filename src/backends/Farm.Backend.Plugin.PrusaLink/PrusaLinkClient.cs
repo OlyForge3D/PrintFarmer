@@ -16,7 +16,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFileUpload,
     ISupportsStartPrint,
     ISupportsCamera,
-    ISupportsPrinterInformation
+    ISupportsPrinterInformation,
+    ISupportsControlOperations
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly IUnifiedLoggingService? _logger;
@@ -174,7 +175,6 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             Backend: PrinterBackend.PrusaLink,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
@@ -529,6 +529,12 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
+    public Task<bool> StopPrintAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return StopPrintAsync(baseUrl.ToString(), apiKey, ct);
+    }
+
     public async Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
         try
@@ -712,6 +718,27 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             return new StandardPrinterInfo { Name = "Unknown", Firmware = "Unknown", Model = "Unknown" };
         }
     }
+
+    /// <summary>
+    /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
+    /// PrusaLink supports job cancel via StopPrintAsync. Pause/Resume are not fully supported.
+    /// </summary>
+    public async Task<bool> PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        // PrusaLink doesn't have a dedicated pause API - would need to send M25 via G-code if supported
+        _logger?.LogWarning($"[PrusaLink] Pause not supported for PrusaLink printers at {baseUrl}");
+        return false;
+    }
+
+    public async Task<bool> ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        // PrusaLink doesn't have a dedicated resume API - would need to send M24 via G-code if supported
+        _logger?.LogWarning($"[PrusaLink] Resume not supported for PrusaLink printers at {baseUrl}");
+        return false;
+    }
+
+    public async Task<bool> CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await StopPrintAsync(baseUrl, apiKey, ct);
 }
 
 #pragma warning restore CS1066

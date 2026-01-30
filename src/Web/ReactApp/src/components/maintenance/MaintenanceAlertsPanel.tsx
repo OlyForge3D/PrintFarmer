@@ -3,11 +3,12 @@
 // Dashboard widget showing active maintenance alerts across all printers
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { maintenanceService } from '@/services/maintenanceService';
 import { maintenanceSignalRService } from '@/services/maintenance-signalr';
 import type { MaintenanceAlert } from '@/types/maintenance';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
+import { Button } from '@/common/components/ui';
 
 /**
  * Props for MaintenanceAlertsPanel component
@@ -35,35 +36,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load alerts on mount and when printerId changes
-  useEffect(() => {
-    loadAlerts();
-  }, [printerId]);
-
-  // Subscribe to real-time alert updates
-  useEffect(() => {
-    // Connect to SignalR hub
-    maintenanceSignalRService.start().catch(err => {
-      console.error('[MaintenanceAlertsPanel] Failed to connect to SignalR:', err);
-    });
-
-    // Register event handlers
-    const unsubscribeCreated = maintenanceSignalRService.onAlertCreated(() => {
-      loadAlerts(); // Reload alerts when new one is created
-    });
-
-    const unsubscribeStatusChanged = maintenanceSignalRService.onAlertStatusChanged(() => {
-      loadAlerts(); // Reload alerts when status changes
-    });
-
-    // Cleanup on unmount
-    return () => {
-      unsubscribeCreated();
-      unsubscribeStatusChanged();
-    };
-  }, [printerId]);
-
-  const loadAlerts = async () => {
+  const loadAlerts = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -93,7 +66,35 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [printerId, maxAlerts]);
+
+  // Load alerts on mount and when printerId changes
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
+
+  // Subscribe to real-time alert updates
+  useEffect(() => {
+    // Connect to SignalR hub
+    maintenanceSignalRService.start().catch(err => {
+      console.error('[MaintenanceAlertsPanel] Failed to connect to SignalR:', err);
+    });
+
+    // Register event handlers
+    const unsubscribeCreated = maintenanceSignalRService.onAlertCreated(() => {
+      loadAlerts(); // Reload alerts when new one is created
+    });
+
+    const unsubscribeStatusChanged = maintenanceSignalRService.onAlertStatusChanged(() => {
+      loadAlerts(); // Reload alerts when status changes
+    });
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribeCreated();
+      unsubscribeStatusChanged();
+    };
+  }, [loadAlerts]);
 
   const getSeverityColor = (severity: number): string => {
     switch (severity) {
@@ -144,12 +145,13 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <p className="text-red-800">Error: {error}</p>
-          <button
+          <Button
+            variant="link"
             onClick={loadAlerts}
-            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+            className="mt-2 text-sm text-red-600 hover:text-red-800"
           >
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -238,9 +240,9 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
       {alerts.length > 0 && maxAlerts < alerts.length && (
         <div className="mt-3 text-center">
-          <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+          <Button variant="link" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
             View all alerts →
-          </button>
+          </Button>
         </div>
       )}
     </div>

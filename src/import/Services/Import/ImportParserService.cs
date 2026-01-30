@@ -6,14 +6,14 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Importing.Services.Import;
 
 public class ImportParserService : IImportParserService
 {
-    public async Task<(CreatePrinterDto[] Dtos, List<string> Errors)> ParseCsvAsync(Stream stream, CancellationToken ct)
+    public async Task<(CreatePrinterFromDiscoveryDto[] Dtos, List<string> Errors)> ParseCsvAsync(Stream stream, CancellationToken ct)
     {
         List<string> errors = new();
         using StreamReader reader = new(stream);
@@ -22,7 +22,7 @@ public class ImportParserService : IImportParserService
         if (lines.Length < 2)
         {
             errors.Add("CSV must contain header and at least one row");
-            return (Array.Empty<CreatePrinterDto>(), errors);
+            return (Array.Empty<CreatePrinterFromDiscoveryDto>(), errors);
         }
 
         string[] header = lines[0].Split(',').Select(h => h.Trim()).ToArray();
@@ -32,13 +32,13 @@ public class ImportParserService : IImportParserService
             headerMap[header[i]] = i;
         }
 
-        var dtos = new List<CreatePrinterDto>();
+        var dtos = new List<CreatePrinterFromDiscoveryDto>();
         for (int i = 1; i < lines.Length; i++)
         {
             try
             {
                 string[] values = ParseCsvLine(lines[i]);
-                CreatePrinterDto dto = new();
+                CreatePrinterFromDiscoveryDto dto = new();
                 string GetCol(string name)
                 {
                     if (!headerMap.TryGetValue(name, out var idx))
@@ -55,7 +55,12 @@ public class ImportParserService : IImportParserService
                 }
 
                 dto.Name = GetCol("Name");
-                dto.ServerUrl = GetCol("ServerUrl");
+
+                // IpAddress is the required column for CSV import (matches discovery DTOs)
+                string ipAddress = GetCol("IpAddress");
+                dto.IpAddress = ipAddress;
+                dto.ServerUrl = $"http://{ipAddress}";
+
                 dto.OriginalServerUrl = string.IsNullOrWhiteSpace(GetCol("OriginalServerUrl")) ? null : GetCol("OriginalServerUrl");
                 dto.Notes = string.IsNullOrWhiteSpace(GetCol("Notes")) ? null : GetCol("Notes");
                 dto.NewManufacturerName = string.IsNullOrWhiteSpace(GetCol("ManufacturerName")) ? null : GetCol("ManufacturerName");
@@ -76,18 +81,18 @@ public class ImportParserService : IImportParserService
         return (dtos.ToArray(), errors);
     }
 
-    public async Task<(CreatePrinterDto[] Dtos, List<string> Errors)> ParseJsonAsync(Stream stream, CancellationToken ct)
+    public async Task<(CreatePrinterFromDiscoveryDto[] Dtos, List<string> Errors)> ParseJsonAsync(Stream stream, CancellationToken ct)
     {
         using StreamReader reader = new(stream);
         string json = await reader.ReadToEndAsync(ct);
         try
         {
-            var dtos = JsonSerializer.Deserialize<CreatePrinterDto[]>(json, ImportJsonOptions.Default) ?? Array.Empty<CreatePrinterDto>();
+            var dtos = JsonSerializer.Deserialize<CreatePrinterFromDiscoveryDto[]>(json, ImportJsonOptions.Default) ?? Array.Empty<CreatePrinterFromDiscoveryDto>();
             return (dtos, new List<string>());
         }
         catch (JsonException ex)
         {
-            return (Array.Empty<CreatePrinterDto>(), new List<string> { ex.Message });
+            return (Array.Empty<CreatePrinterFromDiscoveryDto>(), new List<string> { ex.Message });
         }
     }
 

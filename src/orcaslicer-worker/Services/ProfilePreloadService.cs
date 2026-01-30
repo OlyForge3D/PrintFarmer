@@ -42,8 +42,22 @@ public class ProfilePreloadService(
     {
         try
         {
-            _logger.LogInformation("Starting OrcaSlicer profile preload for catalog manufacturers...");
+            _logger.LogInformation("Starting OrcaSlicer profile preload...");
             Stopwatch stopwatch = Stopwatch.StartNew();
+
+            // If using cached service, initialize the SQLite cache first
+            if (_profileService is CachedOrcaProfilesService cachedService)
+            {
+                _logger.LogInformation("Initializing SQLite profile cache...");
+                await cachedService.InitializeAsync(ct);
+                (int m, int f, int p) = await cachedService.GetCacheStatsAsync(ct);
+                stopwatch.Stop();
+                _logger.LogInformation($"SQLite cache ready in {stopwatch.ElapsedMilliseconds}ms: {m} machines, {f} filaments, {p} processes");
+                return;
+            }
+
+            // Fallback for non-cached service (original behavior)
+            _logger.LogInformation("Using non-cached profile service, loading all profiles...");
 
             // First load all machines to get the list of available manufacturers
             Stopwatch machineStart = Stopwatch.StartNew();

@@ -161,7 +161,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             }
 
             // If no printer hours data, estimate from time between maintenances (assuming 8 hours printing per day)
-            if (avgLifespanHours == 0 && componentGroup.Logs.Count >= 2)
+            if (avgLifespanHours <= 0.001 && componentGroup.Logs.Count >= 2)
             {
                 var sortedLogs = componentGroup.Logs.OrderBy(l => l.PerformedAt).ToList();
                 var daysBetween = new List<double>();

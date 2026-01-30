@@ -74,15 +74,19 @@ if (typeof document !== 'undefined') {
 
 interface PrinterDetailsSidebarProps {
   printerId: string | null;
+  /** Optional printer object - if provided, skips API fetch (useful when parent already has data) */
+  printer?: Printer;
   onClose: () => void;
 }
 
-export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
-  // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
-  const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
-  // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay((apiPrinter || {}) as Printer);
+  // Only fetch if printer prop is not provided
+  const shouldFetch = !printerProp && !!printerId;
+  const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+  // Use provided printer or fall back to API data, merged with realtime SignalR updates
+  const basePrinter = printerProp || apiPrinter;
+  const printer = usePrinterDisplay((basePrinter || {}) as Printer);
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);

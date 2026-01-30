@@ -44,6 +44,11 @@ public sealed class PrusaLinkPollingService(
 
         public string? LastKnownState { get; set; }
 
+        /// <summary>
+        /// Previous state before the last update, used for detecting print completion transitions.
+        /// </summary>
+        public string? PreviousState { get; set; }
+
         public double? LastKnownProgress { get; set; }
 
         public string? LastKnownJobName { get; set; }
@@ -205,11 +210,23 @@ public sealed class PrusaLinkPollingService(
                         || progressChanged
                         || state.LastKnownJobName != status.JobName;
 
+                    // Check for state transition from printing to idle/finished for job completion sync
+                    string? previousState = state.LastKnownState;
+                    bool stateChanged = status.State != previousState;
+
+                    // Update state tracking (including PreviousState for transition detection)
+                    state.PreviousState = previousState;
                     state.LastKnownIsOnline = status.IsOnline;
                     state.LastKnownState = status.State;
                     state.LastKnownProgress = status.Progress;
                     state.LastKnownJobName = status.JobName;
                     state.ConsecutiveFailures = 0;
+
+                    // Check for print completion/failure transitions
+                    if (stateChanged && previousState != null)
+                    {
+                        await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State!, ct);
+                    }
 
                     // Broadcast update via SignalR using PrinterStatusDto
                     var update = new PrinterStatusDto(
@@ -306,5 +323,50 @@ public sealed class PrusaLinkPollingService(
         using IServiceScope scope = _scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
         return await unitOfWork.Printers.FindByIdAsync(printerId, ct);
+    }
+
+    /// <summary>
+    /// Checks for print completion/failure state transitions and synchronizes job status in database.
+    /// Called when printer state changes from "printing" to idle/finished (completion) or error (failure).
+    /// </summary>
+    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    {
+        try
+        {
+            // Only act on transitions FROM "printing" state
+            if (!PrintJobCompletionService.IsPrintingState(previousState))
+            {
+                return;
+            }
+
+            _logger.LogInformation($"[PrusaLinkPollingService] Detected state transition for printer {printerId}: {previousState} -> {newState}");
+
+            // Create a new scope to get the scoped service
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IPrintJobCompletionService completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
+
+            if (PrintJobCompletionService.IsCompletionState(newState))
+            {
+                // Print completed successfully
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                if (marked)
+                {
+                    _logger.LogInformation($"[PrusaLinkPollingService] Print job marked as completed for printer {printerId}");
+                }
+            }
+            else if (PrintJobCompletionService.IsFailureState(newState))
+            {
+                // Print failed
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                if (marked)
+                {
+                    _logger.LogWarning($"[PrusaLinkPollingService] Print job marked as failed for printer {printerId} (state: {newState})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrusaLinkPollingService] Failed to sync job completion for printer {printerId}");
+        }
     }
 }

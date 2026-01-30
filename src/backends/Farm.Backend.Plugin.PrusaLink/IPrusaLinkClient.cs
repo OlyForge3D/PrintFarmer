@@ -12,7 +12,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// Interface for PrusaLink client providing communication with Prusa printers via PrusaLink API.
 /// Supports printer status monitoring, job control, file management, and basic printer operations.
 /// </summary>
-public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint
+public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations
 {
     /// <summary>
     /// Gets comprehensive status information combining printer state, job progress, and camera information.
@@ -94,6 +94,17 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
 
     Task<bool> StartPrintAsync(Uri baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stops (cancels) the current print job on the PrusaLink printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the PrusaLink server</param>
+    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the stop command was successfully sent</returns>
+    Task<bool> StopPrintAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    Task<bool> StopPrintAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a list of G-code file names available on the PrusaLink printer.

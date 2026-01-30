@@ -1,10 +1,10 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
+import { TasksBadge } from '@/features/tasks';
 import { useTheme, Theme } from '@/contexts/ThemeContext';
 import { Button } from '@/common/components/ui';
 import { 
-  CloseIcon, 
   HomeIcon,
   PrinterIcon,
   LayersIcon,
@@ -25,9 +25,11 @@ import {
   LocationIcon,
   KeyIcon,
   DatabaseIcon,
-  CheckIcon
+  CheckIcon,
+  CameraIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useSlicer } from '@/hooks/useSlicer';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -42,6 +44,7 @@ interface NavigationItem {
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: { resource: string; action: string };
   requiredRole?: string;
+  requiresSlicer?: boolean;
   children?: NavigationItem[];
   isDivider?: false;
 }
@@ -73,7 +76,8 @@ const navigation: NavigationElement[] = [
     name: 'Slice',
     href: '/jobs/new',
     icon: BoxIcon,
-    requiredPermission: { resource: 'models', action: 'read' }
+    requiredPermission: { resource: 'models', action: 'read' },
+    requiresSlicer: true
   },
   {
     name: 'Print Queue',
@@ -85,6 +89,11 @@ const navigation: NavigationElement[] = [
     name: 'Spools', 
     href: '/spools', 
     icon: SpoolIcon
+  },
+  {
+    name: 'Cameras',
+    href: '/cameras',
+    icon: CameraIcon
   },
   {
     name: 'Maintenance',
@@ -124,16 +133,24 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
+    name: 'Camera Admin',
+    href: '/admin/cameras',
+    icon: CameraIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,
-    requiredRole: 'farm_admin'
+    requiredRole: 'farm_admin',
+    requiresSlicer: true
   },
   {
     name: 'Slicer Profiles',
     href: '/admin/slicer-profiles',
     icon: SettingsIcon,
-    requiredRole: 'farm_admin'
+    requiredRole: 'farm_admin',
+    requiresSlicer: true
   },
   {
     name: 'System',
@@ -158,6 +175,7 @@ const navigation: NavigationElement[] = [
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const { isSlicerAvailable } = useSlicer();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
@@ -198,12 +216,13 @@ export function Layout() {
     localStorage.setItem('pf_navbar_collapsed', JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
-  // Filter navigation based on user permissions (stable memoization)
+  // Filter navigation based on user permissions and slicer availability (stable memoization)
   const filteredNavigation = useMemo(() => {
     if (!isAuthenticated) {
       // For non-authenticated users, show only public navigation (including dividers)
       return navigation.filter(item => {
         if (isDivider(item)) return true; // Always show dividers
+        if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
@@ -212,9 +231,10 @@ export function Layout() {
       if (isDivider(item)) return true; // Always show dividers
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+      if (item.requiresSlicer && !isSlicerAvailable) return false;
       return true;
     });
-  }, [isAuthenticated, hasRole, hasPermission]); // Include all dependencies
+  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable]); // Include all dependencies
 
   const handleLogout = async () => {
     await logout();
@@ -364,15 +384,15 @@ export function Layout() {
         <div className="flex items-center justify-between h-12 px-3">
           {/* Left side - App branding */}
           <div className="flex items-center space-x-4">
-            {/* Mobile menu button */}
+            {/* Mobile menu button - toggles sidebar */}
             <Button
               type="button"
-              aria-label="Open navigation menu"
-              title="Open navigation menu"
+              aria-label={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
+              title={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
               variant="subtle"
               size="sm"
               className="lg:hidden"
-              onClick={() => setSidebarOpen(true)}
+              onClick={() => setSidebarOpen(prev => !prev)}
             >
               <MenuIcon className="h-5 w-5" />
             </Button>
@@ -401,6 +421,9 @@ export function Layout() {
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
+
+            {/* Pending Tasks Badge */}
+            {isAuthenticated && <TasksBadge />}
 
             {/* User menu */}
             <div className="relative">
@@ -493,11 +516,11 @@ export function Layout() {
                         { value: 'printfarmer-dark' as Theme, label: 'PrintFarmer Dark', desc: 'Original dark theme' },
                         { value: 'light' as Theme, label: 'Light', desc: 'Light theme for bright environments' },
                       ]).map((t) => (
-                        <button
+                        <Button
                           key={t.value}
-                          type="button"
+                          variant="subtle"
                           onClick={() => setTheme(t.value)}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-pf-bg-2 flex items-center gap-2 ${
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-pf-bg-2 flex items-center gap-2 justify-start ${
                             theme === t.value ? 'text-pf-accent' : 'text-pf-text-primary'
                           }`}
                         >
@@ -508,7 +531,7 @@ export function Layout() {
                           {theme === t.value && (
                             <CheckIcon className="h-4 w-4 text-pf-accent flex-shrink-0" />
                           )}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </div>
@@ -522,29 +545,19 @@ export function Layout() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
-          <div className="fixed inset-0 z-40 lg:hidden">
-            <div className="fixed inset-0 bg-black bg-opacity-75" onClick={() => setSidebarOpen(false)} />
-            <div className="relative flex w-full max-w-xs flex-1 flex-col bg-pf-bg-1 border-r border-pf-border h-full">
-              <div className="absolute top-0 right-0 -mr-12 pt-2">
-                <Button
-                  type="button"
-                  aria-label="Close navigation menu"
-                  title="Close navigation menu"
-                  variant="subtle"
-                  size="sm"
-                  className="ml-1 !p-2 h-10 w-10"
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <CloseIcon className="h-6 w-6" />
-                </Button>
-              </div>
-
-              <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+          <div className="fixed inset-x-0 top-12 bottom-0 z-40 lg:hidden flex">
+            {/* Backdrop - starts below header so hamburger button remains clickable */}
+            <div className="fixed inset-x-0 top-12 bottom-0 bg-black bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+            
+            {/* Sidebar panel - matches desktop sidebar exactly */}
+            <div className="relative flex flex-col w-56 bg-pf-bg-1 border-r border-pf-border z-10 h-full">
+              {/* Navigation - identical to desktop */}
+              <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
                 {filteredNavigation.map(item => {
                   // Handle dividers
                   if (isDivider(item)) {
                     return (
-                      <div key={`divider-${item.name || Math.random()}`} className="my-2">
+                      <div key={`divider-${item.name || Math.random()}`} className="my-1.5">
                         <div className="border-t border-pf-border"></div>
                       </div>
                     );
@@ -556,23 +569,23 @@ export function Layout() {
                   
                   const hasChildren = !!navItem.children?.length;
                   return (
-                    <div key={navItem.name} className="flex flex-col">
+                    <div key={navItem.name} className="flex flex-col relative">
                       {hasChildren ? (
                         <details open={isExpanded} className="group">
                           <summary
-                            className={`flex items-center px-3 py-2 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                            className="flex items-center px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2"
                             onClick={e => {
-                              e.preventDefault(); // Prevent native toggle
+                              e.preventDefault();
                               toggleExpand(navItem.name);
                             }}
                             tabIndex={0}
                             role="button"
                           >
-                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                            <span className="flex-1 text-left">{navItem.name}</span>
+                            <Icon className="h-5 w-5 flex-shrink-0" />
+                            <span className="flex-1 text-left ml-3">{navItem.name}</span>
                             <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
                           </summary>
-                          <div className="ml-8 space-y-1 mt-1">
+                          <div className="ml-6 space-y-0.5 mt-0.5">
                             {navItem.children!.map((child: NavigationItem) => {
                               const ChildIcon = child.icon;
                               return (
@@ -586,7 +599,7 @@ export function Layout() {
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                     }`
                                   }
-                                  end={child.href === '/harvest'} // Exact match for parent routes
+                                  end={child.href === '/harvest'}
                                 >
                                   <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
                                   {child.name}
@@ -597,17 +610,17 @@ export function Layout() {
                         </details>
                       ) : (
                         <NavLink
-                          to={item.href}
+                          to={navItem.href}
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
-                            `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                            `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                               ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                             }`
                           }
                         >
-                          <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                          <span className="flex-1 text-left">{item.name}</span>
+                          <Icon className="h-5 w-5 flex-shrink-0" />
+                          <span className="flex-1 text-left ml-3">{navItem.name}</span>
                         </NavLink>
                       )}
                     </div>

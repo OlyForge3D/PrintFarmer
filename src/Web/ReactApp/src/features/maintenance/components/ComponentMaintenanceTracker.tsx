@@ -15,7 +15,7 @@ import {
   ClockIcon,
   TagIcon
 } from '@/common/components/icons/MdiIcons';
-import { Badge } from '@/common/components/ui';
+import { Badge, Button } from '@/common/components/ui';
 import type { ComponentMaintenanceData } from '../hooks/useComponentMaintenance';
 
 export interface ComponentMaintenanceTrackerProps {
@@ -58,16 +58,16 @@ function ComponentCard({ data, isSelected, onSelect }: ComponentCardProps) {
   const colorClass = getComponentColor(data);
 
   return (
-    <button
+    <Button
+      variant={isSelected ? 'tab' : 'subtle'}
       type="button"
       onClick={onSelect}
       className={`
-        w-full text-left p-4 rounded-xl border transition-all duration-150
+        w-full text-left p-4 rounded-xl transition-all duration-150
         ${isSelected 
-          ? 'bg-pf-accent/10 border-pf-accent ring-2 ring-pf-accent/30' 
-          : 'bg-pf-bg-1 border-pf-border hover:bg-pf-border/30 hover:border-pf-text-tertiary'
+          ? 'bg-pf-accent/10 ring-2 ring-pf-accent/30' 
+          : 'bg-pf-bg-1 hover:bg-pf-border/30'
         }
-        focus:outline-none focus:ring-2 focus:ring-pf-accent
       `}
     >
       <div className="flex items-start gap-3">
@@ -131,7 +131,7 @@ function ComponentCard({ data, isSelected, onSelect }: ComponentCardProps) {
           )}
         </div>
       </div>
-    </button>
+    </Button>
   );
 }
 

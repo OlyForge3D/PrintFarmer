@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Repositories.Cameras;
 using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
@@ -31,6 +32,12 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     /// Repository for G-code file persistence and retrieval operations.
     /// </summary>
     IGcodeRepository GcodeFiles { get; }
+
+    /// <summary>
+    /// Repository for standalone camera persistence and retrieval.
+    /// Cameras not attached to printers, managed separately.
+    /// </summary>
+    ICameraRepository Cameras { get; }
 
     /// <summary>
     /// Repository for harvest operation and discovered file persistence and retrieval.

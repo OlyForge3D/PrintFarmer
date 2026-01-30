@@ -12,7 +12,7 @@ namespace Farm.Backend.Plugin.OctoPrint
     /// Interface for OctoPrint client providing communication with OctoPrint 3D printer management servers.
     /// Supports printer status monitoring, job control, file management, temperature control, and system operations.
     /// </summary>
-    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload
+    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload, ISupportsControlOperations
     {
         /// <summary>
         /// Tests the connection to an OctoPrint server.
@@ -54,6 +54,22 @@ namespace Farm.Backend.Plugin.OctoPrint
         /// <param name="apiKey">OctoPrint API key.</param>
         /// <returns>True if successful; otherwise false.</returns>
         Task<bool> CancelJobAsync(string baseUrl, string apiKey);
+
+        /// <summary>
+        /// Pauses the current print job.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>True if successful; otherwise false.</returns>
+        Task<bool> PauseJobAsync(string baseUrl, string apiKey);
+
+        /// <summary>
+        /// Resumes a paused print job.
+        /// </summary>
+        /// <param name="baseUrl">Base URL of OctoPrint server.</param>
+        /// <param name="apiKey">OctoPrint API key.</param>
+        /// <returns>True if successful; otherwise false.</returns>
+        Task<bool> ResumeJobAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Gets the camera stream URL from OctoPrint webcam configuration.

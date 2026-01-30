@@ -47,6 +47,8 @@ services:
       - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+      # DevMode: Set to true to bypass auth for GET requests (debugging only!)
+      - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
     volumes:

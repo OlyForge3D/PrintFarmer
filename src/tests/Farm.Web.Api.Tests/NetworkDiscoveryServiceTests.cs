@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
 

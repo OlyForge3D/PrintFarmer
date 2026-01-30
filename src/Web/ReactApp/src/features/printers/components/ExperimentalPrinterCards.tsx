@@ -230,9 +230,9 @@ export function SegmentedCard({ printer: initialPrinter }: Omit<CardProps, 'onEd
               )}
               {section === 'control' && (
                 <div className="flex gap-2 justify-center py-2">
-                  <Button variant="secondary" size="sm" disabled={!isPrinting}><PauseIcon className="w-4 h-4" /></Button>
-                  <Button variant="success" size="sm" disabled={!isOnline}><PlayIcon className="w-4 h-4" /></Button>
-                  <Button variant="danger" size="sm" disabled={!isOnline}><EmergencyStopIcon className="w-4 h-4" /></Button>
+                  <Button variant="secondary" size="sm" disabled={!isPrinting} iconCenter={<PauseIcon className="w-4 h-4" />} />
+                  <Button variant="success" size="sm" disabled={!isOnline} iconCenter={<PlayIcon className="w-4 h-4" />} />
+                  <Button variant="danger" size="sm" disabled={!isOnline} iconCenter={<EmergencyStopIcon className="w-4 h-4" />} />
                 </div>
               )}
             </div>
@@ -351,11 +351,9 @@ export function StatusGlowCard({ printer: initialPrinter, onEdit }: CardProps) {
 
         {/* Quick actions */}
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" className="flex-1" onClick={() => onEdit?.(printer)}>
-            <EditIcon className="w-4 h-4" />
-          </Button>
-          <Button variant="secondary" size="sm"><ExternalLinkIcon className="w-4 h-4" /></Button>
-          <Button variant="secondary" size="sm"><CameraIcon className="w-4 h-4" /></Button>
+          <Button variant="secondary" size="sm" className="flex-1" onClick={() => onEdit?.(printer)} iconCenter={<EditIcon className="w-4 h-4" />} />
+          <Button variant="secondary" size="sm" iconCenter={<ExternalLinkIcon className="w-4 h-4" />} />
+          <Button variant="secondary" size="sm" iconCenter={<CameraIcon className="w-4 h-4" />} />
         </div>
       </div>
     </div>
@@ -443,7 +441,7 @@ export function CompactDashboardCard({ printer: initialPrinter, onEdit }: CardPr
       {/* Compact action bar */}
       <div className="flex gap-1">
         <Button variant="secondary" size="sm" className="flex-1 !text-xs !py-1" onClick={() => onEdit?.(printer)}>Edit</Button>
-        <Button variant="secondary" size="sm" className="!py-1"><ExternalLinkIcon className="w-3 h-3" /></Button>
+        <Button variant="secondary" size="sm" className="!py-1" iconCenter={<ExternalLinkIcon className="w-3 h-3" />} />
       </div>
     </div>
   );
@@ -537,14 +535,14 @@ export function FlipCard({ printer: initialPrinter, onEdit }: CardProps) {
 
               <div className="text-xs text-pf-text-secondary uppercase font-bold mt-2">Control</div>
               <div className="grid grid-cols-3 gap-2">
-                <Button variant="secondary" size="sm" disabled={!isPrinting}><PauseIcon className="w-4 h-4" /></Button>
-                <Button variant="success" size="sm" disabled={!isOnline}><PlayIcon className="w-4 h-4" /></Button>
-                <Button variant="danger" size="sm" disabled={!isOnline}><EmergencyStopIcon className="w-4 h-4" /></Button>
+                <Button variant="secondary" size="sm" disabled={!isPrinting} iconCenter={<PauseIcon className="w-4 h-4" />} />
+                <Button variant="success" size="sm" disabled={!isOnline} iconCenter={<PlayIcon className="w-4 h-4" />} />
+                <Button variant="danger" size="sm" disabled={!isOnline} iconCenter={<EmergencyStopIcon className="w-4 h-4" />} />
               </div>
             </div>
 
-            <Button variant="secondary" size="sm" className="mt-2" onClick={(e) => { e.stopPropagation(); onEdit?.(printer); }}>
-              <EditIcon className="w-4 h-4 mr-1" /> Edit Printer
+            <Button variant="secondary" size="sm" className="mt-2" onClick={(e) => { e.stopPropagation(); onEdit?.(printer); }} iconLeft={<EditIcon className="w-4 h-4" />}>
+              Edit Printer
             </Button>
           </div>
         </div>
@@ -618,7 +616,7 @@ export function DrawerCard({ printer: initialPrinter, onEdit }: CardProps) {
               <Button variant="secondary" size="sm">PLA (200/60)</Button>
               <Button variant="secondary" size="sm">PETG (240/80)</Button>
               <Button variant="secondary" size="sm">ABS (250/100)</Button>
-              <Button variant="secondary" size="sm"><SnowflakeIcon className="w-4 h-4" /></Button>
+              <Button variant="secondary" size="sm" iconCenter={<SnowflakeIcon className="w-4 h-4" />} />
             </div>
           </div>
 
@@ -626,15 +624,13 @@ export function DrawerCard({ printer: initialPrinter, onEdit }: CardProps) {
           <div className="mb-4">
             <div className="text-xs text-pf-text-secondary uppercase font-bold mb-2">Print Control</div>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" disabled={!isPrinting} className="flex-1">
-                <PauseIcon className="w-4 h-4 mr-1" /> Pause
+              <Button variant="secondary" size="sm" disabled={!isPrinting} className="flex-1" iconLeft={<PauseIcon className="w-4 h-4" />}>
+                Pause
               </Button>
-              <Button variant="success" size="sm" disabled={!isOnline} className="flex-1">
-                <PlayIcon className="w-4 h-4 mr-1" /> Resume
+              <Button variant="success" size="sm" disabled={!isOnline} className="flex-1" iconLeft={<PlayIcon className="w-4 h-4" />}>
+                Resume
               </Button>
-              <Button variant="danger" size="sm" disabled={!isOnline}>
-                <EmergencyStopIcon className="w-4 h-4" />
-              </Button>
+              <Button variant="danger" size="sm" disabled={!isOnline} iconCenter={<EmergencyStopIcon className="w-4 h-4" />} />
             </div>
           </div>
 
