@@ -111,15 +111,55 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   outerWallSpeed: number;
   innerWallSpeed: number;
   infillSpeed: number;
+  sparseInfillSpeed: number;
+  solidInfillSpeed: number;
   topSurfaceSpeed: number;
   travelSpeed: number;
   firstLayerSpeed: number;
+  
+  // Acceleration & jerk
+  outerWallAcceleration: number;
+  innerWallAcceleration: number;
+  topSurfaceAcceleration: number;
+  infillAcceleration: number;
+  travelAcceleration: number;
+  defaultAcceleration: number;
   
   // Temperature
   nozzleTemp: number;
   bedTemp: number;
   firstLayerNozzleTemp: number;
   firstLayerBedTemp: number;
+  
+  // Retraction settings
+  retractionLength: number;        // mm
+  retractionSpeed: number;         // mm/s
+  detractionSpeed: number;         // mm/s
+  retractionMinimumTravel: number; // mm
+  retractOnLayerChange: boolean;
+  wipeBeforeRetract: boolean;
+  retractionLiftZ: number;         // mm - Z hop
+  
+  // Cooling settings
+  enableFanCooling: boolean;
+  minFanSpeed: number;             // 0-100%
+  maxFanSpeed: number;             // 0-100%
+  bridgeFanSpeed: number;          // 0-100%
+  fullFanSpeedAtLayer: number;
+  slowDownForLayerTime: number;    // seconds
+  minPrintSpeed: number;           // mm/s when slowing for cooling
+  
+  // Ironing settings
+  enableIroning: boolean;
+  ironingPattern: 'zigzag' | 'concentric';
+  ironingFlowRate: number;         // % of normal flow
+  ironingSpacing: number;          // mm
+  ironingSpeed: number;            // mm/s
+  ironingAngle: number;            // degrees
+  
+  // Strength settings
+  infillOverlap: number;           // %
+  infillAnchorMaxLength: number;   // mm
   
   // Support settings (when enabled)
   supportType: SupportType;
@@ -128,6 +168,8 @@ export interface AdvancedSlicerSettings extends SimpleSlicerSettings {
   supportTopZDistance: number;
   supportBottomZDistance: number;
   supportInterfaceLayers: number;
+  supportXYDistance: number;
+  supportBaseInterfaceLayers: number;
 }
 
 /** Default values for basic settings */
@@ -236,15 +278,25 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   wallCount: 'strength',
   topLayers: 'strength',
   bottomLayers: 'strength',
+  infillOverlap: 'strength',
+  infillAnchorMaxLength: 'strength',
   
   // Speed tab
   printSpeed: 'speed',
   outerWallSpeed: 'speed',
   innerWallSpeed: 'speed',
   infillSpeed: 'speed',
+  sparseInfillSpeed: 'speed',
+  solidInfillSpeed: 'speed',
   topSurfaceSpeed: 'speed',
   travelSpeed: 'speed',
   firstLayerSpeed: 'speed',
+  outerWallAcceleration: 'speed',
+  innerWallAcceleration: 'speed',
+  topSurfaceAcceleration: 'speed',
+  infillAcceleration: 'speed',
+  travelAcceleration: 'speed',
+  defaultAcceleration: 'speed',
   
   // Support tab
   enableSupports: 'support',
@@ -254,13 +306,41 @@ export const SETTING_TO_CATEGORY_MAP: Record<string, SettingsCategory> = {
   supportTopZDistance: 'support',
   supportBottomZDistance: 'support',
   supportInterfaceLayers: 'support',
+  supportXYDistance: 'support',
+  supportBaseInterfaceLayers: 'support',
   bedAdhesion: 'support',
   
-  // Other tab
+  // Other tab - Temperature
   nozzleTemp: 'other',
   bedTemp: 'other',
   firstLayerNozzleTemp: 'other',
   firstLayerBedTemp: 'other',
+  
+  // Other tab - Retraction
+  retractionLength: 'other',
+  retractionSpeed: 'other',
+  detractionSpeed: 'other',
+  retractionMinimumTravel: 'other',
+  retractOnLayerChange: 'other',
+  wipeBeforeRetract: 'other',
+  retractionLiftZ: 'other',
+  
+  // Other tab - Cooling
+  enableFanCooling: 'other',
+  minFanSpeed: 'other',
+  maxFanSpeed: 'other',
+  bridgeFanSpeed: 'other',
+  fullFanSpeedAtLayer: 'other',
+  slowDownForLayerTime: 'other',
+  minPrintSpeed: 'other',
+  
+  // Other tab - Ironing
+  enableIroning: 'other',
+  ironingPattern: 'other',
+  ironingFlowRate: 'other',
+  ironingSpacing: 'other',
+  ironingSpeed: 'other',
+  ironingAngle: 'other',
 };
 
 /**

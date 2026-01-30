@@ -131,3 +131,59 @@ export const HelpIcon: React.FC<IconProps> = ({ className = 'w-4 h-4' }) => (
     <circle cx="12" cy="17" r="1" fill="currentColor" />
   </svg>
 );
+
+/** Retraction icon - shows filament being pulled back */
+export const RetractionIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M12 3v14" strokeLinecap="round" />
+    <path d="M8 7l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" />
+    <rect x="8" y="17" width="8" height="4" rx="1" fill="currentColor" opacity="0.3" />
+    <path d="M10 19h4" />
+  </svg>
+);
+
+/** Cooling fan icon */
+export const CoolingIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 9c0-3.3 2.7-6 6-6-.5 2-.5 4 0 6" />
+    <path d="M12 9c-3.3 0-6-2.7-6-6 2 .5 4 .5 6 0" />
+    <path d="M12 15c0 3.3-2.7 6-6 6 .5-2 .5-4 0-6" />
+    <path d="M12 15c3.3 0 6 2.7 6 6-2-.5-4-.5-6 0" />
+    <path d="M9 12c-3.3 0-6 2.7-6 6 2-.5 4-.5 6 0" />
+    <path d="M15 12c3.3 0 6-2.7 6-6-2 .5-4 .5-6 0" />
+  </svg>
+);
+
+/** Ironing icon - smoothing top surface */
+export const IroningIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M3 17h18" />
+    <path d="M5 17l2-8h10l2 8" />
+    <rect x="7" y="11" width="10" height="2" rx="0.5" fill="currentColor" opacity="0.3" />
+    <path d="M12 9V6" />
+    <path d="M10 7l2-1 2 1" />
+  </svg>
+);
+
+/** Acceleration icon - speedometer with arrow */
+export const AccelerationIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M3 12a9 9 0 0 1 18 0" />
+    <path d="M12 12l5-3" strokeLinecap="round" />
+    <circle cx="12" cy="12" r="2" fill="currentColor" />
+    <path d="M6 17h2" />
+    <path d="M16 17h2" />
+    <path d="M12 20v-2" />
+  </svg>
+);
+
+/** Overlap/anchor icon for infill connection */
+export const OverlapIcon: React.FC<IconProps> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="3" y="3" width="10" height="10" rx="1" />
+    <rect x="11" y="11" width="10" height="10" rx="1" />
+    <rect x="11" y="11" width="2" height="2" fill="currentColor" />
+  </svg>
+);
+

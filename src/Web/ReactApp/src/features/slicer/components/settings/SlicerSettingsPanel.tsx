@@ -17,6 +17,11 @@ import {
   SpeedIcon,
   TemperatureIcon,
   PrecisionIcon,
+  RetractionIcon,
+  CoolingIcon,
+  IroningIcon,
+  AccelerationIcon,
+  OverlapIcon,
 } from './SlicerSettingIcons';
 import {
   SettingsViewMode,
@@ -519,12 +524,39 @@ const AdvancedSettings: React.FC<{
             step={1}
             disabled={disabled}
           />
+          <SettingRow
+            type="slider"
+            icon={<OverlapIcon />}
+            label="Infill/Wall Overlap"
+            description="How much infill overlaps with walls"
+            value={settings.infillOverlap ?? 25}
+            onChange={(v) => onUpdate('infillOverlap', v)}
+            min={0}
+            max={100}
+            step={5}
+            unit="%"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<OverlapIcon />}
+            label="Infill Anchor Max Length"
+            description="Maximum length for infill anchors"
+            value={settings.infillAnchorMaxLength ?? 10}
+            onChange={(v) => onUpdate('infillAnchorMaxLength', v)}
+            min={0}
+            max={50}
+            step={1}
+            unit="mm"
+            disabled={disabled}
+          />
         </div>
       );
 
     case 'speed':
       return (
         <div className="divide-y divide-pf-border">
+          {/* Speed Settings */}
           <SettingRow
             type="slider"
             icon={<SpeedIcon />}
@@ -564,11 +596,35 @@ const AdvancedSettings: React.FC<{
           <SettingRow
             type="number"
             icon={<SpeedIcon />}
-            label="Infill Speed"
-            value={settings.infillSpeed ?? 150}
-            onChange={(v) => onUpdate('infillSpeed', v)}
+            label="Sparse Infill Speed"
+            value={settings.sparseInfillSpeed ?? 150}
+            onChange={(v) => onUpdate('sparseInfillSpeed', v)}
             min={10}
             max={300}
+            step={5}
+            unit="mm/s"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<SpeedIcon />}
+            label="Solid Infill Speed"
+            value={settings.solidInfillSpeed ?? 120}
+            onChange={(v) => onUpdate('solidInfillSpeed', v)}
+            min={10}
+            max={300}
+            step={5}
+            unit="mm/s"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<SpeedIcon />}
+            label="Top Surface Speed"
+            value={settings.topSurfaceSpeed ?? 100}
+            onChange={(v) => onUpdate('topSurfaceSpeed', v)}
+            min={10}
+            max={200}
             step={5}
             unit="mm/s"
             disabled={disabled}
@@ -595,6 +651,69 @@ const AdvancedSettings: React.FC<{
             max={60}
             step={5}
             unit="mm/s"
+            disabled={disabled}
+          />
+
+          {/* Acceleration Settings */}
+          <SettingRow
+            type="number"
+            icon={<AccelerationIcon />}
+            label="Default Acceleration"
+            description="Base acceleration for all moves"
+            value={settings.defaultAcceleration ?? 5000}
+            onChange={(v) => onUpdate('defaultAcceleration', v)}
+            min={100}
+            max={20000}
+            step={100}
+            unit="mm/s²"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<AccelerationIcon />}
+            label="Outer Wall Acceleration"
+            value={settings.outerWallAcceleration ?? 2000}
+            onChange={(v) => onUpdate('outerWallAcceleration', v)}
+            min={100}
+            max={10000}
+            step={100}
+            unit="mm/s²"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<AccelerationIcon />}
+            label="Inner Wall Acceleration"
+            value={settings.innerWallAcceleration ?? 5000}
+            onChange={(v) => onUpdate('innerWallAcceleration', v)}
+            min={100}
+            max={20000}
+            step={100}
+            unit="mm/s²"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<AccelerationIcon />}
+            label="Infill Acceleration"
+            value={settings.infillAcceleration ?? 5000}
+            onChange={(v) => onUpdate('infillAcceleration', v)}
+            min={100}
+            max={20000}
+            step={100}
+            unit="mm/s²"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<AccelerationIcon />}
+            label="Travel Acceleration"
+            value={settings.travelAcceleration ?? 10000}
+            onChange={(v) => onUpdate('travelAcceleration', v)}
+            min={100}
+            max={30000}
+            step={100}
+            unit="mm/s²"
             disabled={disabled}
           />
         </div>
@@ -651,6 +770,69 @@ const AdvancedSettings: React.FC<{
                 unit="°"
                 disabled={disabled}
               />
+              <SettingRow
+                type="number"
+                icon={<SupportsIcon />}
+                label="Support Top Z Distance"
+                description="Gap between support and print top"
+                value={settings.supportTopZDistance ?? 0.2}
+                onChange={(v) => onUpdate('supportTopZDistance', v)}
+                min={0}
+                max={1}
+                step={0.05}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SupportsIcon />}
+                label="Support Bottom Z Distance"
+                description="Gap between support and print bottom"
+                value={settings.supportBottomZDistance ?? 0.2}
+                onChange={(v) => onUpdate('supportBottomZDistance', v)}
+                min={0}
+                max={1}
+                step={0.05}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<SupportsIcon />}
+                label="Support X-Y Distance"
+                description="Horizontal gap between support and print"
+                value={settings.supportXYDistance ?? 0.6}
+                onChange={(v) => onUpdate('supportXYDistance', v)}
+                min={0}
+                max={2}
+                step={0.1}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                icon={<SupportsIcon />}
+                label="Support Interface Layers"
+                description="Dense layers between support and print"
+                value={settings.supportInterfaceLayers ?? 2}
+                onChange={(v) => onUpdate('supportInterfaceLayers', v)}
+                min={0}
+                max={10}
+                step={1}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                icon={<SupportsIcon />}
+                label="Support Base Interface Layers"
+                description="Dense layers at support base"
+                value={settings.supportBaseInterfaceLayers ?? 0}
+                onChange={(v) => onUpdate('supportBaseInterfaceLayers', v)}
+                min={0}
+                max={10}
+                step={1}
+                disabled={disabled}
+              />
             </>
           )}
           <SettingRow
@@ -675,6 +857,7 @@ const AdvancedSettings: React.FC<{
     case 'other':
       return (
         <div className="divide-y divide-pf-border">
+          {/* Temperature Settings */}
           <SettingRow
             type="number"
             icon={<TemperatureIcon />}
@@ -699,6 +882,265 @@ const AdvancedSettings: React.FC<{
             unit="°C"
             disabled={disabled}
           />
+          <SettingRow
+            type="number"
+            icon={<TemperatureIcon />}
+            label="First Layer Nozzle Temp"
+            value={settings.firstLayerNozzleTemp ?? 215}
+            onChange={(v) => onUpdate('firstLayerNozzleTemp', v)}
+            min={170}
+            max={300}
+            step={5}
+            unit="°C"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<TemperatureIcon />}
+            label="First Layer Bed Temp"
+            value={settings.firstLayerBedTemp ?? 65}
+            onChange={(v) => onUpdate('firstLayerBedTemp', v)}
+            min={0}
+            max={120}
+            step={5}
+            unit="°C"
+            disabled={disabled}
+          />
+
+          {/* Retraction Settings */}
+          <SettingRow
+            type="number"
+            icon={<RetractionIcon />}
+            label="Retraction Length"
+            description="How much filament to retract"
+            value={settings.retractionLength ?? 0.8}
+            onChange={(v) => onUpdate('retractionLength', v)}
+            min={0}
+            max={10}
+            step={0.1}
+            unit="mm"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<RetractionIcon />}
+            label="Retraction Speed"
+            value={settings.retractionSpeed ?? 30}
+            onChange={(v) => onUpdate('retractionSpeed', v)}
+            min={5}
+            max={120}
+            step={5}
+            unit="mm/s"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<RetractionIcon />}
+            label="Deretraction Speed"
+            description="Speed to push filament back"
+            value={settings.detractionSpeed ?? 30}
+            onChange={(v) => onUpdate('detractionSpeed', v)}
+            min={5}
+            max={120}
+            step={5}
+            unit="mm/s"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<RetractionIcon />}
+            label="Retraction Z Lift"
+            description="Z hop during retraction"
+            value={settings.retractionLiftZ ?? 0.2}
+            onChange={(v) => onUpdate('retractionLiftZ', v)}
+            min={0}
+            max={2}
+            step={0.1}
+            unit="mm"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="number"
+            icon={<RetractionIcon />}
+            label="Retraction Minimum Travel"
+            description="Minimum travel distance to trigger retraction"
+            value={settings.retractionMinimumTravel ?? 1}
+            onChange={(v) => onUpdate('retractionMinimumTravel', v)}
+            min={0}
+            max={10}
+            step={0.5}
+            unit="mm"
+            disabled={disabled}
+          />
+          <SettingRow
+            type="checkbox"
+            icon={<RetractionIcon />}
+            label="Retract on Layer Change"
+            checked={settings.retractOnLayerChange ?? false}
+            onChange={(v) => onUpdate('retractOnLayerChange', v)}
+            disabled={disabled}
+          />
+          <SettingRow
+            type="checkbox"
+            icon={<RetractionIcon />}
+            label="Wipe Before Retract"
+            checked={settings.wipeBeforeRetract ?? false}
+            onChange={(v) => onUpdate('wipeBeforeRetract', v)}
+            disabled={disabled}
+          />
+
+          {/* Cooling Settings */}
+          <SettingRow
+            type="checkbox"
+            icon={<CoolingIcon />}
+            label="Enable Fan Cooling"
+            checked={settings.enableFanCooling ?? true}
+            onChange={(v) => onUpdate('enableFanCooling', v)}
+            disabled={disabled}
+          />
+          {settings.enableFanCooling !== false && (
+            <>
+              <SettingRow
+                type="slider"
+                icon={<CoolingIcon />}
+                label="Min Fan Speed"
+                value={settings.minFanSpeed ?? 35}
+                onChange={(v) => onUpdate('minFanSpeed', v)}
+                min={0}
+                max={100}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                icon={<CoolingIcon />}
+                label="Max Fan Speed"
+                value={settings.maxFanSpeed ?? 100}
+                onChange={(v) => onUpdate('maxFanSpeed', v)}
+                min={0}
+                max={100}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                icon={<CoolingIcon />}
+                label="Bridge Fan Speed"
+                value={settings.bridgeFanSpeed ?? 100}
+                onChange={(v) => onUpdate('bridgeFanSpeed', v)}
+                min={0}
+                max={100}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<CoolingIcon />}
+                label="Full Fan Speed at Layer"
+                description="Layer to reach full fan speed"
+                value={settings.fullFanSpeedAtLayer ?? 3}
+                onChange={(v) => onUpdate('fullFanSpeedAtLayer', v)}
+                min={1}
+                max={20}
+                step={1}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<CoolingIcon />}
+                label="Slow Down for Layer Time"
+                description="Slow down if layer prints faster than this"
+                value={settings.slowDownForLayerTime ?? 5}
+                onChange={(v) => onUpdate('slowDownForLayerTime', v)}
+                min={1}
+                max={60}
+                step={1}
+                unit="s"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<CoolingIcon />}
+                label="Min Print Speed"
+                description="Minimum speed when slowing for cooling"
+                value={settings.minPrintSpeed ?? 10}
+                onChange={(v) => onUpdate('minPrintSpeed', v)}
+                min={5}
+                max={50}
+                step={5}
+                unit="mm/s"
+                disabled={disabled}
+              />
+            </>
+          )}
+
+          {/* Ironing Settings */}
+          <SettingRow
+            type="checkbox"
+            icon={<IroningIcon />}
+            label="Enable Ironing"
+            description="Smooth top surfaces with extra passes"
+            checked={settings.enableIroning ?? false}
+            onChange={(v) => onUpdate('enableIroning', v)}
+            disabled={disabled}
+          />
+          {settings.enableIroning && (
+            <>
+              <SettingRow
+                type="select"
+                icon={<IroningIcon />}
+                label="Ironing Pattern"
+                value={settings.ironingPattern ?? 'zigzag'}
+                onChange={(v) => onUpdate('ironingPattern', v as 'zigzag' | 'concentric')}
+                options={[
+                  { value: 'zigzag', label: 'Zig-Zag' },
+                  { value: 'concentric', label: 'Concentric' },
+                ]}
+                disabled={disabled}
+              />
+              <SettingRow
+                type="slider"
+                icon={<IroningIcon />}
+                label="Ironing Flow Rate"
+                value={settings.ironingFlowRate ?? 15}
+                onChange={(v) => onUpdate('ironingFlowRate', v)}
+                min={0}
+                max={50}
+                step={5}
+                unit="%"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<IroningIcon />}
+                label="Ironing Spacing"
+                value={settings.ironingSpacing ?? 0.1}
+                onChange={(v) => onUpdate('ironingSpacing', v)}
+                min={0.05}
+                max={0.5}
+                step={0.05}
+                unit="mm"
+                disabled={disabled}
+              />
+              <SettingRow
+                type="number"
+                icon={<IroningIcon />}
+                label="Ironing Speed"
+                value={settings.ironingSpeed ?? 15}
+                onChange={(v) => onUpdate('ironingSpeed', v)}
+                min={5}
+                max={100}
+                step={5}
+                unit="mm/s"
+                disabled={disabled}
+              />
+            </>
+          )}
+
+          {/* Precision Settings */}
           <SettingRow
             type="checkbox"
             icon={<PrecisionIcon />}
