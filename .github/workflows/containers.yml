@@ -60,7 +60,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ steps.image-name.outputs.name }}
@@ -113,7 +113,7 @@ jobs:
 
       - name: Build (PR) / Build & Push (main/tags)
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ${{ steps.paths.outputs.context }}
           file: ${{ steps.paths.outputs.dockerfile }}
