@@ -376,6 +376,26 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [selectedPrinterForSlicing, machineProfilesData]);
 
+  // Cascade reset: when machine profile changes, validate filament/process selections
+  // If the currently selected profiles are no longer compatible, reset them
+  useEffect(() => {
+    if (!selectedMachineProfileId) {
+      // No machine selected - clear dependent selections
+      setSelectedFilamentProfileId('');
+      setSelectedFilamentMaterial('');
+      setSelectedProcessPresetId('');
+      return;
+    }
+    
+    // When machine profile changes, reset filament and process selections
+    // This ensures users always select compatible profiles for the new machine
+    // Note: We could validate if current selections are still compatible,
+    // but resetting is cleaner and avoids edge cases with stale data
+    setSelectedFilamentProfileId('');
+    setSelectedFilamentMaterial('');
+    setSelectedProcessPresetId('');
+  }, [selectedMachineProfileId]);
+
   // Check if printer has no profiles - show clone suggestion
   // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
   // This prevents the modal from showing during loading states
@@ -683,7 +703,12 @@ export const NewSliceJobPage: React.FC = () => {
             selectedPrinterId={selectedPrinterId}
             onPrinterChange={(printerId) => {
               setSelectedPrinterId(printerId);
-              // Auto-match will happen via the effect above
+              // Cascade reset: printer change resets all profile selections
+              setSelectedMachineProfileId('');
+              setSelectedFilamentProfileId('');
+              setSelectedFilamentMaterial('');
+              setSelectedProcessPresetId('');
+              // Machine profile auto-select will happen via the effect
             }}
             className="bg-pf-panel border border-pf-border rounded-lg p-4"
           />
