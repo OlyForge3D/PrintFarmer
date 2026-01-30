@@ -9,6 +9,7 @@ import { SetupWizard } from '@/features/auth/components/SetupWizard';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
+import { SlicerProvider } from '@/contexts/SlicerContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
 // Hooks & Utils
@@ -239,12 +240,13 @@ function App() {
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
             <SlicerUIProvider>
-              {/*
-                Enable react-router future flags to opt into upcoming behavior and silence
-                development warnings about future flags. These are safe opt-ins for our
-                current router version and recommended by react-router maintainers.
-              */}
-              <Router
+              <SlicerProvider>
+                {/*
+                  Enable react-router future flags to opt into upcoming behavior and silence
+                  development warnings about future flags. These are safe opt-ins for our
+                  current router version and recommended by react-router maintainers.
+                */}
+                <Router
                 // Future flags documented by react-router to opt into v7 behaviors. See
                 // https://reactrouter.com/en/main/upgrading/v6
                 future={{
@@ -259,9 +261,10 @@ function App() {
                 }}
               >
                 <AuthenticatedAppRoutes />
-              </Router>
-              <ReactQueryDevtools initialIsOpen={false} />
-              <Toaster position="top-right" richColors />
+                </Router>
+                <ReactQueryDevtools initialIsOpen={false} />
+                <Toaster position="top-right" richColors />
+              </SlicerProvider>
             </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>

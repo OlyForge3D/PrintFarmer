@@ -4,7 +4,7 @@
  */
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/common/components/ui';
-import { SettingRow } from './SettingRow';
+import { SettingRow, CompactSettingRow, SettingSection } from './SettingRow';
 import {
   InfillDensityIcon,
   InfillPatternIcon,
@@ -21,7 +21,6 @@ import {
   CoolingIcon,
   IroningIcon,
   AccelerationIcon,
-  OverlapIcon,
 } from './SlicerSettingIcons';
 import {
   SettingsViewMode,
@@ -375,475 +374,501 @@ const AdvancedSettings: React.FC<{
   switch (activeCategory) {
     case 'quality':
       return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="slider"
-            icon={<LayerHeightIcon />}
-            label="Layer Height"
-            description="Height of each printed layer"
-            value={settings.layerHeight ?? 0.2}
-            onChange={(v) => onUpdate('layerHeight', v)}
-            min={0.08}
-            max={0.32}
-            step={0.04}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<LayerHeightIcon />}
-            label="First Layer Height"
-            value={settings.firstLayerHeight ?? 0.2}
-            onChange={(v) => onUpdate('firstLayerHeight', v)}
-            min={0.1}
-            max={0.4}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<LineWidthIcon />}
-            label="Line Width (Default)"
-            value={settings.lineWidthDefault ?? 0.45}
-            onChange={(v) => onUpdate('lineWidthDefault', v)}
-            min={0.2}
-            max={0.8}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<LineWidthIcon />}
-            label="First Layer Line Width"
-            value={settings.lineWidthFirstLayer ?? 0.5}
-            onChange={(v) => onUpdate('lineWidthFirstLayer', v)}
-            min={0.2}
-            max={0.8}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="select"
-            icon={<SeamIcon />}
-            label="Seam Position"
-            value={settings.seamPosition ?? 'aligned'}
-            onChange={(v) => onUpdate('seamPosition', v as 'random' | 'aligned' | 'back' | 'nearest')}
-            options={[
-              { value: 'aligned', label: 'Aligned' },
-              { value: 'back', label: 'Back' },
-              { value: 'nearest', label: 'Nearest' },
-              { value: 'random', label: 'Random' },
-            ]}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<PrecisionIcon />}
-            label="Resolution"
-            value={settings.resolution ?? 0.0125}
-            onChange={(v) => onUpdate('resolution', v)}
-            min={0.001}
-            max={0.1}
-            step={0.001}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<PrecisionIcon />}
-            label="Elephant Foot Compensation"
-            description="Compensate for first layer squish"
-            value={settings.elephantFootCompensation ?? 0.1}
-            onChange={(v) => onUpdate('elephantFootCompensation', v)}
-            min={0}
-            max={1}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
+        <div className="space-y-4">
+          {/* Layer Height Section */}
+          <SettingSection icon={<LayerHeightIcon className="w-4 h-4" />} title="Layer height">
+            <CompactSettingRow
+              type="number"
+              label="Layer height"
+              value={settings.layerHeight ?? 0.2}
+              onChange={(v) => onUpdate('layerHeight', v)}
+              min={0.04}
+              max={0.4}
+              step={0.01}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="First layer height"
+              value={settings.firstLayerHeight ?? 0.2}
+              onChange={(v) => onUpdate('firstLayerHeight', v)}
+              min={0.1}
+              max={0.4}
+              step={0.01}
+              unit="mm"
+              disabled={disabled}
+            />
+          </SettingSection>
+
+          {/* Line Width Section */}
+          <SettingSection icon={<LineWidthIcon className="w-4 h-4" />} title="Line width">
+            <CompactSettingRow
+              type="number"
+              label="Default"
+              value={settings.lineWidthDefault ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthDefault', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="First layer"
+              value={settings.lineWidthFirstLayer ?? 0.5}
+              onChange={(v) => onUpdate('lineWidthFirstLayer', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Outer wall"
+              value={settings.lineWidthOuterWall ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthOuterWall', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Inner wall"
+              value={settings.lineWidthInnerWall ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthInnerWall', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Top surface"
+              value={settings.lineWidthTopSurface ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthTopSurface', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Sparse infill"
+              value={settings.lineWidthSparseInfill ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthSparseInfill', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Internal solid infill"
+              value={settings.lineWidthInternalSolidInfill ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthInternalSolidInfill', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Support"
+              value={settings.lineWidthSupport ?? 0.45}
+              onChange={(v) => onUpdate('lineWidthSupport', v)}
+              min={0.2}
+              max={1.0}
+              step={0.01}
+              unit="mm or %"
+              disabled={disabled}
+            />
+          </SettingSection>
+
+          {/* Seam Section */}
+          <SettingSection icon={<SeamIcon className="w-4 h-4" />} title="Seam">
+            <CompactSettingRow
+              type="select"
+              label="Seam position"
+              value={settings.seamPosition ?? 'aligned'}
+              onChange={(v) => onUpdate('seamPosition', v as 'random' | 'aligned' | 'back' | 'nearest')}
+              options={[
+                { value: 'aligned', label: 'Aligned' },
+                { value: 'back', label: 'Back' },
+                { value: 'nearest', label: 'Nearest' },
+                { value: 'random', label: 'Random' },
+              ]}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="checkbox"
+              label="Staggered inner seams"
+              checked={settings.staggeredInnerSeams ?? false}
+              onChange={(v) => onUpdate('staggeredInnerSeams', v)}
+              disabled={disabled}
+            />
+          </SettingSection>
+
+          {/* Precision Section */}
+          <SettingSection icon={<PrecisionIcon className="w-4 h-4" />} title="Precision">
+            <CompactSettingRow
+              type="number"
+              label="Resolution"
+              value={settings.resolution ?? 0.0125}
+              onChange={(v) => onUpdate('resolution', v)}
+              min={0.001}
+              max={0.1}
+              step={0.001}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Elephant foot compensation"
+              value={settings.elephantFootCompensation ?? 0.1}
+              onChange={(v) => onUpdate('elephantFootCompensation', v)}
+              min={0}
+              max={1}
+              step={0.01}
+              unit="mm"
+              disabled={disabled}
+            />
+          </SettingSection>
         </div>
       );
 
     case 'strength':
       return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="slider"
-            icon={<InfillDensityIcon />}
-            label="Infill Density"
-            value={settings.infillDensity}
-            onChange={(v) => onUpdate('infillDensity', v)}
-            min={0}
-            max={100}
-            step={5}
-            unit="%"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="select"
-            icon={<InfillPatternIcon />}
-            label="Infill Pattern"
-            value={settings.infillPattern}
-            onChange={(v) => onUpdate('infillPattern', v as InfillPattern)}
-            options={infillPatternOptions}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="slider"
-            icon={<WallCountIcon />}
-            label="Wall Count"
-            value={settings.wallCount}
-            onChange={(v) => onUpdate('wallCount', v)}
-            min={1}
-            max={10}
-            step={1}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="slider"
-            icon={<WallCountIcon />}
-            label="Top Layers"
-            value={settings.topLayers ?? 4}
-            onChange={(v) => onUpdate('topLayers', v)}
-            min={1}
-            max={10}
-            step={1}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="slider"
-            icon={<WallCountIcon />}
-            label="Bottom Layers"
-            value={settings.bottomLayers ?? 3}
-            onChange={(v) => onUpdate('bottomLayers', v)}
-            min={1}
-            max={10}
-            step={1}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="slider"
-            icon={<OverlapIcon />}
-            label="Infill/Wall Overlap"
-            description="How much infill overlaps with walls"
-            value={settings.infillOverlap ?? 25}
-            onChange={(v) => onUpdate('infillOverlap', v)}
-            min={0}
-            max={100}
-            step={5}
-            unit="%"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<OverlapIcon />}
-            label="Infill Anchor Max Length"
-            description="Maximum length for infill anchors"
-            value={settings.infillAnchorMaxLength ?? 10}
-            onChange={(v) => onUpdate('infillAnchorMaxLength', v)}
-            min={0}
-            max={50}
-            step={1}
-            unit="mm"
-            disabled={disabled}
-          />
+        <div className="space-y-4">
+          {/* Infill Section */}
+          <SettingSection icon={<InfillDensityIcon className="w-4 h-4" />} title="Infill">
+            <CompactSettingRow
+              type="number"
+              label="Sparse infill density"
+              value={settings.infillDensity}
+              onChange={(v) => onUpdate('infillDensity', v)}
+              min={0}
+              max={100}
+              step={5}
+              unit="%"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="select"
+              label="Sparse infill pattern"
+              value={settings.infillPattern}
+              onChange={(v) => onUpdate('infillPattern', v as InfillPattern)}
+              options={infillPatternOptions}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Infill/wall overlap"
+              value={settings.infillOverlap ?? 25}
+              onChange={(v) => onUpdate('infillOverlap', v)}
+              min={0}
+              max={100}
+              step={5}
+              unit="%"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Infill anchor max length"
+              value={settings.infillAnchorMaxLength ?? 10}
+              onChange={(v) => onUpdate('infillAnchorMaxLength', v)}
+              min={0}
+              max={50}
+              step={1}
+              unit="mm"
+              disabled={disabled}
+            />
+          </SettingSection>
+
+          {/* Walls Section */}
+          <SettingSection icon={<WallCountIcon className="w-4 h-4" />} title="Walls">
+            <CompactSettingRow
+              type="number"
+              label="Wall loops"
+              value={settings.wallCount}
+              onChange={(v) => onUpdate('wallCount', v)}
+              min={1}
+              max={10}
+              step={1}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Top shell layers"
+              value={settings.topLayers ?? 4}
+              onChange={(v) => onUpdate('topLayers', v)}
+              min={1}
+              max={10}
+              step={1}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Bottom shell layers"
+              value={settings.bottomLayers ?? 3}
+              onChange={(v) => onUpdate('bottomLayers', v)}
+              min={1}
+              max={10}
+              step={1}
+              disabled={disabled}
+            />
+          </SettingSection>
         </div>
       );
 
     case 'speed':
       return (
-        <div className="divide-y divide-pf-border">
-          {/* Speed Settings */}
-          <SettingRow
-            type="slider"
-            icon={<SpeedIcon />}
-            label="Print Speed"
-            value={settings.printSpeed ?? 120}
-            onChange={(v) => onUpdate('printSpeed', v)}
-            min={20}
-            max={300}
-            step={10}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Outer Wall Speed"
-            value={settings.outerWallSpeed ?? 100}
-            onChange={(v) => onUpdate('outerWallSpeed', v)}
-            min={10}
-            max={200}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Inner Wall Speed"
-            value={settings.innerWallSpeed ?? 150}
-            onChange={(v) => onUpdate('innerWallSpeed', v)}
-            min={10}
-            max={300}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Sparse Infill Speed"
-            value={settings.sparseInfillSpeed ?? 150}
-            onChange={(v) => onUpdate('sparseInfillSpeed', v)}
-            min={10}
-            max={300}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Solid Infill Speed"
-            value={settings.solidInfillSpeed ?? 120}
-            onChange={(v) => onUpdate('solidInfillSpeed', v)}
-            min={10}
-            max={300}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Top Surface Speed"
-            value={settings.topSurfaceSpeed ?? 100}
-            onChange={(v) => onUpdate('topSurfaceSpeed', v)}
-            min={10}
-            max={200}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="Travel Speed"
-            value={settings.travelSpeed ?? 150}
-            onChange={(v) => onUpdate('travelSpeed', v)}
-            min={50}
-            max={500}
-            step={10}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<SpeedIcon />}
-            label="First Layer Speed"
-            value={settings.firstLayerSpeed ?? 20}
-            onChange={(v) => onUpdate('firstLayerSpeed', v)}
-            min={5}
-            max={60}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
+        <div className="space-y-4">
+          {/* Print Speed Section */}
+          <SettingSection icon={<SpeedIcon className="w-4 h-4" />} title="Speed">
+            <CompactSettingRow
+              type="number"
+              label="Outer wall"
+              value={settings.outerWallSpeed ?? 100}
+              onChange={(v) => onUpdate('outerWallSpeed', v)}
+              min={10}
+              max={200}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Inner wall"
+              value={settings.innerWallSpeed ?? 150}
+              onChange={(v) => onUpdate('innerWallSpeed', v)}
+              min={10}
+              max={300}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Sparse infill"
+              value={settings.sparseInfillSpeed ?? 150}
+              onChange={(v) => onUpdate('sparseInfillSpeed', v)}
+              min={10}
+              max={300}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Internal solid infill"
+              value={settings.solidInfillSpeed ?? 120}
+              onChange={(v) => onUpdate('solidInfillSpeed', v)}
+              min={10}
+              max={300}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Top surface"
+              value={settings.topSurfaceSpeed ?? 100}
+              onChange={(v) => onUpdate('topSurfaceSpeed', v)}
+              min={10}
+              max={200}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Travel"
+              value={settings.travelSpeed ?? 150}
+              onChange={(v) => onUpdate('travelSpeed', v)}
+              min={50}
+              max={500}
+              step={10}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="First layer"
+              value={settings.firstLayerSpeed ?? 20}
+              onChange={(v) => onUpdate('firstLayerSpeed', v)}
+              min={5}
+              max={60}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+          </SettingSection>
 
-          {/* Acceleration Settings */}
-          <SettingRow
-            type="number"
-            icon={<AccelerationIcon />}
-            label="Default Acceleration"
-            description="Base acceleration for all moves"
-            value={settings.defaultAcceleration ?? 5000}
-            onChange={(v) => onUpdate('defaultAcceleration', v)}
-            min={100}
-            max={20000}
-            step={100}
-            unit="mm/s²"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<AccelerationIcon />}
-            label="Outer Wall Acceleration"
-            value={settings.outerWallAcceleration ?? 2000}
-            onChange={(v) => onUpdate('outerWallAcceleration', v)}
-            min={100}
-            max={10000}
-            step={100}
-            unit="mm/s²"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<AccelerationIcon />}
-            label="Inner Wall Acceleration"
-            value={settings.innerWallAcceleration ?? 5000}
-            onChange={(v) => onUpdate('innerWallAcceleration', v)}
-            min={100}
-            max={20000}
-            step={100}
-            unit="mm/s²"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<AccelerationIcon />}
-            label="Infill Acceleration"
-            value={settings.infillAcceleration ?? 5000}
-            onChange={(v) => onUpdate('infillAcceleration', v)}
-            min={100}
-            max={20000}
-            step={100}
-            unit="mm/s²"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<AccelerationIcon />}
-            label="Travel Acceleration"
-            value={settings.travelAcceleration ?? 10000}
-            onChange={(v) => onUpdate('travelAcceleration', v)}
-            min={100}
-            max={30000}
-            step={100}
-            unit="mm/s²"
-            disabled={disabled}
-          />
+          {/* Acceleration Section */}
+          <SettingSection icon={<AccelerationIcon className="w-4 h-4" />} title="Acceleration">
+            <CompactSettingRow
+              type="number"
+              label="Normal printing"
+              value={settings.defaultAcceleration ?? 5000}
+              onChange={(v) => onUpdate('defaultAcceleration', v)}
+              min={100}
+              max={20000}
+              step={100}
+              unit="mm/s²"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Outer wall"
+              value={settings.outerWallAcceleration ?? 2000}
+              onChange={(v) => onUpdate('outerWallAcceleration', v)}
+              min={100}
+              max={10000}
+              step={100}
+              unit="mm/s²"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Inner wall"
+              value={settings.innerWallAcceleration ?? 5000}
+              onChange={(v) => onUpdate('innerWallAcceleration', v)}
+              min={100}
+              max={20000}
+              step={100}
+              unit="mm/s²"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Sparse infill"
+              value={settings.infillAcceleration ?? 5000}
+              onChange={(v) => onUpdate('infillAcceleration', v)}
+              min={100}
+              max={20000}
+              step={100}
+              unit="mm/s²"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Travel"
+              value={settings.travelAcceleration ?? 10000}
+              onChange={(v) => onUpdate('travelAcceleration', v)}
+              min={100}
+              max={30000}
+              step={100}
+              unit="mm/s²"
+              disabled={disabled}
+            />
+          </SettingSection>
         </div>
       );
 
     case 'support':
       return (
-        <div className="divide-y divide-pf-border">
-          <SettingRow
-            type="checkbox"
-            icon={<SupportsIcon />}
-            label="Enable Supports"
-            checked={settings.enableSupports}
-            onChange={(v) => onUpdate('enableSupports', v)}
-            disabled={disabled}
-          />
-          {settings.enableSupports && (
-            <>
-              <SettingRow
-                type="select"
-                icon={<SupportsIcon />}
-                label="Support Type"
-                value={settings.supportType ?? 'normal'}
-                onChange={(v) => onUpdate('supportType', v as 'none' | 'normal' | 'tree' | 'tree_auto')}
-                options={[
-                  { value: 'normal', label: 'Normal' },
-                  { value: 'tree', label: 'Tree' },
-                  { value: 'tree_auto', label: 'Tree (Auto)' },
-                ]}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<SupportsIcon />}
-                label="Support Density"
-                value={settings.supportDensity ?? 15}
-                onChange={(v) => onUpdate('supportDensity', v)}
-                min={5}
-                max={50}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<SupportsIcon />}
-                label="Support Angle"
-                description="Minimum overhang angle to support"
-                value={settings.supportAngle ?? 45}
-                onChange={(v) => onUpdate('supportAngle', v)}
-                min={0}
-                max={90}
-                step={5}
-                unit="°"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SupportsIcon />}
-                label="Support Top Z Distance"
-                description="Gap between support and print top"
-                value={settings.supportTopZDistance ?? 0.2}
-                onChange={(v) => onUpdate('supportTopZDistance', v)}
-                min={0}
-                max={1}
-                step={0.05}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SupportsIcon />}
-                label="Support Bottom Z Distance"
-                description="Gap between support and print bottom"
-                value={settings.supportBottomZDistance ?? 0.2}
-                onChange={(v) => onUpdate('supportBottomZDistance', v)}
-                min={0}
-                max={1}
-                step={0.05}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<SupportsIcon />}
-                label="Support X-Y Distance"
-                description="Horizontal gap between support and print"
-                value={settings.supportXYDistance ?? 0.6}
-                onChange={(v) => onUpdate('supportXYDistance', v)}
-                min={0}
-                max={2}
-                step={0.1}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<SupportsIcon />}
-                label="Support Interface Layers"
-                description="Dense layers between support and print"
-                value={settings.supportInterfaceLayers ?? 2}
-                onChange={(v) => onUpdate('supportInterfaceLayers', v)}
-                min={0}
-                max={10}
-                step={1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<SupportsIcon />}
-                label="Support Base Interface Layers"
-                description="Dense layers at support base"
-                value={settings.supportBaseInterfaceLayers ?? 0}
-                onChange={(v) => onUpdate('supportBaseInterfaceLayers', v)}
-                min={0}
-                max={10}
-                step={1}
-                disabled={disabled}
-              />
-            </>
-          )}
-          <SettingRow
-            type="radio"
-            icon={<BedAdhesionIcon />}
-            label="Bed Adhesion"
-            value={settings.bedAdhesion}
-            onChange={(v) => onUpdate('bedAdhesion', v as BedAdhesionType)}
-            options={bedAdhesionOptions}
-            disabled={disabled}
-          />
+        <div className="space-y-4">
+          {/* Support Enable Section */}
+          <SettingSection icon={<SupportsIcon className="w-4 h-4" />} title="Support">
+            <CompactSettingRow
+              type="checkbox"
+              label="Enable support"
+              checked={settings.enableSupports}
+              onChange={(v) => onUpdate('enableSupports', v)}
+              disabled={disabled}
+            />
+            {settings.enableSupports && (
+              <>
+                <CompactSettingRow
+                  type="select"
+                  label="Type"
+                  value={settings.supportType ?? 'normal'}
+                  onChange={(v) => onUpdate('supportType', v as 'none' | 'normal' | 'tree' | 'tree_auto')}
+                  options={[
+                    { value: 'normal', label: 'Normal' },
+                    { value: 'tree', label: 'Tree' },
+                    { value: 'tree_auto', label: 'Tree (Auto)' },
+                  ]}
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Threshold angle"
+                  value={settings.supportAngle ?? 45}
+                  onChange={(v) => onUpdate('supportAngle', v)}
+                  min={0}
+                  max={90}
+                  step={5}
+                  unit="°"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Top Z distance"
+                  value={settings.supportTopZDistance ?? 0.2}
+                  onChange={(v) => onUpdate('supportTopZDistance', v)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  unit="mm"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Bottom Z distance"
+                  value={settings.supportBottomZDistance ?? 0.2}
+                  onChange={(v) => onUpdate('supportBottomZDistance', v)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  unit="mm"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="X/Y distance"
+                  value={settings.supportXYDistance ?? 0.6}
+                  onChange={(v) => onUpdate('supportXYDistance', v)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  unit="mm"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Interface layers"
+                  value={settings.supportInterfaceLayers ?? 2}
+                  onChange={(v) => onUpdate('supportInterfaceLayers', v)}
+                  min={0}
+                  max={10}
+                  step={1}
+                  disabled={disabled}
+                />
+              </>
+            )}
+          </SettingSection>
+
+          {/* Bed Adhesion Section */}
+          <SettingSection icon={<BedAdhesionIcon className="w-4 h-4" />} title="Bed adhesion">
+            <CompactSettingRow
+              type="select"
+              label="Brim type"
+              value={settings.bedAdhesion}
+              onChange={(v) => onUpdate('bedAdhesion', v as BedAdhesionType)}
+              options={bedAdhesionOptions}
+              disabled={disabled}
+            />
+          </SettingSection>
         </div>
       );
 
@@ -856,324 +881,299 @@ const AdvancedSettings: React.FC<{
 
     case 'other':
       return (
-        <div className="divide-y divide-pf-border">
-          {/* Temperature Settings */}
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Nozzle Temperature"
-            value={settings.nozzleTemp ?? 210}
-            onChange={(v) => onUpdate('nozzleTemp', v)}
-            min={170}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="Bed Temperature"
-            value={settings.bedTemp ?? 60}
-            onChange={(v) => onUpdate('bedTemp', v)}
-            min={0}
-            max={120}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="First Layer Nozzle Temp"
-            value={settings.firstLayerNozzleTemp ?? 215}
-            onChange={(v) => onUpdate('firstLayerNozzleTemp', v)}
-            min={170}
-            max={300}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<TemperatureIcon />}
-            label="First Layer Bed Temp"
-            value={settings.firstLayerBedTemp ?? 65}
-            onChange={(v) => onUpdate('firstLayerBedTemp', v)}
-            min={0}
-            max={120}
-            step={5}
-            unit="°C"
-            disabled={disabled}
-          />
+        <div className="space-y-1">
+          {/* Temperature Section */}
+          <SettingSection icon={<TemperatureIcon />} title="Temperature">
+            <CompactSettingRow
+              type="number"
+              label="Nozzle temperature"
+              value={settings.nozzleTemp ?? 210}
+              onChange={(v) => onUpdate('nozzleTemp', v as number)}
+              min={170}
+              max={300}
+              step={5}
+              unit="°C"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Bed temperature"
+              value={settings.bedTemp ?? 60}
+              onChange={(v) => onUpdate('bedTemp', v as number)}
+              min={0}
+              max={120}
+              step={5}
+              unit="°C"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="First layer nozzle temp"
+              value={settings.firstLayerNozzleTemp ?? 215}
+              onChange={(v) => onUpdate('firstLayerNozzleTemp', v as number)}
+              min={170}
+              max={300}
+              step={5}
+              unit="°C"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="First layer bed temp"
+              value={settings.firstLayerBedTemp ?? 65}
+              onChange={(v) => onUpdate('firstLayerBedTemp', v as number)}
+              min={0}
+              max={120}
+              step={5}
+              unit="°C"
+              disabled={disabled}
+            />
+          </SettingSection>
 
-          {/* Retraction Settings */}
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Length"
-            description="How much filament to retract"
-            value={settings.retractionLength ?? 0.8}
-            onChange={(v) => onUpdate('retractionLength', v)}
-            min={0}
-            max={10}
-            step={0.1}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Speed"
-            value={settings.retractionSpeed ?? 30}
-            onChange={(v) => onUpdate('retractionSpeed', v)}
-            min={5}
-            max={120}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Deretraction Speed"
-            description="Speed to push filament back"
-            value={settings.detractionSpeed ?? 30}
-            onChange={(v) => onUpdate('detractionSpeed', v)}
-            min={5}
-            max={120}
-            step={5}
-            unit="mm/s"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Z Lift"
-            description="Z hop during retraction"
-            value={settings.retractionLiftZ ?? 0.2}
-            onChange={(v) => onUpdate('retractionLiftZ', v)}
-            min={0}
-            max={2}
-            step={0.1}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<RetractionIcon />}
-            label="Retraction Minimum Travel"
-            description="Minimum travel distance to trigger retraction"
-            value={settings.retractionMinimumTravel ?? 1}
-            onChange={(v) => onUpdate('retractionMinimumTravel', v)}
-            min={0}
-            max={10}
-            step={0.5}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="checkbox"
-            icon={<RetractionIcon />}
-            label="Retract on Layer Change"
-            checked={settings.retractOnLayerChange ?? false}
-            onChange={(v) => onUpdate('retractOnLayerChange', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="checkbox"
-            icon={<RetractionIcon />}
-            label="Wipe Before Retract"
-            checked={settings.wipeBeforeRetract ?? false}
-            onChange={(v) => onUpdate('wipeBeforeRetract', v)}
-            disabled={disabled}
-          />
+          {/* Retraction Section */}
+          <SettingSection icon={<RetractionIcon />} title="Retraction">
+            <CompactSettingRow
+              type="number"
+              label="Retraction length"
+              value={settings.retractionLength ?? 0.8}
+              onChange={(v) => onUpdate('retractionLength', v as number)}
+              min={0}
+              max={10}
+              step={0.1}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Retraction speed"
+              value={settings.retractionSpeed ?? 30}
+              onChange={(v) => onUpdate('retractionSpeed', v as number)}
+              min={5}
+              max={120}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Deretraction speed"
+              value={settings.detractionSpeed ?? 30}
+              onChange={(v) => onUpdate('detractionSpeed', v as number)}
+              min={5}
+              max={120}
+              step={5}
+              unit="mm/s"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Z lift"
+              value={settings.retractionLiftZ ?? 0.2}
+              onChange={(v) => onUpdate('retractionLiftZ', v as number)}
+              min={0}
+              max={2}
+              step={0.1}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="Minimum travel"
+              value={settings.retractionMinimumTravel ?? 1}
+              onChange={(v) => onUpdate('retractionMinimumTravel', v as number)}
+              min={0}
+              max={10}
+              step={0.5}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="checkbox"
+              label="Retract on layer change"
+              checked={settings.retractOnLayerChange ?? false}
+              onChange={(v) => onUpdate('retractOnLayerChange', v)}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="checkbox"
+              label="Wipe before retract"
+              checked={settings.wipeBeforeRetract ?? false}
+              onChange={(v) => onUpdate('wipeBeforeRetract', v)}
+              disabled={disabled}
+            />
+          </SettingSection>
 
-          {/* Cooling Settings */}
-          <SettingRow
-            type="checkbox"
-            icon={<CoolingIcon />}
-            label="Enable Fan Cooling"
-            checked={settings.enableFanCooling ?? true}
-            onChange={(v) => onUpdate('enableFanCooling', v)}
-            disabled={disabled}
-          />
-          {settings.enableFanCooling !== false && (
-            <>
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Min Fan Speed"
-                value={settings.minFanSpeed ?? 35}
-                onChange={(v) => onUpdate('minFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Max Fan Speed"
-                value={settings.maxFanSpeed ?? 100}
-                onChange={(v) => onUpdate('maxFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<CoolingIcon />}
-                label="Bridge Fan Speed"
-                value={settings.bridgeFanSpeed ?? 100}
-                onChange={(v) => onUpdate('bridgeFanSpeed', v)}
-                min={0}
-                max={100}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<CoolingIcon />}
-                label="Full Fan Speed at Layer"
-                description="Layer to reach full fan speed"
-                value={settings.fullFanSpeedAtLayer ?? 3}
-                onChange={(v) => onUpdate('fullFanSpeedAtLayer', v)}
-                min={1}
-                max={20}
-                step={1}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<CoolingIcon />}
-                label="Slow Down for Layer Time"
-                description="Slow down if layer prints faster than this"
-                value={settings.slowDownForLayerTime ?? 5}
-                onChange={(v) => onUpdate('slowDownForLayerTime', v)}
-                min={1}
-                max={60}
-                step={1}
-                unit="s"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<CoolingIcon />}
-                label="Min Print Speed"
-                description="Minimum speed when slowing for cooling"
-                value={settings.minPrintSpeed ?? 10}
-                onChange={(v) => onUpdate('minPrintSpeed', v)}
-                min={5}
-                max={50}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-            </>
-          )}
+          {/* Cooling Section */}
+          <SettingSection icon={<CoolingIcon />} title="Cooling">
+            <CompactSettingRow
+              type="checkbox"
+              label="Enable fan cooling"
+              checked={settings.enableFanCooling ?? true}
+              onChange={(v) => onUpdate('enableFanCooling', v)}
+              disabled={disabled}
+            />
+            {settings.enableFanCooling !== false && (
+              <>
+                <CompactSettingRow
+                  type="number"
+                  label="Min fan speed"
+                  value={settings.minFanSpeed ?? 35}
+                  onChange={(v) => onUpdate('minFanSpeed', v as number)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  unit="%"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Max fan speed"
+                  value={settings.maxFanSpeed ?? 100}
+                  onChange={(v) => onUpdate('maxFanSpeed', v as number)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  unit="%"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Bridge fan speed"
+                  value={settings.bridgeFanSpeed ?? 100}
+                  onChange={(v) => onUpdate('bridgeFanSpeed', v as number)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  unit="%"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Full fan at layer"
+                  value={settings.fullFanSpeedAtLayer ?? 3}
+                  onChange={(v) => onUpdate('fullFanSpeedAtLayer', v as number)}
+                  min={1}
+                  max={20}
+                  step={1}
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Slow down layer time"
+                  value={settings.slowDownForLayerTime ?? 5}
+                  onChange={(v) => onUpdate('slowDownForLayerTime', v as number)}
+                  min={1}
+                  max={60}
+                  step={1}
+                  unit="s"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Min print speed"
+                  value={settings.minPrintSpeed ?? 10}
+                  onChange={(v) => onUpdate('minPrintSpeed', v as number)}
+                  min={5}
+                  max={50}
+                  step={5}
+                  unit="mm/s"
+                  disabled={disabled}
+                />
+              </>
+            )}
+          </SettingSection>
 
-          {/* Ironing Settings */}
-          <SettingRow
-            type="checkbox"
-            icon={<IroningIcon />}
-            label="Enable Ironing"
-            description="Smooth top surfaces with extra passes"
-            checked={settings.enableIroning ?? false}
-            onChange={(v) => onUpdate('enableIroning', v)}
-            disabled={disabled}
-          />
-          {settings.enableIroning && (
-            <>
-              <SettingRow
-                type="select"
-                icon={<IroningIcon />}
-                label="Ironing Pattern"
-                value={settings.ironingPattern ?? 'zigzag'}
-                onChange={(v) => onUpdate('ironingPattern', v as 'zigzag' | 'concentric')}
-                options={[
-                  { value: 'zigzag', label: 'Zig-Zag' },
-                  { value: 'concentric', label: 'Concentric' },
-                ]}
-                disabled={disabled}
-              />
-              <SettingRow
-                type="slider"
-                icon={<IroningIcon />}
-                label="Ironing Flow Rate"
-                value={settings.ironingFlowRate ?? 15}
-                onChange={(v) => onUpdate('ironingFlowRate', v)}
-                min={0}
-                max={50}
-                step={5}
-                unit="%"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<IroningIcon />}
-                label="Ironing Spacing"
-                value={settings.ironingSpacing ?? 0.1}
-                onChange={(v) => onUpdate('ironingSpacing', v)}
-                min={0.05}
-                max={0.5}
-                step={0.05}
-                unit="mm"
-                disabled={disabled}
-              />
-              <SettingRow
-                type="number"
-                icon={<IroningIcon />}
-                label="Ironing Speed"
-                value={settings.ironingSpeed ?? 15}
-                onChange={(v) => onUpdate('ironingSpeed', v)}
-                min={5}
-                max={100}
-                step={5}
-                unit="mm/s"
-                disabled={disabled}
-              />
-            </>
-          )}
+          {/* Ironing Section */}
+          <SettingSection icon={<IroningIcon />} title="Ironing">
+            <CompactSettingRow
+              type="checkbox"
+              label="Enable ironing"
+              checked={settings.enableIroning ?? false}
+              onChange={(v) => onUpdate('enableIroning', v)}
+              disabled={disabled}
+            />
+            {settings.enableIroning && (
+              <>
+                <CompactSettingRow
+                  type="select"
+                  label="Pattern"
+                  value={settings.ironingPattern ?? 'zigzag'}
+                  onChange={(v) => onUpdate('ironingPattern', v as 'zigzag' | 'concentric')}
+                  options={[
+                    { value: 'zigzag', label: 'Zig-Zag' },
+                    { value: 'concentric', label: 'Concentric' },
+                  ]}
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Flow rate"
+                  value={settings.ironingFlowRate ?? 15}
+                  onChange={(v) => onUpdate('ironingFlowRate', v as number)}
+                  min={0}
+                  max={50}
+                  step={5}
+                  unit="%"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Spacing"
+                  value={settings.ironingSpacing ?? 0.1}
+                  onChange={(v) => onUpdate('ironingSpacing', v as number)}
+                  min={0.05}
+                  max={0.5}
+                  step={0.05}
+                  unit="mm"
+                  disabled={disabled}
+                />
+                <CompactSettingRow
+                  type="number"
+                  label="Speed"
+                  value={settings.ironingSpeed ?? 15}
+                  onChange={(v) => onUpdate('ironingSpeed', v as number)}
+                  min={5}
+                  max={100}
+                  step={5}
+                  unit="mm/s"
+                  disabled={disabled}
+                />
+              </>
+            )}
+          </SettingSection>
 
-          {/* Precision Settings */}
-          <SettingRow
-            type="checkbox"
-            icon={<PrecisionIcon />}
-            label="Arc Fitting"
-            description="Convert G-code segments to arcs"
-            checked={settings.arcFitting ?? false}
-            onChange={(v) => onUpdate('arcFitting', v)}
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<PrecisionIcon />}
-            label="X-Y Hole Compensation"
-            value={settings.xyHoleCompensation ?? 0}
-            onChange={(v) => onUpdate('xyHoleCompensation', v)}
-            min={-1}
-            max={1}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
-          <SettingRow
-            type="number"
-            icon={<PrecisionIcon />}
-            label="X-Y Contour Compensation"
-            value={settings.xyContourCompensation ?? 0}
-            onChange={(v) => onUpdate('xyContourCompensation', v)}
-            min={-1}
-            max={1}
-            step={0.05}
-            unit="mm"
-            disabled={disabled}
-          />
+          {/* Precision Section */}
+          <SettingSection icon={<PrecisionIcon />} title="Precision">
+            <CompactSettingRow
+              type="checkbox"
+              label="Arc fitting"
+              checked={settings.arcFitting ?? false}
+              onChange={(v) => onUpdate('arcFitting', v)}
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="X-Y hole compensation"
+              value={settings.xyHoleCompensation ?? 0}
+              onChange={(v) => onUpdate('xyHoleCompensation', v as number)}
+              min={-1}
+              max={1}
+              step={0.05}
+              unit="mm"
+              disabled={disabled}
+            />
+            <CompactSettingRow
+              type="number"
+              label="X-Y contour compensation"
+              value={settings.xyContourCompensation ?? 0}
+              onChange={(v) => onUpdate('xyContourCompensation', v as number)}
+              min={-1}
+              max={1}
+              step={0.05}
+              unit="mm"
+              disabled={disabled}
+            />
+          </SettingSection>
         </div>
       );
 

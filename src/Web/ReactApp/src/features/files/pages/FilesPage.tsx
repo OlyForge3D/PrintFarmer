@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useEffectEvent } from 'react';
+import { useState, useEffect, useCallback, useEffectEvent, useMemo } from 'react';
 import { CubeIcon, FileIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayout';
@@ -6,20 +6,23 @@ import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
 import { useLocation } from 'react-router-dom';
+import { useSlicer } from '@/hooks/useSlicer';
 
 interface Tab {
   id: 'models' | 'gcode' | 'harvest';
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   description: string;
+  requiresSlicer?: boolean;
 }
 
-const TABS: Tab[] = [
+const ALL_TABS: Tab[] = [
   {
     id: 'models',
     label: '3D Models',
     icon: CubeIcon,
-    description: 'Manage your 3D model files'
+    description: 'Manage your 3D model files',
+    requiresSlicer: true
   },
   {
     id: 'gcode',
@@ -37,15 +40,30 @@ const TABS: Tab[] = [
 
 export function FilesPage() {
   const location = useLocation();
+  const { isSlicerAvailable } = useSlicer();
   
-  // Initialize from localStorage, fallback to 'models'
+  // Filter tabs based on slicer availability
+  const TABS = useMemo(() => {
+    return ALL_TABS.filter(tab => !tab.requiresSlicer || isSlicerAvailable);
+  }, [isSlicerAvailable]);
+  
+  // Initialize from localStorage, fallback to first available tab
   const [activeTab, setActiveTab] = useState<'models' | 'gcode' | 'harvest'>(() => {
     const saved = localStorage.getItem('pf.filesPageActiveTab');
+    // If slicer not available and saved tab was 'models', default to 'gcode'
     if (saved === 'models' || saved === 'gcode' || saved === 'harvest') {
       return saved;
     }
-    return 'models';
+    return 'gcode';
   });
+  
+  // If current tab requires slicer but slicer is unavailable, switch to gcode
+  useEffect(() => {
+    if (activeTab === 'models' && !isSlicerAvailable) {
+      setActiveTab('gcode');
+      localStorage.setItem('pf.filesPageActiveTab', 'gcode');
+    }
+  }, [activeTab, isSlicerAvailable]);
 
   // Persist tab change to localStorage
   const handleTabChange = useCallback((tab: 'models' | 'gcode' | 'harvest') => {
@@ -61,13 +79,14 @@ export function FilesPage() {
       setActiveTab(tab);
       localStorage.setItem('pf.filesPageActiveTab', tab);
     }
-  }, [location.search]);
+  }, [location.search, TABS]);
 
   // React 19: useEffectEvent to handle keyboard input without dependency issues
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
     if (e.key === 't' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
       e.preventDefault();
-      const tabIds: Array<'models' | 'gcode' | 'harvest'> = ['models', 'gcode', 'harvest'];
+      // Only cycle through available tabs
+      const tabIds = TABS.map(t => t.id);
       const currentIndex = tabIds.indexOf(activeTab);
       const nextIndex = (currentIndex + 1) % tabIds.length;
       handleTabChange(tabIds[nextIndex]);

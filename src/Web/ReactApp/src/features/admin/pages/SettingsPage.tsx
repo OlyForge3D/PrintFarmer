@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -23,6 +24,7 @@ interface NavItem {
 }
 
 export function SettingsPage() {
+  const { isSlicerAvailable } = useSlicer();
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
@@ -161,13 +163,18 @@ export function SettingsPage() {
   }, {});
 
   // Sort groups by their order from group metadata, with fallback for undefined groups
-  const sortedGroups = Object.keys(groupedNavItems).sort((a, b) => {
-    const orderA = groupOrderMap[a] ?? 999;
-    const orderB = groupOrderMap[b] ?? 999;
-    if (orderA !== orderB) return orderA - orderB;
-    // If same order, sort alphabetically
-    return a.localeCompare(b);
-  });
+  // Filter out Slicing group when slicer is not available
+  const sortedGroups = useMemo(() => {
+    return Object.keys(groupedNavItems)
+      .filter(group => isSlicerAvailable || group !== 'Slicing')
+      .sort((a, b) => {
+        const orderA = groupOrderMap[a] ?? 999;
+        const orderB = groupOrderMap[b] ?? 999;
+        if (orderA !== orderB) return orderA - orderB;
+        // If same order, sort alphabetically
+        return a.localeCompare(b);
+      });
+  }, [groupedNavItems, groupOrderMap, isSlicerAvailable]);
 
   // Get display name for a group from metadata
   const getGroupDisplayName = (groupKey: string): string => {

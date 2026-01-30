@@ -29,6 +29,7 @@ import {
   CameraIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useSlicer } from '@/hooks/useSlicer';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -43,6 +44,7 @@ interface NavigationItem {
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: { resource: string; action: string };
   requiredRole?: string;
+  requiresSlicer?: boolean;
   children?: NavigationItem[];
   isDivider?: false;
 }
@@ -74,7 +76,8 @@ const navigation: NavigationElement[] = [
     name: 'Slice',
     href: '/jobs/new',
     icon: BoxIcon,
-    requiredPermission: { resource: 'models', action: 'read' }
+    requiredPermission: { resource: 'models', action: 'read' },
+    requiresSlicer: true
   },
   {
     name: 'Print Queue',
@@ -139,13 +142,15 @@ const navigation: NavigationElement[] = [
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,
-    requiredRole: 'farm_admin'
+    requiredRole: 'farm_admin',
+    requiresSlicer: true
   },
   {
     name: 'Slicer Profiles',
     href: '/admin/slicer-profiles',
     icon: SettingsIcon,
-    requiredRole: 'farm_admin'
+    requiredRole: 'farm_admin',
+    requiresSlicer: true
   },
   {
     name: 'System',
@@ -170,6 +175,7 @@ const navigation: NavigationElement[] = [
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const { isSlicerAvailable } = useSlicer();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   // Debug: log current pathname to ensure re-render on navigation
@@ -210,12 +216,13 @@ export function Layout() {
     localStorage.setItem('pf_navbar_collapsed', JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
-  // Filter navigation based on user permissions (stable memoization)
+  // Filter navigation based on user permissions and slicer availability (stable memoization)
   const filteredNavigation = useMemo(() => {
     if (!isAuthenticated) {
       // For non-authenticated users, show only public navigation (including dividers)
       return navigation.filter(item => {
         if (isDivider(item)) return true; // Always show dividers
+        if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
@@ -224,9 +231,10 @@ export function Layout() {
       if (isDivider(item)) return true; // Always show dividers
       if (item.requiredRole && !hasRole(item.requiredRole)) return false;
       if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+      if (item.requiresSlicer && !isSlicerAvailable) return false;
       return true;
     });
-  }, [isAuthenticated, hasRole, hasPermission]); // Include all dependencies
+  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable]); // Include all dependencies
 
   const handleLogout = async () => {
     await logout();

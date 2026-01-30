@@ -1,5 +1,5 @@
 /**
- * ProfileEditorModal - Modal wrapper for editing slicer profiles (Machine, Filament, Process)
+ * ProfileEditorModal - Modal wrapper for editing slicer profiles (Machine, Filament)
  * 
  * This modal provides:
  * - OrcaSlicer-style profile editing interface
@@ -7,18 +7,17 @@
  * - Save modifications as new custom profile
  * - Reset individual settings to original values
  * 
- * Supports three profile types:
+ * Supports two profile types:
  * - Machine: Printer hardware settings (bed size, nozzle, gcode flavor)
  * - Filament: Material settings (temperature, cooling, retraction)
- * - Process: Quality/speed settings (layer height, speeds, infill)
+ * 
+ * Note: Process profiles are edited inline in NewSliceJobPage, not via this modal.
  */
 
 import React, { useState, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
-import { SlicerSettingsPanel } from '@/features/slicer/components/settings/SlicerSettingsPanel';
-import { DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings, type SimpleSlicerSettings, type AdvancedSlicerSettings } from '@/features/slicer/components/settings/slicerSettingsTypes';
 import { FilamentProfileEditor } from '@/features/slicer/components/settings/FilamentProfileEditor';
 import { 
   DEFAULT_BASIC_FILAMENT_SETTINGS, 
@@ -32,9 +31,9 @@ import {
   type AdvancedMachineSettings 
 } from '@/features/slicer/components/settings/machineSettingsTypes';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
-import type { OrcaMachineProfile, OrcaFilamentProfile, OrcaProcessProfile } from '@/services/slicerProfilesService';
+import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
 
-export type ProfileType = 'machine' | 'filament' | 'process';
+export type ProfileType = 'machine' | 'filament';
 
 interface ProfileEditorModalProps {
   /** Whether the modal is open */
@@ -44,7 +43,7 @@ interface ProfileEditorModalProps {
   /** Type of profile being edited */
   profileType: ProfileType;
   /** Original profile data (for name and as starting point) */
-  originalProfile: OrcaMachineProfile | OrcaFilamentProfile | OrcaProcessProfile | null;
+  originalProfile: OrcaMachineProfile | OrcaFilamentProfile | null;
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
 }
@@ -74,7 +73,6 @@ export function ProfileEditorModal({
   // Settings state for each profile type
   const [machineSettings, setMachineSettings] = useState<BasicMachineSettings | AdvancedMachineSettings>(DEFAULT_BASIC_MACHINE_SETTINGS);
   const [filamentSettings, setFilamentSettings] = useState<BasicFilamentSettings | AdvancedFilamentSettings>(DEFAULT_BASIC_FILAMENT_SETTINGS);
-  const [processSettings, setProcessSettings] = useState<BasicSlicerSettings | SimpleSlicerSettings | AdvancedSlicerSettings>(DEFAULT_BASIC_SETTINGS);
   
   // Track if settings have been modified
   const [hasChanges, setHasChanges] = useState(false);
@@ -89,7 +87,6 @@ export function ProfileEditorModal({
       // Reset settings to defaults
       setMachineSettings(DEFAULT_BASIC_MACHINE_SETTINGS);
       setFilamentSettings(DEFAULT_BASIC_FILAMENT_SETTINGS);
-      setProcessSettings(DEFAULT_BASIC_SETTINGS);
     }
   }, [isOpen, profileType, originalProfile]);
   
@@ -100,12 +97,10 @@ export function ProfileEditorModal({
         return machineSettings;
       case 'filament':
         return filamentSettings;
-      case 'process':
-        return processSettings;
       default:
         return {};
     }
-  }, [profileType, machineSettings, filamentSettings, processSettings]);
+  }, [profileType, machineSettings, filamentSettings]);
   
   // Save mutation using uploadProfile
   const saveMutation = useMutation({
@@ -160,8 +155,6 @@ export function ProfileEditorModal({
         return `Edit Machine Profile${originalProfile?.name ? `: ${originalProfile.name}` : ''}`;
       case 'filament':
         return `Edit Filament Profile${originalProfile?.name ? `: ${originalProfile.name}` : ''}`;
-      case 'process':
-        return `Edit Process Profile${originalProfile?.name ? `: ${originalProfile.name}` : ''}`;
       default:
         return 'Edit Profile';
     }
@@ -251,17 +244,6 @@ export function ProfileEditorModal({
             settings={filamentSettings}
             onChange={(settings) => {
               setFilamentSettings(settings);
-              setHasChanges(true);
-            }}
-            initialViewMode="basic"
-          />
-        )}
-        
-        {profileType === 'process' && (
-          <SlicerSettingsPanel
-            settings={processSettings as BasicSlicerSettings}
-            onChange={(settings) => {
-              setProcessSettings(settings);
               setHasChanges(true);
             }}
             initialViewMode="basic"

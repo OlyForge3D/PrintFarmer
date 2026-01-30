@@ -82,7 +82,7 @@ export const NewSliceJobPage: React.FC = () => {
   
   // Profile Editor Modal State
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
-  const [profileEditorType, setProfileEditorType] = useState<ProfileType>('process');
+  const [profileEditorType, setProfileEditorType] = useState<ProfileType>('machine');
   
   const stlFile = useSTLFile();
 
@@ -892,21 +892,6 @@ export const NewSliceJobPage: React.FC = () => {
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-semibold text-pf-text">Process Profile</label>
-              {selectedProcessPresetId && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setProfileEditorType('process');
-                    setProfileEditorOpen(true);
-                  }}
-                  className="p-1 h-auto"
-                  title="Edit process profile settings"
-                >
-                  <EditIcon className="w-4 h-4" />
-                </Button>
-              )}
             </div>
             {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
               <Select
@@ -1203,8 +1188,7 @@ export const NewSliceJobPage: React.FC = () => {
         profileType={profileEditorType}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
-          profileEditorType === 'filament' ? (selectedFilamentProfile ?? null) :
-          (availableProcessProfiles.find(p => p.name === selectedProcessPresetId) ?? null)
+          (selectedFilamentProfile ?? null)
         }
         onSaveSuccess={(profileId, profileName) => {
           // Invalidate custom profiles cache

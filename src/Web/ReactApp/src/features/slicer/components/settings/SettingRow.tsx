@@ -4,7 +4,7 @@
  * Includes change tracking with reset-to-original functionality
  */
 import React, { useId } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, Checkbox } from '@/common/components/ui';
 import { HelpIcon } from './SlicerSettingIcons';
 
 /** Reset icon - circular arrow matching OrcaSlicer's style */
@@ -491,5 +491,204 @@ const ColorInputControl: React.FC<ColorInputSettingProps & { id: string }> = ({
     </div>
   );
 };
+
+// ============================================================================
+// COMPACT SETTING ROW - OrcaSlicer-style inline layout
+// ============================================================================
+
+interface CompactSettingRowBaseProps {
+  label: string;
+  tooltip?: string;
+  disabled?: boolean;
+  /** Whether this setting has been modified from its original value */
+  isModified?: boolean;
+  /** Callback to reset this setting to its original value */
+  onReset?: () => void;
+  /** The original value (displayed in reset tooltip) */
+  originalValue?: unknown;
+}
+
+interface CompactNumberSettingProps extends CompactSettingRowBaseProps {
+  type: 'number';
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+}
+
+interface CompactSelectSettingProps extends CompactSettingRowBaseProps {
+  type: 'select';
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}
+
+interface CompactCheckboxSettingProps extends CompactSettingRowBaseProps {
+  type: 'checkbox';
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+interface CompactTextSettingProps extends CompactSettingRowBaseProps {
+  type: 'text';
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+export type CompactSettingRowProps =
+  | CompactNumberSettingProps
+  | CompactSelectSettingProps
+  | CompactCheckboxSettingProps
+  | CompactTextSettingProps;
+
+/**
+ * CompactSettingRow - OrcaSlicer-style compact setting row
+ * Label on left, small input on right, with optional unit indicator
+ */
+export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
+  const id = React.useId();
+  const { label, tooltip, disabled, isModified, onReset, originalValue } = props;
+
+  const formatOriginalValue = (value: unknown): string => {
+    if (value === undefined || value === null) return 'N/A';
+    if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value);
+  };
+
+  const renderControl = () => {
+    switch (props.type) {
+      case 'number':
+        return (
+          <div className="flex items-center gap-1">
+            <input
+              id={id}
+              type="number"
+              value={props.value}
+              onChange={(e) => props.onChange(Number(e.target.value))}
+              min={props.min}
+              max={props.max}
+              step={props.step ?? 0.01}
+              disabled={disabled}
+              className="w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded
+                         text-pf-text focus:border-pf-accent-2 focus:outline-none
+                         disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            {props.unit && (
+              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded min-w-[40px] text-center">
+                {props.unit}
+              </span>
+            )}
+          </div>
+        );
+      case 'select':
+        return (
+          /* eslint-disable-next-line local/pf-no-raw-html-controls -- OrcaSlicer-style compact dropdown */
+          <select
+            id={id}
+            value={props.value}
+            onChange={(e) => props.onChange(e.target.value)}
+            disabled={disabled}
+            className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
+                       text-pf-text cursor-pointer focus:border-pf-accent-2 focus:outline-none
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {props.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        );
+      case 'checkbox':
+        return (
+          <Checkbox
+            id={id}
+            checked={props.checked}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.onChange(e.target.checked)}
+            disabled={disabled}
+          />
+        );
+      case 'text':
+        return (
+          <input
+            id={id}
+            type="text"
+            value={props.value}
+            onChange={(e) => props.onChange(e.target.value)}
+            placeholder={props.placeholder}
+            disabled={disabled}
+            className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
+                       text-pf-text focus:border-pf-accent-2 focus:outline-none
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={`flex items-center justify-between py-1.5 ${disabled ? 'opacity-50' : ''}`}>
+      {/* Label with optional reset button */}
+      <div className="flex items-center gap-1.5">
+        {/* Reset button - shown when setting is modified */}
+        {isModified && onReset && (
+          <Button
+            variant="subtle"
+            type="button"
+            onClick={onReset}
+            className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors
+                       hover:bg-orange-400/10 rounded"
+            title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+            aria-label={`Reset ${label} to original value`}
+          >
+            <ResetIcon className="w-3.5 h-3.5" />
+          </Button>
+        )}
+        
+        <label 
+          htmlFor={id} 
+          className={`text-sm transition-colors ${
+            isModified 
+              ? 'text-orange-400 font-medium' 
+              : 'text-pf-text'
+          }`}
+          title={tooltip}
+        >
+          {label}
+        </label>
+      </div>
+      
+      {/* Control */}
+      {renderControl()}
+    </div>
+  );
+};
+
+/**
+ * Section header for grouping compact settings
+ */
+interface SettingSectionProps {
+  icon?: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}
+
+export const SettingSection: React.FC<SettingSectionProps> = ({ icon, title, children }) => (
+  <div className="mb-4">
+    <div className="flex items-center gap-2 mb-2 pb-1 border-b border-pf-border/50">
+      {icon && <span className="text-pf-accent-2">{icon}</span>}
+      <h4 className="text-sm font-semibold text-pf-text">{title}</h4>
+    </div>
+    <div className="space-y-0.5 pl-1">
+      {children}
+    </div>
+  </div>
+);
 
 export default SettingRow;
