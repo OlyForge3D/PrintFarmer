@@ -71,12 +71,27 @@ interface NumberInputSettingProps extends BaseSettingRowProps {
   unit?: string;
 }
 
+interface TextInputSettingProps extends BaseSettingRowProps {
+  type: 'text';
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+interface ColorInputSettingProps extends BaseSettingRowProps {
+  type: 'color';
+  value: string;
+  onChange: (value: string) => void;
+}
+
 export type SettingRowProps =
   | SliderSettingProps
   | SelectSettingProps
   | RadioSettingProps
   | CheckboxSettingProps
-  | NumberInputSettingProps;
+  | NumberInputSettingProps
+  | TextInputSettingProps
+  | ColorInputSettingProps;
 
 /**
  * SettingRow - OrcaSlicer-style setting control with icon, label, description, and control
@@ -107,6 +122,10 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
         return <CheckboxControl {...props} id={id} />;
       case 'number':
         return <NumberInputControl {...props} id={id} />;
+      case 'text':
+        return <TextInputControl {...props} id={id} />;
+      case 'color':
+        return <ColorInputControl {...props} id={id} />;
       default:
         return null;
     }
@@ -412,6 +431,63 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
           {unit}
         </span>
       )}
+    </div>
+  );
+};
+
+/** Text input control */
+const TextInputControl: React.FC<TextInputSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}) => {
+  return (
+    <input
+      id={id}
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      disabled={disabled}
+      className="w-full px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
+                 text-pf-text
+                 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                 disabled:opacity-50 disabled:cursor-not-allowed"
+    />
+  );
+};
+
+/** Color input control with preview swatch */
+const ColorInputControl: React.FC<ColorInputSettingProps & { id: string }> = ({
+  id,
+  value,
+  onChange,
+  disabled,
+}) => {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        id={id}
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-12 h-10 rounded cursor-pointer border border-pf-border
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="flex-1 px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
+                   text-pf-text font-mono text-sm uppercase
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+        placeholder="#000000"
+      />
     </div>
   );
 };
