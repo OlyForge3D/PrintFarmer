@@ -79,7 +79,9 @@ jobs:
           # - api-runtime
           # - frontend-runtime  
           # - printer-discovery-runtime
-          echo "dockerfile=dockerfiles/Dockerfile.multistage" >> $GITHUB_OUTPUT
+          # Note: Source Dockerfiles are in scripts/docker/dockerfiles/ (committed to git)
+          # The /dockerfiles/ at root is auto-generated and .gitignored
+          echo "dockerfile=scripts/docker/dockerfiles/Dockerfile.multistage" >> $GITHUB_OUTPUT
           echo "context=./" >> $GITHUB_OUTPUT
           
           if [ "${{ matrix.component }}" = "api" ]; then
