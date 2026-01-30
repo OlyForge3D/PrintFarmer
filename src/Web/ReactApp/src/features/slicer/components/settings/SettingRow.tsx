@@ -1,10 +1,19 @@
 /**
  * Individual setting row component with OrcaSlicer-style UI
  * Supports slider, select, radio, and checkbox control types
+ * Includes change tracking with reset-to-original functionality
  */
 import React, { useId } from 'react';
 import { Button } from '@/common/components/ui';
 import { HelpIcon } from './SlicerSettingIcons';
+
+/** Reset icon - circular arrow matching OrcaSlicer's style */
+const ResetIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+  </svg>
+);
 
 interface BaseSettingRowProps {
   icon: React.ReactNode;
@@ -12,6 +21,12 @@ interface BaseSettingRowProps {
   description?: string;
   tooltip?: string;
   disabled?: boolean;
+  /** Whether this setting has been modified from its original value */
+  isModified?: boolean;
+  /** Callback to reset this setting to its original value */
+  onReset?: () => void;
+  /** The original value (displayed in reset tooltip) */
+  originalValue?: unknown;
 }
 
 interface SliderSettingProps extends BaseSettingRowProps {
@@ -65,10 +80,20 @@ export type SettingRowProps =
 
 /**
  * SettingRow - OrcaSlicer-style setting control with icon, label, description, and control
+ * Supports change tracking with reset-to-original functionality
  */
 export const SettingRow: React.FC<SettingRowProps> = (props) => {
   const id = useId();
-  const { icon, label, description, tooltip, disabled } = props;
+  const { icon, label, description, tooltip, disabled, isModified, onReset, originalValue } = props;
+
+  // Format original value for tooltip display
+  const formatOriginalValue = (value: unknown): string => {
+    if (value === undefined || value === null) return 'N/A';
+    if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value);
+  };
 
   const renderControl = () => {
     switch (props.type) {
@@ -89,12 +114,37 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
 
   return (
     <div className={`py-4 ${disabled ? 'opacity-50' : ''}`}>
-      {/* Header row with icon, label, and help */}
+      {/* Header row with icon, label, reset button, and help */}
       <div className="flex items-center gap-2 mb-1">
         <span className="text-pf-accent-2">{icon}</span>
-        <label htmlFor={id} className="font-semibold text-pf-text">
+        
+        {/* Reset button - shown when setting is modified */}
+        {isModified && onReset && (
+          <Button
+            variant="subtle"
+            type="button"
+            onClick={onReset}
+            className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors
+                       hover:bg-orange-400/10 rounded"
+            title={`Reset to original: ${formatOriginalValue(originalValue)}`}
+            aria-label={`Reset ${label} to original value`}
+          >
+            <ResetIcon className="w-4 h-4" />
+          </Button>
+        )}
+        
+        {/* Label - highlighted in accent color when modified */}
+        <label 
+          htmlFor={id} 
+          className={`font-semibold transition-colors ${
+            isModified 
+              ? 'text-orange-400' 
+              : 'text-pf-text'
+          }`}
+        >
           {label}
         </label>
+        
         {tooltip && (
           <Button
             variant="subtle"
