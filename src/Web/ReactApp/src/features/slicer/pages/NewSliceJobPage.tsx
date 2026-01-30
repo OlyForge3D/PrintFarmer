@@ -77,6 +77,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
   const [isCloneProfilesModalOpen, setIsCloneProfilesModalOpen] = useState(false);
+  const [cloneProfilesDismissed, setCloneProfilesDismissed] = useState(false);
   const stlFile = useSTLFile();
 
   // === Queries ===
@@ -231,9 +232,11 @@ export const NewSliceJobPage: React.FC = () => {
   // 2. Filament/process profiles loaded when machine profile is selected
 
   // Get selected printer's model ID for profile queries
+  // NOTE: Use selectedPrinterDetails (from /details endpoint) because the basic
+  // /api/printers list doesn't include modelId - only the details endpoint does
   const selectedPrinterModelId = useMemo(() => {
-    return selectedPrinter?.modelId || null;
-  }, [selectedPrinter]);
+    return selectedPrinterDetails?.modelId || null;
+  }, [selectedPrinterDetails]);
 
   // Fetch machine profiles for the selected printer's model
   const { data: machineProfilesData = [], isLoading: isMachineProfilesLoading } = useQuery<OrcaMachineProfile[]>({
@@ -346,25 +349,40 @@ export const NewSliceJobPage: React.FC = () => {
     }
   }, [selectedPrinterForSlicing, machineProfilesData]);
 
-  // Filter profiles for the selected printer - use incremental process profiles
-  const printerProcessProfiles = useMemo(() => {
-    return processProfilesData ?? [];
-  }, [processProfilesData]);
-
   // Check if printer has no profiles - show clone suggestion
+  // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
+  // This prevents the modal from showing during loading states
   const shouldSuggestCloneProfiles = useMemo(() => {
-    return selectedPrinterId && printerProcessProfiles.length === 0;
-  }, [selectedPrinterId, printerProcessProfiles.length]);
+    // Don't suggest if user already dismissed for this session
+    if (cloneProfilesDismissed) return false;
+    // Don't suggest if no printer selected
+    if (!selectedPrinterId) return false;
+    // Don't suggest if printer has no modelId (query won't run)
+    if (!selectedPrinterModelId) return false;
+    // Don't suggest while machine profiles are still loading
+    if (isMachineProfilesLoading) return false;
+    // Suggest if machine profiles query completed but returned empty
+    // (meaning OrcaSlicer has no profiles for this printer model)
+    if (machineProfilesData.length === 0 && !isMachineProfilesLoading) return true;
+    // Don't suggest if we have machine profiles (process profiles will load after machine selection)
+    return false;
+  }, [selectedPrinterId, selectedPrinterModelId, machineProfilesData.length, isMachineProfilesLoading, cloneProfilesDismissed]);
 
   // Auto-open clone profiles modal if printer selected but has no profiles
+  // Only opens once per printer selection - user dismissal is respected
   useEffect(() => {
     if (shouldSuggestCloneProfiles && !isCloneProfilesModalOpen) {
       const timer = setTimeout(() => {
         setIsCloneProfilesModalOpen(true);
-      }, 300);
+      }, 500); // Increased delay to ensure profiles have time to load
       return () => clearTimeout(timer);
     }
   }, [shouldSuggestCloneProfiles, isCloneProfilesModalOpen]);
+
+  // Reset dismissal state when printer changes
+  useEffect(() => {
+    setCloneProfilesDismissed(false);
+  }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
   const machineProfiles = useMemo(() => {
@@ -1052,13 +1070,17 @@ export const NewSliceJobPage: React.FC = () => {
       {selectedPrinter && (
         <CloneProfilesModal
           isOpen={isCloneProfilesModalOpen}
-          onClose={() => setIsCloneProfilesModalOpen(false)}
+          onClose={() => {
+            setIsCloneProfilesModalOpen(false);
+            setCloneProfilesDismissed(true); // Prevent re-opening on cancel
+          }}
           printerId={selectedPrinterId}
           printerName={selectedPrinter.name}
           onSuccess={() => {
             // Invalidate profiles cache to reload when modal closes
             qc.invalidateQueries({ queryKey: ['slicerProfiles'] });
             qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+            qc.invalidateQueries({ queryKey: ['machineProfilesForModel'] });
           }}
         />
       )}
