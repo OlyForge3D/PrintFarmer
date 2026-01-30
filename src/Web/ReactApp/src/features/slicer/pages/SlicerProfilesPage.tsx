@@ -19,7 +19,9 @@ import {
   CloneSingleProfileRequest,
   CloneSingleProfileResponse,
   UploadProfileRequest,
-  CustomProfile
+  CustomProfile,
+  CustomProfilesListResponse,
+  UpdateCustomProfileRequest
 } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
@@ -56,8 +58,15 @@ export const SlicerProfilesPage: React.FC = () => {
   const [uploadProfileType, setUploadProfileType] = useState<'machine' | 'filament' | 'process'>('process');
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Tab state - 'machines', 'filaments', 'processes'
-  const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes'>('machines');
+  // Edit custom profile modal state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<CustomProfile | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Tab state - 'machines', 'filaments', 'processes', 'custom'
+  const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes' | 'custom'>('machines');
 
   // Filtering and search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +129,13 @@ export const SlicerProfilesPage: React.FC = () => {
     queryKey: ['slicerProfilesHierarchyFiltered', selectedMachineProfileId],
     queryFn: async () => slicerProfilesService.listHierarchical(selectedMachineProfileId),
     enabled: !!selectedMachineProfileId,
+    staleTime: 10_000
+  });
+
+  // Custom profiles query - loads user-owned custom profiles
+  const { data: customProfilesData, isLoading: customProfilesLoading } = useQuery<CustomProfilesListResponse, Error>({
+    queryKey: ['customProfiles'],
+    queryFn: async () => slicerProfilesService.listCustomProfiles(),
     staleTime: 10_000
   });
 
@@ -252,6 +268,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
   });
@@ -262,6 +279,7 @@ export const SlicerProfilesPage: React.FC = () => {
     onSuccess: (result) => {
       setMessage(`Created custom profile: ${result.name}`);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
   });
@@ -276,9 +294,60 @@ export const SlicerProfilesPage: React.FC = () => {
       setUploadError(null);
       setIsUploadModalOpen(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setUploadError(err.message)
   });
+
+  // Update custom profile mutation
+  const updateProfileMutation = useMutation<CustomProfile, Error, { id: string; request: UpdateCustomProfileRequest }>({
+    mutationFn: async ({ id, request }) => slicerProfilesService.updateCustomProfile(id, request),
+    onSuccess: (result) => {
+      setMessage(`Updated profile: ${result.name}`);
+      setIsEditModalOpen(false);
+      setEditingProfile(null);
+      setEditError(null);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setEditError(err.message)
+  });
+
+  // Delete single custom profile mutation
+  const deleteProfileMutation = useMutation<void, Error, string>({
+    mutationFn: async (id) => slicerProfilesService.deleteCustomProfile(id),
+    onSuccess: () => {
+      setMessage('Profile deleted');
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setMessage(`Failed to delete profile: ${err.message}`)
+  });
+
+  // Helper to open edit modal for a custom profile
+  const openEditModal = (profile: CustomProfile) => {
+    setEditingProfile(profile);
+    setEditName(profile.name);
+    setEditDescription(profile.description || '');
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const onEditProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProfile) return;
+    if (!editName.trim()) {
+      setEditError('Name is required');
+      return;
+    }
+    updateProfileMutation.mutate({
+      id: editingProfile.id,
+      request: {
+        name: editName,
+        description: editDescription || undefined
+      }
+    });
+  };
 
   const onUploadCustomProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -463,6 +532,21 @@ export const SlicerProfilesPage: React.FC = () => {
     });
   }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedMachineContext, selectedProcessProfileId]);
 
+  // Filtered custom profiles for "My Profiles" tab
+  const filteredCustomProfiles = useMemo<CustomProfile[]>(() => {
+    if (!customProfilesData?.profiles) return [];
+    
+    return customProfilesData.profiles.filter((p) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [customProfilesData, searchQuery]);
+
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!rawJson.trim()) {
@@ -534,14 +618,56 @@ export const SlicerProfilesPage: React.FC = () => {
     </SelectableRow>
   );
 
+  // Render a custom profile row for the "My Profiles" tab
+  const renderCustomProfileRow = (p: CustomProfile) => (
+    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={selectedProfileIds.has(p.id)}>
+      <td className="p-2">
+        <Checkbox
+          checked={selectedProfileIds.has(p.id)}
+          onChange={() => handleToggleSelection(p.id)}
+          label=""
+          aria-label={`Select ${p.name}`}
+        />
+      </td>
+      <td className="p-2 font-medium">{p.name}</td>
+      <td className="p-2 capitalize">{p.profileType}</td>
+      <td className="p-2">{p.description || '-'}</td>
+      <td className="p-2">
+        {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}
+      </td>
+      <td className="p-2">
+        {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : '-'}
+      </td>
+      <td className="p-2">
+        <div className="flex gap-2">
+          <Button
+            onClick={() => openEditModal(p)}
+            size="sm"
+            variant="secondary"
+          >Edit</Button>
+          <Button
+            onClick={() => {
+              if (window.confirm(`Delete profile "${p.name}"?`)) {
+                deleteProfileMutation.mutate(p.id);
+              }
+            }}
+            loading={deleteProfileMutation.isPending}
+            size="sm"
+            variant="danger"
+          >Delete</Button>
+        </div>
+      </td>
+    </SelectableRow>
+  );
   const getTotalCount = () => {
-    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length;
+    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length + (customProfilesData?.profiles?.length ?? 0);
   };
 
   const getFilteredCount = () => {
     if (activeTab === 'machines') return filteredMachineProfiles.length;
     if (activeTab === 'filaments') return filteredFilamentProfiles.length;
     if (activeTab === 'processes') return filteredProcessProfiles.length;
+    if (activeTab === 'custom') return filteredCustomProfiles.length;
     return 0;
   };
 
@@ -601,6 +727,7 @@ export const SlicerProfilesPage: React.FC = () => {
     if (activeTab === 'machines') return filteredMachineProfiles;
     if (activeTab === 'filaments') return filteredFilamentProfiles;
     if (activeTab === 'processes') return filteredProcessProfiles;
+    // 'custom' tab handles its own rendering
     return [];
   }, [activeTab, filteredFilamentProfiles, filteredMachineProfiles, filteredProcessProfiles]);
 
@@ -953,6 +1080,15 @@ export const SlicerProfilesPage: React.FC = () => {
               >
                 Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
               </Button>
+              <Button
+                type="button"
+                onClick={() => setActiveTab('custom')}
+                variant="tab"
+                size="sm"
+                className={activeTab === 'custom' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
+              >
+                My Profiles ({filteredCustomProfiles.length})
+              </Button>
             </div>
           </div>
 
@@ -967,6 +1103,65 @@ export const SlicerProfilesPage: React.FC = () => {
             {!isLoading && (activeTab === 'filaments' || activeTab === 'processes') && !selectedMachineProfileId && (
               <div className="text-pf-text-muted text-sm">Select a machine model to view filament and process profiles.</div>
             )}
+            
+            {/* Custom Profiles Tab Content */}
+            {activeTab === 'custom' && (
+              <>
+                {customProfilesLoading && <div>Loading custom profiles...</div>}
+                {!customProfilesLoading && filteredCustomProfiles.length === 0 && (
+                  <div className="text-center py-8">
+                    <p className="text-pf-text-muted mb-4">No custom profiles yet.</p>
+                    <p className="text-sm text-pf-text-secondary mb-4">
+                      Create custom profiles by cloning system profiles or uploading your own.
+                    </p>
+                    <Button
+                      variant="primary"
+                      onClick={() => setIsUploadModalOpen(true)}
+                      iconLeft={<UploadIcon className="w-4 h-4" />}
+                    >
+                      Upload Custom Profile
+                    </Button>
+                  </div>
+                )}
+                {!customProfilesLoading && filteredCustomProfiles.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="bg-pf-bg-1 text-left">
+                          <th className="p-2 w-10">
+                            <Checkbox
+                              checked={filteredCustomProfiles.length > 0 && filteredCustomProfiles.every(p => selectedProfileIds.has(p.id))}
+                              onChange={() => {
+                                if (selectedProfileIds.size === filteredCustomProfiles.length && filteredCustomProfiles.every(p => selectedProfileIds.has(p.id))) {
+                                  setSelectedProfileIds(new Set());
+                                } else {
+                                  setSelectedProfileIds(new Set(filteredCustomProfiles.map(p => p.id)));
+                                }
+                              }}
+                              label=""
+                              aria-label="Select all custom profiles"
+                            />
+                          </th>
+                          <th className="p-2">Name</th>
+                          <th className="p-2">Type</th>
+                          <th className="p-2">Description</th>
+                          <th className="p-2">Created</th>
+                          <th className="p-2">Updated</th>
+                          <th className="p-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCustomProfiles.map(p => renderCustomProfileRow(p))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Regular Profiles Tabs Content (Machines, Filaments, Processes) */}
+            {activeTab !== 'custom' && (
+              <>
             {/* Bulk actions bar */}
             {selectedProfileIds.size > 0 && (
               <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded">
@@ -1041,6 +1236,8 @@ export const SlicerProfilesPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>
@@ -1240,6 +1437,67 @@ export const SlicerProfilesPage: React.FC = () => {
             {reseedMessage}
           </p>
         </div>
+      </Modal>
+
+      {/* Edit Custom Profile Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingProfile(null);
+          setEditError(null);
+        }}
+        title="Edit Custom Profile"
+        isDisabled={updateProfileMutation.isPending}
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button
+              variant="secondary"
+              onClick={() => setIsEditModalOpen(false)}
+              disabled={updateProfileMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              form="edit-profile-form"
+              type="submit"
+              loading={updateProfileMutation.isPending}
+              variant="primary"
+            >
+              Save Changes
+            </Button>
+          </div>
+        }
+      >
+        <form id="edit-profile-form" onSubmit={onEditProfile} className="space-y-4">
+          {editingProfile && (
+            <>
+              <p className="text-sm text-pf-text-secondary">
+                Editing <span className="font-medium">{editingProfile.profileType}</span> profile
+              </p>
+
+              <FormField label="Name" required>
+                <Input
+                  type="text"
+                  placeholder="Profile name"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+              </FormField>
+
+              <FormField label="Description">
+                <Textarea
+                  placeholder="Optional description"
+                  value={editDescription}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditDescription(e.target.value)}
+                  rows={3}
+                />
+              </FormField>
+
+              {editError && <Alert type="error">{editError}</Alert>}
+            </>
+          )}
+        </form>
       </Modal>
     </PageTemplate>
   );
