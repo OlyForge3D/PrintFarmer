@@ -9,6 +9,11 @@ dotnet_diagnostic.SA1404.severity = none
 dotnet_diagnostic.IDE0290.severity = none
 dotnet_diagnostic.SA1400.severity = none
 dotnet_diagnostic.CA1510.severity = none
+
+# Suppress "Prefix local calls with this" - project style prefers no this. prefix
+dotnet_diagnostic.SA1101.severity = none
+# Suppress "Elements should be documented" - not requiring XML docs for all public members
+dotnet_diagnostic.SA1600.severity = none
 # EditorConfig is awesome: https://EditorConfig.org
 
 # top-most EditorConfig file
@@ -63,6 +68,7 @@ dotnet_diagnostic.xUnit2018.severity = none # "do not compare an object's exact 
 # Sort using and Import directives with System.* appearing first
 dotnet_sort_system_directives_first = true
 dotnet_separate_import_directive_groups = false
+
 # Avoid "this." and "Me." if not necessary
 dotnet_style_qualification_for_field = false:refactoring
 dotnet_style_qualification_for_property = false:refactoring

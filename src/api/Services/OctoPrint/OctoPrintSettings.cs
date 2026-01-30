@@ -1,6 +1,4 @@
-﻿using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
 
 namespace Farm.Web.Api.Services.OctoPrint;
@@ -22,8 +20,7 @@ public class OctoPrintSettings : IAppSetting
     /// When disabled, uploads are allowed without authentication (useful for local/trusted networks).
     /// </summary>
     [JsonPropertyName("requireApiKey")]
-    [DisplayName("Require API Key")]
-    [Description("When enabled, slicer connections (OrcaSlicer, PrusaSlicer, etc.) must provide a valid API key. Disable for trusted local networks.")]
+    [SettingDisplay(Name = "Require API Key", Description = "When enabled, slicer connections must provide a valid API key. Disable for trusted local networks.", InputType = SettingInputType.Boolean, Order = 1)]
     public bool RequireApiKey { get; set; } = false;
 
     /// <summary>
@@ -31,25 +28,20 @@ public class OctoPrintSettings : IAppSetting
     /// When disabled, keys are stored in plain text (useful for debugging but less secure).
     /// </summary>
     [JsonPropertyName("hashStoredApiKeys")]
-    [DisplayName("Hash Stored API Keys")]
-    [Description("Store API keys as SHA256 hashes for improved security. Disable only for debugging purposes.")]
+    [SettingDisplay(Name = "Hash Stored API Keys", Description = "Store API keys as SHA256 hashes for improved security. Disable only for debugging.", InputType = SettingInputType.Boolean, Order = 2)]
     public bool HashStoredApiKeys { get; set; } = true;
 
     /// <summary>
     /// Maximum number of upload requests per minute from a single IP or API key.
     /// </summary>
     [JsonPropertyName("rateLimitPerMinute")]
-    [DisplayName("Rate Limit (per minute)")]
-    [Description("Maximum upload requests per minute from a single source. Set to 0 to disable rate limiting.")]
-    [Range(0, 1000)]
+    [SettingDisplay(Name = "Rate Limit (per minute)", Description = "Maximum upload requests per minute from a single source. Set to 0 to disable.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1000, Order = 3)]
     public int RateLimitPerMinute { get; set; } = 60;
 
     /// <summary>
     /// Maximum file size allowed for uploads in megabytes.
     /// </summary>
     [JsonPropertyName("maxUploadSizeMb")]
-    [DisplayName("Max Upload Size (MB)")]
-    [Description("Maximum file size for slicer uploads in megabytes.")]
-    [Range(1, 500)]
+    [SettingDisplay(Name = "Max Upload Size (MB)", Description = "Maximum file size for slicer uploads in megabytes.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 500, Order = 4)]
     public int MaxUploadSizeMb { get; set; } = 50;
 }

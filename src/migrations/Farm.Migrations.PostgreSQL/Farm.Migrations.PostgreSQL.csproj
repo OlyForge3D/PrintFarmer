@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Suppress warnings in auto-generated migration files -->
+    <NoWarn>$(NoWarn);CA1825;CA1861</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
