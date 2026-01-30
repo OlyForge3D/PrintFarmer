@@ -77,6 +77,7 @@ export interface Printer {
   manufacturerName?: string;
   modelId?: string;
   modelName?: string;
+  motionType?: MotionType;
   progress?: number;
   jobName?: string;
   thumbnailUrl?: string;

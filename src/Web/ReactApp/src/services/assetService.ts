@@ -142,6 +142,40 @@ class AssetService {
   }
 
   /**
+   * Get a fallback printer image based on motion type.
+   * Returns generic CoreXY, Cartesian, or default printer SVG.
+   * MotionType enum: Cartesian=0, CoreXY=1, Delta=2, Unknown=99
+   */
+  getFallbackImageUrl(motionType?: string | number): string {
+    // motionType can be string ('CoreXY', 'Cartesian') or enum number
+    const type = typeof motionType === 'string' ? motionType.toLowerCase() : motionType;
+    
+    if (type === 'corexy' || type === 1) {
+      return '/assets/printers/generic-corexy.svg';
+    }
+    if (type === 'cartesian' || type === 0) {
+      return '/assets/printers/generic-cartesian.svg';
+    }
+    // Delta, Unknown, or undefined
+    return '/assets/printers/generic-printer.svg';
+  }
+
+  /**
+   * Get printer cover image URL with fallback based on motion type
+   */
+  getCoverImageUrlWithFallback(
+    manufacturerId?: string,
+    modelId?: string,
+    motionType?: string | number
+  ): string {
+    if (manufacturerId && modelId) {
+      const coverUrl = this.getCoverImageUrl(manufacturerId, modelId);
+      if (coverUrl) return coverUrl;
+    }
+    return this.getFallbackImageUrl(motionType);
+  }
+
+  /**
    * Get bed texture image URL
    */
   getBedTextureUrl(

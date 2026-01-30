@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-import { assetService } from '@/services/assetService';
+import { PrinterImage } from '@/common/components/PrinterImage';
 
 interface PrinterItem {
     id: string;
@@ -10,6 +10,8 @@ interface PrinterItem {
     modelName?: string;
     manufacturerName?: string;
     isOnline?: boolean;
+    nozzleDiameter?: number;
+    motionType?: number;
 }
 
 interface PrinterSelectorModalProps {
@@ -69,10 +71,6 @@ export function PrinterSelectorModal({
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredPrinters.map((printer) => {
-                        const coverImageUrl = printer.manufacturerName && printer.modelName
-                            ? assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName)
-                            : undefined;
-
                         const isSelected = printer.id === selectedPrinterId;
 
                         return (
@@ -83,30 +81,29 @@ export function PrinterSelectorModal({
                                 onClick={() => handleSelect(printer.id)}
                                 className="group relative overflow-hidden h-auto p-0 !rounded-lg !justify-start"
                             >
-                                {/* Cover Image */}
-                                {coverImageUrl && (
-                                    <div className="relative w-full h-40 overflow-hidden bg-pf-bg-1">
-                                        <img
-                                            src={coverImageUrl}
-                                            alt={printer.name}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                                            onError={(e) => {
-                                                (e.target as HTMLImageElement).style.display = 'none';
-                                            }}
-                                        />
-                                    </div>
-                                )}
+                                {/* Cover Image (uses fallback SVG if no model image or on error) */}
+                                <div className="relative w-full h-40 overflow-hidden bg-pf-bg-1">
+                                    <PrinterImage
+                                        manufacturerName={printer.manufacturerName}
+                                        modelName={printer.modelName}
+                                        motionType={printer.motionType}
+                                        alt={printer.name}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                    />
+                                </div>
 
                                 {/* Info */}
-                                <div className={`p-4 ${coverImageUrl ? '' : 'pt-6'}`}>
+                                <div className="p-4">
                                     <h3 className="font-semibold text-pf-text text-lg truncate text-left">
                                         {printer.name}
                                     </h3>
 
-                                    {printer.modelName && (
+                                    {(printer.modelName || printer.nozzleDiameter) && (
                                         <p className="text-sm text-pf-text-secondary truncate text-left">
                                             {printer.manufacturerName && `${printer.manufacturerName} • `}
                                             {printer.modelName}
+                                            {printer.modelName && printer.nozzleDiameter && ' • '}
+                                            {printer.nozzleDiameter && `${printer.nozzleDiameter}mm nozzle`}
                                         </p>
                                     )}
 

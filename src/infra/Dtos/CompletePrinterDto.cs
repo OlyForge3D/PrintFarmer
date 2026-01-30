@@ -19,6 +19,7 @@ public record CompletePrinterDto(
     string? ManufacturerName,
     Guid? ModelId,
     string? ModelName,
+    MotionType? MotionType,
     PrinterBackend Backend,
     string? ApiKey,
     string? OriginalServerUrl,

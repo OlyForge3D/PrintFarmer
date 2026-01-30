@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
-import { Select } from '@/common/components/ui';
-import type { ToolheadDto } from '@/types/api';
+import React, { useMemo, useState } from 'react';
+import { Button } from '@/common/components/ui';
+import { PrinterImage } from '@/common/components/PrinterImage';
+import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
+import type { ToolheadDto, MotionType } from '@/types/api';
 
 export interface PrinterForSlicing {
   id: string;
@@ -13,6 +15,7 @@ export interface PrinterForSlicing {
   thumbnailUrl?: string;
   isOnline?: boolean;
   toolheads?: ToolheadDto[];
+  motionType?: MotionType;
 }
 
 interface PrinterSlicerSelectorProps {
@@ -55,133 +58,110 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
   onPrinterChange,
   className
 }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const selectedPrinter = useMemo(() => {
     return printers.find(p => p.id === selectedPrinterId);
   }, [printers, selectedPrinterId]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const printerId = e.target.value;
+  const handleSelect = (printerId: string) => {
     const printer = printers.find(p => p.id === printerId);
     onPrinterChange(printerId, printer);
   };
 
-  // Group printers by manufacturer for better organization
-  const printersByManufacturer = useMemo(() => {
-    const grouped = new Map<string, PrinterForSlicing[]>();
-    
-    for (const printer of printers) {
-      const mfr = printer.manufacturerName || 'Other';
-      if (!grouped.has(mfr)) {
-        grouped.set(mfr, []);
-      }
-      grouped.get(mfr)!.push(printer);
-    }
-    
-    // Sort manufacturers alphabetically, but put "Other" last
-    return Array.from(grouped.entries()).sort((a, b) => {
-      if (a[0] === 'Other') return 1;
-      if (b[0] === 'Other') return -1;
-      return a[0].localeCompare(b[0]);
-    });
+  // Map printers to modal format with nozzle diameter and motion type
+  const modalPrinters = useMemo(() => {
+    return printers.map(p => ({
+      id: p.id,
+      name: p.name,
+      modelName: p.modelName,
+      manufacturerName: p.manufacturerName,
+      isOnline: p.isOnline,
+      nozzleDiameter: getPrimaryNozzleDiameter(p),
+      motionType: p.motionType
+    }));
   }, [printers]);
 
-  const formatPrinterOption = (printer: PrinterForSlicing): string => {
-    const nozzle = getPrimaryNozzleDiameter(printer);
-    const parts = [printer.name];
-    
-    if (printer.modelName) {
-      parts.push(`(${printer.modelName}`);
-      if (nozzle) {
-        parts[parts.length - 1] += ` • ${nozzle}mm`;
-      }
-      parts[parts.length - 1] += ')';
-    } else if (nozzle) {
-      parts.push(`(${nozzle}mm nozzle)`);
-    }
-    
-    return parts.join(' ');
-  };
-
   return (
-    <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 ${className ?? ''}`}>
+    <div className={className ?? ''}>
       <label className="block text-sm font-semibold text-pf-text mb-2">
         Printer
       </label>
       
       {isLoading ? (
-        <Select disabled className="bg-pf-disabled">
-          <option>Loading printers...</option>
-        </Select>
+        <div className="p-3 bg-pf-surface rounded-lg text-pf-text-muted">
+          Loading printers...
+        </div>
       ) : printers.length === 0 ? (
         <div className="text-sm text-pf-text-muted p-2 bg-pf-surface rounded">
           No printers configured. <a href="/printers" className="text-pf-primary hover:underline">Add a printer</a> to get started.
         </div>
       ) : (
         <>
-          <Select
-            value={selectedPrinterId}
-            onChange={handleChange}
-            className="w-full"
+          {/* Clickable printer card that opens modal */}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setIsModalOpen(true)}
+            className="w-full !justify-start !p-3 !rounded-lg"
           >
-            <option value="">-- Select printer to slice for --</option>
-            {printersByManufacturer.map(([manufacturer, manufacturerPrinters]) => (
-              <optgroup key={manufacturer} label={manufacturer}>
-                {manufacturerPrinters.map(printer => (
-                  <option key={printer.id} value={printer.id}>
-                    {formatPrinterOption(printer)}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </Select>
-          
-          {/* Rich display of selected printer */}
-          {selectedPrinter && (
-            <div className="mt-3 p-3 bg-pf-surface rounded-lg flex items-start gap-3">
-              {/* Printer thumbnail or icon */}
-              <div className="flex-shrink-0 w-16 h-16 bg-pf-bg-1 rounded flex items-center justify-center overflow-hidden">
-                {selectedPrinter.thumbnailUrl ? (
-                  <img 
-                    src={selectedPrinter.thumbnailUrl} 
+            {selectedPrinter ? (
+              <div className="flex items-start gap-3 w-full text-left">
+                {/* Printer cover image from manufacturer/model or fallback based on motion type */}
+                <div className="flex-shrink-0 w-12 h-12 bg-pf-bg-1 rounded flex items-center justify-center overflow-hidden">
+                  <PrinterImage
+                    manufacturerName={selectedPrinter.manufacturerName}
+                    modelName={selectedPrinter.modelName}
+                    motionType={selectedPrinter.motionType}
                     alt={selectedPrinter.name}
                     className="w-full h-full object-cover"
                   />
-                ) : (
-                  <span className="text-2xl" role="img" aria-label="Printer">🖨️</span>
-                )}
-              </div>
-              
-              {/* Printer info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-pf-text truncate">
-                    {selectedPrinter.name}
-                  </span>
-                  {selectedPrinter.isOnline !== undefined && (
-                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      selectedPrinter.isOnline ? 'bg-green-500' : 'bg-gray-400'
-                    }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
-                  )}
                 </div>
-                <div className="text-sm text-pf-text-muted flex items-center gap-1 mt-0.5">
-                  {selectedPrinter.modelName && (
-                    <span>{selectedPrinter.modelName}</span>
-                  )}
-                  {selectedPrinter.modelName && getPrimaryNozzleDiameter(selectedPrinter) && (
-                    <span className="text-pf-text-muted">•</span>
-                  )}
-                  {getPrimaryNozzleDiameter(selectedPrinter) && (
-                    <span>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</span>
-                  )}
-                </div>
-                {selectedPrinter.manufacturerName && (
-                  <div className="text-xs text-pf-text-muted mt-1">
-                    {selectedPrinter.manufacturerName}
+                
+                {/* Printer info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-pf-text truncate">
+                      {selectedPrinter.name}
+                    </span>
+                    {selectedPrinter.isOnline !== undefined && (
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        selectedPrinter.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                      }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
+                    )}
                   </div>
-                )}
+                  <div className="text-sm text-pf-text-muted flex items-center gap-1 mt-0.5">
+                    {selectedPrinter.modelName && (
+                      <span>{selectedPrinter.modelName}</span>
+                    )}
+                    {selectedPrinter.modelName && getPrimaryNozzleDiameter(selectedPrinter) && (
+                      <span className="text-pf-text-muted">•</span>
+                    )}
+                    {getPrimaryNozzleDiameter(selectedPrinter) && (
+                      <span>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Change indicator */}
+                <span className="text-pf-text-muted text-sm">Change</span>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center gap-3 text-pf-text-muted">
+                <span className="text-xl">🖨️</span>
+                <span>Click to select a printer...</span>
+              </div>
+            )}
+          </Button>
+          
+          {/* Printer selector modal */}
+          <PrinterSelectorModal
+            isOpen={isModalOpen}
+            printers={modalPrinters}
+            selectedPrinterId={selectedPrinterId}
+            onSelect={handleSelect}
+            onClose={() => setIsModalOpen(false)}
+          />
         </>
       )}
     </div>

@@ -152,7 +152,8 @@ export const NewSliceJobPage: React.FC = () => {
         modelId: p.modelId,
         modelName: p.modelName,
         thumbnailUrl: p.thumbnailUrl,
-        isOnline: p.isOnline
+        isOnline: p.isOnline,
+        motionType: p.motionType
       })) as PrinterForSlicing[];
     },
     staleTime: 30_000
