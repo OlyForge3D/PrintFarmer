@@ -41,6 +41,8 @@ interface SlicerSettingsPanelProps {
   disabled?: boolean;
   /** Custom class name */
   className?: string;
+  /** Optional function to check if a category has modified settings */
+  isCategoryDirty?: (category: SettingsCategory) => boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   initialViewMode = 'basic',
   disabled = false,
   className = '',
+  isCategoryDirty,
 }) => {
   const [viewMode, setViewMode] = useState<SettingsViewMode>(initialViewMode);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('quality');
@@ -139,18 +142,28 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <>
             {/* Category Tabs */}
             <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
-              {categories.map((cat) => (
-                <Button
-                  key={cat.id}
-                  variant={activeCategory === cat.id ? 'tab' : 'subtle'}
-                  type="button"
-                  onClick={() => setActiveCategory(cat.id)}
-                  disabled={disabled}
-                  className="px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap"
-                >
-                  {cat.label}
-                </Button>
-              ))}
+              {categories.map((cat) => {
+                const isDirty = isCategoryDirty?.(cat.id) ?? false;
+                return (
+                  <Button
+                    key={cat.id}
+                    variant={activeCategory === cat.id ? 'tab' : 'subtle'}
+                    type="button"
+                    onClick={() => setActiveCategory(cat.id)}
+                    disabled={disabled}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap relative
+                               ${isDirty ? 'ring-1 ring-pf-accent-orange ring-offset-1 ring-offset-pf-surface' : ''}`}
+                  >
+                    {cat.label}
+                    {isDirty && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-pf-accent-orange"
+                        aria-label="Has modified settings"
+                      />
+                    )}
+                  </Button>
+                );
+              })}
             </div>
 
             <AdvancedSettings
