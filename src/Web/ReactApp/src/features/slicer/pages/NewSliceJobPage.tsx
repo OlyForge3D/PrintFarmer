@@ -15,13 +15,14 @@ import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
+import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { SlicerSettingsPanel, DEFAULT_BASIC_SETTINGS, type BasicSlicerSettings } from '@/features/slicer/components/settings';
 import { PrinterSlicerSelector, type PrinterForSlicing } from '../components/job';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea } from '@/common/components/ui';
-import { LayersIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EyeIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -78,6 +79,11 @@ export const NewSliceJobPage: React.FC = () => {
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
   const [isCloneProfilesModalOpen, setIsCloneProfilesModalOpen] = useState(false);
   const [cloneProfilesDismissed, setCloneProfilesDismissed] = useState(false);
+  
+  // Profile Editor Modal State
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileEditorType, setProfileEditorType] = useState<ProfileType>('process');
+  
   const stlFile = useSTLFile();
 
   // === Queries ===
@@ -716,10 +722,27 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* MACHINE PROFILE SELECTION - Filtered by selected printer */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">
-              Machine Profile
-              {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-semibold text-pf-text">
+                Machine Profile
+                {isProfilesLoading && <span className="ml-2 text-xs text-pf-text-muted">(Loading...)</span>}
+              </label>
+              {selectedMachineProfileId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setProfileEditorType('machine');
+                    setProfileEditorOpen(true);
+                  }}
+                  className="p-1 h-auto"
+                  title="Edit machine profile settings"
+                >
+                  <EditIcon className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
             
             {/* Show printer info when selected */}
             {selectedPrinterForSlicing?.manufacturerName && selectedPrinterForSlicing?.modelName ? (
@@ -774,7 +797,24 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* FILAMENT PROFILE - two-step selection: material type then profile */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
-            <label className="block text-sm font-semibold text-pf-text">Filament Profile</label>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-semibold text-pf-text">Filament Profile</label>
+              {selectedFilamentProfileId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setProfileEditorType('filament');
+                    setProfileEditorOpen(true);
+                  }}
+                  className="p-1 h-auto"
+                  title="Edit filament profile settings"
+                >
+                  <EditIcon className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
             
             {allFilamentProfiles.length > 0 ? (
               <>
@@ -850,7 +890,24 @@ export const NewSliceJobPage: React.FC = () => {
 
           {/* PROCESS PROFILE - Custom profiles first, then system presets grouped by quality */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
-            <label className="block text-sm font-semibold text-pf-text mb-2">Process Profile</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-pf-text">Process Profile</label>
+              {selectedProcessPresetId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setProfileEditorType('process');
+                    setProfileEditorOpen(true);
+                  }}
+                  className="p-1 h-auto"
+                  title="Edit process profile settings"
+                >
+                  <EditIcon className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
             {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
               <Select
                 value={selectedProcessPresetId}
@@ -1138,6 +1195,24 @@ export const NewSliceJobPage: React.FC = () => {
           }}
         />
       )}
+      
+      {/* Profile Editor Modal - for editing selected profile settings */}
+      <ProfileEditorModal
+        isOpen={profileEditorOpen}
+        onClose={() => setProfileEditorOpen(false)}
+        profileType={profileEditorType}
+        originalProfile={
+          profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
+          profileEditorType === 'filament' ? (selectedFilamentProfile ?? null) :
+          (availableProcessProfiles.find(p => p.name === selectedProcessPresetId) ?? null)
+        }
+        onSaveSuccess={(profileId, profileName) => {
+          // Invalidate custom profiles cache
+          qc.invalidateQueries({ queryKey: ['customProfiles'] });
+          // Show success message
+          setMessage(`Custom profile "${profileName}" saved successfully`);
+        }}
+      />
     </PageTemplate>
   );
 };
