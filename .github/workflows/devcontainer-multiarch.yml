@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
     tags: ['v*']
+    paths:
+      - '.devcontainer/**'
+      - '.github/workflows/devcontainer-multiarch.yml'
   workflow_dispatch:
     inputs:
       tag:
