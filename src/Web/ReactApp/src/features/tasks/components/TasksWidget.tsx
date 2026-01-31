@@ -3,7 +3,7 @@ import { tasksApi, UserTask, TaskType, TaskPriority } from '@/services/tasksApi'
 import { AlertCircleIcon, CheckCircleIcon, CloseIcon, LayersIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 /**

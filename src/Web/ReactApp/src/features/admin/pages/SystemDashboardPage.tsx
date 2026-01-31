@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Tabs } from '@/common/components/ui';
 import { SystemLogsContent } from '../components/SystemLogsContent';

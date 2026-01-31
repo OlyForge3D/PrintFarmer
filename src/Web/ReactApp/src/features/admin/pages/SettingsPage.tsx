@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';

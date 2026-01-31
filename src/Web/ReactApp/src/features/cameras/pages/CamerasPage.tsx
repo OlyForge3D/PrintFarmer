@@ -4,7 +4,7 @@ import { Button } from '@/common/components/ui';
 import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { CameraDto } from '@/types/api';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view

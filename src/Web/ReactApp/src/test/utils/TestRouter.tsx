@@ -1,18 +1,8 @@
 import React from 'react';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router';
 
-// Shared test router to centralize react-router future flags used in tests.
+// Shared test router for use in tests.
+// React Router v7 no longer requires future flags (they are now default behavior).
 export function TestRouter({ children }: { children: React.ReactNode }) {
-  return (
-    <BrowserRouter
-      future={{
-        v7_preventBasepathDoubleSlash: true,
-        v7_useIdInRoutePaths: true,
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      }}
-    >
-      {children}
-    </BrowserRouter>
-  );
+  return <BrowserRouter>{children}</BrowserRouter>;
 }

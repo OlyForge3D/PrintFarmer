@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ChevronRightIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { EmailIcon, ArrowLeftIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { Button, Input, FormField  } from '@/common/components/ui';

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { LayersIcon, CheckCircleIcon } from '@/common/components/icons/MdiIcons';

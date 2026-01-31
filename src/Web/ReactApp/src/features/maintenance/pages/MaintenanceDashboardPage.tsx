@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { 

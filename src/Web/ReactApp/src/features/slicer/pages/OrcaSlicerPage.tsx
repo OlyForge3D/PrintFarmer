@@ -3,7 +3,7 @@
  * A full-screen slicer interface matching OrcaSlicer's layout
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, type SubmitSliceJobRequest, SlicerEngine } from '@/services/sliceJobService';
 import { slicerProfilesService } from '@/services/slicerProfilesService';

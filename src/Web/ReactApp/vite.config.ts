@@ -100,7 +100,7 @@ export default defineConfig({
       // In a browser SPA, we need all dependencies bundled
       output: {
         manualChunks: {
-          routing: ['react-router-dom'],
+          routing: ['react-router'],
           three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
           viewers: [
             // Heavy 3D viewer components (ensure paths resolved at build time)

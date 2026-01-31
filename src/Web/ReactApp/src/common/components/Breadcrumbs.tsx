@@ -3,7 +3,7 @@
  * Shows hierarchy and allows navigation between levels
  */
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ChevronRightIcon } from '@/common/components/icons/MdiIcons';
 
 export interface BreadcrumbItem {

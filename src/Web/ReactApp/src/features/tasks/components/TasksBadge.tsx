@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { tasksApi } from '@/services/tasksApi';
 import { AlertCircleIcon } from '@/common/components/icons/MdiIcons';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 /**
  * TasksBadge shows a notification badge with the count of pending tasks.

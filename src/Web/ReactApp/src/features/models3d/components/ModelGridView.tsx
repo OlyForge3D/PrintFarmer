@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { CubeIcon, EyeIcon, TagIcon, FileIcon, LayersTripleOutlineIcon, DeleteIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { ContextMenu } from '@/common/components/ContextMenu';

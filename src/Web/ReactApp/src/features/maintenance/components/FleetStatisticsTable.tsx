@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { maintenanceService } from '@/services/maintenanceService';
 import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';

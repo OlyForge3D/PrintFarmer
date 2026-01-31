@@ -5,7 +5,7 @@ import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayou
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { useSlicer } from '@/hooks/useSlicer';
 
 interface Tab {

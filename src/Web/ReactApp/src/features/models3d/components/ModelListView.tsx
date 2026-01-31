@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router';
 import { CubeIcon, EyeIcon, TagIcon, FileIcon, LayersTripleOutlineIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
