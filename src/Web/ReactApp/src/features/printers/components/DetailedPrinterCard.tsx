@@ -240,7 +240,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   };
 
   return (
-    <div className={`rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 w-full min-w-[23rem]`}>
+    <div className={`rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 w-full min-w-92`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -271,7 +271,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 size="sm"
                 onClick={() => setShowCamera(!showCamera)}
                 disabled={!hasCameraUrls}
-                className="!p-1 !h-auto"
+                className="p-1! h-auto!"
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                 iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -279,7 +279,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               </Button>
             </div>
             {showCamera && (
-              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
                 {cameraStreamUrl && expandedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
@@ -310,7 +310,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             variant="subtle"
             size="sm"
             onClick={handleViewHistory}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="View print history"
             aria-label="View print history"
             iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -321,7 +321,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             variant="subtle"
             size="sm"
             onClick={() => onEdit?.(printer)}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="Edit details"
             aria-label="Edit details"
             iconCenter={<EditIcon className="h-4 w-4" />}
@@ -333,7 +333,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               variant="subtle"
               size="sm"
               onClick={onDismiss}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Close"
               aria-label="Close"
               iconCenter={<CloseIcon className="h-4 w-4" />}
@@ -367,7 +367,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
         <div className="grid grid-cols-3 gap-2 w-full">
           {/* Row 1: Labels */}
           <div className="flex items-center h-5 min-w-0">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
+            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto truncate">
               {formatTempWithTarget(
                 printer.hotendTemp,
@@ -377,7 +377,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
           </div>
           
           <div className="flex items-center h-5 min-w-0">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
+            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto truncate">
               {formatTempWithTarget(
                 printer.bedTemp,
@@ -395,14 +395,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
-            className="!w-full"
+            className="w-full!"
           />
           
           <TemperatureInput
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
-            className="!w-full"
+            className="w-full!"
           />
           
           <div className="flex gap-1 items-stretch h-9 min-w-0">
@@ -414,7 +414,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               aria-label="Cooldown"
-              className="flex-shrink-0 px-2"
+              className="shrink-0 px-2"
               iconCenter={<SnowflakeIcon className="h-4 w-4" />}
             >
         </Button>
@@ -445,7 +445,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
         {/* Row 1: Labels and Pads side by side */}
         <div className="flex gap-4 items-start flex-wrap">
           {/* Left Column: Move */}
-          <div className="flex flex-col gap-2 items-start flex-1 min-w-[12rem]">
+          <div className="flex flex-col gap-2 items-start flex-1 min-w-48">
             <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
               Move
             </div>
@@ -621,21 +621,21 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             disabled={isPrinting}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Y"
             disabled={isPrinting}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Z"
             disabled={isPrinting}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <Button
             type="button"
@@ -648,7 +648,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 console.log('[PrintFarmer] DetailedPrinterCard: Moving to', moveX, moveY, moveZ);
               }
             }}
-            className="w-full h-full !p-0"
+            className="w-full h-full p-0!"
           >
             GO
           </Button>

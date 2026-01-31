@@ -123,7 +123,7 @@ export function PrinterTableView({
             <select
               value={bulkAction}
               onChange={(e) => setBulkAction(e.target.value as typeof bulkAction)}
-              className="text-sm bg-pf-panel border border-pf-border rounded px-2 py-1 text-pf-text-primary"
+              className="text-sm bg-pf-panel border border-pf-border rounded-sm px-2 py-1 text-pf-text-primary"
               aria-label="Bulk action selector"
             >
               <option value="none">Choose action...</option>
@@ -173,7 +173,7 @@ export function PrinterTableView({
                   onClick={toggleSelectAll}
                   variant="subtle"
                   size="sm"
-                  className="!p-0 !h-auto"
+                  className="p-0! h-auto!"
                   aria-label={selectedPrinters.size === printers.length ? "Deselect all printers" : "Select all printers"}
                   iconCenter={
                     selectedPrinters.size === printers.length ? (
@@ -226,7 +226,7 @@ export function PrinterTableView({
                       onClick={() => toggleSelectPrinter(printer.id)}
                       variant="subtle"
                       size="sm"
-                      className="!p-0 !h-auto"
+                      className="p-0! h-auto!"
                       aria-label={selectedPrinters.has(printer.id) ? `Deselect ${printer.name}` : `Select ${printer.name}`}
                       iconCenter={
                         selectedPrinters.has(printer.id) ? (
@@ -241,7 +241,7 @@ export function PrinterTableView({
                   {/* Printer Info */}
                   <td className="px-4 py-4">
                     <div className="flex items-center">
-                      <span className="text-2xl mr-3 flex-shrink-0">
+                      <span className="text-2xl mr-3 shrink-0">
                         {getBackendIcon(printer.backend)}
                       </span>
                       <div className="min-w-0">
@@ -312,7 +312,7 @@ export function PrinterTableView({
                           onClick={() => onToggleEnabled(printer)}
                           variant="subtle"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title={printer.isEnabled ? 'Disable printer' : 'Enable printer'}
                         >
                           {printer.isEnabled ? <CheckCircleIcon className="w-4 h-4" /> : <CircleIcon className="w-4 h-4" />}
@@ -331,7 +331,7 @@ export function PrinterTableView({
                         onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
                         variant={printer.inMaintenance ? 'primary' : 'subtle'}
                         size="sm"
-                        className={`!p-2 !h-auto ${printer.inMaintenance ? '!text-white' : ''}`}
+                        className={`p-2! h-auto! ${printer.inMaintenance ? 'text-white!' : ''}`}
                         style={printer.inMaintenance ? { 
                           backgroundColor: '#fb8c00',
                           backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
@@ -348,7 +348,7 @@ export function PrinterTableView({
                           onClick={() => onEdit(printer)}
                           variant="subtle"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title="Edit printer"
                           aria-label="Edit printer"
                           iconCenter={<EditIcon className="w-4 h-4" />}
@@ -361,7 +361,7 @@ export function PrinterTableView({
                           onClick={() => onDelete([printer])}
                           variant="danger"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title="Delete printer"
                           aria-label="Delete printer"
                           iconCenter={<DeleteIcon className="w-4 h-4" />}

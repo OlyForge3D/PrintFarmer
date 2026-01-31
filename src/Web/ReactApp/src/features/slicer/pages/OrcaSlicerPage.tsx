@@ -347,7 +347,7 @@ export const OrcaSlicerPage: React.FC = () => {
               <label className="block text-sm font-semibold text-pf-text mb-2">Printer</label>
               {selectedPrinter ? (
                 <div className="space-y-2">
-                  <div className="p-3 bg-pf-bg-0 rounded border border-pf-border">
+                  <div className="p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
                     <p className="font-medium text-pf-text">{selectedPrinter.name}</p>
                     {selectedPrinter.modelName && (
                       <p className="text-sm text-pf-text-muted">

@@ -55,7 +55,7 @@ export function AuditTimeline({ audits, getAuditTypeLabel, isLoading }: AuditTim
                 <div className="flex-1">
                   {/* Audit header */}
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="flex-shrink-0 w-2 h-2 rounded-full bg-pf-accent" />
+                    <div className="shrink-0 w-2 h-2 rounded-full bg-pf-accent" />
                     <span className="font-medium text-pf-text">{getAuditTypeLabel(audit.auditType)}</span>
                     <Badge variant={audit.hasIssues ? 'error' : 'success'}>
                       {audit.hasIssues ? 'Issues Found' : 'No Issues'}

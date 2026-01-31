@@ -270,7 +270,7 @@ export const FilamentProfileStep: React.FC<FilamentProfileStepProps> = ({
                       </span>
                       {isImported && (
                         <span title="Already imported">
-                          <CheckCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
                         </span>
                       )}
                     </label>

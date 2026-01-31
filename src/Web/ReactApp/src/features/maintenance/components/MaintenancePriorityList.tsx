@@ -154,7 +154,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
       <div className="p-4">
         <div className="flex items-start gap-3">
           {/* Severity icon */}
-          <div className="flex-shrink-0 pt-0.5">
+          <div className="shrink-0 pt-0.5">
             <SeverityIcon className={`h-5 w-5 ${config.textColor}`} aria-hidden="true" />
           </div>
 
@@ -172,7 +172,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
               
               {/* Severity badge */}
               <span className={`
-                flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded
+                shrink-0 px-2 py-0.5 text-xs font-medium rounded
                 ${config.bgColor} ${config.textColor} border ${config.borderColor}
               `}>
                 {config.label}
@@ -313,11 +313,11 @@ export function MaintenancePriorityList({
             className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 animate-pulse"
           >
             <div className="flex items-start gap-3">
-              <div className="w-5 h-5 bg-pf-border rounded" />
+              <div className="w-5 h-5 bg-pf-border rounded-sm" />
               <div className="flex-1">
-                <div className="h-4 bg-pf-border rounded w-48 mb-2" />
-                <div className="h-3 bg-pf-border rounded w-full mb-2" />
-                <div className="h-3 bg-pf-border rounded w-24" />
+                <div className="h-4 bg-pf-border rounded-sm w-48 mb-2" />
+                <div className="h-3 bg-pf-border rounded-sm w-full mb-2" />
+                <div className="h-3 bg-pf-border rounded-sm w-24" />
               </div>
             </div>
           </div>

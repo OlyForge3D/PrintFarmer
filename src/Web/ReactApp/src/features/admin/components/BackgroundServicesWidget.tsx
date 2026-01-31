@@ -119,7 +119,7 @@ function ServiceStatusRow({ service }: { service: BackgroundServiceStatus }) {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+      <div className="flex items-center gap-2 shrink-0 ml-2">
         {service.lastError ? (
           <span
             className="text-xs text-pf-error-text max-w-32 truncate"

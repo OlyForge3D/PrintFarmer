@@ -208,7 +208,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="firstName"
                 value={formData.firstName}
                 onChange={(e) => handleInputChange('firstName', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
                 placeholder="Optional"
                 disabled={isPending}
               />
@@ -223,7 +223,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="lastName"
                 value={formData.lastName}
                 onChange={(e) => handleInputChange('lastName', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
                 placeholder="Optional"
                 disabled={isPending}
               />
@@ -240,7 +240,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               name="username"
               value={formData.username}
               onChange={(e) => handleInputChange('username', e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="Choose a username"
               required
               disabled={isPending}
@@ -257,7 +257,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               name="email"
               value={formData.email}
               onChange={(e) => handleInputChange('email', e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="Enter your email"
               required
               disabled={isPending}
@@ -275,7 +275,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Create a password"
                 required
                 disabled={isPending}
@@ -303,7 +303,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
+                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Confirm your password"
                 required
                 disabled={isPending}

@@ -119,7 +119,7 @@ export default function HistoryFiltersBar({
         </Button>
         
         {/* Quick actions always visible */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <div className="hidden sm:flex gap-1">
             {[
               { label: "7d", days: 7 },
@@ -139,7 +139,7 @@ export default function HistoryFiltersBar({
             ))}
           </div>
           {/* View Toggle */}
-          <div className="hidden sm:flex rounded border border-pf-border overflow-hidden flex-shrink-0">
+          <div className="hidden sm:flex rounded-sm border border-pf-border overflow-hidden shrink-0">
             <Button
               onClick={() => onViewModeChange("cards")}
               variant="ghost"
@@ -172,7 +172,7 @@ export default function HistoryFiltersBar({
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
-            className="text-xs py-1 px-2 w-auto flex-shrink-0"
+            className="text-xs py-1 px-2 w-auto shrink-0"
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
@@ -239,7 +239,7 @@ export default function HistoryFiltersBar({
                     e.target.value ? new Date(e.target.value + "T00:00:00Z") : null
                   )
                 }
-                className="w-full px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
+                className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary"
               />
             </div>
             <div>
@@ -254,7 +254,7 @@ export default function HistoryFiltersBar({
                     e.target.value ? new Date(e.target.value + "T23:59:59Z") : null
                   )
                 }
-                className="w-full px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
+                className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary"
               />
             </div>
           </div>

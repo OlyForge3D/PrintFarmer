@@ -353,7 +353,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
   if (!isExpanded) {
     // Collapsed view - matching Blazor structure
     return (
-      <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 min-w-[26rem] max-w-[26rem] overflow-hidden flex flex-col min-h-0">
+      <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 min-w-104 max-w-104 overflow-hidden flex flex-col min-h-0">
         <div className="flex justify-between items-start mb-4 gap-4">
           <div className="flex justify-between items-start flex-1 gap-4">
             <div className="flex-1">
@@ -386,7 +386,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   size="sm"
                   onClick={() => setShowCamera(!showCamera)}
                   disabled={!hasCameraUrls}
-                  className="!p-1 !h-auto"
+                  className="p-1! h-auto!"
                   aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                   title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                   iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -407,7 +407,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               variant="subtle"
               size="sm"
               onClick={handleToggleExpand}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Expand card"
               aria-label="Expand card"
               iconCenter={<ChevronDownIcon className="h-4 w-4" />}
@@ -418,7 +418,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               variant="subtle"
               size="sm"
               onClick={handleViewHistory}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="View print history"
               aria-label="View print history"
               iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -429,7 +429,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               variant="subtle"
               size="sm"
               onClick={() => onEdit?.(printer)}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Edit details"
               aria-label="Edit details"
               iconCenter={<EditIcon className="h-4 w-4" />}
@@ -489,7 +489,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
         )}
 
               {showCamera && (
-                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
                   {cameraStreamUrl && collapsedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
@@ -509,7 +509,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
 
               {/* Optional debug panel controlled by window.PrintFarmerDebug.expandablePrinterCardDisplay */}
               {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
-                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
                   {renderUnknown({ printer })}
                 </div>
               )}
@@ -526,7 +526,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
 
   // Expanded view - matching Blazor structure exactly
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border min-w-[26rem] max-w-[26rem]`}>
+    <div className={`border rounded-xl p-3 bg-linear-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border min-w-104 max-w-104`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -560,7 +560,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                 size="sm"
                 onClick={() => setShowCamera(!showCamera)}
                 disabled={!hasCameraUrls}
-                className="!p-1 !h-auto"
+                className="p-1! h-auto!"
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                 iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -568,7 +568,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
         </Button>
             </div>
             {showCamera && (
-              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
                 {cameraStreamUrl && expandedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
@@ -599,7 +599,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             variant="subtle"
             size="sm"
             onClick={handleToggleExpand}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="Collapse card"
             aria-label="Collapse card"
             iconCenter={<MinusIcon className="h-4 w-4" />}
@@ -610,7 +610,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             variant="subtle"
             size="sm"
             onClick={handleViewHistory}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="View print history"
             aria-label="View print history"
             iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -621,7 +621,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             variant="subtle"
             size="sm"
             onClick={() => onEdit?.(printer)}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="Edit details"
             aria-label="Edit details"
             iconCenter={<EditIcon className="h-4 w-4" />}
@@ -651,10 +651,10 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
       {/* Temps Section */}
       <div className="mb-2">
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
-        <div className="grid grid-cols-3 gap-2 w-[24.5rem]">
+        <div className="grid grid-cols-3 gap-2 w-98">
           {/* Row 1: Labels */}
-          <div className="flex items-center h-5 w-[7.75rem]">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
+          <div className="flex items-center h-5 w-31">
+            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.hotendTemp,
@@ -663,8 +663,8 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             </span>
           </div>
           
-          <div className="flex items-center h-5 w-[7.75rem]">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
+          <div className="flex items-center h-5 w-31">
+            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.bedTemp,
@@ -682,14 +682,14 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
-            className="!w-full"
+            className="w-full!"
           />
           
           <TemperatureInput
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
-            className="!w-full"
+            className="w-full!"
           />
           
           <div className="flex gap-1 items-stretch h-9">
@@ -701,7 +701,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               aria-label="Cooldown"
-              className="flex-shrink-0"
+              className="shrink-0"
               iconCenter={<SnowflakeIcon className="h-4 w-4" />}
             >
         </Button>
@@ -748,7 +748,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   onClick={() => handleHome()}
                   title="Home all axes"
                   aria-label="Home all axes"
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<HomeIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -758,7 +758,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   size="sm"
                   disabled={isPrinting}
                   onClick={() => handleMove('Y', step)}
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<ArrowUpIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -770,7 +770,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   onClick={() => handleControlAction('disable-motors')}
                   title="Disable Motors (M84)"
                   aria-label="Disable Motors (M84)"
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<DisableMotorsIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -782,7 +782,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   size="sm"
                   disabled={isPrinting}
                   onClick={() => handleMove('X', -step)}
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<ArrowLeftIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -794,7 +794,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   onClick={() => handleHome('xy')}
                   title="Home X/Y"
                   aria-label="Home X/Y"
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<HomeIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -804,7 +804,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   size="sm"
                   disabled={isPrinting}
                   onClick={() => handleMove('X', step)}
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<ArrowRightIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -817,7 +817,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   size="sm"
                   disabled={isPrinting}
                   onClick={() => handleMove('Y', -step)}
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<ArrowDownIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -878,7 +878,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   onClick={() => handleControlAction('pause')}
                   title="Pause"
                   aria-label="Pause"
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<PauseIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -890,7 +890,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   onClick={() => handleControlAction('resume')}
                   title="Resume"
                   aria-label="Resume"
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={<PlayIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -901,7 +901,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   disabled={!isOnline}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                  className="w-full h-full !p-0"
+                  className="w-full h-full p-0!"
                   iconCenter={isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
                 >
         </Button>
@@ -923,7 +923,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                     variant={step === stepValue ? 'primary' : 'secondary'}
                     size="sm"
                     onClick={() => handleStepChange(stepValue)}
-                    className="w-full h-full !p-0"
+                    className="w-full h-full p-0!"
                   >
                     {stepValue}
                   </Button>
@@ -955,21 +955,21 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             disabled={isPrinting}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Y"
             disabled={isPrinting}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <MovementInput
             axis="Z"
             disabled={isPrinting}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-            className="!w-full"
+            className="w-full!"
           />
           <Button
             type="button"
@@ -982,7 +982,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                 console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
               }
             }}
-            className="w-full h-full !p-0"
+            className="w-full h-full p-0!"
           >
             GO
           </Button>

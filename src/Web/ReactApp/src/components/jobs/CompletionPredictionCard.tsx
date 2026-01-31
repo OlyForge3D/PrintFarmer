@@ -83,7 +83,7 @@ export const CompletionPredictionCard: React.FC<CompletionPredictionCardProps> =
   if (isLoading) {
     return (
       <div className={compact ? 'flex items-center gap-2 text-sm' : 'pf-card pf-bg-1 pf-border'}>
-        <div className={compact ? 'animate-pulse h-4 w-32 pf-bg-0 rounded' : 'p-4'}>
+        <div className={compact ? 'animate-pulse h-4 w-32 pf-bg-0 rounded-sm' : 'p-4'}>
           {!compact && <div className="text-sm pf-text-secondary">Loading prediction...</div>}
         </div>
       </div>
@@ -141,7 +141,7 @@ export const CompletionPredictionCard: React.FC<CompletionPredictionCardProps> =
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="pf-text-secondary text-sm">Estimated Completion</span>
-            <span className={`text-xs px-2 py-1 rounded ${getConfidenceColor(prediction.confidence)}`}>
+            <span className={`text-xs px-2 py-1 rounded-sm ${getConfidenceColor(prediction.confidence)}`}>
               {getConfidenceIcon(prediction.confidence)} {prediction.confidence} Confidence
             </span>
           </div>
@@ -169,7 +169,7 @@ export const CompletionPredictionCard: React.FC<CompletionPredictionCardProps> =
 
         {/* Note */}
         {prediction.note && (
-          <div className="bg-pf-bg-0 pf-border rounded p-3 text-xs pf-text-secondary">
+          <div className="bg-pf-bg-0 pf-border rounded-sm p-3 text-xs pf-text-secondary">
             💡 {prediction.note}
           </div>
         )}

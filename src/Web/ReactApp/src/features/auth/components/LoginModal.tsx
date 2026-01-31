@@ -93,7 +93,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               variant="subtle"
               size="sm"
               disabled={isLoading}
-              className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0! h-auto!"
             >
               {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
             </Button>

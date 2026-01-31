@@ -160,7 +160,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
             <div className="grid md:grid-cols-4 gap-6">
                 {/* Left: Printer Selection */}
                 <div className="md:col-span-1">
-                    <div className="card bg-pf-panel border border-pf-border rounded shadow p-4 sticky top-20">
+                    <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-4 sticky top-20">
                         <h3 className="font-semibold mb-4">Select Printer</h3>
 
                         <FormField label="Printer">
@@ -183,7 +183,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                         </FormField>
 
                         {selectedPrinter && (
-                            <div className="mt-4 p-3 bg-pf-background rounded text-sm space-y-1">
+                            <div className="mt-4 p-3 bg-pf-background rounded-sm text-sm space-y-1">
                                 <p className="text-pf-text-muted">Printer: <span className="font-medium text-pf-text">{selectedPrinter.name}</span></p>
                                 {selectedPrinter.modelName && (
                                     <p className="text-pf-text-muted">Model: <span className="font-medium text-pf-text">{selectedPrinter.modelName}</span></p>
@@ -193,7 +193,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
 
                         {selectedPrinterId && (
                             <>
-                                <div className="mt-6 p-3 bg-pf-background rounded text-sm">
+                                <div className="mt-6 p-3 bg-pf-background rounded-sm text-sm">
                                     <p className="text-pf-text-muted mb-2">Selected: {selectedProfileIds.size} profile(s)</p>
                                     <div className="space-y-2">
                                         <Button
@@ -247,30 +247,30 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                 {/* Right: Profile List */}
                 <div className="md:col-span-3">
                     {!selectedPrinterId ? (
-                        <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
+                        <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
                             <AlertCircleIcon className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">Select a printer to see available profiles</p>
                         </div>
                     ) : profilesError ? (
-                        <div className="card bg-red-900/50 border border-red-700 rounded shadow p-8 text-center">
+                        <div className="card bg-red-900/50 border border-red-700 rounded-sm shadow-sm p-8 text-center">
                             <AlertCircleIcon className="w-12 h-12 text-red-400 mx-auto mb-4" />
                             <p className="text-red-200 font-medium mb-2">Failed to Load Profiles</p>
                             <p className="text-red-300 text-sm">{(profilesError as Error).message}</p>
                             <p className="text-red-300 text-xs mt-3 italic">The OrcaSlicer worker service may not be running. Please check the server logs and ensure the worker is started.</p>
                         </div>
                     ) : profilesLoading ? (
-                        <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
+                        <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
                             <p className="text-pf-text-muted">Loading profiles...</p>
                         </div>
                     ) : officialProfiles.length === 0 ? (
-                        <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
+                        <div className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm p-8 text-center">
                             <AlertCircleIcon className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">No official profiles available</p>
                         </div>
                     ) : (
                         <div className="space-y-4">
                             {groupedProfiles.map(([group, profiles]) => (
-                                <div key={group} className="card bg-pf-panel border border-pf-border rounded shadow">
+                                <div key={group} className="card bg-pf-panel border border-pf-border rounded-sm shadow-sm">
                                     <div className="card-header bg-pf-hover p-3">
                                         <h4 className="font-semibold text-sm">{group}</h4>
                                     </div>
@@ -279,7 +279,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                             {profiles.map(profile => (
                                                 <div
                                                     key={profile.id}
-                                                    className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${selectedProfileIds.has(profile.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
+                                                    className={`flex items-center gap-3 p-2 rounded-sm cursor-pointer transition-colors ${selectedProfileIds.has(profile.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
                                                 >
                                                     <Checkbox
                                                         id={`profile-${profile.id}`}

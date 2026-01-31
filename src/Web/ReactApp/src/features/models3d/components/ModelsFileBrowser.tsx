@@ -67,7 +67,7 @@ const modelColumns: ColumnDef[] = [
         <img
           src={model.thumbnailUrl}
           alt={file.fileName}
-          className="h-12 w-12 rounded object-cover"
+          className="h-12 w-12 rounded-sm object-cover"
         />
       ) : (
         '—'

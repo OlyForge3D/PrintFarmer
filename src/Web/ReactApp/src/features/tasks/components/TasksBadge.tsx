@@ -27,7 +27,7 @@ export function TasksBadge() {
       title={`${count} pending task${count !== 1 ? 's' : ''}`}
     >
       <AlertCircleIcon className="h-5 w-5 text-pf-warning" />
-      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-bold leading-none text-white bg-pf-warning rounded-full">
+      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center h-4 min-w-4 px-1 text-[10px] font-bold leading-none text-white bg-pf-warning rounded-full">
         {count > 9 ? '9+' : count}
       </span>
     </Link>

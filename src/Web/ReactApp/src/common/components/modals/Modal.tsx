@@ -138,7 +138,7 @@ export function Modal({
 
   return (
     <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
@@ -155,10 +155,10 @@ export function Modal({
       >
         {/* Header */}
         {showHeader && (
-          <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               {titleIcon && (
-                <div className="flex-shrink-0">
+                <div className="shrink-0">
                   {titleIcon}
                 </div>
               )}
@@ -175,7 +175,7 @@ export function Modal({
                 variant="subtle"
                 size="sm"
                 aria-label={closeAriaLabel}
-                className="!p-1 !h-auto"
+                className="p-1! h-auto!"
               >
                 <CloseIcon className="w-6 h-6" />
               </Button>
@@ -190,7 +190,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3 flex-shrink-0">
+          <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3 shrink-0">
             {footer}
           </div>
         )}

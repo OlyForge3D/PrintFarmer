@@ -224,7 +224,7 @@ export function PrinterMaintenancePage() {
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getPriorityColor(alert.severity)}`}>
+                        <span className={`px-2 py-0.5 rounded-sm text-xs font-medium ${getPriorityColor(alert.severity)}`}>
                           {getPriorityLabel(alert.severity)}
                         </span>
                         <span className="font-medium text-pf-text-primary">{alert.title}</span>
@@ -337,7 +337,7 @@ export function PrinterMaintenancePage() {
                           <div className="flex-1">
                             <span className="font-medium text-pf-text-primary">{log.taskName}</span>
                             {log.component && (
-                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-primary/20 text-pf-primary rounded">
+                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-primary/20 text-pf-primary rounded-sm">
                                 {log.component}
                               </span>
                             )}

@@ -140,14 +140,14 @@ export const LocationManagement: React.FC = () => {
 
       {/* Error message */}
       {error && (
-        <div className="px-4 py-3 rounded bg-pf-error-bg border border-pf-error text-pf-error">
+        <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
           {error}
         </div>
       )}
 
       {/* Create/Edit Form */}
       {showForm && (
-        <div className="shadow rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
+        <div className="shadow-sm rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
           <h2 className="text-xl font-semibold mb-4 text-pf-text-primary">
             {editingId ? 'Edit Location' : 'Create New Location'}
           </h2>
@@ -163,7 +163,7 @@ export const LocationManagement: React.FC = () => {
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., RACK1-01"
-                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                className="mt-1 block w-full rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 required
               />
             </div>
@@ -204,7 +204,7 @@ export const LocationManagement: React.FC = () => {
       )}
 
       {/* Locations List */}
-      <div className="shadow overflow-hidden rounded-lg bg-pf-bg-1 border border-pf-border">
+      <div className="shadow-sm overflow-hidden rounded-lg bg-pf-bg-1 border border-pf-border">
         {loading && !showForm ? (
           <div className="p-6 text-center text-pf-text-primary">Loading locations...</div>
         ) : optimisticLocations.length === 0 ? (

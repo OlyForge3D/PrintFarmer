@@ -49,7 +49,7 @@ export default function HistoryJobTable({
   }, []);
 
   const getStatusBadge = useCallback((status: string) => {
-    const baseClasses = "px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap";
+    const baseClasses = "px-2 py-0.5 rounded-sm text-xs font-medium whitespace-nowrap";
     switch (status) {
       case "completed":
         return <span className={`${baseClasses} bg-pf-success-bg text-pf-success border border-pf-success`}>✓ Completed</span>;

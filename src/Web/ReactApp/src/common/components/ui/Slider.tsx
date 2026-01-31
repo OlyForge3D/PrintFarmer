@@ -58,7 +58,7 @@ export const Slider: React.FC<SliderProps> = ({
       className={clsx(
         'w-full h-2 rounded-lg appearance-none cursor-pointer',
         'bg-pf-surface',
-        'focus:outline-none focus:ring-2 focus:ring-pf-accent focus:ring-offset-2 focus:ring-offset-pf-bg-0',
+        'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-2 focus:ring-offset-pf-bg-0',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         // Custom thumb styling
         '[&::-webkit-slider-thumb]:appearance-none',

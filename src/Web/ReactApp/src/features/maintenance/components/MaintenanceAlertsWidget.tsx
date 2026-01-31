@@ -98,13 +98,13 @@ export function MaintenanceAlertsWidget({
               className="block p-3 bg-pf-bg-1 rounded-lg border border-pf-border hover:bg-pf-border/30 transition-colors"
             >
               <div className="flex items-start gap-3">
-                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${config.bgColor.replace('/20', '')}`} />
+                <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${config.bgColor.replace('/20', '')}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium text-pf-text-primary truncate">
                       {alert.title}
                     </p>
-                    <Badge variant={alert.severity >= 3 ? 'error' : 'warning'} className="text-xs flex-shrink-0">
+                    <Badge variant={alert.severity >= 3 ? 'error' : 'warning'} className="text-xs shrink-0">
                       {config.label}
                     </Badge>
                   </div>

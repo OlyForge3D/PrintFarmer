@@ -59,7 +59,7 @@ const gcodeColumns: ColumnDef[] = [
         <img
           src={file.thumbnailUrl}
           alt={file.fileName}
-          className="h-12 w-12 rounded object-cover"
+          className="h-12 w-12 rounded-sm object-cover"
         />
       ) : (
         '—'

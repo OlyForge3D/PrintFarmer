@@ -366,7 +366,7 @@ export function Layout() {
       {/* Live region for accessibility announcements */}
       <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
-      <header className="bg-pf-bg-1 border-b border-pf-border h-12 flex-shrink-0 z-50">
+      <header className="bg-pf-bg-1 border-b border-pf-border h-12 shrink-0 z-50">
         <div className="flex items-center justify-between h-12 px-3">
           {/* Left side - App branding */}
           <div className="flex items-center space-x-4">
@@ -446,7 +446,7 @@ export function Layout() {
                           onClick={() => setUserMenuOpen(false)}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full !justify-start"
+                          className="flex items-center gap-2 w-full justify-start!"
                         >
                           <SettingsIcon className="h-4 w-4" />
                           <span>Profile</span>
@@ -456,7 +456,7 @@ export function Layout() {
                           onClick={handleLogout}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full !justify-start"
+                          className="flex items-center gap-2 w-full justify-start!"
                         >
                           <LogoutIcon className="h-4 w-4" />
                           <span>Sign out</span>
@@ -472,7 +472,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full !justify-start"
+                          className="flex items-center gap-2 w-full justify-start!"
                         >
                           <LoginIcon className="h-4 w-4" />
                           <span>Sign In</span>
@@ -485,7 +485,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full !justify-start"
+                          className="flex items-center w-full justify-start!"
                         >
                           Register
                         </Button>
@@ -515,7 +515,7 @@ export function Layout() {
                             <span className="block text-xs text-pf-text-secondary">{t.desc}</span>
                           </span>
                           {theme === t.value && (
-                            <CheckIcon className="h-4 w-4 text-pf-accent flex-shrink-0" />
+                            <CheckIcon className="h-4 w-4 text-pf-accent shrink-0" />
                           )}
                         </Button>
                       ))}
@@ -533,7 +533,7 @@ export function Layout() {
         {sidebarOpen && (
           <div className="fixed inset-x-0 top-12 bottom-0 z-40 lg:hidden flex">
             {/* Backdrop - starts below header so hamburger button remains clickable */}
-            <div className="fixed inset-x-0 top-12 bottom-0 bg-black bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+            <div className="fixed inset-x-0 top-12 bottom-0 bg-black/75" onClick={() => setSidebarOpen(false)} />
             
             {/* Sidebar panel - matches desktop sidebar exactly */}
             <div className="relative flex flex-col w-56 bg-pf-bg-1 border-r border-pf-border z-10 h-full">
@@ -559,7 +559,7 @@ export function Layout() {
                       {hasChildren ? (
                         <details open={isExpanded} className="group">
                           <summary
-                            className="flex items-center px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2"
+                            className="flex items-center px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2"
                             onClick={e => {
                               e.preventDefault();
                               toggleExpand(navItem.name);
@@ -567,7 +567,7 @@ export function Layout() {
                             tabIndex={0}
                             role="button"
                           >
-                            <Icon className="h-5 w-5 flex-shrink-0" />
+                            <Icon className="h-5 w-5 shrink-0" />
                             <span className="flex-1 text-left ml-3">{navItem.name}</span>
                             <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
                           </summary>
@@ -580,14 +580,14 @@ export function Layout() {
                                   to={child.href}
                                   onClick={() => { setSidebarOpen(false); }}
                                   className={({ isActive }: { isActive: boolean }) =>
-                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                                       ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                       : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                     }`
                                   }
                                   end={child.href === '/harvest'}
                                 >
-                                  <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                  <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
                                   {child.name}
                                 </NavLink>
                               );
@@ -599,13 +599,13 @@ export function Layout() {
                           to={navItem.href}
                           onClick={() => { setSidebarOpen(false); }}
                           className={({ isActive }: { isActive: boolean }) =>
-                            `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                            `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                               ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                               : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                             }`
                           }
                         >
-                          <Icon className="h-5 w-5 flex-shrink-0" />
+                          <Icon className="h-5 w-5 shrink-0" />
                           <span className="flex-1 text-left ml-3">{navItem.name}</span>
                         </NavLink>
                       )}
@@ -618,7 +618,7 @@ export function Layout() {
         )}
 
         {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
-        <aside className={`hidden lg:flex lg:flex-shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
+        <aside className={`hidden lg:flex lg:shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
           <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
             <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
               {filteredNavigation.map((item, index) => {
@@ -646,7 +646,7 @@ export function Layout() {
                     {hasChildren ? (
                       <details open={isExpanded} className="group">
                         <summary
-                          className={`flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
+                          className={`flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
                           title={navbarCollapsed ? item.name : undefined}
                           onClick={e => {
                             e.preventDefault(); // Prevent native toggle
@@ -655,7 +655,7 @@ export function Layout() {
                           tabIndex={0}
                           role="button"
                         >
-                          <Icon className="h-5 w-5 flex-shrink-0" />
+                          <Icon className="h-5 w-5 shrink-0" />
                           {!navbarCollapsed && (
                             <>
                               <span className="flex-1 text-left ml-3">{item.name}</span>
@@ -673,14 +673,14 @@ export function Layout() {
                                 to={child.href}
                                 onClick={() => { /* child nav */ }}
                                 className={({ isActive }: { isActive: boolean }) =>
-                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                                     ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                                   }`
                                 }
                                 end={child.href === '/harvest'} // Exact match for parent routes
                               >
-                                <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
                                 {child.name}
                               </NavLink>
                             );
@@ -693,14 +693,14 @@ export function Layout() {
                         to={navItem.href}
                         onClick={() => { /* top-level nav */ }}
                         className={({ isActive }: { isActive: boolean }) =>
-                          `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
+                          `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
                             ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                             : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
                           }`
                         }
                         title={navbarCollapsed ? navItem.name : undefined}
                       >
-                        <Icon className="h-5 w-5 flex-shrink-0" />
+                        <Icon className="h-5 w-5 shrink-0" />
                         {!navbarCollapsed && <span className="flex-1 text-left ml-3">{navItem.name}</span>}
                       </NavLink>
                     )}
@@ -726,7 +726,7 @@ export function Layout() {
                                 }
                                 end={child.href === '/harvest'}
                               >
-                                <ChildIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
                                 {child.name}
                               </NavLink>
                             );
@@ -740,7 +740,7 @@ export function Layout() {
             </nav>
 
             {/* Navbar collapse toggle at bottom */}
-            <div className="border-t border-pf-border p-2 flex-shrink-0">
+            <div className="border-t border-pf-border p-2 shrink-0">
               <Button
                 type="button"
                 aria-label={navbarCollapsed ? "Expand navigation" : "Collapse navigation"}

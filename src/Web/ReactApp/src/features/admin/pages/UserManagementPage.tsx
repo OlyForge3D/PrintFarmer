@@ -466,7 +466,7 @@ export function UserManagementPage() {
                           setSelectedUser(user);
                           setShowPermissionsModal(true);
                         }}
-                        className="!p-2 !h-auto"
+                        className="p-2! h-auto!"
                         title="Manage permissions"
                       >
                         <Shield className="h-4 w-4" />
@@ -479,7 +479,7 @@ export function UserManagementPage() {
                           setSelectedUser(user);
                           setShowEditModal(true);
                         }}
-                        className="!p-2 !h-auto"
+                        className="p-2! h-auto!"
                         title="Edit user"
                       >
                         <EditIcon className="h-4 w-4" />
@@ -489,7 +489,7 @@ export function UserManagementPage() {
                         variant="subtle"
                         size="sm"
                         onClick={() => setUserToDelete(user)}
-                        className="!p-2 !h-auto hover:text-red-500"
+                        className="p-2! h-auto! hover:text-red-500"
                         title="Delete user"
                       >
                         <DeleteIcon className="h-4 w-4" />
@@ -695,7 +695,7 @@ export function UserManagementPage() {
                     const isDisabled = isAdmin;
 
                     return (
-                      <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded cursor-pointer transition">
+                      <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded-sm cursor-pointer transition">
                         <Checkbox
                           checked={selectedPermissions.includes(area.id)}
                           onChange={() => {
@@ -848,12 +848,12 @@ export function UserManagementPage() {
                     Edit Permissions →
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-2 p-3 bg-pf-bg-0 rounded border border-pf-border">
+                <div className="flex flex-wrap gap-2 p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
                   {selectedUser.permissions.length > 0 ? (
                     selectedUser.permissions.map(p => {
                       const area = applicationAreas.find(a => a.id === p);
                       return (
-                        <span key={p} className="inline-block bg-pf-accent/20 text-pf-accent px-2 py-1 rounded text-xs font-medium" title={area?.description}>
+                        <span key={p} className="inline-block bg-pf-accent/20 text-pf-accent px-2 py-1 rounded-sm text-xs font-medium" title={area?.description}>
                           {area?.name || p}
                         </span>
                       );
@@ -916,7 +916,7 @@ export function UserManagementPage() {
               <p className="text-sm text-pf-text-secondary">
                 Select which areas of the application this user can access:
               </p>
-              <div className="space-y-3 bg-pf-bg-0 p-4 rounded border border-pf-border">
+              <div className="space-y-3 bg-pf-bg-0 p-4 rounded-sm border border-pf-border">
                 {applicationAreas.map(area => {
                   const userRole = selectedUser.roles[0];
                   const isAdmin = userRole === 'farm_admin';
@@ -924,7 +924,7 @@ export function UserManagementPage() {
                   const hasAccess = selectedUser.permissions?.includes(area.id) ?? false;
 
                   return (
-                    <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer transition">
+                    <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-1 rounded-sm cursor-pointer transition">
                       <Checkbox
                         checked={hasAccess}
                         onChange={() => {

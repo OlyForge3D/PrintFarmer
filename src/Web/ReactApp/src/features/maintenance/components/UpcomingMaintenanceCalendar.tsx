@@ -180,7 +180,7 @@ export function UpcomingMaintenanceCalendar({
     return (
       <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden ${className}`}>
         <div className="p-4 border-b border-pf-border">
-          <div className="h-6 bg-pf-border rounded w-40 animate-pulse" />
+          <div className="h-6 bg-pf-border rounded-sm w-40 animate-pulse" />
         </div>
         <div className="p-4">
           <div className="grid grid-cols-7 gap-0">

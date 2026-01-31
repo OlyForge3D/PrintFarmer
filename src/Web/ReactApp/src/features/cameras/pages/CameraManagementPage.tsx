@@ -231,14 +231,14 @@ export function CameraManagementPage() {
 
         {/* Error message */}
         {error && (
-          <div className="px-4 py-3 rounded bg-pf-error-bg border border-pf-error text-pf-error">
+          <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
             {error}
           </div>
         )}
 
         {/* Create/Edit Form */}
         {showForm && (
-          <div className="shadow rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
+          <div className="shadow-sm rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
             <h3 className="text-lg font-semibold mb-4 text-pf-text-primary">
               {editingId ? 'Edit Camera' : 'Add New Camera'}
             </h3>
@@ -254,7 +254,7 @@ export function CameraManagementPage() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="e.g., Workshop Camera 1"
-                  className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                  className="mt-1 block w-full rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                   required
                 />
               </div>
@@ -270,7 +270,7 @@ export function CameraManagementPage() {
                   value={formData.streamUrl || ''}
                   onChange={(e) => setFormData({ ...formData, streamUrl: e.target.value })}
                   placeholder="e.g., http://192.168.1.100:8080/stream"
-                  className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                  className="mt-1 block w-full rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 />
                 <p className="mt-1 text-xs text-pf-text-tertiary">
                   MJPEG or HLS stream URL. For RTSP cameras, use a transcoding service like go2rtc.
@@ -288,7 +288,7 @@ export function CameraManagementPage() {
                   value={formData.snapshotUrl || ''}
                   onChange={(e) => setFormData({ ...formData, snapshotUrl: e.target.value })}
                   placeholder="e.g., http://192.168.1.100:8080/snapshot"
-                  className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                  className="mt-1 block w-full rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 />
               </div>
 
@@ -303,7 +303,7 @@ export function CameraManagementPage() {
                   value={formData.location || ''}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                   placeholder="e.g., Workshop, Main Room"
-                  className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                  className="mt-1 block w-full rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 />
               </div>
 
@@ -332,7 +332,7 @@ export function CameraManagementPage() {
                   type="number"
                   value={formData.sortOrder || 0}
                   onChange={(e) => setFormData({ ...formData, sortOrder: parseInt(e.target.value) || 0 })}
-                  className="mt-1 block w-32 rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
+                  className="mt-1 block w-32 rounded-md shadow-xs py-2 px-3 focus:outline-hidden bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 />
                 <p className="mt-1 text-xs text-pf-text-tertiary">
                   Lower numbers appear first in the camera view.
@@ -475,7 +475,7 @@ export function CameraManagementPage() {
         {showPrinterModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/50 backdrop-blur-xs"
               onClick={() => setShowPrinterModal(false)}
               onKeyDown={(e) => e.key === 'Escape' && setShowPrinterModal(false)}
               role="button"
@@ -514,7 +514,7 @@ export function CameraManagementPage() {
                         className="w-full p-4 text-left rounded-lg border border-pf-border hover:border-pf-accent hover:bg-pf-bg-2 transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <PrinterIcon className="w-8 h-8 text-pf-text-tertiary flex-shrink-0" />
+                          <PrinterIcon className="w-8 h-8 text-pf-text-tertiary shrink-0" />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-pf-text-primary">{printer.name}</div>
                             <div className="text-xs text-pf-text-tertiary mt-1 space-y-0.5">
@@ -530,7 +530,7 @@ export function CameraManagementPage() {
                               )}
                             </div>
                           </div>
-                          <DownloadIcon className="w-5 h-5 text-pf-accent flex-shrink-0" />
+                          <DownloadIcon className="w-5 h-5 text-pf-accent shrink-0" />
                         </div>
                       </Button>
                     ))}

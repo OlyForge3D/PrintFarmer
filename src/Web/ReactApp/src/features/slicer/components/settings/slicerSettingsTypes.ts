@@ -199,7 +199,7 @@ export const INFILL_PATTERN_INFO: Record<InfillPattern, { label: string; descrip
   stars: { label: 'Stars', description: 'Star-shaped pattern' },
   cubic: { label: 'Cubic', description: '3D cubic pattern for strength' },
   line: { label: 'Lines', description: 'Simple parallel lines, fastest' },
-  concentric: { label: 'Concentric', description: 'Follows the outline shape' },
+  concentric: { label: 'Concentric', description: 'Follows the outline-solid shape' },
   honeycomb: { label: 'Honeycomb', description: 'Hexagonal pattern, strong and efficient' },
   honeycomb3d: { label: '3D Honeycomb', description: '3D hexagonal structure' },
   gyroid: { label: 'Gyroid', description: 'Complex 3D pattern, excellent strength-to-weight' },

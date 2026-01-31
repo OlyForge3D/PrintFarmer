@@ -152,7 +152,7 @@ export function DataManagementPage() {
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
             <div className="flex items-start">
-              <AlertCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-3 flex-shrink-0" />
+              <AlertCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-3 shrink-0" />
               <div className="flex-1">
                 <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Error</h3>
                 <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
@@ -164,7 +164,7 @@ export function DataManagementPage() {
         {success && (
           <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
             <div className="flex items-start">
-              <CheckCircleIcon className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 mr-3 flex-shrink-0" />
+              <CheckCircleIcon className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 mr-3 shrink-0" />
               <div className="flex-1">
                 <h3 className="text-sm font-medium text-green-800 dark:text-green-200">Success</h3>
                 <p className="text-sm text-green-700 dark:text-green-300 mt-1">{success}</p>
@@ -292,7 +292,7 @@ export function DataManagementPage() {
 
           {/* Import Results */}
           {importResult && (
-            <div className="mt-4 p-4 bg-pf-bg-2 rounded border border-pf-border">
+            <div className="mt-4 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
               <h3 className="text-sm font-semibold text-pf-text-primary mb-2">Import Results</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                 <div>
@@ -381,7 +381,7 @@ export function DataManagementPage() {
           <div className="mt-4 text-xs text-pf-text-secondary">
             <p>
               <strong>Note:</strong> This operation uses merge mode and will not overwrite existing data. 
-              Seed data is stored in <code className="bg-pf-bg-2 px-1 py-0.5 rounded">data/seed/</code> YAML files.
+              Seed data is stored in <code className="bg-pf-bg-2 px-1 py-0.5 rounded-sm">data/seed/</code> YAML files.
             </p>
           </div>
         </div>
@@ -396,7 +396,7 @@ export function DataManagementPage() {
               {exportHistory.map((item, idx) => (
                 <div 
                   key={idx} 
-                  className="flex items-center justify-between text-sm p-2 bg-pf-bg-2 rounded"
+                  className="flex items-center justify-between text-sm p-2 bg-pf-bg-2 rounded-sm"
                 >
                   <div>
                     <span className="font-medium text-pf-text-primary">{item.filename}</span>

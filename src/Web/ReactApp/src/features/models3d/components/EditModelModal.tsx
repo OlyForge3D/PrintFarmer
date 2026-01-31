@@ -597,7 +597,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   value={formData.defaultBackend}
                   onChange={(backend) => handleInputChange('defaultBackend', backend)}
                   valueType="string"
-                  className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
+                  className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
                 />
               </FormField>
             </div>
@@ -639,7 +639,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                       <span className="flex items-center gap-2">
                         {toolhead.name || `Toolhead ${index + 1}`}
                         {toolhead.isPrimary && (
-                          <span className="text-xs px-1.5 py-0.5 bg-pf-accent/20 text-pf-accent rounded font-normal">
+                          <span className="text-xs px-1.5 py-0.5 bg-pf-accent/20 text-pf-accent rounded-sm font-normal">
                             Primary
                           </span>
                         )}

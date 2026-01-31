@@ -104,7 +104,7 @@ export function MaintenanceOverviewWidget({
             `}
           >
             <div className={`
-              w-2 h-2 rounded-full flex-shrink-0
+              w-2 h-2 rounded-full shrink-0
               ${task.isOverdue ? 'bg-red-500' : task.isDueToday ? 'bg-amber-500' : 'bg-blue-500'}
             `} />
             <div className="flex-1 min-w-0">
@@ -115,7 +115,7 @@ export function MaintenanceOverviewWidget({
                 {task.printerName}
               </p>
             </div>
-            <div className="text-right flex-shrink-0">
+            <div className="text-right shrink-0">
               <p className={`text-xs font-medium ${
                 task.isOverdue ? 'text-red-400' : task.isDueToday ? 'text-amber-400' : 'text-pf-text-secondary'
               }`}>

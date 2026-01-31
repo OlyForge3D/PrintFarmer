@@ -126,7 +126,7 @@ const Tab: React.FC<TabProps> = ({
       ref={btnRef}
       className={clsx(
         'px-4 py-2 text-sm font-medium transition-colors rounded-none',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
+        'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
         // when active: left/top/right border, no bottom border, background matches panel
         isActive
           ? 'relative z-20 bg-pf-bg-0 border-l-0 border-t border-r-0 border-pf-border border-b-0 -mb-px text-pf-text-primary rounded-none'
@@ -151,7 +151,7 @@ export interface TabPanelsProps {
 
 const TabPanels: React.FC<TabPanelsProps> = ({ children, className }) => {
   return (
-    <div className={clsx('border border-pf-border bg-pf-bg-0 p-4 mt-[-1px]', className)}>
+    <div className={clsx('border border-pf-border bg-pf-bg-0 p-4 -mt-px', className)}>
       {children}
     </div>
   );

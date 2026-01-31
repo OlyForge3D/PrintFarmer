@@ -312,7 +312,7 @@ export function PrintQueueDashboardPage() {
           <Tabs.Panel id="all-jobs">
             <div className="flex flex-col h-full w-full min-h-0">
               {/* Filters */}
-              <div className="flex-shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
+              <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <TableFiltersBar
                   onStatusChange={setStatusFilter}
                   onModelChange={setModelFilter}

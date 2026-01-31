@@ -129,7 +129,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   if (loading && alerts.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
+      <div className="bg-white rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -141,7 +141,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   if (error) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
+      <div className="bg-white rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <p className="text-red-800">Error: {error}</p>
@@ -158,7 +158,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white rounded-lg shadow-sm p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Maintenance Alerts</h3>
         {alerts.length > 0 && (
@@ -197,7 +197,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={`px-2 py-0.5 text-xs font-semibold rounded ${getStatusBadge(alert.status)}`}>
+                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-sm ${getStatusBadge(alert.status)}`}>
                       {MaintenanceAlertStatus[alert.status]}
                     </span>
                     <span className="text-xs font-medium">
@@ -218,7 +218,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
                   )}
                 </div>
                 <svg
-                  className="h-5 w-5 flex-shrink-0"
+                  className="h-5 w-5 shrink-0"
                   fill="currentColor"
                   viewBox="0 0 20 20"
                 >

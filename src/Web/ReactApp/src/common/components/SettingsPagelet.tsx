@@ -64,7 +64,7 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
 
 export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error }) => {
   return (
-    <div className="settings-pagelet bg-pf-bg-1 border border-pf-border rounded-xl p-4 mb-6 shadow-sm">
+    <div className="settings-pagelet bg-pf-bg-1 border border-pf-border rounded-xl p-4 mb-6 shadow-xs">
       <h3 className="text-lg font-semibold text-pf-text-primary mb-3">{metadata.displayName || metadata.className}</h3>
       <div className="space-y-2">
             {metadata.properties.map((prop0: SettingPropertyMetadata) => {
@@ -80,7 +80,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex items-center gap-3 py-1" key={prop.name}>
               {/* Label column - fixed width for alignment */}
               <label 
-                className="flex items-center flex-shrink-0 w-48 text-sm font-medium text-pf-text-primary" 
+                className="flex items-center shrink-0 w-48 text-sm font-medium text-pf-text-primary" 
                 htmlFor={prop.name}
               >
                 <span className="truncate">{displayName}</span>
@@ -95,7 +95,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     <div key={idx} className="flex items-center mb-1.5">
                       <input
                         type={typeof val === 'number' ? 'number' : 'text'}
-                        className="border border-pf-border rounded px-2 py-1.5 flex-1 text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                        className="border border-pf-border rounded-sm px-2 py-1.5 flex-1 text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
                         value={typeof val === 'number' ? val : (typeof val === 'string' ? val : '')}
                         placeholder={displayName}
                         title={prop.display?.description || displayName}
@@ -108,7 +108,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                       />
                       <button
                         type="button"
-                        className="ml-1.5 px-2 py-1 text-xs bg-pf-error/90 hover:bg-pf-error text-white rounded transition-colors"
+                        className="ml-1.5 px-2 py-1 text-xs bg-pf-error/90 hover:bg-pf-error text-white rounded-sm transition-colors"
                         onClick={() => {
                           const arr = Array.isArray(values[prop.name]) ? [...(values[prop.name] as (string | number)[])] : [];
                           arr.splice(idx, 1);
@@ -120,7 +120,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                   ))}
                   <button
                     type="button"
-                    className="px-2 py-1 text-xs bg-pf-accent/90 hover:bg-pf-accent text-white rounded transition-colors"
+                    className="px-2 py-1 text-xs bg-pf-accent/90 hover:bg-pf-accent text-white rounded-sm transition-colors"
                     onClick={() => {
                       const arr = Array.isArray(values[prop.name]) ? [...(values[prop.name] as (string | number)[])] : [];
                       arr.push(Array.isArray(values[prop.name]) && typeof (values[prop.name] as (string | number)[])[0] === 'number' ? 0 : '');
@@ -136,7 +136,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     id={prop.name}
                     name={prop.name}
                     type="checkbox"
-                    className="h-4 w-4 accent-pf-accent border-pf-border rounded focus:ring-pf-accent"
+                    className="h-4 w-4 accent-pf-accent border-pf-border rounded-sm focus:ring-pf-accent"
                     checked={Boolean(values[prop.name])}
                     onChange={e => onChange(prop.name, e.currentTarget.checked)}
                   />
@@ -147,7 +147,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                   <textarea
                     id={prop.name}
                     name={prop.name}
-                    className="border border-pf-border rounded px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition resize-none"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition resize-none"
                     rows={2}
                     value={String(getInputValue(values[prop.name] as SettingValue))}
                     onChange={e => onChange(prop.name, e.currentTarget.value)}
@@ -163,7 +163,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     id={prop.name}
                     name={prop.name}
                     type="number"
-                    className="border border-pf-border rounded px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
                     value={getInputValue(values[prop.name] as SettingValue)}
                     min={prop.display?.minValue}
                     max={prop.display?.maxValue}
@@ -180,7 +180,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                   <select
                     id={prop.name}
                     name={prop.name}
-                    className="border border-pf-border rounded px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
                     value={String(getInputValue(values[prop.name] as SettingValue))}
                     onChange={e => onChange(prop.name, e.currentTarget.value)}
                     aria-label={displayName}
@@ -198,7 +198,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     id={prop.name}
                     name={prop.name}
                     type={prop.display?.inputType === SettingInputType.Password ? 'password' : 'text'}
-                    className="border border-pf-border rounded px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
+                    className="border border-pf-border rounded-sm px-2 py-1.5 w-full text-sm text-pf-text-primary bg-pf-bg-2 focus:border-pf-accent focus:ring-1 focus:ring-pf-accent/30 transition"
                     value={String(getInputValue(values[prop.name] as SettingValue))}
                     onChange={e => onChange(prop.name, e.currentTarget.value)}
                     placeholder={displayName}
@@ -220,15 +220,15 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           <div className="mt-4 pt-3 border-t border-pf-border">
             <h4 className="text-base font-semibold mb-2">Per-Engine Slicer Settings</h4>
             {Object.entries(values['PerEngine'] as Record<string, unknown>).map(([engine, engineSettings]) => (
-              <div key={engine} className="border rounded p-3 mb-3 bg-pf-bg-2">
+              <div key={engine} className="border rounded-sm p-3 mb-3 bg-pf-bg-2">
                 <h5 className="font-medium text-sm mb-2">{engine}</h5>
                 <div className="space-y-1.5">
                   {Object.entries(engineSettings as Record<string, string | number | boolean | undefined>).map(([field, value]) => (
                     <div className="flex items-center gap-3" key={field}>
-                      <label className="flex-shrink-0 w-32 text-sm font-medium" htmlFor={`perengine-${engine}-${field}`}>{field}</label>
+                      <label className="shrink-0 w-32 text-sm font-medium" htmlFor={`perengine-${engine}-${field}`}>{field}</label>
                       <input
                         id={`perengine-${engine}-${field}`}
-                        className="border border-pf-border rounded px-2 py-1.5 flex-1 text-sm bg-pf-bg-1"
+                        className="border border-pf-border rounded-sm px-2 py-1.5 flex-1 text-sm bg-pf-bg-1"
                         value={typeof value === 'string' || typeof value === 'number' ? value : ''}
                         placeholder={field}
                         title={field}

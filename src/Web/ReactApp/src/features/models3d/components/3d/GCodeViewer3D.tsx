@@ -317,7 +317,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   return (
     <div className="space-y-4">
       {/* Header with Controls */}
-      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-lg shadow p-4 border border-gray-700">
+      <div className="bg-linear-to-r from-gray-900 to-gray-800 rounded-lg shadow-sm p-4 border border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-bold text-lg text-white">G-Code Viewer</h3>
@@ -355,7 +355,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                         <Select
                           value={renderQuality}
                           onChange={(e) => setRenderQuality(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs border-gray-600"
+                          className="w-full bg-gray-700 text-white rounded-sm px-2 py-1 text-xs border-gray-600"
                         >
                           {RENDER_QUALITIES.map(q => (
                             <option key={q.value} value={q.value}>{q.label}</option>
@@ -379,7 +379,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                         <Select
                           value={colorMode}
                           onChange={(e) => setColorMode(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs border-gray-600"
+                          className="w-full bg-gray-700 text-white rounded-sm px-2 py-1 text-xs border-gray-600"
                         >
                           {COLOR_MODES.map(m => (
                             <option key={m.id} value={m.id}>{m.label}</option>
@@ -410,7 +410,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                           type="color" 
                           value={backgroundColor}
                           onChange={(e) => setBackgroundColor(e.target.value)}
-                          className="w-8 h-8 rounded cursor-pointer"
+                          className="w-8 h-8 rounded-sm cursor-pointer"
                         />
                       </div>
                       <div className="flex items-center space-x-2">
@@ -419,7 +419,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                           type="color" 
                           value={gridColor}
                           onChange={(e) => setGridColor(e.target.value)}
-                          className="w-8 h-8 rounded cursor-pointer"
+                          className="w-8 h-8 rounded-sm cursor-pointer"
                         />
                       </div>
                       {colorMode === 1 && (
@@ -430,7 +430,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                               type="color" 
                               value={minFeedColor}
                               onChange={(e) => setMinFeedColor(e.target.value)}
-                              className="w-8 h-8 rounded cursor-pointer"
+                              className="w-8 h-8 rounded-sm cursor-pointer"
                             />
                           </div>
                           <div className="flex items-center space-x-2">
@@ -439,7 +439,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                               type="color" 
                               value={maxFeedColor}
                               onChange={(e) => setMaxFeedColor(e.target.value)}
-                              className="w-8 h-8 rounded cursor-pointer"
+                              className="w-8 h-8 rounded-sm cursor-pointer"
                             />
                           </div>
                         </>
@@ -485,7 +485,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
       </div>
       
       {/* Layer Slider */}
-      <div className="bg-gray-800 rounded-lg shadow p-4 border border-gray-700">
+      <div className="bg-gray-800 rounded-lg shadow-sm p-4 border border-gray-700">
         <div className="flex items-center justify-between text-sm text-gray-300 mb-2">
           <span>Layer {currentLayer + 1} / {layers.length}</span>
           <span>Z: {layers[currentLayer]?.z.toFixed(2)}mm</span>

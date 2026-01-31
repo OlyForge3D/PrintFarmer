@@ -51,7 +51,7 @@ function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate(task); } }}
     >
-      <div className="flex-shrink-0 mt-0.5">
+      <div className="shrink-0 mt-0.5">
         <div className="p-2 rounded-lg bg-pf-warning/10">
           <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
         </div>
@@ -69,7 +69,7 @@ function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
               </p>
             )}
             <div className="flex items-center gap-2 mt-1.5">
-              <span className={`text-xs px-1.5 py-0.5 rounded ${getPriorityClasses(task.priority)}`}>
+              <span className={`text-xs px-1.5 py-0.5 rounded-sm ${getPriorityClasses(task.priority)}`}>
                 {task.priority}
               </span>
               {task.relatedEntityCount > 0 && (
@@ -162,7 +162,7 @@ export function TasksWidget() {
 
   const taskCount = tasks?.length ?? 0;
   const badge = taskCount > 0 ? (
-    <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
+    <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white">
       {taskCount}
     </span>
   ) : undefined;

@@ -29,7 +29,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
         variant="subtle"
         size="sm"
         onClick={toggleDropdown}
-        className="!p-2 !h-auto flex-shrink-0"
+        className="p-2! h-auto! shrink-0"
         aria-label="Printer actions"
         iconCenter={<MoreVerticalIcon className="w-5 h-5" />}
       >
@@ -52,7 +52,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
               variant="subtle"
               size="sm"
               onClick={() => handleAction(() => onEdit(printer))}
-              className="w-full text-left !justify-start"
+              className="w-full text-left justify-start!"
               iconLeft={<EditIcon className="w-4 h-4 mr-3" />}
             >
               Edit Settings
@@ -65,7 +65,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
                 variant="subtle"
                 size="sm"
                 onClick={() => handleAction(() => onDelete(printer))}
-                className="w-full text-left !justify-start hover:text-pf-error hover:bg-pf-error-bg"
+                className="w-full text-left justify-start! hover:text-pf-error hover:bg-pf-error-bg"
                 iconLeft={<DeleteIcon className="w-4 h-4 mr-3" />}
               >
                 Delete Printer

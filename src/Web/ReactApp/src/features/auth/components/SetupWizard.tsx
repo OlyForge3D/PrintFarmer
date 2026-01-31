@@ -451,35 +451,35 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>First Name *</label>
-          <input id="firstName" type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} />
+          <input id="firstName" type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} />
           {accountFormState.errors.firstName && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.firstName}</p>}
         </div>
         <div>
           <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-2">Last Name *</label>
-          <input id="lastName" type="text" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="family-name" disabled={submitting} />
+          <input id="lastName" type="text" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="family-name" disabled={submitting} />
           {accountFormState.errors.lastName && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.lastName}</p>}
         </div>
       </div>
       <div>
         <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>Username *</label>
-        <input id="username" type="text" name="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} />
+        <input id="username" type="text" name="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} />
         {accountFormState.errors.username && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.username}</p>}
       </div>
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-2"><EmailIcon className="inline h-4 w-4 mr-1"/>Email *</label>
-        <input id="email" type="email" name="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} />
+        <input id="email" type="email" name="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} />
         {accountFormState.errors.email && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.email}</p>}
       </div>
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Password *</label>
         <div className="relative">
-          <input id="password" type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} />
+          <input id="password" type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} />
           <Button
             type="button"
             onClick={() => setShowPassword(p => !p)}
             variant="subtle"
             size="sm"
-            className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-0! h-auto!"
             disabled={submitting}
             title={showPassword ? 'Hide password' : 'Show password'}
           >
@@ -497,7 +497,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       </div>
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Confirm Password *</label>
-        <input id="confirmPassword" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} />
+        <input id="confirmPassword" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} />
         {accountFormState.errors.confirmPassword && <p className="text-xs text-red-500" role="alert">{accountFormState.errors.confirmPassword}</p>}
       </div>
       <div className="flex justify-end">
@@ -523,7 +523,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="space-y-2">
         {networkDiscoverySettings?.discoverySubnets.map((r: string, i: number) => (
           <div key={i} className="flex gap-2">
-            <input value={r} onChange={e => updateNetworkRange(i, e.target.value)} placeholder="192.168.1.0/24" className="flex-1 px-3 py-2 bg-pf-bg-2 border border-pf-border rounded" />
+            <input value={r} onChange={e => updateNetworkRange(i, e.target.value)} placeholder="192.168.1.0/24" className="flex-1 px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-sm" />
             <Button
               type="button"
               onClick={() => removeNetworkRange(i)}
@@ -552,7 +552,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <input
             id="clientTimeoutMs"
             type="number"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.clientTimeoutMs ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, clientTimeoutMs: Number(e.target.value) } : s)}
             min={100}
@@ -564,7 +564,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <input
             id="requestDelayMs"
             type="number"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.requestDelayMs ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, requestDelayMs: Number(e.target.value) } : s)}
             min={0}
@@ -576,7 +576,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <input
             id="maxConcurrentRequests"
             type="number"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxConcurrentRequests ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxConcurrentRequests: Number(e.target.value) } : s)}
             min={1}
@@ -588,7 +588,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <input
             id="maxRetries"
             type="number"
-            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+            className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxRetries ?? 0}
             onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxRetries: Number(e.target.value) } : s)}
             min={0}
@@ -634,7 +634,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={handleNetworkScan}
                 disabled={isScanning}
-                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded text-sm hover:bg-pf-accent-dark disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded-sm text-sm hover:bg-pf-accent-dark disabled:opacity-50"
               >
                 <SearchIcon className="h-4 w-4" />
                 {isScanning ? 'Scanning...' : 'Scan Network'}
@@ -642,7 +642,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
             
             {scanError && (
-              <div className="text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2">
+              <div className="text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2">
                 {scanError}
               </div>
             )}
@@ -656,7 +656,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       key={index}
                       type="button"
                       onClick={() => selectSpoolmanInstance(instance.url)}
-                      className="w-full text-left p-2 bg-pf-bg-2 hover:bg-pf-bg-3 border border-pf-border rounded text-xs flex items-center justify-between transition-colors"
+                      className="w-full text-left p-2 bg-pf-bg-2 hover:bg-pf-bg-3 border border-pf-border rounded-sm text-xs flex items-center justify-between transition-colors"
                     >
                       <div>
                         <div className="font-medium">{instance.url}</div>
@@ -674,7 +674,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             )}
             
             {scanResults.length > 0 && availableInstances.length === 0 && (
-              <div className="text-xs text-orange-400 bg-orange-950/30 border border-orange-800/40 rounded p-2">
+              <div className="text-xs text-orange-400 bg-orange-950/30 border border-orange-800/40 rounded-sm p-2">
                 Found {scanResults.length} address(es) but no Spoolman instances were responding
               </div>
             )}
@@ -688,14 +688,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               value={spoolmanUrl}
               onChange={e => setSpoolmanUrl(e.target.value)}
               placeholder="http://spoolman:7912"
-              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded"
+              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-sm"
             />
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={testSpoolman}
                 disabled={testingSpoolman}
-                className="px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="px-3 py-2 bg-blue-600 text-white rounded-sm text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {testingSpoolman ? 'Testing...' : 'Test URL'}
               </button>
@@ -706,7 +706,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <p className={`text-xs ${spoolmanTestOk ? 'text-green-500':'text-red-500'}`}>{spoolmanTestResult}</p>
           )}
           {!spoolmanTestOk && spoolmanErrorCategory && (
-            <div className="relative text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2 flex gap-2 group">
+            <div className="relative text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded-sm p-2 flex gap-2 group">
               <AlertIcon className="h-4 w-4 shrink-0" />
               <div className="space-y-1">
                 <div className="font-semibold">{getSpoolmanFriendly(spoolmanErrorCategory)}</div>
@@ -850,7 +850,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
             <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
               {['Account','Network','Spoolman','Summary'].map((label, idx) => (
-                <div key={label} className={`px-2 py-1 rounded ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
+                <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
               ))}
             </div>
             {globalError && step !== 3 && <div className="mb-4 text-sm text-red-500" role="alert">{globalError}</div>}

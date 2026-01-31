@@ -46,7 +46,7 @@ export interface SlicerBedVisualizationProps {
 function LoadingIndicator() {
   return (
     <Html center>
-      <div className="bg-pf-bg-2/90 backdrop-blur px-4 py-2 rounded-lg border border-pf-border shadow-lg">
+      <div className="bg-pf-bg-2/90 backdrop-blur-sm px-4 py-2 rounded-lg border border-pf-border shadow-lg">
         <div className="text-sm font-medium text-pf-text flex items-center gap-2">
           <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />

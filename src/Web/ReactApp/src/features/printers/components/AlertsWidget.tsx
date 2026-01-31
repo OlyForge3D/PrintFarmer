@@ -77,8 +77,8 @@ export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
     >
       <div className="space-y-3">
         {showOfflineAlerts && stats.offline > 0 && (
-          <div className="flex items-start gap-2 p-3 bg-pf-error-bg rounded border border-pf-error-border">
-            <AlertCircleIcon className="h-4 w-4 text-pf-error-text flex-shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 p-3 bg-pf-error-bg rounded-sm border border-pf-error-border">
+            <AlertCircleIcon className="h-4 w-4 text-pf-error-text shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-pf-error-text">
                 {stats.offline} Printer{stats.offline > 1 ? 's' : ''} Offline
@@ -90,8 +90,8 @@ export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
           </div>
         )}
         {stats.maintenance > 0 && (
-          <div className="flex items-start gap-2 p-3 bg-pf-warning-bg rounded border border-pf-warning-border">
-            <WrenchIcon className="h-4 w-4 text-pf-warning-text flex-shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 p-3 bg-pf-warning-bg rounded-sm border border-pf-warning-border">
+            <WrenchIcon className="h-4 w-4 text-pf-warning-text shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-pf-warning-text">
                 {stats.maintenance} Printer{stats.maintenance > 1 ? 's' : ''} in Maintenance

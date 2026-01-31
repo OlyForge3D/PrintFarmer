@@ -182,24 +182,24 @@ const TagAnalyticsDashboard: React.FC = () => {
             {stats.topTags.map((tag, index) => (
               <div key={tag.id} className="flex items-center gap-4">
                 {/* Rank Badge */}
-                <div className="flex-shrink-0 w-8">
+                <div className="shrink-0 w-8">
                   <Badge variant="default" className="inline-flex items-center justify-center h-8 w-8 rounded-full p-0 text-xs">
                     {index + 1}
                   </Badge>
                 </div>
 
                 {/* Tag Name */}
-                <div className="flex-shrink-0 w-32">
+                <div className="shrink-0 w-32">
                   <p className="text-sm font-medium text-pf-text-primary truncate">
                     {tag.name}
                   </p>
                 </div>
 
                 {/* Bar */}
-                <div className="flex-grow">
+                <div className="grow">
                   <div className="h-8 bg-pf-bg-1 rounded-md overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-pf-accent to-pf-accent/80 transition-all duration-300"
+                      className="h-full bg-linear-to-r from-pf-accent to-pf-accent/80 transition-all duration-300"
                       style={{ width: `${getBarPercentage(tag.modelCount)}%` }}
                       role="progressbar"
                       aria-valuenow={tag.modelCount}
@@ -211,7 +211,7 @@ const TagAnalyticsDashboard: React.FC = () => {
                 </div>
 
                 {/* Count */}
-                <div className="flex-shrink-0 w-12 text-right">
+                <div className="shrink-0 w-12 text-right">
                   <p className="text-sm font-semibold text-pf-text-primary">
                     {tag.modelCount}
                   </p>

@@ -120,10 +120,10 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
     <div className="mb-3">
       {/* Row 1: Printer name, Status, Started/Completed on same line */}
       <div className="flex items-center gap-6 mb-3">
-        <div className="flex-shrink-0">
+        <div className="shrink-0">
           <div className="text-lg font-bold text-pf-primary">{operation.printerName}</div>
         </div>
-        <div className="flex-shrink-0">
+        <div className="shrink-0">
           <span className="text-sm font-medium text-pf-text-1">Status:</span>
           <span className="ml-1 text-sm font-semibold text-pf-text-0">{operation.status}</span>
         </div>
@@ -138,19 +138,19 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       
       {/* Row 2: File Stats Chicklets */}
       <div className="flex flex-wrap gap-2">
-        <div className="h-7 rounded bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
           Found <span className="font-bold ml-1">{operation.filesFound}</span>
         </div>
-        <div className="h-7 rounded bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
           Added <span className="font-bold ml-1">{operation.filesAdded}</span>
         </div>
-        <div className="h-7 rounded bg-pf-bg-2 border border-pf-border text-pf-text-secondary text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-secondary text-xs font-semibold flex items-center justify-center px-2">
           Skipped <span className="font-bold ml-1">{operation.filesSkipped}</span>
         </div>
-        <div className="h-7 rounded bg-pf-error-bg border border-pf-error-border text-pf-error-text text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-error-bg border border-pf-error-border text-pf-error-text text-xs font-semibold flex items-center justify-center px-2">
           Failed <span className="font-bold ml-1">{operation.filesErrored}</span>
         </div>
-        <div className="h-7 rounded bg-pf-info-bg border border-pf-info-border text-pf-info-text text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-info-bg border border-pf-info-border text-pf-info-text text-xs font-semibold flex items-center justify-center px-2">
           Total <span className="font-bold ml-1">{operation.totalSizeBytes}</span>
         </div>
       </div>
@@ -166,14 +166,14 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           variant="subtle"
           size="sm"
           onClick={onClose}
-          className="absolute top-2 right-2 !p-1 !h-auto"
+          className="absolute top-2 right-2 p-1! h-auto!"
           aria-label="Close details"
         >
           <CloseIcon className="h-4 w-4" />
         </Button>
       )}
-      <h2 className="text-xl font-bold mb-3 text-pf-text-0 flex-shrink-0">Harvest Operation Details</h2>
-      <div className="mb-3 flex-shrink-0">
+      <h2 className="text-xl font-bold mb-3 text-pf-text-0 shrink-0">Harvest Operation Details</h2>
+      <div className="mb-3 shrink-0">
         {summaryTable}
       </div>
 
@@ -183,12 +183,12 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
         if (!errorInfo) return null;
 
         return (
-          <div className="bg-pf-error-bg border border-pf-error-border rounded-lg p-3 mb-3 flex-shrink-0">
+          <div className="bg-pf-error-bg border border-pf-error-border rounded-lg p-3 mb-3 shrink-0">
             <div className="flex items-start gap-3">
               <ErrorIcon type={errorInfo.iconType} />
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-pf-error-text text-sm">{errorInfo.title}</p>
-                <p className="text-pf-error-text text-sm mt-1 break-words opacity-90">{errorInfo.message}</p>
+                <p className="text-pf-error-text text-sm mt-1 wrap-break-word opacity-90">{errorInfo.message}</p>
                 
                 {errorInfo.phase && (
                   <p className="text-pf-error-text text-xs mt-1 italic opacity-75">
@@ -203,7 +203,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
                 )}
                 
                 {errorInfo.suggestion && (
-                  <div className="mt-2 p-2 bg-pf-bg-2 border border-pf-border rounded text-xs text-pf-text-secondary">
+                  <div className="mt-2 p-2 bg-pf-bg-2 border border-pf-border rounded-sm text-xs text-pf-text-secondary">
                     <p className="font-semibold text-pf-text-primary">💡 Suggestion:</p>
                     <p className="mt-0.5">{errorInfo.suggestion}</p>
                   </div>
@@ -222,9 +222,9 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
 
       {/* Cancelled Banner */}
       {shouldShowCancelledBanner && (
-        <div className="bg-pf-warning-bg border border-pf-warning-border rounded-lg p-3 mb-3 flex-shrink-0">
+        <div className="bg-pf-warning-bg border border-pf-warning-border rounded-lg p-3 mb-3 shrink-0">
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-pf-warning-text flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-5 h-5 text-pf-warning-text shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             <div className="flex-1 min-w-0">
@@ -239,9 +239,9 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
 
       {/* Success Banner */}
       {isCompleted && !operation.error && (
-        <div className="bg-pf-success-bg border border-pf-success-border rounded-lg p-3 mb-3 flex-shrink-0">
+        <div className="bg-pf-success-bg border border-pf-success-border rounded-lg p-3 mb-3 shrink-0">
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-pf-success-text flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-5 h-5 text-pf-success-text shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
             <div className="flex-1 min-w-0">
@@ -256,7 +256,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
 
       {/* Footer Buttons - Only shown in standalone mode (not in wizard) */}
       {!hideCloseButton && onClose && (
-        <div className="mt-4 flex-shrink-0 flex justify-end gap-2">
+        <div className="mt-4 shrink-0 flex justify-end gap-2">
           {!isCompleted && !isFailed && !isCancelled && (
             <Button
               onClick={onClose}
@@ -276,13 +276,13 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
         </div>
       )}
 
-      <div className="mb-2 flex-shrink-0">
+      <div className="mb-2 shrink-0">
         <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
         <div className="text-xs text-pf-muted mb-2">
           You can retry or skip failed files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>
       </div>
-      <div className="rounded border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">
+      <div className="rounded-sm border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">
         <IndexedFilesList operationId={operation.id} onFilesImported={onFilesImported} />
       </div>
     </div>
@@ -292,7 +292,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
     return <div className="w-full h-full">{content}</div>;
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-6xl h-5/6 flex flex-col">
         {content}
       </div>

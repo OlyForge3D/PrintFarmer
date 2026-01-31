@@ -201,7 +201,7 @@ export const SlicerSettingsPage: React.FC = () => {
                         variant="subtle"
                         size="sm"
                         onClick={() => setOpenExamplesEngine(openExamplesEngine === engine ? null : engine)}
-                        className="!justify-start"
+                        className="justify-start!"
                       >
                         {openExamplesEngine === engine ? '▼ Hide examples' : '▶ Show Orca examples'}
                       </Button>
@@ -227,7 +227,7 @@ export const SlicerSettingsPage: React.FC = () => {
                             </Button>
                           </div>
                           <div className="form-helper text-xs">
-                            Placeholders: <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{input}'}</code> – model file; <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{output}'}</code> – gcode output; <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{config}'}</code> – generated config path
+                            Placeholders: <code className="bg-pf-bg-0 px-1 rounded-sm">{'{'}{'{input}'}</code> – model file; <code className="bg-pf-bg-0 px-1 rounded-sm">{'{'}{'{output}'}</code> – gcode output; <code className="bg-pf-bg-0 px-1 rounded-sm">{'{'}{'{config}'}</code> – generated config path
                           </div>
                         </div>
                       )}

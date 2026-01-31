@@ -115,7 +115,7 @@ export function JobQueueDashboardPage() {
       {/* Jobs list */}
       <div className="space-y-4">
         {!loading && jobs.map(job => (
-          <div key={job.id} className="bg-pf-panel rounded-lg shadow p-6 border border-pf-border">
+          <div key={job.id} className="bg-pf-panel rounded-lg shadow-sm p-6 border border-pf-border">
             <div className="flex justify-between items-start mb-4">
               <div className="flex-1">
                 <div className="flex items-center space-x-3 mb-2">
@@ -220,7 +220,7 @@ export function JobQueueDashboardPage() {
 
             {/* Error message */}
             {job.status === SliceJobStatus.Failed && job.errorMessage && (
-              <div className="mt-4 p-3 bg-pf-error-bg border border-pf-error-border rounded">
+              <div className="mt-4 p-3 bg-pf-error-bg border border-pf-error-border rounded-sm">
                 <div className="text-xs text-pf-text-muted mb-1">Error</div>
                 <div className="text-sm text-pf-error-text">{job.errorMessage}</div>
               </div>
@@ -229,7 +229,7 @@ export function JobQueueDashboardPage() {
         ))}
 
         {!loading && jobs.length === 0 && (
-          <div className="bg-pf-panel rounded-lg shadow p-12 text-center text-pf-text-muted border border-pf-border">
+          <div className="bg-pf-panel rounded-lg shadow-sm p-12 text-center text-pf-text-muted border border-pf-border">
             No jobs found
           </div>
         )}

@@ -149,7 +149,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center flex-shrink-0">
+      <div className="w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -213,7 +213,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
     if (isHomed) {
       return {
-        className: '!text-white',
+        className: 'text-white!',
         style: {
           backgroundColor: '#2096f3',
           backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
@@ -221,7 +221,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
       };
     }
     return {
-      className: '!text-white',
+      className: 'text-white!',
       style: {
         backgroundColor: '#fb8c00',
         backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
@@ -362,13 +362,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   };
 
   return (
-    <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter flex-shrink-0">
+    <div className="w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter shrink-0">
       {/* Header */}
-      <div className="flex justify-between items-start p-4 border-b border-pf-border flex-shrink-0 gap-3">
+      <div className="flex justify-between items-start p-4 border-b border-pf-border shrink-0 gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h2 className="text-lg font-bold text-pf-text-primary truncate">{printer.name}</h2>
-            <div className={`flex-shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={isOnline ? 'Online' : 'Offline'} />
+            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={isOnline ? 'Online' : 'Offline'} />
           </div>
           <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
           <p className="text-xs text-pf-text-secondary mt-1">{state}</p>
@@ -378,7 +378,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           variant="subtle"
           size="sm"
           onClick={onClose}
-          className="!p-1 !h-auto flex-shrink-0"
+          className="p-1! h-auto! shrink-0"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
@@ -401,7 +401,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isPrinting}
                 onClick={() => handleControlAction('pause')}
                 title="Pause print"
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<PauseIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -411,7 +411,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isPaused}
                 onClick={() => handleControlAction('resume')}
                 title="Resume print"
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<PlayIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -421,7 +421,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isOnline}
                 onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                 title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconLeft={isShutdown ? (
                   <RefreshIcon className="h-6 w-6" />
                 ) : (
@@ -469,7 +469,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome()}
                 title="Home all axes"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isAllHomed).className}`}
                 style={getHomeButtonStyle(isAllHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -479,7 +479,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<ArrowUpIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -489,7 +489,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isOnline || isPrinting}
                 onClick={() => handleControlAction('disable-motors')}
                 title="Disable Motors (M84)"
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<DisableMotorsIcon className="w-6 h-6" />}
               ></Button>
 
@@ -500,7 +500,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', -step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<ArrowLeftIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -510,7 +510,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome()}
                 title="Home X"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isXHomed).className}`}
                 style={getHomeButtonStyle(isXHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -520,7 +520,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<ArrowRightIcon className="h-6 w-6" />}
               ></Button>
 
@@ -532,7 +532,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', -step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
                 iconCenter={<ArrowDownIcon className="h-6 w-6" />}
               ></Button>
               <div></div>
@@ -546,7 +546,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
               >
                 Z+
               </Button>
@@ -557,7 +557,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome()}
                 title="Home Z"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -567,7 +567,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', -step)}
-                className="w-full h-full !p-0"
+                className="w-full h-full p-0!"
               >
                 Z-
               </Button>
@@ -627,21 +627,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               value={moveX}
               onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-              className="!w-full"
+              className="w-full!"
             />
             <MovementInput
               axis="Y"
               value={moveY}
               onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-              className="!w-full"
+              className="w-full!"
             />
             <MovementInput
               axis="Z"
               value={moveZ}
               onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-              className="!w-full"
+              className="w-full!"
             />
           </div>
         </div>
@@ -658,7 +658,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleApplyPreset('cooldown')}
                 title="Cooldown"
-                className="flex-shrink-0 px-2"
+                className="shrink-0 px-2"
                 iconCenter={<SnowflakeIcon className="h-4 w-4" />}
               ></Button>
               <Select
@@ -684,7 +684,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
           {/* Hotend Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
+            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Hotend</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
@@ -703,7 +703,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
           {/* Bed Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
+            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Bed</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
@@ -743,7 +743,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                   <span className="text-pf-text-secondary">Color:</span>
                   <div className="flex items-center gap-2">
                     <div
-                      className="w-3 h-3 rounded border border-pf-border"
+                      className="w-3 h-3 rounded-sm border border-pf-border"
                       style={{ backgroundColor: displayPrinter.spoolInfo.colorHex }}
                       title={displayPrinter.spoolInfo.colorHex}
                     />
@@ -767,7 +767,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           </div>
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
-          <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+          <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
             {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
           </div>
         )}

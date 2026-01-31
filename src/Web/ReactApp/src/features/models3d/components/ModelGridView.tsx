@@ -83,14 +83,14 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
                     {model.tags.slice(0, 1).map(tag => (
                       <span
                         key={tag.id}
-                        className="inline-block px-1.5 py-0.5 text-xs rounded text-white"
+                        className="inline-block px-1.5 py-0.5 text-xs rounded-sm text-white"
                         style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                       >
                         {tag.name}
                       </span>
                     ))}
                     {model.tags.length > 1 && (
-                      <span className="inline-block px-1.5 py-0.5 text-xs rounded bg-pf-bg-2 text-pf-text-secondary">
+                      <span className="inline-block px-1.5 py-0.5 text-xs rounded-sm bg-pf-bg-2 text-pf-text-secondary">
                         +{model.tags.length - 1}
                       </span>
                     )}

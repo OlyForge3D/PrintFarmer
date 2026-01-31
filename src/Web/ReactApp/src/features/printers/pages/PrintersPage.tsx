@@ -237,7 +237,7 @@ export function PrintersPage() {
     return (
       <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
         <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
-          <div className="h-8 w-48 bg-pf-bg-1 rounded mb-6 animate-pulse" />
+          <div className="h-8 w-48 bg-pf-bg-1 rounded-sm mb-6 animate-pulse" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-24 bg-pf-bg-1 rounded-xl animate-pulse" />
@@ -348,7 +348,7 @@ export function PrintersPage() {
                   ))}
                 </div>
                 {expandedPrinterId && (
-                  <div className="w-96 flex-shrink-0">
+                  <div className="w-96 shrink-0">
                     <PrinterDetailsSidebar
                       printerId={expandedPrinterId}
                       printer={printersById[expandedPrinterId]}

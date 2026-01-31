@@ -161,7 +161,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               placeholder="Add tags (press Enter)"
               maxLength={MAX_TAG_LENGTH}
-              className="w-full px-3 py-1.5 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+              className="w-full px-3 py-1.5 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-label="Add tags"
               aria-autocomplete="list"
               aria-controls="tag-suggestions"

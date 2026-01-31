@@ -394,7 +394,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   }
   if (error) {
     return (
-      <div className="flex items-center gap-2 text-pf-error bg-pf-error-bg rounded px-3 py-2">
+      <div className="flex items-center gap-2 text-pf-error bg-pf-error-bg rounded-sm px-3 py-2">
         <svg className="w-5 h-5 text-pf-error" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M12 9v4m0 4h.01M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9Z" /></svg>
         {error}
       </div>
@@ -402,7 +402,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   }
   if (!files.length) {
     return (
-      <div className="flex items-center gap-2 text-pf-muted bg-pf-surface rounded px-3 py-2">
+      <div className="flex items-center gap-2 text-pf-muted bg-pf-surface rounded-sm px-3 py-2">
         <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         Discovering files... Files will appear here as they are found.
       </div>
@@ -459,7 +459,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                         <img
                           src={file.thumbnailUrl}
                           alt={file.fileName + ' thumbnail'}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded shadow border border-pf-border bg-pf-surface object-cover"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-sm shadow-sm border border-pf-border bg-pf-surface object-cover"
                           loading="lazy"
                         />
                       )}
@@ -551,7 +551,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage(0)}
-                className="!px-2 !py-1"
+                className="px-2! py-1!"
                 title="First page"
                 iconLeft={<ChevronsLeftIcon className="h-3 w-3" />}
               />
@@ -560,7 +560,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage(currentPage - 1)}
-                className="!px-2 !py-1"
+                className="px-2! py-1!"
                 title="Previous page"
                 iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
               />
@@ -570,7 +570,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === totalPages - 1}
                 onClick={() => setCurrentPage(currentPage + 1)}
-                className="!px-2 !py-1"
+                className="px-2! py-1!"
                 title="Next page"
                 iconLeft={<ArrowRightIcon className="h-3 w-3" />}
               />
@@ -579,7 +579,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === totalPages - 1}
                 onClick={() => setCurrentPage(totalPages - 1)}
-                className="!px-2 !py-1"
+                className="px-2! py-1!"
                 title="Last page"
                 iconLeft={<ChevronsRightIcon className="h-3 w-3" />}
               />
@@ -615,7 +615,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
             </div>
             <div>
               <h3 className="font-semibold text-pf-primary mb-2">Error Details</h3>
-              <p className="text-pf-error bg-pf-error-bg rounded px-3 py-2 text-sm">{errorModalFile.error || 'No error details available'}</p>
+              <p className="text-pf-error bg-pf-error-bg rounded-sm px-3 py-2 text-sm">{errorModalFile.error || 'No error details available'}</p>
             </div>
             <div className="flex gap-2 justify-end pt-4">
               <Button

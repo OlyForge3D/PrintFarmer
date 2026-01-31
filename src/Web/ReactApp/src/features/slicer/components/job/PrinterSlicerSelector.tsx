@@ -93,7 +93,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
           Loading printers...
         </div>
       ) : printers.length === 0 ? (
-        <div className="text-sm text-pf-text-muted p-2 bg-pf-surface rounded">
+        <div className="text-sm text-pf-text-muted p-2 bg-pf-surface rounded-sm">
           No printers configured. <a href="/printers" className="text-pf-primary hover:underline">Add a printer</a> to get started.
         </div>
       ) : (
@@ -103,12 +103,12 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
             type="button"
             variant="secondary"
             onClick={() => setIsModalOpen(true)}
-            className="w-full !justify-start !p-3 !rounded-lg"
+            className="w-full justify-start! p-3! rounded-lg!"
           >
             {selectedPrinter ? (
               <div className="flex items-start gap-3 w-full text-left">
                 {/* Printer cover image from manufacturer/model or fallback based on motion type */}
-                <div className="flex-shrink-0 w-12 h-12 bg-pf-bg-1 rounded flex items-center justify-center overflow-hidden">
+                <div className="shrink-0 w-12 h-12 bg-pf-bg-1 rounded-sm flex items-center justify-center overflow-hidden">
                   <PrinterImage
                     manufacturerName={selectedPrinter.manufacturerName}
                     modelName={selectedPrinter.modelName}
@@ -125,7 +125,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                       {selectedPrinter.name}
                     </span>
                     {selectedPrinter.isOnline !== undefined && (
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${
                         selectedPrinter.isOnline ? 'bg-green-500' : 'bg-gray-400'
                       }`} title={selectedPrinter.isOnline ? 'Online' : 'Offline'} />
                     )}

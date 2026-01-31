@@ -138,7 +138,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
       border border-pf-border
       bg-pf-bg-1 text-pf-text-primary
       placeholder-pf-text-secondary
-      focus:outline-none focus:ring-2 focus:ring-pf-accent
+      focus:outline-hidden focus:ring-2 focus:ring-pf-accent
       disabled:opacity-50 disabled:cursor-not-allowed
       text-sm
     `;
@@ -149,7 +149,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         px-4 py-2 rounded-lg font-medium
         bg-pf-accent text-white
         hover:opacity-90 active:opacity-75
-        focus:outline-none focus:ring-2 focus:ring-pf-accent focus:ring-offset-2
+        focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-opacity duration-150
       `,
@@ -158,7 +158,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         bg-pf-bg-2 text-pf-text-primary
         border border-pf-border
         hover:bg-pf-bg-3 active:bg-pf-bg-1
-        focus:outline-none focus:ring-2 focus:ring-pf-accent
+        focus:outline-hidden focus:ring-2 focus:ring-pf-accent
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-colors duration-150
       `,
@@ -166,7 +166,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         px-4 py-2 rounded-lg font-medium
         bg-pf-error text-white
         hover:opacity-90 active:opacity-75
-        focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
+        focus:outline-hidden focus:ring-2 focus:ring-red-500 focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-opacity duration-150
       `,
@@ -174,7 +174,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         px-4 py-2 rounded-lg font-medium
         bg-pf-success-bg text-white
         hover:opacity-90 active:opacity-75
-        focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2
+        focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-opacity duration-150
       `,
@@ -182,7 +182,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         px-3 py-1.5 rounded-lg font-medium text-sm
         bg-transparent text-pf-accent
         hover:bg-pf-bg-2
-        focus:outline-none focus:ring-2 focus:ring-pf-accent
+        focus:outline-hidden focus:ring-2 focus:ring-pf-accent
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-colors duration-150
       `,

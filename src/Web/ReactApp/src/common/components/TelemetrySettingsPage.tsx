@@ -82,7 +82,7 @@ export function TelemetrySettingsPage() {
       </div>
 
       {/* Status Card */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
+      <div className="bg-white rounded-lg shadow-xs border p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Telemetry Status</h2>
           <div className={`flex items-center space-x-2 ${telemetryStatus ? 'text-green-600' : 'text-red-600'}`}>
@@ -110,7 +110,7 @@ export function TelemetrySettingsPage() {
       </div>
 
       {/* Configuration */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
+      <div className="bg-white rounded-lg shadow-xs border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">Configuration</h2>
         
         <div className="space-y-6">
@@ -197,7 +197,7 @@ export function TelemetrySettingsPage() {
       </div>
 
       {/* Instrumentation Options */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
+      <div className="bg-white rounded-lg shadow-xs border p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">Instrumentation</h2>
         
         <div className="space-y-4">

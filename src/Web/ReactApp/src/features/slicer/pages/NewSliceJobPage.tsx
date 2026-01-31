@@ -699,7 +699,7 @@ export const NewSliceJobPage: React.FC = () => {
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}
-        <div className="w-full lg:w-96 space-y-4 flex-shrink-0 pb-4 max-h-screen overflow-y-auto">
+        <div className="w-full lg:w-96 space-y-4 shrink-0 pb-4 max-h-screen overflow-y-auto">
 
           {/* SLICER SELECTION - Shows name and version */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
@@ -1125,7 +1125,7 @@ export const NewSliceJobPage: React.FC = () => {
         {/* RIGHT SIDE: 3D Model Preview */}
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
           <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
-            <div className="card-header flex-shrink-0">
+            <div className="card-header shrink-0">
               <h3 className="font-semibold text-pf-text">
                 {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
               </h3>

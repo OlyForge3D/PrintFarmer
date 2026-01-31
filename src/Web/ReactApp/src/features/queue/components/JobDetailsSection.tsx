@@ -102,7 +102,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               onChange={handleNameChange}
               maxLength={255}
               placeholder="Enter job name"
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-invalid={!!errors.name}
               aria-describedby={errors.name ? 'name-error' : undefined}
             />
@@ -126,7 +126,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               value={jobDetails.priority}
               onChange={handlePriorityChange}
               placeholder="Priority (0-100)"
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-invalid={!!errors.priority}
               aria-describedby={errors.priority ? 'priority-error' : undefined}
             />
@@ -146,7 +146,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               onChange={handleMaterialChange}
               placeholder="e.g., PLA, PETG, ABS"
               list="material-suggestions"
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
             />
             <datalist id="material-suggestions">
               <option value="PLA" />
@@ -165,7 +165,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               value={jobDetails.printerName}
               disabled
               readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
             <span className="text-xs text-pf-text-muted italic">Cannot change printer after queuing</span>
           </div>
@@ -178,7 +178,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               value={jobDetails.status}
               disabled
               readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
             <span className="text-xs text-pf-text-muted italic">Status managed by system</span>
           </div>
@@ -191,7 +191,7 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
               value={jobDetails.queuePosition}
               disabled
               readOnly
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
+              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-2 text-pf-text-muted cursor-not-allowed"
             />
             <span className="text-xs text-pf-text-muted italic">Use drag-and-drop to reorder</span>
           </div>
@@ -208,11 +208,11 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
     <div className="space-y-1">
       <dl className="grid grid-cols-1 gap-3">
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Name</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Name</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.name}</dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Status</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Status</dt>
           <dd className="text-sm mt-1 sm:mt-0">
             <span 
               className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
@@ -228,19 +228,19 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
           </dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Printer</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Printer</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerName || <span className="text-pf-text-muted italic">Not assigned</span>}</dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Printer Model</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Printer Model</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{jobDetails.printerModel || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-pf-border">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Material Type</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Material Type</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{materialType || <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center py-2">
-          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 flex-shrink-0">Nozzle Diameter</dt>
+          <dt className="text-sm font-medium text-pf-text-secondary w-full sm:w-40 shrink-0">Nozzle Diameter</dt>
           <dd className="text-sm text-pf-text-primary mt-1 sm:mt-0">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="text-pf-text-muted italic">Not specified</span>}</dd>
         </div>
       </dl>

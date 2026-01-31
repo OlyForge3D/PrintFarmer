@@ -185,7 +185,7 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-1 ml-2 flex-shrink-0">
+          <div className="flex gap-1 ml-2 shrink-0">
             {onEdit && (
               <Button
                 variant="subtle"

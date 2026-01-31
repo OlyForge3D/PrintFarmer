@@ -57,7 +57,7 @@ export function CameraCard({
         
         {/* Status overlay - top right */}
         <div className="absolute top-2 right-2 flex gap-1">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium backdrop-blur-sm ${
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium backdrop-blur-xs ${
             isOnline 
               ? 'bg-pf-status-online-bg/80 text-pf-status-online-text' 
               : 'bg-pf-border-medium/80 text-pf-text-secondary'
@@ -65,7 +65,7 @@ export function CameraCard({
             {isOnline ? 'Online' : 'Offline'}
           </span>
           {isPrinting && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning/80 text-pf-text-primary backdrop-blur-sm">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-warning/80 text-pf-text-primary backdrop-blur-xs">
               Printing
             </span>
           )}
@@ -73,13 +73,13 @@ export function CameraCard({
 
         {/* Camera mode toggle - bottom right (only if both modes available) */}
         {hasSnapshot && hasStream && (
-          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-sm rounded p-1">
+          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
             <Button
               type="button"
               variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('snapshot')}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Snapshot"
               aria-label="Snapshot mode"
               iconCenter={<ImageIcon className="w-4 h-4" />}
@@ -89,7 +89,7 @@ export function CameraCard({
               variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('stream')}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Stream"
               aria-label="Stream mode"
               iconCenter={<VideoIcon className="w-4 h-4" />}
@@ -100,7 +100,7 @@ export function CameraCard({
         {/* Camera indicator - top left */}
         {hasCameraUrls && !imageError && (
           <div className="absolute top-2 left-2">
-            <CameraIcon className="w-5 h-5 text-white/70 drop-shadow" />
+            <CameraIcon className="w-5 h-5 text-white/70 drop-shadow-sm" />
           </div>
         )}
       </div>

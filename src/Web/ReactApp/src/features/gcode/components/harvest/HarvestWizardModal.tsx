@@ -427,20 +427,20 @@ export function HarvestWizardModal({
           <div className="space-y-4">
             {/* Stats row */}
             <div className="flex flex-wrap gap-2">
-              <div className="h-7 rounded bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
+              <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
                 Found <span className="font-bold ml-1">{filesFound}</span>
               </div>
-              <div className="h-7 rounded bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
+              <div className="h-7 rounded-sm bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
                 Added <span className="font-bold ml-1">{filesAdded}</span>
               </div>
-              <div className="h-7 rounded bg-pf-bg-2 border border-pf-border text-pf-text-secondary text-xs font-semibold flex items-center justify-center px-2">
+              <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-secondary text-xs font-semibold flex items-center justify-center px-2">
                 Skipped <span className="font-bold ml-1">{filesSkipped}</span>
               </div>
-              <div className="h-7 rounded bg-pf-error-bg border border-pf-error-border text-pf-error-text text-xs font-semibold flex items-center justify-center px-2">
+              <div className="h-7 rounded-sm bg-pf-error-bg border border-pf-error-border text-pf-error-text text-xs font-semibold flex items-center justify-center px-2">
                 Failed <span className="font-bold ml-1">{filesErrored}</span>
               </div>
               {selectedCount > 0 && (
-                <div className="h-7 rounded bg-pf-accent border border-pf-accent text-white text-xs font-semibold flex items-center justify-center px-2">
+                <div className="h-7 rounded-sm bg-pf-accent border border-pf-accent text-white text-xs font-semibold flex items-center justify-center px-2">
                   Selected <span className="font-bold ml-1">{selectedCount}</span>
                 </div>
               )}

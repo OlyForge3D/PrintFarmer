@@ -81,7 +81,7 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
   }, [logger]);
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg shadow-sm">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg shadow-xs">
       {/* Header */}
       <div className="px-4 py-3 border-b border-pf-border">
         <div className="flex items-center justify-between">
@@ -91,14 +91,14 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
               onClick={() => setIsExpanded(!isExpanded)}
               variant="subtle"
               size="sm"
-              className="!p-0 !h-auto"
+              className="p-0! h-auto!"
             >
               <span className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                 ►
               </span>
               <h3 className="text-lg font-semibold ml-2">Unified Logging Dashboard</h3>
             </Button>
-            <span className="bg-pf-bg-2 text-pf-accent text-xs font-medium px-2.5 py-0.5 rounded">
+            <span className="bg-pf-bg-2 text-pf-accent text-xs font-medium px-2.5 py-0.5 rounded-sm">
               {filteredLogs.length} / {logs.length} logs
             </span>
           </div>
@@ -165,13 +165,13 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search messages or components..."
-                className="text-sm border border-pf-border rounded px-2 py-1 w-64 bg-pf-bg-0 text-pf-text-primary placeholder-pf-text-tertiary focus:ring-2 focus:ring-pf-accent focus:border-transparent"
+                className="text-sm border border-pf-border rounded-sm px-2 py-1 w-64 bg-pf-bg-0 text-pf-text-primary placeholder-pf-text-tertiary focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               />
             </div>
           </div>
 
           {/* Log Entries */}
-          <div className="bg-pf-bg-0 rounded border border-pf-border max-h-96 overflow-y-auto">
+          <div className="bg-pf-bg-0 rounded-sm border border-pf-border max-h-96 overflow-y-auto">
             {filteredLogs.length === 0 ? (
               <div className="p-4 text-center text-pf-text-tertiary">
                 No log entries found. {logs.length === 0 ? 'Try clicking "Test Logs" to generate some entries.' : 'Adjust your filters.'}
@@ -202,7 +202,7 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                           )}
                         </div>
                         
-                        <p className="text-sm text-pf-text-primary break-words">
+                        <p className="text-sm text-pf-text-primary wrap-break-word">
                           {log.message}
                         </p>
                         {log.context != null && (

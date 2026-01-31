@@ -310,7 +310,7 @@ export function SettingsPage() {
       ) : (
         <div className="flex gap-6" style={{ height: 'calc(100vh - 160px)' }}>
           {/* Sidebar Navigation - Hidden on small screens */}
-          <nav className="hidden lg:block w-56 flex-shrink-0">
+          <nav className="hidden lg:block w-56 shrink-0">
             <div className="pr-2">
               <div className="text-xs font-semibold text-pf-text-secondary uppercase tracking-wider mb-3">
                 Sections

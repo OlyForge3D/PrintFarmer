@@ -208,7 +208,7 @@ export function PrinterCard({
         <div className="flex items-center justify-between">
           {/* Left: Basic Info */}
           <div className="flex items-center space-x-4 min-w-0 flex-1">
-            <div className="flex-shrink-0">
+            <div className="shrink-0">
               <span className="text-2xl">{getBackendIcon(printer.backend)}</span>
             </div>
 
@@ -217,7 +217,7 @@ export function PrinterCard({
                 <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                   {printer.name}
                 </h3>
-                <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+                <span className={`inline-flex items-center px-3 py-1 rounded-sm text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
                   {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
                 </span>
               </div>
@@ -228,7 +228,7 @@ export function PrinterCard({
           </div>
 
           {/* Center: Status Info */}
-          <div className="hidden md:flex items-center space-x-6 flex-shrink-0">
+          <div className="hidden md:flex items-center space-x-6 shrink-0">
             {/* Progress */}
             {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
               <div className="text-center">
@@ -264,7 +264,7 @@ export function PrinterCard({
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center space-x-2 flex-shrink-0">
+          <div className="flex items-center space-x-2 shrink-0">
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
@@ -274,7 +274,7 @@ export function PrinterCard({
                     title="Pause print"
                     variant="subtle"
                     size="sm"
-                    className="!p-2 !h-auto text-pf-warning"
+                    className="p-2! h-auto! text-pf-warning"
                     iconCenter={<PauseIcon className="h-4 w-4" />}
                   >
                   </Button>
@@ -286,7 +286,7 @@ export function PrinterCard({
                     title="Resume print"
                     variant="subtle"
                     size="sm"
-                    className="!p-2 !h-auto text-pf-success"
+                    className="p-2! h-auto! text-pf-success"
                     iconCenter={<PlayIcon className="h-4 w-4" />}
                   >
                   </Button>
@@ -297,7 +297,7 @@ export function PrinterCard({
                   title="Stop print"
                   variant="subtle"
                   size="sm"
-                  className="!p-2 !h-auto text-pf-error"
+                  className="p-2! h-auto! text-pf-error"
                   iconCenter={<StopIcon className="h-4 w-4" />}
                 >
                 </Button>
@@ -311,7 +311,7 @@ export function PrinterCard({
                 title="Manage printer"
                 variant="subtle"
                 size="sm"
-                className="!p-2 !h-auto text-pf-accent"
+                className="p-2! h-auto! text-pf-accent"
                 iconCenter={<GearIcon className="h-4 w-4" />}
               >
               </Button>
@@ -353,7 +353,7 @@ export function PrinterCard({
         {renderDebugBadge()}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center min-w-0 flex-1">
-            <span className="text-2xl mr-3 flex-shrink-0">{getBackendIcon(printer.backend)}</span>
+            <span className="text-2xl mr-3 shrink-0">{getBackendIcon(printer.backend)}</span>
             <div className="min-w-0 flex-1">
               <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                 {printer.name}
@@ -375,7 +375,7 @@ export function PrinterCard({
 
         {/* Status Badge */}
         <div className="mb-3">
-          <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+          <span className={`inline-flex items-center px-3 py-1 rounded-sm text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
             {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
           </span>
         </div>
@@ -386,7 +386,7 @@ export function PrinterCard({
             <img
               src={coverImageUrl}
               alt={`${printer.name} cover`}
-              className="w-full h-32 object-cover rounded border border-pf-border"
+              className="w-full h-32 object-cover rounded-sm border border-pf-border"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}
@@ -456,7 +456,7 @@ export function PrinterCard({
             <img
               src={printer.cameraSnapshotUrl || printer.cameraStreamUrl}
               alt={`${printer.name} camera`}
-              className="w-full h-24 object-cover rounded border"
+              className="w-full h-24 object-cover rounded-sm border"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}

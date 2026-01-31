@@ -57,7 +57,7 @@
     "react-router": "^7.13.0",
     "recharts": "^3.6.0",
     "sonner": "^2.0.7",
-    "tailwindcss": "3.4.17",
+    "tailwindcss": "^4.1.18",
     "zod": "^4.1.5"
   },
   "devDependencies": {
@@ -65,6 +65,7 @@
     "@playwright/test": "^1.57.0",
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",
+    "@tailwindcss/postcss": "^4.1.18",
     "@tanstack/react-query-devtools": "5.87.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",

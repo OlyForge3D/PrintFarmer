@@ -189,18 +189,18 @@ export function HarvestWizardStep4Progress({
 
           {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-pf-bg p-2 rounded text-center">
+            <div className="bg-pf-bg p-2 rounded-sm text-center">
               <div className="text-lg font-semibold text-pf-success">{completedCount}</div>
               <div className="text-xs text-pf-text-secondary">Imported</div>
             </div>
             {failedCount > 0 && (
-              <div className="bg-pf-bg p-2 rounded text-center">
+              <div className="bg-pf-bg p-2 rounded-sm text-center">
                 <div className="text-lg font-semibold text-pf-error">{failedCount}</div>
                 <div className="text-xs text-pf-text-secondary">Failed</div>
               </div>
             )}
             {skippedCount > 0 && (
-              <div className="bg-pf-bg p-2 rounded text-center">
+              <div className="bg-pf-bg p-2 rounded-sm text-center">
                 <div className="text-lg font-semibold text-pf-warning">{skippedCount}</div>
                 <div className="text-xs text-pf-text-secondary">Skipped</div>
               </div>
@@ -233,11 +233,11 @@ export function HarvestWizardStep4Progress({
             return (
               <div
                 key={file.fileId}
-                className="flex flex-col gap-2 p-3 rounded border border-pf-border bg-pf-surface"
+                className="flex flex-col gap-2 p-3 rounded-sm border border-pf-border bg-pf-surface"
               >
                 {/* File name and status */}
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 h-5">
+                  <div className="shrink-0 w-5 h-5">
                     {file.status === 'pending' && (
                       <div className="w-5 h-5 border-2 border-pf-border rounded-full" />
                     )}
@@ -267,7 +267,7 @@ export function HarvestWizardStep4Progress({
                       <div className="text-xs text-pf-error truncate">{file.error}</div>
                     )}
                   </div>
-                  <div className="text-xs font-mono text-pf-text-secondary flex-shrink-0">
+                  <div className="text-xs font-mono text-pf-text-secondary shrink-0">
                     {file.status === 'importing' && `${Math.round(file.progress)}%`}
                     {file.status === 'completed' && 'Done'}
                     {file.status === 'pending' && 'Waiting'}

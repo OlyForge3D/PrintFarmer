@@ -45,7 +45,7 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
     <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg">
       <div className="p-5">
         <div className="flex items-center">
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <div className={`p-3 rounded-md ${colorClasses[color]}`}>
               <Icon className="h-6 w-6" />
             </div>
@@ -98,13 +98,13 @@ export const PrinterDashboard: React.FC = () => {
       {/* Loading State */}
       {isLoading ? (
         <div role="status" aria-label="Printers loading">
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-48" />
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-56" />
-          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-40" />
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-48" />
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-56" />
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-40" />
         </div>
       ) : error ? (
         /* Error State */
-        <div className="p-4 bg-pf-bg-1 rounded-lg shadow">
+        <div className="p-4 bg-pf-bg-1 rounded-lg shadow-sm">
           <h2 className="text-lg font-semibold">Error Loading Printers</h2>
           {(() => {
             const e: unknown = error;

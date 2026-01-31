@@ -23,8 +23,8 @@ export const Checkbox: React.FC<CheckboxProps> = ({
       type="checkbox"
       id={inputId}
       className={clsx(
-        'w-4 h-4 rounded border-pf-border bg-pf-bg-0 text-pf-accent',
-        'focus:outline-none focus:ring-2 focus:ring-pf-accent focus:ring-offset-1 focus:ring-offset-pf-bg-0',
+        'w-4 h-4 rounded-sm border-pf-border bg-pf-bg-0 text-pf-accent',
+        'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-1 focus:ring-offset-pf-bg-0',
         'checked:bg-pf-accent checked:border-pf-accent',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         'transition-colors cursor-pointer',

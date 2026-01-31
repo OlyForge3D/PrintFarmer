@@ -361,7 +361,7 @@ export const TagAdminPage: React.FC = () => {
                                     }}
                                     title="Add new tag (A)"
                                 >
-                                    <kbd className="px-1 py-0.5 text-xs font-mono bg-white/20 rounded">A</kbd>dd Tag
+                                    <kbd className="px-1 py-0.5 text-xs font-mono bg-white/20 rounded-sm">A</kbd>dd Tag
                                 </Button>
                             </div>
 
@@ -411,7 +411,7 @@ export const TagAdminPage: React.FC = () => {
                                     >
                                         <td className="px-6 py-4">
                                             <div
-                                                className="w-8 h-8 rounded border border-pf-border"
+                                                className="w-8 h-8 rounded-sm border border-pf-border"
                                                 style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                                                 title={tag.color}
                                             />
@@ -452,7 +452,7 @@ export const TagAdminPage: React.FC = () => {
                                             )}
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className="inline-block px-3 py-1 bg-pf-bg-2 rounded text-sm text-pf-text-primary">
+                                            <span className="inline-block px-3 py-1 bg-pf-bg-2 rounded-sm text-sm text-pf-text-primary">
                                                 {tag.usageCount || 0} model{tag.usageCount !== 1 ? 's' : ''}
                                             </span>
                                         </td>
@@ -464,7 +464,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={handleSaveEdit}
                                                         variant="success"
                                                         size="sm"
-                                                        className="!p-2 !h-auto"
+                                                        className="p-2! h-auto!"
                                                         title="Save changes"
                                                     >
                                                         <CheckIcon className="w-4 h-4" />
@@ -474,7 +474,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={handleCancelEdit}
                                                         variant="danger"
                                                         size="sm"
-                                                        className="!p-2 !h-auto"
+                                                        className="p-2! h-auto!"
                                                         title="Cancel editing"
                                                     >
                                                         <CloseIcon className="w-4 h-4" />
@@ -487,7 +487,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={() => handleStartEdit(tag)}
                                                         variant="subtle"
                                                         size="sm"
-                                                        className="!p-2 !h-auto"
+                                                        className="p-2! h-auto!"
                                                         title="Edit tag (E)"
                                                         disabled={isPending}
                                                     >
@@ -498,7 +498,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={() => handleDeleteTag(tag.id)}
                                                         variant="danger"
                                                         size="sm"
-                                                        className="!p-2 !h-auto"
+                                                        className="p-2! h-auto!"
                                                         title="Delete tag"
                                                         disabled={isPending}
                                                     >
@@ -610,7 +610,7 @@ export const TagAdminPage: React.FC = () => {
                                 value={newTagColor}
                                 onChange={(e) => setNewTagColor(e.target.value)}
                                 disabled={createTagMutation.isPending}
-                                className="h-12 w-12 border-2 border-pf-border rounded-lg cursor-pointer disabled:opacity-50 shadow-sm"
+                                className="h-12 w-12 border-2 border-pf-border rounded-lg cursor-pointer disabled:opacity-50 shadow-xs"
                                 aria-label="Select tag color"
                             />
                             <div className="flex-1">

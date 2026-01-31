@@ -187,7 +187,7 @@ export function SystemLogsContent() {
       </div>
 
       {/* Column Visibility Controls */}
-      <div className="p-3 bg-pf-bg-1 rounded border border-pf-border">
+      <div className="p-3 bg-pf-bg-1 rounded-sm border border-pf-border">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-semibold text-pf-text-primary">Visible Columns</h3>
           <Button variant="secondary" size="sm" onClick={resetColumns}>Reset to Defaults</Button>
@@ -208,7 +208,7 @@ export function SystemLogsContent() {
       {loading && <div className="text-pf-text-muted">Loading logs...</div>}
 
       {/* Logs Table */}
-      <div className="overflow-x-auto border border-pf-border rounded">
+      <div className="overflow-x-auto border border-pf-border rounded-sm">
         <table className="w-full">
           <thead>
             <tr className="bg-pf-bg-1 border-b border-pf-border">
@@ -253,7 +253,7 @@ export function SystemLogsContent() {
                         {visibleColumns.message && (
                           <div>
                             <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Full Message</h4>
-                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono">
+                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded-sm whitespace-pre-wrap wrap-break-word font-mono">
                               {log.message}
                             </p>
                           </div>
@@ -261,7 +261,7 @@ export function SystemLogsContent() {
                         {visibleColumns.metadata && log.metadata && (
                           <div>
                             <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Metadata</h4>
-                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono">
+                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded-sm whitespace-pre-wrap wrap-break-word font-mono">
                               {log.metadata}
                             </p>
                           </div>
@@ -269,7 +269,7 @@ export function SystemLogsContent() {
                         {visibleColumns.exception && log.exception && (
                           <div>
                             <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Exception Details</h4>
-                            <p className="text-xs text-red-400 bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono overflow-y-auto max-h-48">
+                            <p className="text-xs text-red-400 bg-pf-bg-0 p-2 rounded-sm whitespace-pre-wrap wrap-break-word font-mono overflow-y-auto max-h-48">
                               {log.exception}
                             </p>
                           </div>

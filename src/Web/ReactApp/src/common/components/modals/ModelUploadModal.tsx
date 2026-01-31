@@ -164,7 +164,7 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
       {/* Drag & Drop Area */}
       <div
         className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-          dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border hover:border-pf-accent'
+          dragOver ? 'border-pf-accent bg-pf-accent-bg/20' : 'border-pf-border hover:border-pf-accent'
         } cursor-pointer`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -202,7 +202,7 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
 
           <div className="max-h-48 overflow-y-auto space-y-2">
             {uploadQueue.map(item => (
-              <div key={item.id} className="bg-pf-bg-2 rounded p-3 border border-pf-border">
+              <div key={item.id} className="bg-pf-bg-2 rounded-sm p-3 border border-pf-border">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm truncate text-pf-text-primary font-medium">{item.file.name}</span>
                   <div className="flex items-center gap-2">
@@ -216,7 +216,7 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
                       onClick={() => removeItem(item.id)}
                       variant="subtle"
                       size="sm"
-                      className="!p-1"
+                      className="p-1!"
                     >
                       <DeleteIcon className="w-4 h-4" />
                     </Button>

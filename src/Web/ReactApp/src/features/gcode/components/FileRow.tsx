@@ -155,7 +155,7 @@ export const FileRow: React.FC<FileRowProps> = ({
               variant="subtle"
               size="sm"
               title="Download file"
-              className="!p-1"
+              className="p-1!"
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
             </Button>
@@ -166,7 +166,7 @@ export const FileRow: React.FC<FileRowProps> = ({
               variant="subtle"
               size="sm"
               title={hashValue ? `Hash: ${hashValue}` : (hashing ? 'Computing hash...' : `Compute & copy ${hashAlgo.toUpperCase()} hash`)}
-              className="!p-1 relative"
+              className="p-1! relative"
             >
               <ClipboardIcon className={`w-4 h-4 ${hashing ? 'opacity-40' : ''}`} />
               {hashing && (
@@ -185,7 +185,7 @@ export const FileRow: React.FC<FileRowProps> = ({
               variant="subtle"
               size="sm"
               title="Delete file"
-              className="!p-1 hover:text-pf-error"
+              className="p-1! hover:text-pf-error"
             >
               <TrashIcon className="w-4 h-4" />
             </Button>

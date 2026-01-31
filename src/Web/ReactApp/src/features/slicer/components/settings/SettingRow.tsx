@@ -292,7 +292,7 @@ const SelectControl: React.FC<SelectSettingProps & { id: string }> = ({
         disabled={disabled}
         className="w-full px-4 py-3 bg-pf-panel border border-pf-border rounded-lg
                    text-pf-text appearance-none cursor-pointer
-                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {options.map((opt) => (
@@ -423,11 +423,11 @@ const NumberInputControl: React.FC<NumberInputSettingProps & { id: string }> = (
         disabled={disabled}
         className="flex-1 px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
                    text-pf-text text-right
-                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
       />
       {unit && (
-        <span className="text-sm text-pf-text-muted px-2 py-2 bg-pf-border rounded">
+        <span className="text-sm text-pf-text-muted px-2 py-2 bg-pf-border rounded-sm">
           {unit}
         </span>
       )}
@@ -453,7 +453,7 @@ const TextInputControl: React.FC<TextInputSettingProps & { id: string }> = ({
       disabled={disabled}
       className="w-full px-4 py-2 bg-pf-panel border border-pf-border rounded-lg
                  text-pf-text
-                 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                  disabled:opacity-50 disabled:cursor-not-allowed"
     />
   );
@@ -484,7 +484,7 @@ const ColorInputControl: React.FC<ColorInputSettingProps & { id: string }> = ({
         disabled={disabled}
         className="flex-1 px-3 py-2 bg-pf-panel border border-pf-border rounded-lg
                    text-pf-text font-mono text-sm uppercase
-                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-none
+                   hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden
                    disabled:opacity-50 disabled:cursor-not-allowed"
         placeholder="#000000"
       />
@@ -575,11 +575,11 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
               step={props.step ?? 0.01}
               disabled={disabled}
               className="w-20 px-2 py-1 text-sm text-right bg-pf-panel border border-pf-border rounded
-                         text-pf-text focus:border-pf-accent-2 focus:outline-none
+                         text-pf-text focus:border-pf-accent-2 focus:outline-hidden
                          disabled:opacity-50 disabled:cursor-not-allowed"
             />
             {props.unit && (
-              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded min-w-[40px] text-center">
+              <span className="text-xs text-pf-text-muted px-1.5 py-1 bg-pf-border/50 rounded-sm min-w-[40px] text-center">
                 {props.unit}
               </span>
             )}
@@ -594,7 +594,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             onChange={(e) => props.onChange(e.target.value)}
             disabled={disabled}
             className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
-                       text-pf-text cursor-pointer focus:border-pf-accent-2 focus:outline-none
+                       text-pf-text cursor-pointer focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {props.options.map((opt) => (
@@ -623,7 +623,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             placeholder={props.placeholder}
             disabled={disabled}
             className="w-32 px-2 py-1 text-sm bg-pf-panel border border-pf-border rounded
-                       text-pf-text focus:border-pf-accent-2 focus:outline-none
+                       text-pf-text focus:border-pf-accent-2 focus:outline-hidden
                        disabled:opacity-50 disabled:cursor-not-allowed"
           />
         );

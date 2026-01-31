@@ -59,7 +59,7 @@ export const MaintenanceReport: React.FC = () => {
           headers={headers}
           filename="maintenance-report.csv"
           ref={csvLinkRef}
-          className="px-3 py-1 bg-green-600 text-white rounded focus:outline focus-visible:ring"
+          className="px-3 py-1 bg-green-600 text-white rounded-sm focus:outline-solid focus-visible:ring-3"
           aria-label="Export CSV"
         >
           Export CSV

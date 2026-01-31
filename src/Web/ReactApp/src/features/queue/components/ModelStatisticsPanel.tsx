@@ -53,7 +53,7 @@ export default function ModelStatisticsPanel({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {/* Total Jobs */}
-        <div className="bg-pf-bg-0 border border-pf-border rounded p-3">
+        <div className="bg-pf-bg-0 border border-pf-border rounded-sm p-3">
           <div className="text-pf-text-secondary text-xs font-medium">
             Total Jobs
           </div>
@@ -63,7 +63,7 @@ export default function ModelStatisticsPanel({
         </div>
 
         {/* Active Models */}
-        <div className="bg-pf-bg-0 border border-pf-border rounded p-3">
+        <div className="bg-pf-bg-0 border border-pf-border rounded-sm p-3">
           <div className="text-pf-text-secondary text-xs font-medium">
             Models
           </div>
@@ -73,7 +73,7 @@ export default function ModelStatisticsPanel({
         </div>
 
         {/* Average Wait Time */}
-        <div className="bg-pf-bg-0 border border-pf-border rounded p-3">
+        <div className="bg-pf-bg-0 border border-pf-border rounded-sm p-3">
           <div className="text-pf-text-secondary text-xs font-medium">
             Avg Wait
           </div>
@@ -83,7 +83,7 @@ export default function ModelStatisticsPanel({
         </div>
 
         {/* Busiest Queue */}
-        <div className="bg-pf-bg-0 border border-pf-border rounded p-3">
+        <div className="bg-pf-bg-0 border border-pf-border rounded-sm p-3">
           <div className="text-pf-text-secondary text-xs font-medium">
             Largest Queue
           </div>
@@ -96,7 +96,7 @@ export default function ModelStatisticsPanel({
         </div>
 
         {/* Most Printing */}
-        <div className="bg-pf-bg-0 border border-pf-border rounded p-3">
+        <div className="bg-pf-bg-0 border border-pf-border rounded-sm p-3">
           <div className="text-pf-text-secondary text-xs font-medium">
             Most Printing
           </div>

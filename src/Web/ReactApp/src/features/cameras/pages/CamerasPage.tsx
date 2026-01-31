@@ -52,7 +52,7 @@ export function CamerasPage() {
       <div className="space-y-6">
         {/* Error message */}
         {error && (
-          <div className="px-4 py-3 rounded bg-pf-error-bg border border-pf-error text-pf-error">
+          <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
             {error}
           </div>
         )}
@@ -131,13 +131,13 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
 
         {/* Camera mode toggle - bottom right (only if both modes available) */}
         {hasSnapshot && hasStream && (
-          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-sm rounded p-1">
+          <div className="absolute bottom-2 right-2 flex gap-1 bg-black/50 backdrop-blur-xs rounded-sm p-1">
             <Button
               type="button"
               variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('snapshot')}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Snapshot"
               aria-label="Snapshot mode"
               iconCenter={<ImageIcon className="w-4 h-4" />}
@@ -147,7 +147,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
               variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('stream')}
-              className="!p-1 !h-auto"
+              className="p-1! h-auto!"
               title="Stream"
               aria-label="Stream mode"
               iconCenter={<VideoIcon className="w-4 h-4" />}
@@ -159,7 +159,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
       {/* Camera info */}
       <div className="p-3 bg-pf-bg-1">
         <div className="flex items-center gap-2">
-          <CameraIcon className="w-4 h-4 text-pf-text-tertiary flex-shrink-0" />
+          <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-pf-text-primary truncate">{camera.name}</h3>
             {camera.location && (

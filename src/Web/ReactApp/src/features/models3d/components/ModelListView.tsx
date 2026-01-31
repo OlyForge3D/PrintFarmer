@@ -55,7 +55,7 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3 min-w-0">
                   {/* Thumbnail */}
-                  <div className="w-12 h-12 flex-shrink-0 rounded bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
+                  <div className="w-12 h-12 shrink-0 rounded-sm bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
                     {model.thumbnailPath ? (
                       <img
                         src={model.thumbnailPath}
@@ -87,7 +87,7 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
                     {model.tags.slice(0, 2).map(tag => (
                       <span
                         key={tag.id}
-                        className="inline-block px-2 py-0.5 text-xs rounded text-white"
+                        className="inline-block px-2 py-0.5 text-xs rounded-sm text-white"
                         style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                       >
                         {tag.name}

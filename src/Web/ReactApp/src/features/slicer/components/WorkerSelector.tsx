@@ -42,7 +42,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
 
   if (error) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+      <div className="p-4 bg-red-50 border border-red-200 rounded-sm text-red-700 text-sm">
         <strong>Error:</strong> {error}
       </div>
     );
@@ -116,7 +116,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                         {worker.capabilities.map(cap => (
                           <span
                             key={cap}
-                            className="inline-block px-2 py-0.5 bg-pf-panel border border-pf-border rounded text-xs"
+                            className="inline-block px-2 py-0.5 bg-pf-panel border border-pf-border rounded-sm text-xs"
                           >
                             {cap}
                           </span>

@@ -173,7 +173,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
                         : 'hover:bg-pf-bg-hover'
                     }`}
                   >
-                    <Package className={`h-5 w-5 flex-shrink-0 ${isSelected ? 'text-pf-accent' : 'text-pf-text-tertiary'}`} />
+                    <Package className={`h-5 w-5 shrink-0 ${isSelected ? 'text-pf-accent' : 'text-pf-text-tertiary'}`} />
                     <span className={`flex-1 text-left ${isSelected ? 'text-pf-accent font-medium' : 'text-pf-text-primary'}`}>
                       {model.name}
                     </span>

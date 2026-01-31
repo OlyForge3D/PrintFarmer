@@ -71,7 +71,7 @@ export function PageTemplate({
                 </p>
               )}
             </div>
-            {actions && <div className="flex-shrink-0">{actions}</div>}
+            {actions && <div className="shrink-0">{actions}</div>}
           </div>
         )}
 

@@ -101,7 +101,7 @@ export const GcodeListView: React.FC<GcodeListViewProps> = ({
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3 min-w-0">
                   {/* Thumbnail */}
-                  <div className="w-12 h-12 flex-shrink-0 rounded bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
+                  <div className="w-12 h-12 shrink-0 rounded-sm bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
                     {!file.isDirectory && file.thumbnailUrl ? (
                       <img
                         src={file.thumbnailUrl}

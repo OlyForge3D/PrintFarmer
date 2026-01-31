@@ -54,14 +54,14 @@ export const Toggle: React.FC<ToggleProps> = ({
           'rounded-full transition-colors',
           sizeClasses[size].track,
           'bg-pf-bg-2 peer-checked:bg-pf-accent',
-          'peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-pf-accent peer-focus:ring-offset-1 peer-focus:ring-offset-pf-bg-0',
+          'peer-focus:outline-hidden peer-focus:ring-2 peer-focus:ring-pf-accent peer-focus:ring-offset-1 peer-focus:ring-offset-pf-bg-0',
           invalid && 'ring-1 ring-pf-error',
           className
         )}
       >
         <div
           className={clsx(
-            'absolute top-0.5 left-0.5 rounded-full bg-white shadow transition-transform',
+            'absolute top-0.5 left-0.5 rounded-full bg-white shadow-sm transition-transform',
             sizeClasses[size].thumb,
             checked && sizeClasses[size].translate
           )}

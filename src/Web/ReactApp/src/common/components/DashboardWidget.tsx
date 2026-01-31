@@ -118,7 +118,7 @@ export function DashboardWidget({
         >
           {/* Icon in colored container */}
           {Icon && (
-            <div className={`p-2 rounded-lg flex-shrink-0 ${iconBgClass}`}>
+            <div className={`p-2 rounded-lg shrink-0 ${iconBgClass}`}>
               <Icon className={`h-5 w-5 ${iconColorClass}`} />
             </div>
           )}

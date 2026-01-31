@@ -72,7 +72,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
     <div className="p-4">
       <div className="flex items-start justify-between">
         <div className="flex items-start space-x-3">
-          <div className={`flex-shrink-0 w-8 h-8 rounded-full bg-${config.color}-100 flex items-center justify-center`}>
+          <div className={`shrink-0 w-8 h-8 rounded-full bg-${config.color}-100 flex items-center justify-center`}>
             <config.icon className={`w-4 h-4 text-${config.color}-600`} />
           </div>
 
@@ -81,7 +81,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
               <h4 className="font-medium text-gray-900">
                 Harvest from {operation.printerName}
               </h4>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-${config.color}-100 text-${config.color}-800`}>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-${config.color}-100 text-${config.color}-800`}>
                 {config.label}
               </span>
             </div>
@@ -132,7 +132,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
             {/* Error message */}
             {operation.status === GcodeHarvestStatus.Failed && operation.error && (
-              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-sm text-sm text-red-700">
                 {operation.error}
               </div>
             )}

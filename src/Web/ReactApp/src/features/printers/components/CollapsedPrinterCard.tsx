@@ -132,7 +132,7 @@ export function CollapsedPrinterCard({
         </div>
         
         {/* Status pill - matches DetailedPrinterCard */}
-        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${stateColorClasses}`}>
+        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium shrink-0 ${stateColorClasses}`}>
           {getBackendIcon(printer.backend)}
           {isOnline ? toCamelCase(state) : 'Offline'}
         </div>
@@ -146,7 +146,7 @@ export function CollapsedPrinterCard({
           variant="subtle"
           size="sm"
           onClick={onExpand}
-          className="!p-1 !h-auto"
+          className="p-1! h-auto!"
           title="Open details sidebar"
           aria-label="Open details sidebar"
           iconCenter={<PanelRightIcon className="h-4 w-4" />}
@@ -158,7 +158,7 @@ export function CollapsedPrinterCard({
           href={printer.frontendUrl} 
           target="_blank" 
           rel="noopener noreferrer"
-          className="text-pf-text-secondary hover:text-pf-text-primary flex-shrink-0 p-1"
+          className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 p-1"
           aria-label={`Open printer ${printer.name} in new tab`}
           title={`Open printer ${printer.name}`}
         >
@@ -172,7 +172,7 @@ export function CollapsedPrinterCard({
           size="sm"
           onClick={() => setShowCamera(!showCamera)}
           disabled={!hasCameraUrls}
-          className="!p-1 !h-auto"
+          className="p-1! h-auto!"
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
           title={hasCameraUrls ? `Camera available` : 'No camera configured'}
           iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -186,7 +186,7 @@ export function CollapsedPrinterCard({
             variant="subtle"
             size="sm"
             onClick={handleViewHistory}
-            className="!p-1 !h-auto"
+            className="p-1! h-auto!"
             title="View print history"
             aria-label="View print history"
             iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -200,7 +200,7 @@ export function CollapsedPrinterCard({
           variant="subtle"
           size="sm"
           onClick={() => setShowFiles(true)}
-          className="!p-1 !h-auto"
+          className="p-1! h-auto!"
           title="View printer files"
           aria-label="View printer files"
           iconCenter={<FileIcon className="h-4 w-4" />}
@@ -213,7 +213,7 @@ export function CollapsedPrinterCard({
           variant="subtle"
           size="sm"
           onClick={() => onEdit?.(printer)}
-          className="!p-1 !h-auto"
+          className="p-1! h-auto!"
           title="Edit details"
           aria-label="Edit details"
           iconCenter={<EditIcon className="h-4 w-4" />}
@@ -253,14 +253,14 @@ export function CollapsedPrinterCard({
 
       {/* Print Statistics Section */}
       {hasStats && stats && (
-        <div className="mb-2 bg-pf-bg-2 rounded overflow-hidden">
+        <div className="mb-2 bg-pf-bg-2 rounded-sm overflow-hidden">
           {/* Collapsible header */}
           <Button
             type="button"
             variant="subtle"
             size="sm"
             onClick={() => setShowStats(!showStats)}
-            className="!w-full !justify-start !gap-1 !px-2 !py-1.5 !h-auto text-xs text-pf-text-secondary hover:text-pf-text-primary"
+            className="w-full! justify-start! gap-1! px-2! py-1.5! h-auto! text-xs text-pf-text-secondary hover:text-pf-text-primary"
             aria-expanded={showStats}
             aria-controls="printer-stats-content"
             iconLeft={showStats ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronRightIcon className="w-3.5 h-3.5" />}
@@ -317,10 +317,10 @@ export function CollapsedPrinterCard({
       })()}
 
       {showCamera && (
-        <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+        <div className="mt-4 w-52 flex flex-col bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
           {/* Camera mode toggle - show if both snapshot and stream are available */}
           {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
-            <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
+            <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1/50">
               <Button
                 type="button"
                 onClick={() => setCameraMode('snapshot')}

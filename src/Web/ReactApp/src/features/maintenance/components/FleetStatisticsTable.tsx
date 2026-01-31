@@ -167,16 +167,16 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
               <td className="py-3 px-4 text-center">
                 <div className="flex items-center justify-center gap-2">
                   {printer.inMaintenance ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning/20 text-pf-warning">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-warning/20 text-pf-warning">
                       <WrenchIcon className="w-3 h-3 mr-1" />
                       Maintenance
                     </span>
                   ) : printer.isOnline ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-success/20 text-pf-success">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-success/20 text-pf-success">
                       Online
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-border-medium text-pf-text-tertiary">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-border-medium text-pf-text-tertiary">
                       Offline
                     </span>
                   )}

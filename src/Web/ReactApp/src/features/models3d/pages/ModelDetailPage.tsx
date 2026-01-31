@@ -341,7 +341,7 @@ export const ModelDetailPage: React.FC = () => {
                                             variant="subtle"
                                             size="sm"
                                             onClick={() => setIsEditingDescription(true)}
-                                            className="p-1 flex-shrink-0"
+                                            className="p-1 shrink-0"
                                         >
                                             <EditIcon className="w-4 h-4" />
                                         </Button>
@@ -400,7 +400,7 @@ export const ModelDetailPage: React.FC = () => {
                                 <a
                                     href={model.url}
                                     download
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover mt-3"
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded-sm hover:bg-pf-success-hover mt-3"
                                 >
                                     <DownloadIcon className="w-4 h-4" />
                                     Download File
@@ -472,7 +472,7 @@ export const ModelDetailPage: React.FC = () => {
                                     onClick={() => setIsEditingTags(true)}
                                     variant="subtle"
                                     size="sm"
-                                    className="!p-1 !h-auto"
+                                    className="p-1! h-auto!"
                                     title="Add a new tag"
                                 >
                                     <PlusIcon className="w-4 h-4" />
@@ -486,7 +486,7 @@ export const ModelDetailPage: React.FC = () => {
                                     onClick={() => setIsEditingTags(true)}
                                     variant="subtle"
                                     size="sm"
-                                    className="!p-1 !h-auto"
+                                    className="p-1! h-auto!"
                                     title="Add a new tag"
                                 >
                                     <PlusIcon className="w-4 h-4" />

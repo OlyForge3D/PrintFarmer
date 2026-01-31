@@ -105,7 +105,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={!isPrinting}
                 title="Pause"
                 aria-label="Pause"
-                className="!p-2 !h-auto"
+                className="p-2! h-auto!"
                 iconCenter={<PauseIcon className="h-4 w-4" />}
               >
         </Button>
@@ -117,7 +117,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={!isPaused}
                 title="Resume"
                 aria-label="Resume"
-                className="!p-2 !h-auto"
+                className="p-2! h-auto!"
                 iconCenter={<PlayIcon className="h-4 w-4" />}
               >
         </Button>
@@ -127,7 +127,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 size="sm"
                 onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
                 title={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
-                className="!p-2 !h-auto"
+                className="p-2! h-auto!"
                 iconCenter={isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
               >
         </Button>
@@ -140,7 +140,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               onClick={() => setIsExpanded(true)}
               title="Expand"
               aria-label="Expand"
-              className="!p-2 !h-auto"
+              className="p-2! h-auto!"
               iconCenter={<ChevronDown className="h-4 w-4" />}
             >
         </Button>
@@ -182,7 +182,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                     size="sm"
                     onClick={() => setIsCameraVisible(!isCameraVisible)}
                     title={isCameraVisible ? 'Hide camera' : 'Show camera'}
-                    className="!p-0 !h-auto text-blue-500 hover:text-blue-700"
+                    className="p-0! h-auto! text-blue-500 hover:text-blue-700"
                     iconCenter={isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}
                   >
         </Button>
@@ -198,7 +198,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               onClick={() => setIsExpanded(false)}
               title="Collapse"
               aria-label="Collapse"
-              className="!p-2 !h-auto"
+              className="p-2! h-auto!"
               iconCenter={<ChevronUp className="h-4 w-4" />}
             >
         </Button>
@@ -208,7 +208,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               size="sm"
               title="History"
               aria-label="History"
-              className="!p-2 !h-auto"
+              className="p-2! h-auto!"
               iconCenter={<History className="h-4 w-4" />}
             >
         </Button>
@@ -218,7 +218,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               size="sm"
               title="Settings"
               aria-label="Settings"
-              className="!p-2 !h-auto"
+              className="p-2! h-auto!"
               iconCenter={<Cog className="h-4 w-4" />}
             >
         </Button>
@@ -229,7 +229,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
             <img
               src={`${currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl}?t=${Date.now()}`}
               alt="Camera snapshot"
-              className="w-full h-32 object-cover rounded border"
+              className="w-full h-32 object-cover rounded-sm border"
               onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
             />
             {/* For OctoPrint, optionally show a note if only stream is available */}

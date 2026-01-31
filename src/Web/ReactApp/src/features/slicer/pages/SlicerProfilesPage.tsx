@@ -582,9 +582,9 @@ export const SlicerProfilesPage: React.FC = () => {
       <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).infillPercentage + '%' : '-'}</td>
       <td className="p-2">
         <div className="flex flex-col text-xs gap-1">
-          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded">Default</span>}
-          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded">System</span>}
-          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded">Public</span>}
+          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded-sm">Default</span>}
+          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded-sm">System</span>}
+          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded-sm">Public</span>}
         </div>
       </td>
       <td className="p-2">
@@ -895,7 +895,7 @@ export const SlicerProfilesPage: React.FC = () => {
 
       <div className="space-y-4">
         {message && <Alert type="success">{message}</Alert>}
-        <div className="bg-pf-panel rounded shadow">
+        <div className="bg-pf-panel rounded-sm shadow-sm">
           {/* Header with Search and Filters */}
           <div className="p-4 border-b border-pf-border">
             <div className="flex items-center gap-4 mb-4">
@@ -1164,7 +1164,7 @@ export const SlicerProfilesPage: React.FC = () => {
               <>
             {/* Bulk actions bar */}
             {selectedProfileIds.size > 0 && (
-              <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded">
+              <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded-sm">
                 <span className="text-sm text-pf-text-secondary">{selectedProfileIds.size} profile(s) selected</span>
                 <Button
                   onClick={handleDeleteSelected}
