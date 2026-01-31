@@ -234,14 +234,14 @@ jobs:
         with:
           image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: 'spdx-json'
-          output-file: sbom/syft-${{ matrix.component }}.spdx.json
+          output-file: syft-${{ matrix.component }}.spdx.json
 
       - name: Upload Syft SBOM
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: syft-sbom-${{ matrix.component }}
-          path: sbom/syft-${{ matrix.component }}.spdx.json
+          path: syft-${{ matrix.component }}.spdx.json
 
       - name: Vulnerability Scan (Grype)
         if: github.event_name != 'pull_request'
@@ -282,7 +282,7 @@ jobs:
         run: |
           set -e
           FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          SBOM_FILE=sbom/syft-${{ matrix.component }}.spdx.json
+          SBOM_FILE=syft-${{ matrix.component }}.spdx.json
           if [ -f "$SBOM_FILE" ]; then
             cosign attest --predicate "$SBOM_FILE" --predicate-type spdxjson --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "SBOM attestation failed"
           fi
