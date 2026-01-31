@@ -20,6 +20,7 @@ on:
       - 'Dockerfile*'
       - 'docker-compose*.yml'
       - '.github/workflows/containers.yml'
+  workflow_dispatch: {}
 
 env:
   REGISTRY: ghcr.io
