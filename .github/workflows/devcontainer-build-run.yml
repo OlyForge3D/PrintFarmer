@@ -68,92 +68,22 @@ jobs:
               npm test --silent || echo "npm test returned non-zero (continuing)"
               popd >/dev/null
             fi
-            # Save the built devcontainer image to a tar for artifact upload
-            echo "Saving devcontainer image to /tmp/printfarmer-devcontainer.tar"
-            docker image save printfarmer-devcontainer:latest -o /tmp/printfarmer-devcontainer.tar || true
-          imageName: printfarmer-devcontainer
+          imageName: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
+          imageTag: latest,${{ github.sha }}
           platform: linux/amd64
+          push: always
           cacheFrom: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer:latest
+          cacheTo: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer:buildcache
           checkoutPath: .
           # prevent long-running global npm installs inside CI container
           env: |
             SKIP_GLOBAL_NPM=1
             DEVCONTAINER_VERIFY=1
 
-      - name: Upload devcontainer image artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: devcontainer-image
-          path: /tmp/printfarmer-devcontainer.tar
-
-      - name: Log in to GitHub Container Registry
-        if: success() && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || steps.detect_changes.outputs.changed == 'true')
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Tag and push devcontainer image to GHCR
-        if: success() && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || steps.detect_changes.outputs.changed == 'true')
-        run: |
-          set -e
-          IMAGE_NAME=printfarmer-devcontainer:latest
-          GHCR_NAME=ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
-          SHA='${{ github.sha }}'
-          # Attempt to discover a release tag for this run (if a release exists for the ref)
-          TAG=''
-          TOKEN='${{ secrets.GITHUB_TOKEN }}'
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG='${{ github.event.release.tag_name }}'
-          elif echo "${GITHUB_REF:-}" | grep -q '^refs/tags/'; then
-            TAG=${GITHUB_REF#refs/tags/}
-          fi
-
-          echo "Tagging $IMAGE_NAME -> $GHCR_NAME:${SHA} and :latest"
-          docker tag $IMAGE_NAME $GHCR_NAME:${SHA}
-          docker tag $IMAGE_NAME $GHCR_NAME:latest
-
-          # If we have a release tag, also push a semver tag with release notes label
-          if [ -n "$TAG" ]; then
-            echo "Fetching release notes for tag: $TAG"
-            RELEASE_JSON=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$TAG" || true)
-            RELEASE_BODY=$(echo "$RELEASE_JSON" | jq -r '.body // ""' 2>/dev/null || true)
-            RELEASE_BODY_SANITIZED=$(printf "%s" "$RELEASE_BODY" | tr '\n' ' ' | sed 's/"/'"'"'/g' | cut -c1-2000)
-            # Rebuild a small image manifest with labels (re-tagging local image by building an empty image that pulls the tar)
-            TMP_DOCKERFILE=$(mktemp)
-            cat > $TMP_DOCKERFILE <<'EOF'
-            FROM scratch
-            COPY --from=printfarmer-devcontainer:latest / /
-            EOF
-            # Note: docker build --label without changing content will still create a new image with labels
-            docker build -f $TMP_DOCKERFILE --label "org.opencontainers.image.description=${RELEASE_BODY_SANITIZED}" -t $GHCR_NAME:${TAG} . || true
-            rm -f $TMP_DOCKERFILE || true
-          fi
-
-          docker push $GHCR_NAME:${SHA}
-          docker push $GHCR_NAME:latest
-          if [ -n "$TAG" ]; then docker push $GHCR_NAME:${TAG} || true; fi
-
-      - name: Inspect devcontainer image manifests and upload labels
+      - name: Summary
         if: success()
         run: |
-          set -e
-          GHCR_NAME=ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer
-          SHA='${{ github.sha }}'
-          docker manifest inspect ${GHCR_NAME}:${SHA} > manifest-${SHA}.json || true
-          jq -r '.[0].annotations // {}' manifest-${SHA}.json > image-labels-devcontainer-${SHA}.json || echo '{}' > image-labels-devcontainer-${SHA}.json
-          docker manifest inspect ${GHCR_NAME}:latest > manifest-latest.json || true
-          jq -r '.[0].annotations // {}' manifest-latest.json > image-labels-devcontainer-latest.json || echo '{}' > image-labels-devcontainer-latest.json
-          if [ -n "$TAG" ]; then
-            docker manifest inspect ${GHCR_NAME}:${TAG} > manifest-${TAG}.json || true
-            jq -r '.[0].annotations // {}' manifest-${TAG}.json > image-labels-devcontainer-${TAG}.json || echo '{}' > image-labels-devcontainer-${TAG}.json
-          fi
-
-      - name: Upload devcontainer image labels artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: devcontainer-image-labels
-          path: image-labels-devcontainer-*.json
+          echo "## Devcontainer Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build and tests completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Image pushed to: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer:latest" >> $GITHUB_STEP_SUMMARY
+          echo "🏷️ SHA tag: ghcr.io/${{ github.repository_owner }}/printfarmer-devcontainer:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
