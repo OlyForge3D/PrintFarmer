@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useSignalRPrinterStatus } from '@/common/hooks/useSignalRPrinterStatus';
 
-// Mock SignalR
+// Mock SignalR - Vitest v4 requires class/function for constructors
 vi.mock('@microsoft/signalr', () => {
   const mockConnection = {
     start: vi.fn(() => Promise.resolve()),
@@ -19,18 +19,20 @@ vi.mock('@microsoft/signalr', () => {
   };
 
   return {
-    HubConnectionBuilder: vi.fn(() => ({
-      withUrl: vi.fn(function () {
+    HubConnectionBuilder: class MockHubConnectionBuilder {
+      withUrl() {
         return this;
-      }),
-      withAutomaticReconnect: vi.fn(function () {
+      }
+      withAutomaticReconnect() {
         return this;
-      }),
-      configureLogging: vi.fn(function () {
+      }
+      configureLogging() {
         return this;
-      }),
-      build: vi.fn(() => mockConnection),
-    })),
+      }
+      build() {
+        return mockConnection;
+      }
+    },
     LogLevel: {
       Warning: 2,
       Information: 1,
