@@ -10,7 +10,7 @@ import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/common/components/ui';
 import { PlayIcon, PauseIcon, StopIcon, GearIcon } from '@/common/components/icons/MdiIcons';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
 import { renderUnknown } from '@/common/utils/renderUnknown';
@@ -35,15 +35,12 @@ export function PrinterCard({
   // Merge with realtime SignalR updates
   const printer = usePrinterDisplay(printerProp);
 
-  // State for printer cover image
-  const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(undefined);
-
-  // Load printer cover image on mount
-  useEffect(() => {
+  // Derive printer cover image URL from printer data (no effect needed)
+  const coverImageUrl = useMemo(() => {
     if (printer.manufacturerName && printer.modelName) {
-      const url = assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName);
-      setCoverImageUrl(url);
+      return assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName);
     }
+    return undefined;
   }, [printer.manufacturerName, printer.modelName]);
 
   // If debug info exists on window, we may log it — avoid runtime exceptions
@@ -104,14 +101,16 @@ export function PrinterCard({
   useEffect(() => {
     let ignore = false;
     if (printer.backend === PrinterBackend.Moonraker) {
-      apiClient.getPrintJobStatus(printer.id).then(res => {
+      void (async () => {
+        const res = await apiClient.getPrintJobStatus(printer.id);
         if (!ignore) setPrintJobStatus(res);
-      });
-    } else {
-      setPrintJobStatus(null);
+      })();
+    } else if (printJobStatus !== null) {
+      // Only update if different to avoid unnecessary renders
+      queueMicrotask(() => setPrintJobStatus(null));
     }
     return () => { ignore = true; };
-  }, [printer.id, printer.backend]);
+  }, [printer.id, printer.backend, printJobStatus]);
 
   // Prefer print job status for Moonraker, fallback to printer data
   const currentStatus = (() => {

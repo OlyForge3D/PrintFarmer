@@ -92,7 +92,8 @@ export const HarvestPage: React.FC = () => {
       // Clean up joined ops using local copy
       opsToClean.forEach(opId => signalRService.leaveHarvestGroup(opId));
     };
-  }, [harvestOperations, handleHarvestFileProgress, handleHarvestOperationProgress, handleHarvestUpdate]);
+   
+  }, [harvestOperations]);
 
   // Update selectedOperation when harvestOperations changes
   useEffect(() => {

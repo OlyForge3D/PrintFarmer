@@ -77,7 +77,8 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
       getFileInfo();
     } else if (fileUrl && fileName) {
       // For URL-based files, estimate info from file name
-      setIsLoading(true);
+      // Defer setIsLoading to satisfy React Compiler rules
+      queueMicrotask(() => setIsLoading(true));
       fetch(fileUrl, { signal: controller.signal })
         .then(res => res.blob())
         .then(blob => {

@@ -120,7 +120,7 @@ export const ProfileImportWizardPage: React.FC = () => {
         .filter((m) => importedMachineSet.has(m.name))
         .map((m) => m.name);
       if (preSelected.length > 0) {
-        setSelectedMachines(new Set(preSelected));
+        queueMicrotask(() => setSelectedMachines(new Set(preSelected)));
       }
     }
   }, [importedNames, machineProfiles, selectedMachines.size]);

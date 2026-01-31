@@ -231,7 +231,7 @@ export const NewSliceJobPage: React.FC = () => {
     // If local asset service doesn't have it, return undefined
     // Don't use API fallback as it may return 404 and cause TextureLoader errors
     return { url: undefined, format: undefined };
-  }, [selectedPrinterWithDetails?.manufacturerName, selectedPrinterWithDetails?.modelName]);
+  }, [selectedPrinterWithDetails]);
 
   // === INCREMENTAL PROFILE LOADING (Phase 1) ===
   // Instead of loading all 3000+ profiles upfront, we load incrementally:
@@ -352,55 +352,61 @@ export const NewSliceJobPage: React.FC = () => {
   useEffect(() => {
     if (!selectedPrinterForSlicing || !machineProfilesData?.length) return;
 
-    // Set manufacturer/model from printer for display purposes
-    const mfgName = selectedPrinterForSlicing.manufacturerName;
-    const modelName = selectedPrinterForSlicing.modelName;
-    setSelectedManufacturer(mfgName || '');
-    setSelectedPrinterModel(modelName || '');
-    
-    // Get nozzle diameter from printer's primary toolhead
-    const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
-    
-    if (!nozzle) {
-      // No nozzle info, select first available machine profile
-      if (machineProfilesData[0]) {
+    // Defer all setState calls to avoid synchronous updates in effect body
+    queueMicrotask(() => {
+      // Set manufacturer/model from printer for display purposes
+      const mfgName = selectedPrinterForSlicing.manufacturerName;
+      const modelName = selectedPrinterForSlicing.modelName;
+      setSelectedManufacturer(mfgName || '');
+      setSelectedPrinterModel(modelName || '');
+      
+      // Get nozzle diameter from printer's primary toolhead
+      const nozzle = getPrimaryNozzleDiameter(selectedPrinterForSlicing);
+      
+      if (!nozzle) {
+        // No nozzle info, select first available machine profile
+        if (machineProfilesData[0]) {
+          setSelectedMachineProfileId(machineProfilesData[0].name);
+        }
+        return;
+      }
+      
+      // Find profile with matching nozzle diameter (within tolerance)
+      const nozzleTolerance = 0.01;
+      const matchedProfile = machineProfilesData.find((p: OrcaMachineProfile) =>
+        p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
+      );
+      
+      if (matchedProfile) {
+        setSelectedMachineProfileId(matchedProfile.name);
+      } else if (machineProfilesData[0]) {
+        // Default to first profile if no nozzle match
         setSelectedMachineProfileId(machineProfilesData[0].name);
       }
-      return;
-    }
-    
-    // Find profile with matching nozzle diameter (within tolerance)
-    const nozzleTolerance = 0.01;
-    const matchedProfile = machineProfilesData.find((p: OrcaMachineProfile) =>
-      p.nozzleDiameter && Math.abs(p.nozzleDiameter - nozzle) < nozzleTolerance
-    );
-    
-    if (matchedProfile) {
-      setSelectedMachineProfileId(matchedProfile.name);
-    } else if (machineProfilesData[0]) {
-      // Default to first profile if no nozzle match
-      setSelectedMachineProfileId(machineProfilesData[0].name);
-    }
+    });
   }, [selectedPrinterForSlicing, machineProfilesData]);
 
   // Cascade reset: when machine profile changes, validate filament/process selections
   // If the currently selected profiles are no longer compatible, reset them
   useEffect(() => {
-    if (!selectedMachineProfileId) {
-      // No machine selected - clear dependent selections
+    // Defer all setState calls to avoid synchronous updates in effect body
+    queueMicrotask(() => {
+      if (!selectedMachineProfileId) {
+        // No machine selected - clear dependent selections
+        setSelectedFilamentProfileId('');
+        setSelectedFilamentMaterial('');
+        setSelectedProcessPresetId('');
+        return;
+      }
+      
+      // When machine profile changes, reset filament and process selections
+      // This ensures users always select compatible profiles for the new machine
+      // Note: We could validate if current selections are still compatible,
+      // but resetting is cleaner and avoids edge cases with stale data
       setSelectedFilamentProfileId('');
       setSelectedFilamentMaterial('');
       setSelectedProcessPresetId('');
-      return;
-    }
-    
-    // When machine profile changes, reset filament and process selections
-    // This ensures users always select compatible profiles for the new machine
-    // Note: We could validate if current selections are still compatible,
-    // but resetting is cleaner and avoids edge cases with stale data
-    setSelectedFilamentProfileId('');
-    setSelectedFilamentMaterial('');
-    setSelectedProcessPresetId('');
+    });
   }, [selectedMachineProfileId]);
 
   // Check if printer has no profiles - show clone suggestion
@@ -435,7 +441,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Reset dismissal state when printer changes
   useEffect(() => {
-    setCloneProfilesDismissed(false);
+    queueMicrotask(() => setCloneProfilesDismissed(false));
   }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
@@ -540,9 +546,11 @@ export const NewSliceJobPage: React.FC = () => {
   useEffect(() => {
     try {
       const savedCaps = localStorage.getItem('sliceJob.requiredCapabilities');
-      if (savedCaps) setRequiredCapabilitiesJson(savedCaps);
       const savedProfileId = localStorage.getItem('sliceJob.selectedProfileId');
-      if (savedProfileId) setSelectedProfileId(savedProfileId);
+      queueMicrotask(() => {
+        if (savedCaps) setRequiredCapabilitiesJson(savedCaps);
+        if (savedProfileId) setSelectedProfileId(savedProfileId);
+      });
     } catch { /* ignore */ }
   }, []);
 
@@ -561,38 +569,42 @@ export const NewSliceJobPage: React.FC = () => {
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
       const apiBase = getApiBaseUrl();
-      setModelFileUrl(`${apiBase}/3d-models/file/${selectedModelId}`);
       const mdl = models?.find(m => m.id === selectedModelId);
-      if (mdl) {
-        setModelFileName(mdl.originalFileName || mdl.fileName);
-      }
+      queueMicrotask(() => {
+        setModelFileUrl(`${apiBase}/3d-models/file/${selectedModelId}`);
+        if (mdl) {
+          setModelFileName(mdl.originalFileName || mdl.fileName);
+        }
+      });
     }
   }, [useModelPicker, selectedModelId, models]);
 
   // Capabilities JSON validation
   useEffect(() => {
     const text = requiredCapabilitiesJson.trim();
-    if (!text) {
-      setParsedCapabilities([]);
-      setCapabilitiesError(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) {
-        setCapabilitiesError('Capabilities JSON must be an array');
+    queueMicrotask(() => {
+      if (!text) {
         setParsedCapabilities([]);
-      } else if (!parsed.every(x => typeof x === 'string')) {
-        setCapabilitiesError('All capability entries must be strings');
-        setParsedCapabilities([]);
-      } else {
         setCapabilitiesError(null);
-        setParsedCapabilities(parsed as string[]);
+        return;
       }
-    } catch {
-      setCapabilitiesError('Invalid JSON syntax');
-      setParsedCapabilities([]);
-    }
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) {
+          setCapabilitiesError('Capabilities JSON must be an array');
+          setParsedCapabilities([]);
+        } else if (!parsed.every(x => typeof x === 'string')) {
+          setCapabilitiesError('All capability entries must be strings');
+          setParsedCapabilities([]);
+        } else {
+          setCapabilitiesError(null);
+          setParsedCapabilities(parsed as string[]);
+        }
+      } catch {
+        setCapabilitiesError('Invalid JSON syntax');
+        setParsedCapabilities([]);
+      }
+    });
   }, [requiredCapabilitiesJson]);
 
   // Get selected filament profile details for display

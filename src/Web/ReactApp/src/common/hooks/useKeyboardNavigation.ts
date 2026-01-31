@@ -33,7 +33,7 @@ export function useKeyboardNavigation<T>(
 
       switch (e.key) {
         case 'ArrowDown':
-          newIndex = Math.min(selectedIndex + (options?.columns || 1), items.length - 1);
+          newIndex = Math.min(validSelectedIndex + (options?.columns || 1), items.length - 1);
           handled = true;
           break;
         case 'ArrowUp':

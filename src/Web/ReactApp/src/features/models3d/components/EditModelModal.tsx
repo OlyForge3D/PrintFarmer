@@ -79,44 +79,47 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
 
   useEffect(() => {
     if (model) {
-      const initialData: UpdateModelRequest = {
-        name: model.name,
-        motionType: model.motionType,
-        maxX: model.maxX,
-        maxY: model.maxY,
-        maxZ: model.maxZ,
-        defaultBackend: model.defaultBackend,
-        supportedFilamentTypeIds: undefined, // Will be set based on supportedMaterialNames
+      // Defer all state updates to satisfy React Compiler rules
+      queueMicrotask(() => {
+        const initialData: UpdateModelRequest = {
+          name: model.name,
+          motionType: model.motionType,
+          maxX: model.maxX,
+          maxY: model.maxY,
+          maxZ: model.maxZ,
+          defaultBackend: model.defaultBackend,
+          supportedFilamentTypeIds: undefined, // Will be set based on supportedMaterialNames
+          
+          // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
+          hasHeatedBed: model.hasHeatedBed,
+          hasEnclosure: model.hasEnclosure,
+          multiMaterial: model.multiMaterial,
+          supportsAutoLeveling: model.supportsAutoLeveling,
+          
+          // Temperature ranges
+          maxBedTemp: model.maxBedTemp,
+          
+          // Speed capabilities
+          maxPrintSpeed: model.maxPrintSpeed,
+        };
         
-        // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
-        hasHeatedBed: model.hasHeatedBed,
-        hasEnclosure: model.hasEnclosure,
-        multiMaterial: model.multiMaterial,
-        supportsAutoLeveling: model.supportsAutoLeveling,
+        setFormData(initialData);
+        setOriginalFormData(initialData);
         
-        // Temperature ranges
-        maxBedTemp: model.maxBedTemp,
+        // Initialize supported material names from the model
+        const materials = model.supportedFilamentTypes || [];
+        setSupportedMaterialNames(materials);
+        setOriginalMaterialNames(materials);
         
-        // Speed capabilities
-        maxPrintSpeed: model.maxPrintSpeed,
-      };
-      
-      setFormData(initialData);
-      setOriginalFormData(initialData);
-      
-      // Initialize supported material names from the model
-      const materials = model.supportedFilamentTypes || [];
-      setSupportedMaterialNames(materials);
-      setOriginalMaterialNames(materials);
-      
-      // Initialize toolheads from the model
-      const modelToolheads = model.toolheads || [];
-      setToolheads(modelToolheads);
-      setOriginalToolheads(modelToolheads);
-      setExpandedToolheads(new Set());
-      
-      // Reset alias tracking
-      setAliasesHaveChanges(false);
+        // Initialize toolheads from the model
+        const modelToolheads = model.toolheads || [];
+        setToolheads(modelToolheads);
+        setOriginalToolheads(modelToolheads);
+        setExpandedToolheads(new Set());
+        
+        // Reset alias tracking
+        setAliasesHaveChanges(false);
+      });
     }
   }, [model]);
 

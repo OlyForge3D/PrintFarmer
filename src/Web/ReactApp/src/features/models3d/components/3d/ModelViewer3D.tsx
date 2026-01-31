@@ -279,8 +279,12 @@ function STLModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChan
 /**
  * Camera fitter optimized for 3D printing models (typical size: 20-200mm)
  * This component should be placed inside Canvas to have access to useThree
+ * 
+ * Note: Three.js requires direct camera property mutations for near/far planes.
+ * This is intentional and expected in the Three.js/R3F ecosystem.
  */
 function CameraFitter() {
+  "use no memo"; // Opt out of React Compiler - Three.js requires camera mutations
   const { camera, scene } = useThree();
 
   useEffect(() => {
@@ -335,6 +339,7 @@ function CameraFitter() {
     camera.lookAt(center);
 
     // Update near/far clipping planes to handle wider range of model sizes
+    // eslint-disable-next-line react-hooks/immutability -- Three.js requires direct camera property mutations
     camera.near = Math.max(0.1, cameraDistance / 500);
     camera.far = cameraDistance * 10;
     camera.updateProjectionMatrix();

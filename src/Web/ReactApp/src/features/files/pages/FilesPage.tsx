@@ -120,7 +120,8 @@ export function FilesPage() {
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+   
+  }, []);
 
   const currentTab = TABS.find(t => t.id === validActiveTab)!;
 

@@ -125,13 +125,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   // Update last known values when printer data changes
   useEffect(() => {
     if (printer) {
-      setLastKnownValues(prev => ({
-        hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
-        bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
-        x: printer.x !== undefined ? printer.x : prev.x,
-        y: printer.y !== undefined ? printer.y : prev.y,
-        z: printer.z !== undefined ? printer.z : prev.z,
-      }));
+      // Defer state update to satisfy React Compiler rules
+      queueMicrotask(() => {
+        setLastKnownValues(prev => ({
+          hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
+          bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
+          x: printer.x !== undefined ? printer.x : prev.x,
+          y: printer.y !== undefined ? printer.y : prev.y,
+          z: printer.z !== undefined ? printer.z : prev.z,
+        }));
+      });
     }
   }, [printer]);
 

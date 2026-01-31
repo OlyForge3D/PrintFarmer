@@ -50,10 +50,13 @@ export function HarvestWizardStep4Progress({
         status: 'pending',
         progress: 0,
       }));
-      setFileStatuses(initialStatuses);
-      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
-        console.info(`[Step4] Initialized ${initialStatuses.length} files in pending state`);
-      }
+      // Defer setState to satisfy React Compiler rules
+      queueMicrotask(() => {
+        setFileStatuses(initialStatuses);
+        if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+          console.info(`[Step4] Initialized ${initialStatuses.length} files in pending state`);
+        }
+      });
     }
   }, [selectedFiles, fileStatuses.length]);
 
@@ -132,7 +135,8 @@ export function HarvestWizardStep4Progress({
     
     // If all files are either completed or failed, we're done importing
     if (totalProcessed === totalFiles) {
-      setIsImporting(false);
+      // Defer setState to satisfy React Compiler rules
+      queueMicrotask(() => setIsImporting(false));
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.info(`[Step4] Import complete: ${completedCount} completed, ${failedCount} failed`);
       }

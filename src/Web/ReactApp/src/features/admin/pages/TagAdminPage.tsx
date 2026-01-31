@@ -86,7 +86,8 @@ export const TagAdminPage: React.FC = () => {
     useEffect(() => {
         window.addEventListener('mousemove', handleMouseMove);
         return () => window.removeEventListener('mousemove', handleMouseMove);
-    }, [handleMouseMove]);
+     
+    }, []);
 
     // Scroll focused row into view when navigating with keyboard
     useEffect(() => {
@@ -313,7 +314,8 @@ export const TagAdminPage: React.FC = () => {
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleKeyDown]);
+     
+    }, []);
 
     if (isLoading) {
         return (

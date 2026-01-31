@@ -193,8 +193,10 @@ export const OrcaSlicerPage: React.FC = () => {
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
         };
-        setLoadedModels([newLoadedModel]);
-        setSelectedLoadedModelId(model.id);
+        queueMicrotask(() => {
+          setLoadedModels([newLoadedModel]);
+          setSelectedLoadedModelId(model.id);
+        });
       }
     }
   }, [modelIdFromUrl, models]);

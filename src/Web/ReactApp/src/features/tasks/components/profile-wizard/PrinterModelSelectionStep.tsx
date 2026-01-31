@@ -94,8 +94,8 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
       .filter((group) => group.models.length > 0);
   }, [manufacturerData, searchQuery]);
 
-  // Get selected model and manufacturer info
-  const selectedModel = useMemo(() => {
+  // Get selected model and manufacturer info - let React Compiler handle memoization
+  const getSelectedModel = () => {
     if (!selectedModelId) return null;
     for (const group of manufacturerData) {
       const model = group.models.find((m) => m.id === selectedModelId);
@@ -104,7 +104,8 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
       }
     }
     return null;
-  }, [selectedModelId, manufacturerData]);
+  };
+  const selectedModel = getSelectedModel();
 
   const isLoading = manufacturersLoading || modelsLoading;
 

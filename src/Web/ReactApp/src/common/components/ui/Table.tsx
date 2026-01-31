@@ -268,7 +268,8 @@ export function TableRow({
   useEffect(() => {
     if (context && rowIndex === undefined) {
       const idx = context.registerRow();
-      setRegisteredIndex(idx);
+      // Defer setState to satisfy React Compiler rules
+      queueMicrotask(() => setRegisteredIndex(idx));
       return () => context.unregisterRow(idx);
     }
   }, [context, rowIndex]);

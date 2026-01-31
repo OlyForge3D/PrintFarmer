@@ -55,13 +55,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       clearTimeout(timeoutId);
       document.removeEventListener('mousedown', handleMouseDown);
     };
-  }, [handleMouseDown]);
+   
+  }, []);
 
   // Close menu on Escape key - React 19: Simplified with useEffectEvent
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+   
+  }, []);
 
   // Adjust position to avoid off-screen rendering
   const menuWidth = 200; // Estimated menu width

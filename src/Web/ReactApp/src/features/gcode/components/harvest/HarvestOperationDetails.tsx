@@ -28,23 +28,23 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
   // Also re-fetch periodically to ensure UI stays in sync
   useEffect(() => {
     if (!initialOperation && propOperationId) {
-      const fetchOperation = () => {
-        apiClient.getHarvestOperation(propOperationId)
-          .then(op => {
-            setOperation(op);
-            setLoading(false);
-          })
-          .catch(err => {
-            console.error('Failed to fetch harvest operation:', err);
-            setLoading(false);
-          });
+      const fetchOperation = async () => {
+        try {
+          const op = await apiClient.getHarvestOperation(propOperationId);
+          setOperation(op);
+          setLoading(false);
+        } catch (err) {
+          console.error('Failed to fetch harvest operation:', err);
+          setLoading(false);
+        }
       };
 
-      setLoading(true);
-      fetchOperation();
+      // Defer setLoading to avoid synchronous setState in effect
+      queueMicrotask(() => setLoading(true));
+      void fetchOperation();
 
       // Poll every 5 seconds to keep stats in sync (fallback if SignalR events are missed)
-      const interval = setInterval(fetchOperation, 5000);
+      const interval = setInterval(() => void fetchOperation(), 5000);
       return () => clearInterval(interval);
     }
   }, [initialOperation, propOperationId]);
