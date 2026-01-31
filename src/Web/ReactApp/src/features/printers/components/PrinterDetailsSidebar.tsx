@@ -97,12 +97,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [step, setStep] = useState(10);
 
-  // Use refs instead of state for caching display values - this avoids setState during render
-  const lastKnownHotendTempRef = useRef<number | null>(null);
-  const lastKnownBedTempRef = useRef<number | null>(null);
-  const lastKnownXRef = useRef<number | null>(null);
-  const lastKnownYRef = useRef<number | null>(null);
-  const lastKnownZRef = useRef<number | null>(null);
+  // Track last known values for display fallback - use state not refs for render access
+  const [lastKnownValues, setLastKnownValues] = useState({
+    hotendTemp: null as number | null,
+    bedTemp: null as number | null,
+    x: null as number | null,
+    y: null as number | null,
+    z: null as number | null,
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
@@ -120,6 +122,19 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
     return () => clearInterval(pollInterval);
   }, [printer, refetch, printerId]);
 
+  // Update last known values when printer data changes
+  useEffect(() => {
+    if (printer) {
+      setLastKnownValues(prev => ({
+        hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
+        bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
+        x: printer.x !== undefined ? printer.x : prev.x,
+        y: printer.y !== undefined ? printer.y : prev.y,
+        z: printer.z !== undefined ? printer.z : prev.z,
+      }));
+    }
+  }, [printer]);
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -127,15 +142,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
-
-  // Update refs when display printer changes - refs don't trigger re-renders
-  if (displayPrinter) {
-    if (displayPrinter.hotendTemp !== undefined) lastKnownHotendTempRef.current = displayPrinter.hotendTemp;
-    if (displayPrinter.bedTemp !== undefined) lastKnownBedTempRef.current = displayPrinter.bedTemp;
-    if (displayPrinter.x !== undefined) lastKnownXRef.current = displayPrinter.x;
-    if (displayPrinter.y !== undefined) lastKnownYRef.current = displayPrinter.y;
-    if (displayPrinter.z !== undefined) lastKnownZRef.current = displayPrinter.z;
-  }
 
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
@@ -153,6 +159,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+
+  // Use state values to track last known values for display (fallback when data is undefined)
+  const lastKnownHotendTemp = lastKnownValues.hotendTemp;
+  const lastKnownBedTemp = lastKnownValues.bedTemp;
+  const lastKnownX = lastKnownValues.x;
+  const lastKnownY = lastKnownValues.y;
+  const lastKnownZ = lastKnownValues.z;
 
   // Format temperature with target
   const formatTempWithTarget = (current?: number, target?: number, lastKnown?: number | null): string => {
@@ -596,13 +609,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           <div className="grid grid-cols-3 gap-2 h-20">
             {/* Row 1: Current Position Labels */}
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownXRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownX ?? 0).toFixed(1)} ]</span>
             </div>
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownYRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownY ?? 0).toFixed(1)} ]</span>
             </div>
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZ ?? 0).toFixed(1)} ]</span>
             </div>
 
             {/* Row 2: Input Fields */}
@@ -674,7 +687,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               {formatTempWithTarget(
                 displayPrinter?.hotendTemp,
                 displayPrinter?.hotendTarget,
-                lastKnownHotendTempRef.current
+                lastKnownHotendTemp
               )}
             </span>
             <TemperatureInput
@@ -693,7 +706,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               {formatTempWithTarget(
                 displayPrinter?.bedTemp,
                 displayPrinter?.bedTarget,
-                lastKnownBedTempRef.current
+                lastKnownBedTemp
               )}
             </span>
             <TemperatureInput
@@ -752,7 +765,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
-            {renderUnknown({ status, lastKnownHotendTemp: lastKnownHotendTempRef.current, lastKnownBedTemp: lastKnownBedTempRef.current, lastKnownX: lastKnownXRef.current, lastKnownY: lastKnownYRef.current, lastKnownZ: lastKnownZRef.current })}
+            {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
           </div>
         )}
       </div>

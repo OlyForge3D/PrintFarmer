@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { CloseIcon, CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/common/components/icons/MdiIcons';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
@@ -39,7 +39,7 @@ export function HarvestWizardStep4Progress({
   const [fileStatuses, setFileStatuses] = useState<FileImportStatus[]>([]);
   const [isImporting, setIsImporting] = useState(true);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [startTime] = useState(Date.now());
+  const startTimeRef = useRef<number | null>(null);
 
   // Initialize file statuses from selected files on component mount
   useEffect(() => {
@@ -61,12 +61,17 @@ export function HarvestWizardStep4Progress({
   useEffect(() => {
     if (!isImporting) return;
 
+    // Initialize start time on first mount
+    if (startTimeRef.current === null) {
+      startTimeRef.current = Date.now();
+    }
+
     const interval = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current!) / 1000));
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isImporting, startTime]);
+  }, [isImporting]);
 
   // Subscribe to real SignalR progress events
   useEffect(() => {

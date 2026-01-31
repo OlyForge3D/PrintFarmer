@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useRef, ReactNode } from 'react';
+import React, { useRef, useId, ReactNode } from 'react';
 import { Label } from './Label';
 import { Button } from './Button';
 
@@ -129,7 +129,8 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
       }
     };
 
-    const inputId = id || `file-upload-${Math.random().toString(36).substr(2, 9)}`;
+    const generatedId = useId();
+    const inputId = id || generatedId;
 
     // Base input styles
     const inputBaseClass = `

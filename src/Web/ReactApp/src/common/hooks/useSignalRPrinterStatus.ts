@@ -67,7 +67,7 @@ export function useSignalRPrinterStatus(printerId: string): UseSignalRPrinterSta
   // Build and manage SignalR connection
   useEffect(() => {
     if (!printerId) {
-      setError('Printer ID is required');
+      // No printer ID - don't attempt connection
       return;
     }
 

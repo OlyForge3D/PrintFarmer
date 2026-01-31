@@ -260,16 +260,16 @@ export function TableRow({
 }: TableRowProps) {
   const context = useContext(TableContext);
   const rowRef = useRef<HTMLTableRowElement>(null);
-  const [assignedIndex, setAssignedIndex] = useState(-1);
+  // Use provided rowIndex directly, or track assigned index from context registration
+  const [registeredIndex, setRegisteredIndex] = useState(-1);
+  const assignedIndex = rowIndex !== undefined ? rowIndex : registeredIndex;
 
-  // Register row for keyboard navigation
+  // Register row for keyboard navigation (only if no explicit rowIndex provided)
   useEffect(() => {
     if (context && rowIndex === undefined) {
       const idx = context.registerRow();
-      setAssignedIndex(idx);
+      setRegisteredIndex(idx);
       return () => context.unregisterRow(idx);
-    } else if (rowIndex !== undefined) {
-      setAssignedIndex(rowIndex);
     }
   }, [context, rowIndex]);
 

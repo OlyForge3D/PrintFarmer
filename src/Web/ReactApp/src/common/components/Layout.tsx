@@ -245,7 +245,45 @@ export function Layout() {
   const LOCAL_STORAGE_KEY = 'pf_nav_expanded_v1';
 
   // Track which parent menus are expanded (with persistence)
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Initialize from localStorage with auto-expand for active routes
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const path = location.pathname;
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      let parsed: Record<string, boolean> = {};
+      if (raw) {
+        const storedData = JSON.parse(raw);
+        if (storedData && typeof storedData === 'object') {
+          parsed = storedData;
+        }
+      }
+      
+      // Auto-expand groups containing current route during initialization
+      // Note: filteredNavigation not available yet, so use navigation directly
+      for (const item of navigation) {
+        if (!isDivider(item) && item.children) {
+          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+          if (hasActiveChild && !(item.name in parsed)) {
+            parsed[item.name] = true;
+          }
+        }
+      }
+      
+      return parsed;
+    } catch {
+      // If parsing fails, at least auto-expand current route
+      const autoExpanded: Record<string, boolean> = {};
+      for (const item of navigation) {
+        if (!isDivider(item) && item.children) {
+          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+          if (hasActiveChild) {
+            autoExpanded[item.name] = true;
+          }
+        }
+      }
+      return autoExpanded;
+    }
+  });
   const [announcement, setAnnouncement] = useState('');
   const announcementTimer = useRef<number | null>(null);
 
@@ -294,86 +332,34 @@ export function Layout() {
   };
 
   // (Removed unused prefersReducedMotion calculation to satisfy lint)
-
-  // Initialize expanded state only once on mount
-  const initializedRef = useRef(false);
   
-  useEffect(() => {
-    if (initializedRef.current) return; // Prevent re-initialization
-    
+  // Compute merged expanded state: user selections + auto-expand for active route
+  const computedExpanded = useMemo(() => {
     const path = location.pathname;
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      let parsed: Record<string, boolean> = {};
-      if (raw) {
-        const storedData = JSON.parse(raw);
-        if (storedData && typeof storedData === 'object') {
-          parsed = storedData;
+    const result = { ...expanded };
+    
+    // Auto-expand groups containing current route
+    for (const item of filteredNavigation) {
+      if (!isDivider(item) && item.children) {
+        const hasActiveChild = item.children.some(c => path.startsWith(c.href));
+        // Only auto-expand if user hasn't explicitly set it
+        if (hasActiveChild && expanded[item.name] === undefined) {
+          result[item.name] = true;
         }
       }
-      
-      // Auto-expand groups containing current route during initialization
-      for (const item of filteredNavigation) {
-        if (!isDivider(item) && item.children) {
-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild && !(item.name in parsed)) {
-            parsed[item.name] = true;
-          }
-        }
-      }
-      
-      setExpanded(parsed);
-      initializedRef.current = true;
-    } catch {
-      // If parsing fails, at least auto-expand current route
-      const autoExpanded: Record<string, boolean> = {};
-      for (const item of filteredNavigation) {
-        if (!isDivider(item) && item.children) {
-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild) {
-            autoExpanded[item.name] = true;
-          }
-        }
-      }
-      setExpanded(autoExpanded);
-      initializedRef.current = true;
     }
-  }, [isAuthenticated, filteredNavigation, location.pathname]); // Include all dependencies
+    
+    return result;
+  }, [location.pathname, expanded, filteredNavigation]);
 
-  // Persist expanded changes
+  // Persist expanded changes to localStorage
   useEffect(() => {
-    if (!initializedRef.current) return; // Don't persist until initialized
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expanded));
     } catch {
       // ignore
     }
   }, [expanded]);
-
-  // Auto-expand groups containing current route on navigation (only after initialization)
-  useEffect(() => {
-    if (!initializedRef.current) return; // Don't auto-expand until initialized
-    
-    const path = location.pathname;
-    setExpanded((prev: Record<string, boolean>) => {
-      let hasChanges = false;
-      const next = { ...prev };
-      
-      // Only process navigation items that have children
-      for (const item of filteredNavigation) {
-        if (!isDivider(item) && item.children) {
-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild && prev[item.name] === undefined) {
-            // Only auto-expand if user hasn't manually set the state
-            next[item.name] = true;
-            hasChanges = true;
-          }
-        }
-      }
-      
-      return hasChanges ? next : prev; // Prevent unnecessary re-renders
-    });
-  }, [location.pathname, filteredNavigation]); // Include all dependencies
 
   return (
     <div className="flex flex-col h-screen bg-pf-bg-0">
@@ -553,11 +539,11 @@ export function Layout() {
             <div className="relative flex flex-col w-56 bg-pf-bg-1 border-r border-pf-border z-10 h-full">
               {/* Navigation - identical to desktop */}
               <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
-                {filteredNavigation.map(item => {
+                {filteredNavigation.map((item, index) => {
                   // Handle dividers
                   if (isDivider(item)) {
                     return (
-                      <div key={`divider-${item.name || Math.random()}`} className="my-1.5">
+                      <div key={`divider-${item.name || index}`} className="my-1.5">
                         <div className="border-t border-pf-border"></div>
                       </div>
                     );
@@ -565,7 +551,7 @@ export function Layout() {
 
                   const navItem = item as NavigationItem;
                   const Icon = navItem.icon;
-                  const isExpanded = !!expanded[navItem.name];
+                  const isExpanded = !!computedExpanded[navItem.name];
                   
                   const hasChildren = !!navItem.children?.length;
                   return (
@@ -635,10 +621,10 @@ export function Layout() {
         <aside className={`hidden lg:flex lg:flex-shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
           <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
             <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
-              {filteredNavigation.map(item => {
+              {filteredNavigation.map((item, index) => {
                 if (isDivider(item)) {
                   return (
-                    <div key={`divider-${item.name || Math.random()}`} className="my-1.5">
+                    <div key={`divider-${item.name || index}`} className="my-1.5">
                       <div className="border-t border-pf-border"></div>
                     </div>
                   );
@@ -646,7 +632,7 @@ export function Layout() {
 
                 const navItem = item as NavigationItem;
                 const Icon = navItem.icon;
-                const isExpanded = !!expanded[navItem.name];
+                const isExpanded = !!computedExpanded[navItem.name];
                 const isHovered = hoveredNavItem === navItem.name;
                 
                 const hasChildren = !!navItem.children?.length;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 export interface UseKeyboardNavigationOptions {
   columns?: number;
@@ -18,11 +18,10 @@ export function useKeyboardNavigation<T>(
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isNavigating, setIsNavigating] = useState(false);
 
-  // Ensure selected index stays valid
-  useEffect(() => {
-    if (selectedIndex >= items.length && items.length > 0) {
-      setSelectedIndex(items.length - 1);
-    }
+  // Compute valid index - clamps to bounds without triggering effect cascade
+  const validSelectedIndex = useMemo(() => {
+    if (items.length === 0) return 0;
+    return Math.min(selectedIndex, items.length - 1);
   }, [items.length, selectedIndex]);
 
   const handleKeyDown = useCallback(
@@ -30,7 +29,7 @@ export function useKeyboardNavigation<T>(
       if (items.length === 0) return;
 
       let handled = false;
-      let newIndex = selectedIndex;
+      let newIndex = validSelectedIndex;
 
       switch (e.key) {
         case 'ArrowDown':
@@ -38,23 +37,23 @@ export function useKeyboardNavigation<T>(
           handled = true;
           break;
         case 'ArrowUp':
-          newIndex = Math.max(selectedIndex - (options?.columns || 1), 0);
+          newIndex = Math.max(validSelectedIndex - (options?.columns || 1), 0);
           handled = true;
           break;
         case 'ArrowRight':
           if (options?.columns) {
-            newIndex = Math.min(selectedIndex + 1, items.length - 1);
+            newIndex = Math.min(validSelectedIndex + 1, items.length - 1);
             handled = true;
           }
           break;
         case 'ArrowLeft':
           if (options?.columns) {
-            newIndex = Math.max(selectedIndex - 1, 0);
+            newIndex = Math.max(validSelectedIndex - 1, 0);
             handled = true;
           }
           break;
         case 'Enter':
-          onSelect(items[selectedIndex], selectedIndex);
+          onSelect(items[validSelectedIndex], validSelectedIndex);
           options?.onEnter?.();
           handled = true;
           break;
@@ -72,7 +71,7 @@ export function useKeyboardNavigation<T>(
         setIsNavigating(true);
       }
     },
-    [items, selectedIndex, onSelect, options]
+    [items, validSelectedIndex, onSelect, options]
   );
 
   useEffect(() => {
@@ -81,7 +80,7 @@ export function useKeyboardNavigation<T>(
   }, [handleKeyDown]);
 
   return {
-    selectedIndex,
+    selectedIndex: validSelectedIndex,
     setSelectedIndex,
     isNavigating,
   };

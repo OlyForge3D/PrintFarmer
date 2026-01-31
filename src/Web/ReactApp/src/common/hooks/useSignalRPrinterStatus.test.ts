@@ -65,11 +65,14 @@ describe('useSignalRPrinterStatus Hook', () => {
     });
   });
 
-  it('requires a printer ID', async () => {
+  it('returns early for empty printer ID without error', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus(''));
 
     await waitFor(() => {
-      expect(result.current.error).toBeDefined();
+      // With empty printer ID, hook returns without attempting connection
+      expect(result.current.status).toBeNull();
+      expect(result.current.isConnected).toBe(false);
+      expect(result.current.error).toBeNull();
     });
   });
 
@@ -174,12 +177,14 @@ describe('useSignalRPrinterStatus - Error Handling', () => {
     vi.clearAllMocks();
   });
 
-  it('returns error for empty printer ID', async () => {
+  it('returns no status for empty printer ID without error', async () => {
+    // When printerId is empty, the hook should simply return null status
+    // without setting an error - this is expected behavior for "no selection" state
     const { result } = renderHook(() => useSignalRPrinterStatus(''));
 
-    await waitFor(() => {
-      expect(result.current.error).toBeTruthy();
-    });
+    // Should not have status or error - just null values for no-selection state
+    expect(result.current.status).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
   it('has graceful error recovery', async () => {

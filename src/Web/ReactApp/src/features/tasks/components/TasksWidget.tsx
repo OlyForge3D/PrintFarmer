@@ -7,16 +7,16 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 /**
- * Get icon for task type
+ * Render icon for task type inline to avoid dynamic component creation
  */
-function getTaskIcon(taskType: TaskType): React.ComponentType<{ className?: string }> {
+function TaskTypeIcon({ taskType, className }: { taskType: TaskType; className?: string }) {
   switch (taskType) {
     case TaskType.ProfileImport:
-      return LayersIcon;
+      return <LayersIcon className={className} />;
     case TaskType.MaintenanceDue:
-      return WrenchIcon;
+      return <WrenchIcon className={className} />;
     default:
-      return AlertCircleIcon;
+      return <AlertCircleIcon className={className} />;
   }
 }
 
@@ -43,8 +43,6 @@ interface TaskItemProps {
 }
 
 function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
-  const Icon = getTaskIcon(task.taskType);
-  
   return (
     <div 
       className="flex items-start gap-3 p-3 hover:bg-pf-bg-hover rounded-lg transition-colors group cursor-pointer"
@@ -55,7 +53,7 @@ function TaskItem({ task, onSkip, onNavigate }: TaskItemProps) {
     >
       <div className="flex-shrink-0 mt-0.5">
         <div className="p-2 rounded-lg bg-pf-warning/10">
-          <Icon className="h-5 w-5 text-pf-warning" />
+          <TaskTypeIcon taskType={task.taskType} className="h-5 w-5 text-pf-warning" />
         </div>
       </div>
       
