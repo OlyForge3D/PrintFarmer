@@ -59,6 +59,11 @@ fi
 echo "📱 Setting up React application..."
 if [ -d "src/Web/ReactApp" ]; then
     cd src/Web/ReactApp
+    # Fix ownership of node_modules volume mount (may be created as root)
+    if [ -d "node_modules" ]; then
+        echo "🔧 Fixing node_modules ownership..."
+        sudo chown -R $(id -u):$(id -g) node_modules 2>/dev/null || true
+    fi
     echo "📦 Installing React dependencies..."
     npm ci
     cd ../../../
