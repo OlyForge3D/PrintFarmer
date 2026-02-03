@@ -10,6 +10,8 @@ vi.mock('@/services/sliceJobService', () => ({
     getMyJobs: vi.fn().mockResolvedValue([]),
     getQueue: vi.fn().mockResolvedValue([]),
     cancelJob: vi.fn().mockResolvedValue(undefined),
+    getStatusColor: vi.fn().mockReturnValue('bg-blue-100 text-blue-800'),
+    getStatusText: vi.fn().mockReturnValue('Queued'),
   },
   SliceJobStatus: {
     Queued: 'Queued',
