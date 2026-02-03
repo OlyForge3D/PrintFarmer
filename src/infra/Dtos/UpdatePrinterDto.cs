@@ -20,6 +20,19 @@ public record UpdatePrinterDto(
     DateTime? DateAcquired = null,
     PrinterBackend? Backend = null,
     string? ApiKey = null,
+
+    /// <summary>
+    /// Username for HTTP Digest authentication (primarily for PrusaLink).
+    /// Defaults to "maker" for PrusaLink printers if not specified.
+    /// </summary>
+    string? Username = null,
+
+    /// <summary>
+    /// Password for HTTP Digest authentication (primarily for PrusaLink).
+    /// User must obtain this from the printer's web interface under Settings → Network → Credentials.
+    /// </summary>
+    string? Password = null,
+
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,

@@ -126,6 +126,18 @@ public class Printer
 
     public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
 
+    /// <summary>
+    /// Username for HTTP Digest Authentication (used by PrusaLink for privileged API access).
+    /// Combined with Password, enables access to additional endpoints not available with API key alone.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Password for HTTP Digest Authentication (used by PrusaLink for privileged API access).
+    /// Stored encrypted in the database. Combined with Username for full API access.
+    /// </summary>
+    public string? Password { get; set; }
+
     public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
 
     public string? CameraSnapshotUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink

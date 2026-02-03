@@ -1269,6 +1269,11 @@ public class PrintersService(
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey,
 
+            // Digest authentication credentials (primarily for PrusaLink)
+            // Default username to "maker" for PrusaLink if password is provided but username is not
+            Username = dto.Username ?? (dto.Backend == PrinterBackend.PrusaLink && !string.IsNullOrEmpty(dto.Password) ? "maker" : null),
+            Password = dto.Password,
+
             // BackendPort MUST be set by discovery probes (always includes actual port, even if standard)
             BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
             FrontendPort = dto.FrontendPort,

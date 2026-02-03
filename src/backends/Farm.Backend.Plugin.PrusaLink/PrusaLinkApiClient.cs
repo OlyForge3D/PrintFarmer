@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -12,12 +12,20 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// <summary>
 /// Comprehensive PrusaLink API client based on the official OpenAPI specification
 /// https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
+///
+/// Supports two authentication modes:
+/// - API Key (X-Api-Key header): Read access to most endpoints
+/// - HTTP Digest Authentication: Full access including privileged operations
 /// </summary>
 public class PrusaLinkApiClient : IPrusaLinkApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly IUnifiedLoggingService _logger;
+
+    // Cache for digest auth clients - keyed by username:password hash
+    private readonly Dictionary<string, HttpClient> _digestAuthClients = new();
+    private readonly object _clientLock = new();
 
     public PrusaLinkApiClient(HttpClient httpClient, IUnifiedLoggingService logger)
     {
@@ -28,6 +36,36 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+    }
+
+    private HttpClient GetClientForCredentials(PrusaLinkCredentials? credentials)
+    {
+        // If no digest auth credentials, use the default client
+        if (credentials == null || !credentials.HasDigestAuth)
+        {
+            return _httpClient;
+        }
+
+        // Create a cache key for these credentials
+        string cacheKey = $"{credentials.Username}:{credentials.Password?.GetHashCode()}";
+
+        lock (_clientLock)
+        {
+            if (_digestAuthClients.TryGetValue(cacheKey, out HttpClient? cachedClient))
+            {
+                return cachedClient;
+            }
+
+            // Create a new HttpClient with DigestAuthHandler
+            DigestAuthHandler handler = new(credentials.Username!, credentials.Password!);
+            HttpClient newClient = new(handler, disposeHandler: true)
+            {
+                Timeout = _httpClient.Timeout
+            };
+
+            _digestAuthClients[cacheKey] = newClient;
+            return newClient;
+        }
     }
 
     private static Uri EnsureBaseUri(string baseUrl)
@@ -54,20 +92,20 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // API Version Information
-    public async Task<VersionInfo> GetVersionAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<VersionInfo> GetVersionAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/version").ToString();
+        HttpClient client = GetClientForCredentials(credentials);
         try
         {
-            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
             _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Expected when cancellation is requested
             throw;
         }
         catch (HttpRequestException ex)
@@ -88,22 +126,22 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // API Version Information (Uri overload co-located for S4136)
-    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
 
         Uri url = new(baseUrl, "api/version");
+        HttpClient client = GetClientForCredentials(credentials);
         try
         {
-            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url.ToString(), apiKey);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url.ToString(), credentials);
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
             _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<VersionInfo>(json, _jsonOptions)!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Expected when cancellation is requested
             throw;
         }
         catch (HttpRequestException ex)
@@ -124,20 +162,20 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Printer Information
-    public async Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<PrinterInfo> GetInfoAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/info").ToString();
+        HttpClient client = GetClientForCredentials(credentials);
         try
         {
-            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
             _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<PrinterInfo>(json, _jsonOptions)!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Expected when cancellation is requested
             throw;
         }
         catch (HttpRequestException ex)
@@ -158,20 +196,20 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Status Information
-    public async Task<StatusInfo> GetStatusAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<StatusInfo> GetStatusAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/status").ToString();
+        HttpClient client = GetClientForCredentials(credentials);
         try
         {
-            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
             _ = response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize<StatusInfo>(json, _jsonOptions)!;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Expected when cancellation is requested
             throw;
         }
         catch (HttpRequestException ex)
@@ -192,10 +230,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Job Management
-    public async Task<Job?> GetJobAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<Job?> GetJobAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/job").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/job").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -207,54 +246,60 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return JsonSerializer.Deserialize<Job>(json, _jsonOptions);
     }
 
-    public async Task<bool> StopJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StopJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> PauseJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> PauseJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/pause").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/pause").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ResumeJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> ResumeJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/resume").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/resume").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ContinueJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> ContinueJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/continue").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/continue").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
     // Storage Management
-    public async Task<StorageListResponse> GetStorageAsync(string baseUrl, string? apiKey = null, string? acceptLanguage = null, CancellationToken ct = default)
+    public async Task<StorageListResponse> GetStorageAsync(string baseUrl, PrusaLinkCredentials? credentials = null, string? acceptLanguage = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/storage").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/storage").ToString(), credentials);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
         {
             request.Headers.Add("Accept-Language", acceptLanguage);
         }
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<StorageListResponse>(json, _jsonOptions)!;
     }
 
     // Transfer Management
-    public async Task<Transfer?> GetTransferAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<Transfer?> GetTransferAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/transfer").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/transfer").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -266,19 +311,21 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return JsonSerializer.Deserialize<Transfer>(json, _jsonOptions);
     }
 
-    public async Task<bool> StopTransferAsync(string baseUrl, int transferId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StopTransferAsync(string baseUrl, int transferId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/transfer/{transferId}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/transfer/{transferId}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
     // File Management
-    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
+    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default)
     {
+        HttpClient client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString();
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
         {
             request.Headers.Add("Accept-Language", acceptLanguage);
@@ -289,7 +336,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Headers.Add("Accept", accept);
         }
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
             _logger?.LogError($"PrusaLink API returned {response.StatusCode} for {url}");
@@ -316,11 +363,12 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     public async Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream,
-        string? apiKey = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default)
+        PrusaLinkCredentials? credentials = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(fileStream);
 
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
 
         request.Content = new StreamContent(fileStream);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -329,23 +377,25 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         request.Headers.Add("Print-After-Upload", printAfterUpload ? "?1" : "?0");
         request.Headers.Add("Overwrite", overwrite ? "?1" : "?0");
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
         request.Content = new StringContent(string.Empty);
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<FileStatus> CheckFileStatusAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    public async Task<FileStatus> CheckFileStatusAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Head, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Head, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -360,64 +410,71 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return new FileStatus(true, readOnly, currentlyPrinted);
     }
 
-    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
+    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null,
         bool force = false, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
         request.Headers.Add("Force", force ? "?1" : "?0");
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
     // Camera Management
-    public async Task<Camera[]> GetCamerasAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<Camera[]> GetCamerasAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<Camera[]>(json, _jsonOptions)!;
     }
 
-    public async Task<bool> SetCameraOrderAsync(string baseUrl, string[] cameraIds, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> SetCameraOrderAsync(string baseUrl, string[] cameraIds, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(cameraIds, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<CameraConfig> GetCameraConfigAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<CameraConfig> GetCameraConfigAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<CameraConfig>(json, _jsonOptions)!;
     }
 
-    public async Task<bool> SetupCameraAsync(string baseUrl, string cameraId, CameraConfigSet config, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> SetupCameraAsync(string baseUrl, string cameraId, CameraConfigSet config, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> DeleteCameraAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> DeleteCameraAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras/snap").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras/snap").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -428,10 +485,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -442,50 +500,56 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Patch, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), apiKey);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Patch, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ResetCameraConfigAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> ResetCameraConfigAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> RegisterCameraToConnectAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> RegisterCameraToConnectAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> UnregisterCameraFromConnectAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> UnregisterCameraFromConnectAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
     // Update Management
-    public async Task<UpdateInfo?> GetUpdateInfoAsync(string baseUrl, string environment = "prusalink", string? apiKey = null, CancellationToken ct = default)
+    public async Task<UpdateInfo?> GetUpdateInfoAsync(string baseUrl, string environment = "prusalink", PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -506,10 +570,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return updateInfo;
     }
 
-    public async Task<bool> StartUpdateAsync(string baseUrl, string environment = "prusalink", string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StartUpdateAsync(string baseUrl, string environment = "prusalink", PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        HttpClient client = GetClientForCredentials(credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
 
@@ -520,13 +585,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     /// Reference: FDM-Monster implementation at https://github.com/fdm-monster/fdm-monster
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink printer.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credentials">Optional credentials for authentication (API key and/or digest auth).</param>
     /// <param name="ct">The cancellation token.</param>
-    public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
     {
+        HttpClient client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/files").ToString();
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -568,14 +634,63 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return allFiles;
     }
 
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string? apiKey)
+    /// <summary>
+    /// Creates an HTTP request message with appropriate authentication headers.
+    /// Adds X-Api-Key header if API key is provided in credentials.
+    /// Digest authentication is handled by DigestAuthHandler at the HttpClient level.
+    /// </summary>
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, PrusaLinkCredentials? credentials)
     {
         HttpRequestMessage request = new(method, url);
-        if (!string.IsNullOrWhiteSpace(apiKey))
+
+        // Always add X-Api-Key header if available - PrusaLink uses this for read operations
+        if (credentials?.HasApiKey == true)
         {
-            request.Headers.Add("X-Api-Key", apiKey);
+            request.Headers.Add("X-Api-Key", credentials.ApiKey);
         }
 
         return request;
     }
+
+    // ========== BACKWARD COMPATIBLE OVERLOADS (string apiKey) ==========
+    // These methods provide backward compatibility for existing code that passes string? apiKey.
+    // They delegate to the primary methods after converting apiKey to PrusaLinkCredentials.
+    private static PrusaLinkCredentials? ToCredentials(string? apiKey)
+        => string.IsNullOrEmpty(apiKey) ? null : PrusaLinkCredentials.FromApiKey(apiKey);
+
+    public Task<VersionInfo> GetVersionAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetVersionAsync(baseUrl, ToCredentials(apiKey), ct);
+
+    public Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetInfoAsync(baseUrl, ToCredentials(apiKey), ct);
+
+    public Task<StatusInfo> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetStatusAsync(baseUrl, ToCredentials(apiKey), ct);
+
+    public Task<Job?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetJobAsync(baseUrl, ToCredentials(apiKey), ct);
+
+    public Task<bool> StopJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
+        => StopJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
+
+    public Task<bool> PauseJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
+        => PauseJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
+
+    public Task<bool> ResumeJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
+        => ResumeJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
+
+    public Task<StorageListResponse> GetStorageAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetStorageAsync(baseUrl, ToCredentials(apiKey), acceptLanguage: null, ct);
+
+    public Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct)
+        => GetFileInfoAsync(baseUrl, storagePath, filePath, ToCredentials(apiKey), acceptLanguage: null, accept: null, ct);
+
+    public Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey, CancellationToken ct)
+        => GetFilesLegacyAsync(baseUrl, ToCredentials(apiKey), ct);
+
+    public Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream, string? apiKey, bool printAfterUpload, bool overwrite, CancellationToken ct)
+        => UploadFileAsync(baseUrl, storagePath, filePath, fileStream, ToCredentials(apiKey), printAfterUpload, overwrite, ct);
+
+    public Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct)
+        => StartPrintAsync(baseUrl, storagePath, filePath, ToCredentials(apiKey), ct);
 }

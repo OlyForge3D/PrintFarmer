@@ -311,6 +311,10 @@ export interface CreatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
   backendPort?: number;
@@ -322,6 +326,10 @@ export interface TestConnectionRequest {
   serverUrl: string;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   backendPort?: number;
 }
 
@@ -358,6 +366,10 @@ export interface UpdatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
   // Printer capabilities
