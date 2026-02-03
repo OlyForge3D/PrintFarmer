@@ -15,8 +15,5 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install deps (tools)
-        run: npm ci
-        working-directory: ./
       - name: Run path casing check
         run: node ./scripts/check-path-casing.js

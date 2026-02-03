@@ -113,17 +113,28 @@ jobs:
           # Verify extraction
           echo "Extracted contents:"
           ls -la orcaslicer-extract/orcaslicer/ | head -20
+          echo "bin/ contents:"
+          ls -la orcaslicer-extract/orcaslicer/bin/ 2>/dev/null | head -10 || echo "No bin/ directory"
           
-          # Check for critical files
-          if [ ! -f orcaslicer-extract/orcaslicer/orca-slicer ]; then
-            # Try alternative binary name
-            if [ -f orcaslicer-extract/orcaslicer/OrcaSlicer ]; then
-              echo "Found OrcaSlicer binary"
-            else
-              echo "ERROR: orca-slicer binary not found!"
-              find orcaslicer-extract -name "*slicer*" -o -name "*Slicer*" | head -20
-              exit 1
+          # Check for binary in possible locations
+          BINARY_FOUND=false
+          for BINARY_PATH in \
+            "orcaslicer-extract/orcaslicer/bin/orca-slicer" \
+            "orcaslicer-extract/orcaslicer/bin/OrcaSlicer" \
+            "orcaslicer-extract/orcaslicer/orca-slicer" \
+            "orcaslicer-extract/orcaslicer/OrcaSlicer"; do
+            if [ -f "$BINARY_PATH" ]; then
+              echo "✓ Found binary at: $BINARY_PATH"
+              BINARY_FOUND=true
+              break
             fi
+          done
+          
+          if [ "$BINARY_FOUND" = false ]; then
+            echo "ERROR: orca-slicer binary not found in any expected location!"
+            echo "Searching for any slicer-related files:"
+            find orcaslicer-extract -type f -name "*slicer*" -o -name "*Slicer*" 2>/dev/null | head -20
+            exit 1
           fi
           
           echo "✓ AppImage extracted successfully"
@@ -155,19 +166,23 @@ jobs:
           # Copy extracted OrcaSlicer
           COPY orcaslicer-extract/orcaslicer /opt/orcaslicer
           
-          # Make binaries executable
-          RUN chmod +x /opt/orcaslicer/orca-slicer 2>/dev/null || \
+          # Make binaries executable (check bin/ subdir first, then root)
+          RUN chmod +x /opt/orcaslicer/bin/orca-slicer 2>/dev/null || \
+              chmod +x /opt/orcaslicer/bin/OrcaSlicer 2>/dev/null || \
+              chmod +x /opt/orcaslicer/orca-slicer 2>/dev/null || \
               chmod +x /opt/orcaslicer/OrcaSlicer 2>/dev/null || \
               chmod +x /opt/orcaslicer/AppRun 2>/dev/null || true
           
-          # Create symlink for consistent access
-          RUN ln -sf /opt/orcaslicer/orca-slicer /usr/local/bin/orca-slicer 2>/dev/null || \
+          # Create symlink for consistent access (check bin/ subdir first)
+          RUN ln -sf /opt/orcaslicer/bin/orca-slicer /usr/local/bin/orca-slicer 2>/dev/null || \
+              ln -sf /opt/orcaslicer/bin/OrcaSlicer /usr/local/bin/orca-slicer 2>/dev/null || \
+              ln -sf /opt/orcaslicer/orca-slicer /usr/local/bin/orca-slicer 2>/dev/null || \
               ln -sf /opt/orcaslicer/OrcaSlicer /usr/local/bin/orca-slicer 2>/dev/null || \
               ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orca-slicer 2>/dev/null
           
-          # Set library path
-          ENV LD_LIBRARY_PATH=/opt/orcaslicer/lib:/opt/orcaslicer:$LD_LIBRARY_PATH
-          ENV PATH=/opt/orcaslicer:$PATH
+          # Set library path (include bin/ and usr/lib)
+          ENV LD_LIBRARY_PATH=/opt/orcaslicer/bin:/opt/orcaslicer/usr/lib:/opt/orcaslicer/lib:/opt/orcaslicer:$LD_LIBRARY_PATH
+          ENV PATH=/opt/orcaslicer/bin:/opt/orcaslicer:$PATH
           
           # Verify binary works (--help should exit 0 or 1, not crash)
           RUN /usr/local/bin/orca-slicer --help 2>&1 | head -5 || echo "Binary check complete"

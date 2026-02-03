@@ -9,8 +9,8 @@ on:
       - '*.sln'
       - 'global.json'
       - 'Directory.Build.props'
-      - 'package.json'
-      - 'package-lock.json'
+      - 'src/Web/ReactApp/package.json'
+      - 'src/Web/ReactApp/package-lock.json'
       - '.github/workflows/ci.yml'
   pull_request:
     types: [opened, synchronize, reopened]
@@ -20,8 +20,8 @@ on:
       - '*.sln'
       - 'global.json'
       - 'Directory.Build.props'
-      - 'package.json'
-      - 'package-lock.json'
+      - 'src/Web/ReactApp/package.json'
+      - 'src/Web/ReactApp/package-lock.json'
       - '.github/workflows/ci.yml'
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: 24.x
           cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: src/Web/ReactApp/package-lock.json
 
       - name: Restore .NET
         working-directory: src
