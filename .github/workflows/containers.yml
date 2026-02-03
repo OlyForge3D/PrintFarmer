@@ -60,7 +60,7 @@ jobs:
         run: dotnet publish src/orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o ./publish/orcaslicer-worker --no-build
 
       - name: Publish Printer Discovery
-        run: dotnet publish src/printer-discovery/Farm.PrinterDiscovery.Service.csproj -c Release -o ./publish/printer-discovery --no-build
+        run: dotnet publish src/printer-discovery/PrinterDiscoveryService.csproj -c Release -o ./publish/printer-discovery --no-build
 
       - name: Upload API artifact
         uses: actions/upload-artifact@v4
@@ -266,7 +266,7 @@ jobs:
           WORKDIR /app
           COPY artifact/ ./
           EXPOSE 8080
-          ENTRYPOINT ["dotnet", "Farm.PrinterDiscovery.Service.dll"]
+          ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
           EOF
               ;;
             
