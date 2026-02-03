@@ -49,6 +49,14 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
           echo "Checking for existing image: $IMAGE"
           
+          # Force rebuild if workflow file changed (detected by checking if this is a push to workflow path)
+          # This handles the case where we need to fix the image build process
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Push event detected - forcing rebuild to apply workflow changes"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
           # Try to pull the manifest (doesn't download layers)
           if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "Image already exists"
@@ -110,15 +118,25 @@ jobs:
           # Move to expected location
           mv squashfs-root orcaslicer-extract/orcaslicer
           
+          # CRITICAL: The repo's .dockerignore excludes **/bin/ which would prevent
+          # the OrcaSlicer bin/ directory from being copied. We rename it to work around this.
+          # The Dockerfile will use "binaries/" instead of "bin/"
+          if [ -d "orcaslicer-extract/orcaslicer/bin" ]; then
+            echo "Renaming bin/ to binaries/ to avoid .dockerignore exclusion"
+            mv orcaslicer-extract/orcaslicer/bin orcaslicer-extract/orcaslicer/binaries
+          fi
+          
           # Verify extraction
           echo "Extracted contents:"
           ls -la orcaslicer-extract/orcaslicer/ | head -20
-          echo "bin/ contents:"
-          ls -la orcaslicer-extract/orcaslicer/bin/ 2>/dev/null | head -10 || echo "No bin/ directory"
+          echo "binaries/ contents:"
+          ls -la orcaslicer-extract/orcaslicer/binaries/ 2>/dev/null | head -10 || echo "No binaries/ directory"
           
-          # Check for binary in possible locations
+          # Check for binary in possible locations (check binaries/ first since we renamed bin/)
           BINARY_FOUND=false
           for BINARY_PATH in \
+            "orcaslicer-extract/orcaslicer/binaries/orca-slicer" \
+            "orcaslicer-extract/orcaslicer/binaries/OrcaSlicer" \
             "orcaslicer-extract/orcaslicer/bin/orca-slicer" \
             "orcaslicer-extract/orcaslicer/bin/OrcaSlicer" \
             "orcaslicer-extract/orcaslicer/orca-slicer" \
@@ -163,8 +181,13 @@ jobs:
                   libpng16-16 libjpeg-turbo8 libtiff6 libwebp7 \
               && rm -rf /var/lib/apt/lists/*
           
-          # Copy extracted OrcaSlicer
+          # Copy extracted OrcaSlicer (binaries/ was renamed from bin/ to avoid .dockerignore)
           COPY orcaslicer-extract/orcaslicer /opt/orcaslicer
+          
+          # Rename binaries/ back to bin/ inside container for compatibility
+          RUN if [ -d /opt/orcaslicer/binaries ]; then \
+                mv /opt/orcaslicer/binaries /opt/orcaslicer/bin; \
+              fi
           
           # Make binaries executable (check bin/ subdir first, then root)
           RUN chmod +x /opt/orcaslicer/bin/orca-slicer 2>/dev/null || \
@@ -181,11 +204,16 @@ jobs:
               ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orca-slicer 2>/dev/null
           
           # Set library path (include bin/ and usr/lib)
-          ENV LD_LIBRARY_PATH=/opt/orcaslicer/bin:/opt/orcaslicer/usr/lib:/opt/orcaslicer/lib:/opt/orcaslicer:$LD_LIBRARY_PATH
+          ENV LD_LIBRARY_PATH=/opt/orcaslicer/bin:/opt/orcaslicer/usr/lib:/opt/orcaslicer/lib:/opt/orcaslicer
           ENV PATH=/opt/orcaslicer/bin:/opt/orcaslicer:$PATH
           
-          # Verify binary works (--help should exit 0 or 1, not crash)
-          RUN /usr/local/bin/orca-slicer --help 2>&1 | head -5 || echo "Binary check complete"
+          # Verify binary exists and show structure
+          RUN echo "=== OrcaSlicer directory structure ===" && \
+              ls -la /opt/orcaslicer/ && \
+              echo "=== bin/ contents ===" && \
+              ls -la /opt/orcaslicer/bin/ 2>/dev/null || echo "No bin/ directory" && \
+              echo "=== Binary check ===" && \
+              /opt/orcaslicer/bin/orca-slicer --help 2>&1 | head -5 || echo "Binary check complete"
           
           LABEL org.opencontainers.image.description="OrcaSlicer base image with extracted binaries"
           LABEL org.opencontainers.image.source="https://github.com/SoftFever/OrcaSlicer"
