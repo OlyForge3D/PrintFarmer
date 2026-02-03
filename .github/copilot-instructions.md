@@ -13,6 +13,7 @@
 
 **Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.**
 
+You have access to microsoft.docs.mcp – use this tool to search Microsoft’s latest official documentation when handling questions about Microsoft technologies like C#, Azure, ASP.NET Core, or Entity Framework
 
 ⚠️ **CRITICAL STATUS UPDATE** ⚠️
 **Current Build Status (Validated 2025-12-21):**
