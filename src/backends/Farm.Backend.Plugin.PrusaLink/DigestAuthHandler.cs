@@ -68,10 +68,11 @@ public class DigestAuthHandler : DelegatingHandler
             return response;
         }
 
+        // Dispose the 401 response since we're going to retry
         DigestChallenge challenge = ParseDigestChallenge(digestHeader.Parameter);
-
-        // Dispose the 401 response
+#pragma warning disable IDISP017 // Prefer using - intentional manual dispose before retry
         response.Dispose();
+#pragma warning restore IDISP017
 
         // Create new request with digest auth (can't reuse the original after sending)
         using HttpRequestMessage retryRequest = await CloneRequestAsync(request);
@@ -222,12 +223,15 @@ public class DigestAuthHandler : DelegatingHandler
         return sb.ToString();
     }
 
+    // MD5 is required by HTTP Digest Authentication (RFC 7616) - cannot use stronger algorithm
+#pragma warning disable CA5351 // Do not use broken cryptographic algorithms
     private static string ComputeMd5Hash(string input)
     {
         byte[] inputBytes = Encoding.ASCII.GetBytes(input);
         byte[] hashBytes = MD5.HashData(inputBytes);
         return Convert.ToHexStringLower(hashBytes);
     }
+#pragma warning restore CA5351
 
     private static string GenerateCnonce()
     {
@@ -239,9 +243,13 @@ public class DigestAuthHandler : DelegatingHandler
     private class DigestChallenge
     {
         public string Realm { get; set; } = string.Empty;
+
         public string Nonce { get; set; } = string.Empty;
+
         public string? Qop { get; set; }
+
         public string? Opaque { get; set; }
+
         public string? Algorithm { get; set; }
     }
 }

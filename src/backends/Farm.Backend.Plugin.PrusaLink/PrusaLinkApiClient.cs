@@ -38,7 +38,10 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         };
     }
 
+    // Intentionally caches HttpClient instances per credential set for connection reuse
+#pragma warning disable IDISP015 // Member should not return created and cached instance
     private HttpClient GetClientForCredentials(PrusaLinkCredentials? credentials)
+#pragma warning restore IDISP015
     {
         // If no digest auth credentials, use the default client
         if (credentials == null || !credentials.HasDigestAuth)
@@ -693,4 +696,218 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct)
         => StartPrintAsync(baseUrl, storagePath, filePath, ToCredentials(apiKey), ct);
+
+    // ========== LEGACY ENDPOINT IMPLEMENTATIONS (OctoPrint-compatible, require HTTP Digest Auth) ==========
+    // These endpoints provide pause/resume, temperature control, and movement capabilities
+    public async Task<bool> PausePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] PausePrintLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/job").ToString();
+
+        try
+        {
+            LegacyJobCommand command = new() { Command = "pause", Action = "pause" };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] PausePrintLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> ResumePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] ResumePrintLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/job").ToString();
+
+        try
+        {
+            LegacyJobCommand command = new() { Command = "pause", Action = "resume" };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] ResumePrintLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, int toolIndex = 0, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] SetToolTemperatureLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/tool").ToString();
+
+        try
+        {
+            LegacyToolCommand command = new()
+            {
+                Command = "target",
+                Targets = new Dictionary<string, double> { [$"tool{toolIndex}"] = temperature }
+            };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] SetToolTemperatureLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] SetBedTemperatureLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/bed").ToString();
+
+        try
+        {
+            LegacyBedCommand command = new() { Command = "target", Target = temperature };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] SetBedTemperatureLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] JogPrintHeadLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
+
+        try
+        {
+            LegacyPrintheadCommand command = new()
+            {
+                Command = "jog",
+                X = x,
+                Y = y,
+                Z = z,
+                Speed = feedRate
+            };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] JogPrintHeadLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        if (!credentials.HasDigestAuth)
+        {
+            _logger?.LogWarning("[PrusaLink] HomePrintHeadLegacy requires digest auth credentials");
+            return false;
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
+
+        try
+        {
+            // Build axes list based on what needs to be homed
+            List<string> axes = new();
+            if (homeX)
+            {
+                axes.Add("x");
+            }
+
+            if (homeY)
+            {
+                axes.Add("y");
+            }
+
+            if (homeZ)
+            {
+                axes.Add("z");
+            }
+
+            LegacyPrintheadCommand command = new()
+            {
+                Command = "home",
+                Axes = axes.ToArray()
+            };
+            string jsonContent = JsonSerializer.Serialize(command, _jsonOptions);
+
+            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, url, credentials);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"[PrusaLink] HomePrintHeadLegacy failed for {baseUrl}: {ex.Message}");
+            return false;
+        }
+    }
 }

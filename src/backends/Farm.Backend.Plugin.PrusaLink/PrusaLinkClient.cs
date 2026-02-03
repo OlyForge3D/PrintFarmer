@@ -17,7 +17,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsStartPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
-    ISupportsControlOperations
+    ISupportsControlOperations,
+    ISupportsMovement,
+    ISupportsTemperatureControl
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly IUnifiedLoggingService? _logger;
@@ -721,24 +723,161 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
     /// <summary>
     /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
-    /// PrusaLink supports job cancel via StopPrintAsync. Pause/Resume are not fully supported.
+    /// PrusaLink supports job cancel via StopPrintAsync.
+    /// Pause/Resume require HTTP Digest Auth via legacy /api/job endpoint.
+    /// The apiKey parameter should be in format "username:password" for digest auth operations.
     /// </summary>
     public async Task<bool> PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        // PrusaLink doesn't have a dedicated pause API - would need to send M25 via G-code if supported
-        _logger?.LogWarning($"[PrusaLink] Pause not supported for PrusaLink printers at {baseUrl}");
-        return false;
+        // Try to get digest auth credentials from apiKey (format: "username:password")
+        PrusaLinkCredentials? credentials = ParseCredentialsFromApiKey(apiKey);
+        if (credentials?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Pause requires digest auth credentials (format: username:password) at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.PausePrintLegacyAsync(baseUrl, credentials, ct);
     }
 
     public async Task<bool> ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        // PrusaLink doesn't have a dedicated resume API - would need to send M24 via G-code if supported
-        _logger?.LogWarning($"[PrusaLink] Resume not supported for PrusaLink printers at {baseUrl}");
-        return false;
+        // Try to get digest auth credentials from apiKey (format: "username:password")
+        PrusaLinkCredentials? credentials = ParseCredentialsFromApiKey(apiKey);
+        if (credentials?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Resume requires digest auth credentials (format: username:password) at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.ResumePrintLegacyAsync(baseUrl, credentials, ct);
     }
 
     public async Task<bool> CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
         => await StopPrintAsync(baseUrl, apiKey, ct);
+
+    /// <summary>
+    /// ISupportsMovement implementations - home and jog operations.
+    /// These require HTTP Digest Auth via legacy /api/printer/printhead endpoint.
+    /// The apiKey parameter should be in format "username:password" for digest auth operations.
+    /// </summary>
+    public async Task<bool> HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        PrusaLinkCredentials? credentials = ParseCredentialsFromApiKey(apiKey);
+        if (credentials?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Home requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.HomePrintHeadLegacyAsync(baseUrl, homeX: true, homeY: true, homeZ: true, credentials, ct);
+    }
+
+    public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
+    {
+        // Without credentials, we can't perform the operation
+        _logger?.LogWarning($"[PrusaLink] SendHome requires digest auth credentials at {baseUrl}");
+        return false;
+    }
+
+    public async Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default)
+    {
+        // Without credentials, we can't perform the operation
+        _logger?.LogWarning($"[PrusaLink] HomeXY requires digest auth credentials at {baseUrl}");
+        return false;
+    }
+
+    public async Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default)
+    {
+        // Without credentials, we can't perform the operation
+        _logger?.LogWarning($"[PrusaLink] HomeZ requires digest auth credentials at {baseUrl}");
+        return false;
+    }
+
+    public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        PrusaLinkCredentials? credentials = ParseCredentialsFromApiKey(apiKey);
+        if (credentials?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Move requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.JogPrintHeadLegacyAsync(baseUrl, x, y, z, f, credentials, ct);
+    }
+
+    public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    {
+        // PrusaLink legacy API only supports relative jog, not absolute positioning
+        _logger?.LogWarning($"[PrusaLink] MoveToAsync (absolute positioning) not supported via legacy API at {baseUrl}");
+        return false;
+    }
+
+    /// <summary>
+    /// ISupportsTemperatureControl implementation - set hotend and bed temperatures.
+    /// Requires HTTP Digest Auth via legacy /api/printer/tool and /api/printer/bed endpoints.
+    /// The apiKey parameter should be in format "username:password" for digest auth operations.
+    /// </summary>
+    public async Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        PrusaLinkCredentials? credentials = ParseCredentialsFromApiKey(apiKey);
+        if (credentials?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] SetTemperatures requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        bool success = true;
+
+        // Set hotend temperature if specified
+        if (hotendTemp.HasValue)
+        {
+            bool toolResult = await _apiClient.SetToolTemperatureLegacyAsync(baseUrl, hotendTemp.Value, credentials, toolIndex: 0, ct);
+            if (!toolResult)
+            {
+                _logger?.LogWarning($"[PrusaLink] Failed to set hotend temperature to {hotendTemp.Value}°C at {baseUrl}");
+                success = false;
+            }
+        }
+
+        // Set bed temperature if specified
+        if (bedTemp.HasValue)
+        {
+            bool bedResult = await _apiClient.SetBedTemperatureLegacyAsync(baseUrl, bedTemp.Value, credentials, ct);
+            if (!bedResult)
+            {
+                _logger?.LogWarning($"[PrusaLink] Failed to set bed temperature to {bedTemp.Value}°C at {baseUrl}");
+                success = false;
+            }
+        }
+
+        return success;
+    }
+
+    /// <summary>
+    /// Parses credentials from apiKey string.
+    /// If apiKey contains ":", it's treated as "username:password" for digest auth.
+    /// Otherwise, it's treated as a simple API key.
+    /// </summary>
+    private static PrusaLinkCredentials? ParseCredentialsFromApiKey(string? apiKey)
+    {
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            return null;
+        }
+
+        // Check if apiKey is in "username:password" format for digest auth
+        int colonIndex = apiKey.IndexOf(':');
+        if (colonIndex > 0 && colonIndex < apiKey.Length - 1)
+        {
+            string username = apiKey.Substring(0, colonIndex);
+            string password = apiKey.Substring(colonIndex + 1);
+            return PrusaLinkCredentials.FromDigestAuth(username, password);
+        }
+
+        // Treat as simple API key
+        return PrusaLinkCredentials.FromApiKey(apiKey);
+    }
 }
 
 #pragma warning restore CS1066

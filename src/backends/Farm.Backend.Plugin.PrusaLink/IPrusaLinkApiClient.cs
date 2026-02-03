@@ -99,4 +99,25 @@ public interface IPrusaLinkApiClient
 
     /// <summary>Starts a print from an uploaded file (backward compatible).</summary>
     Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct);
+
+    // ========== LEGACY ENDPOINTS (OctoPrint-compatible, require HTTP Digest Auth) ==========
+    // These endpoints provide pause/resume, temperature control, and movement capabilities
+
+    /// <summary>Pauses the current print job via legacy /api/job endpoint (requires digest auth).</summary>
+    Task<bool> PausePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default);
+
+    /// <summary>Resumes the current print job via legacy /api/job endpoint (requires digest auth).</summary>
+    Task<bool> ResumePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default);
+
+    /// <summary>Sets hotend (tool) temperature via legacy /api/printer/tool endpoint (requires digest auth).</summary>
+    Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, int toolIndex = 0, CancellationToken ct = default);
+
+    /// <summary>Sets bed temperature via legacy /api/printer/bed endpoint (requires digest auth).</summary>
+    Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, CancellationToken ct = default);
+
+    /// <summary>Jogs the print head by relative distances via legacy /api/printer/printhead endpoint (requires digest auth).</summary>
+    Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrusaLinkCredentials credentials, CancellationToken ct = default);
+
+    /// <summary>Homes specified axes via legacy /api/printer/printhead endpoint (requires digest auth).</summary>
+    Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrusaLinkCredentials credentials, CancellationToken ct = default);
 }

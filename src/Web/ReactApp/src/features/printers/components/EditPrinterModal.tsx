@@ -64,6 +64,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
           : printerDetails.backend,
         apiKey: printerDetails.apiKey,
+        username: printerDetails.username,
+        password: printerDetails.password,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
         // Printer capabilities
@@ -152,7 +154,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     // Compare each field
     const fields: (keyof UpdatePrinterDto)[] = [
       'name', 'serverUrl', 'notes', 'manufacturerId', 'modelId',
-      'newManufacturerName', 'newModelName', 'backend', 'apiKey',
+      'newManufacturerName', 'newModelName', 'backend', 'apiKey', 'username', 'password',
       'cameraStreamUrl', 'cameraSnapshotUrl', 'nozzleDiameter',
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
@@ -522,15 +524,39 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
-            {(formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && (
+            {/* PrusaLink uses Digest Authentication (username/password) */}
+            {formData.backend === PrinterBackend.PrusaLink && (
+              <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Username">
+                  <Input
+                    type="text"
+                    value={formData.username || 'maker'}
+                    onChange={e => handleInputChange('username', e.target.value)}
+                    placeholder="maker"
+                    title="PrusaLink username (usually 'maker')"
+                  />
+                </FormField>
+                <FormField label="Password">
+                  <Input
+                    type="password"
+                    value={formData.password || ''}
+                    onChange={e => handleInputChange('password', e.target.value)}
+                    placeholder="From printer Settings → Network → Credentials"
+                    title="PrusaLink password from printer settings"
+                  />
+                </FormField>
+              </div>
+            )}
+            {/* OctoPrint uses API Key authentication */}
+            {formData.backend === PrinterBackend.OctoPrint && (
               <div className="col-span-2">
-                <FormField label={formData.backend === PrinterBackend.PrusaLink ? "API Key (PrusaLink)" : "API Key (OctoPrint)"}>
+                <FormField label="API Key (OctoPrint)">
                   <Input
                     type="text"
                     value={formData.apiKey || ''}
                     onChange={e => handleInputChange('apiKey', e.target.value)}
-                    placeholder={formData.backend === PrinterBackend.PrusaLink ? "Enter PrusaLink API Key" : "Enter OctoPrint API Key"}
-                    title={formData.backend === PrinterBackend.PrusaLink ? "PrusaLink API Key" : "OctoPrint API Key"}
+                    placeholder="Enter OctoPrint API Key"
+                    title="OctoPrint API Key"
                   />
                 </FormField>
               </div>

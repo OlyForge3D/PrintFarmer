@@ -213,6 +213,16 @@ public class PrinterExportDto
     public int Backend { get; set; }
 
     public bool IsAvailable { get; set; }
+
+    /// <summary>
+    /// Username for Digest authentication (PrusaLink)
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Password for Digest authentication (PrusaLink)
+    /// </summary>
+    public string? Password { get; set; }
 }
 
 /// <summary>
