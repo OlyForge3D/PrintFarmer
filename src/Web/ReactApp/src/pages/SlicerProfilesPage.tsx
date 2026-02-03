@@ -13,7 +13,7 @@ import {
   SlicerProfileExportDto 
 } from '@/services/slicerProfilesService';
 import { officialProfilesService } from '@/services/officialProfilesService';
-import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
+import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { Settings, Download, Upload, Search, Filter } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';

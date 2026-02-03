@@ -6,7 +6,7 @@
 name: printfarmer
 
 services:
-  # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
+  # Database (configurable via environment - supports PostgreSQL, SQL Server)
   database:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: printfarmer-database
@@ -19,11 +19,7 @@ services:
       ACCEPT_EULA: ${ACCEPT_EULA:-Y}
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: ${MSSQL_PID:-Developer}
-      # MySQL (when using mysql:8.0)
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DATABASE_NAME:-printfarmer}
-      MYSQL_USER: ${DATABASE_USER:-printfarmer}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:

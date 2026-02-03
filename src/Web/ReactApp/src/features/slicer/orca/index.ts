@@ -1,8 +1,9 @@
 /**
- * OrcaSlicer v2.3.1 UI Export
+ * OrcaSlicer UI Export
  *
- * This file aggregates all OrcaSlicer-specific UI components, services, types, and hooks.
- * The React app imports these exports and registers them with the SlicerUIRegistry.
+ * This file aggregates all OrcaSlicer-specific UI components, services, types.
+ * These were previously in a separate workspace package (@farm/slicers-orcaslicer-v2_3_1)
+ * and have been consolidated into the main ReactApp for simpler builds.
  */
 
 // OrcaSlicer UI Components

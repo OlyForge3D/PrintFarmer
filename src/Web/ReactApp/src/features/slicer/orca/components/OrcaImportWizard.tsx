@@ -13,10 +13,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UploadIcon, CheckIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon, CheckCircleIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation } from '@tanstack/react-query';
 import { orcaProfilesService } from '../services/orcaProfilesService';
-import { OrcaBundlePreview } from '../types/orcaProfiles';
+import type { OrcaBundlePreview } from '../types/orcaProfiles';
 
 type WizardStep = 'upload' | 'preview' | 'review' | 'import' | 'complete';
 
@@ -141,7 +141,7 @@ export const OrcaImportWizard: React.FC = () => {
                     id="bundle-upload"
                 />
                 <label htmlFor="bundle-upload" className="cursor-pointer">
-                    <Upload className="w-12 h-12 mx-auto mb-4 text-pf-text-muted" />
+                    <UploadIcon className="w-12 h-12 mx-auto mb-4 text-pf-text-muted" />
                     <p className="text-lg font-medium mb-2 text-pf-text-primary">
                         {bundleJson ? 'File loaded' : 'Click to select bundle file'}
                     </p>
@@ -428,7 +428,7 @@ export const OrcaImportWizard: React.FC = () => {
 
     const renderCompleteStep = () => (
         <div className="max-w-2xl mx-auto text-center">
-            <CheckCircle className="w-20 h-20 mx-auto mb-6 text-pf-accent" />
+            <CheckCircleIcon className="w-20 h-20 mx-auto mb-6 text-pf-accent" />
             <h2 className="text-3xl font-bold mb-4 text-pf-text-primary">Import Complete!</h2>
             <p className="text-lg text-pf-text-secondary mb-8">
                 Your OrcaSlicer presets have been successfully imported.

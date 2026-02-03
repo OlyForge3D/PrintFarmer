@@ -662,13 +662,6 @@ ensure_database_passwords() {
             print_error "SQL Server password is empty. Update SQLSERVER_PASSWORD in $ENV_FILE and rerun."
             exit 3
             ;;
-        mysql)
-            if [ -n "${MYSQL_PASSWORD:-}${MYSQL_ROOT_PASSWORD:-}" ]; then
-                return 0
-            fi
-            print_error "MySQL password is empty. Update MYSQL_PASSWORD in $ENV_FILE and rerun."
-            exit 3
-            ;;
     esac
 }
 
@@ -684,11 +677,6 @@ mask_secret_short() {
 
 ensure_connection_string_password() {
     local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
-    
-    # SQLite doesn't require a password
-    if [ "$provider" = "sqlite" ]; then
-        return 0
-    fi
     
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
@@ -711,12 +699,6 @@ ensure_connection_string_password() {
             fallback_pw=$(get_kv_from_file "$ENV_FILE" "SQLSERVER_PASSWORD" || true)
             if [ -z "$fallback_pw" ]; then
                 fallback_pw=$(get_kv_from_file "$ENV_FILE" "MSSQL_SA_PASSWORD" || true)
-            fi
-            ;;
-        mysql)
-            fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_PASSWORD" || true)
-            if [ -z "$fallback_pw" ]; then
-                fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_ROOT_PASSWORD" || true)
             fi
             ;;
     esac
@@ -1050,26 +1032,6 @@ run_api_diagnostics() {
                     dc exec -T database /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$sql_password" -Q "SELECT name FROM sys.databases;" || true
                 else
                     print_warning "SQLSERVER_PASSWORD not found; skipping SQL Server diagnostics."
-                fi
-            fi
-            ;;
-        mysql)
-            if dc --format json ps --services 2>/dev/null | grep -q '^database$'; then
-                local mysql_user mysql_password mysql_db
-                mysql_user=$(get_env_value "MYSQL_USER"); mysql_user=${mysql_user:-root}
-                mysql_password=$(get_env_value "MYSQL_ROOT_PASSWORD")
-                if [ -z "$mysql_password" ]; then
-                    mysql_password=$(get_env_value "MYSQL_PASSWORD")
-                fi
-                mysql_db=$(get_env_value "MYSQL_DB"); mysql_db=${mysql_db:-printfarmer}
-
-                    if [ -n "$mysql_password" ]; then
-                    print_info "MySQL ping (mysqladmin):"
-                    dc exec -T database sh -c "mysqladmin ping -h 127.0.0.1 -u \"$mysql_user\" --password=\"$mysql_password\"" || true
-                    print_info "Sample database tables:"
-                    dc exec -T database sh -c "mysql -u \"$mysql_user\" --password=\"$mysql_password\" $mysql_db -e \"SHOW TABLES;\" | head -n 10" || true
-                else
-                    print_warning "MySQL password not found; skipping MySQL diagnostics."
                 fi
             fi
             ;;
@@ -2002,7 +1964,7 @@ tear_down_deployment() {
     # This helps on systems where compose project names or previous runs left DB containers behind
     print_info "Ensuring PrintFarmer database containers are removed"
     # Look for both generic database containers and provider-specific legacy containers
-    containers=$(docker ps -a --format '{{.Names}}' | grep -E "printfarmer-database|pfarm-(postgres|sqlserver|mysql)" || true)
+    containers=$(docker ps -a --format '{{.Names}}' | grep -E "printfarmer-database|pfarm-(postgres|sqlserver)" || true)
     if [ -n "$containers" ]; then
         print_warning "Found database containers to remove: $containers"
         docker rm -f $containers 2>/dev/null || true
@@ -2330,7 +2292,7 @@ COMPOSE GENERATOR OPTIONS:
         --include-telemetry Legacy flag - telemetry now included by default
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
-        --include-discovery Include network printer discovery service (microservices only)
+        --include-discovery Include network printer discovery service
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
@@ -2426,8 +2388,8 @@ EXAMPLES:
     # Deploy with full observability stack
     ./scripts/deploy-docker.sh --architecture microservices --include-monitoring --include-telemetry
     
-    # Deploy monolithic with security and registry
-    ./scripts/deploy-docker.sh --architecture monolithic --include-security --include-registry
+    # Deploy monolithic with discovery, security and registry
+    ./scripts/deploy-docker.sh --architecture monolithic --include-discovery --include-security --include-registry
     
     # Deploy microservices with printer discovery service
     ./scripts/deploy-docker.sh --architecture microservices --include-discovery
@@ -2468,7 +2430,6 @@ DATABASE OPTIONS:
                          • Developer: Free, full-featured (dev/test only)
                          • Express: Free, production-ready (10GB limit)
                          • Standard/Enterprise: Requires commercial license
-    3. MySQL           - Popular open source database
     4. External        - Use your own database server
 
 NETWORK MODES:
@@ -2496,10 +2457,10 @@ DATA PERSISTENCE (P0 Requirement):
         export EXTERNAL_PROFILES_PATH=/path/to/profiles
         ./scripts/deploy-docker.sh --non-interactive
 
-PRINTER DISCOVERY (MICROSERVICES ONLY):
+PRINTER DISCOVERY:
     The network printer discovery service automatically scans your local network 
     to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
-    - Enabled by default in microservices deployments
+    - Available in both monolithic and microservices deployments
     - Runs on the configured Docker network and can be tuned via discovery ranges
     - Scans configurable IP ranges periodically
     - Supports both automatic push and manual pull discovery modes
@@ -2587,22 +2548,14 @@ save_deployment_config() {
     # database credentials or enabling other DB containers in future runs.
     SAVE_INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
     SAVE_INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
-    SAVE_INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
     case "${DB_PROVIDER:-}" in
         postgres)
             SAVE_INCLUDE_POSTGRES=yes
             SAVE_INCLUDE_SQLSERVER=no
-            SAVE_INCLUDE_MYSQL=no
             ;;
         sqlserver)
             SAVE_INCLUDE_POSTGRES=no
             SAVE_INCLUDE_SQLSERVER=yes
-            SAVE_INCLUDE_MYSQL=no
-            ;;
-        mysql)
-            SAVE_INCLUDE_POSTGRES=no
-            SAVE_INCLUDE_SQLSERVER=no
-            SAVE_INCLUDE_MYSQL=yes
             ;;
         *)
             # Leave provided values as-is for unknown/external providers
@@ -2631,7 +2584,6 @@ DB_PASSWORD=${DB_PASSWORD:-}
 # unrelated DB credentials or enabling unintended DB containers later.
 INCLUDE_POSTGRES=$SAVE_INCLUDE_POSTGRES
 INCLUDE_SQLSERVER=$SAVE_INCLUDE_SQLSERVER
-INCLUDE_MYSQL=$SAVE_INCLUDE_MYSQL
 # Connection string (generic)
 CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
 # Network Configuration
@@ -2666,15 +2618,6 @@ SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
 SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
 SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
-EOF
-            ;;
-        mysql)
-            cat >> "$CONFIG_FILE" << EOF
-
-# MySQL Configuration
-MYSQL_DB=${MYSQL_DB:-printfarmer}
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
 EOF
             ;;
         *)
@@ -3011,14 +2954,14 @@ choose_architecture() {
     echo "   • Single container with API + Web frontend"
     echo "   • Simpler configuration and networking"
     echo "   • Good for most deployments"
-    echo "   • Uses SQLite database by default"
+    echo "   • Uses PostgreSQL database by default"
     echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     echo -e "${GREEN}2. Microservices (Advanced)${NC}"
     echo "   • Separate containers for API, Web, Database"
     echo "   • Enhanced networking capabilities"
     echo "   • Better for large-scale deployments"
-    echo "   • Supports PostgreSQL, SQL Server, MySQL"
+    echo "   • Supports PostgreSQL, SQL Server"
     echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     
@@ -3187,12 +3130,6 @@ validate_configuration() {
 configure_database() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
-        # Validate SQLite is only used with monolithic architecture
-        if [ "${DB_PROVIDER:-}" = "sqlite" ] && [ "$ARCHITECTURE" != "monolithic" ]; then
-            print_error "SQLite can only be used with monolithic architecture, not $ARCHITECTURE"
-            print_error "Please use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
-            exit 1
-        fi
         print_info "Using configured database: $DB_PROVIDER"
         return 0
     fi
@@ -3201,62 +3138,8 @@ configure_database() {
     
     if [ "$ARCHITECTURE" = "monolithic" ]; then
         echo -e "${BLUE}Monolithic deployment supports:${NC}"
-        echo "1. SQLite (recommended) - No additional setup"
-        echo "2. External database - Requires separate setup"
-        echo
-        
-        # Map DB_PROVIDER to menu choice number for default
-        local default_choice="1"
-        case "${DB_PROVIDER:-sqlite}" in
-            sqlite) default_choice="1" ;;
-            postgres|sqlserver|mysql) default_choice="2" ;;
-        esac
-        
-        prompt_with_default "Choose database [1=SQLite, 2=External]:" "$default_choice" "DB_CHOICE"
-        
-        case "$DB_CHOICE" in
-            1|sqlite|SQLite)
-                DB_PROVIDER="sqlite"
-                CONNECTION_STRING="Data Source=/data/farm.db"
-                print_success "Using SQLite - Data will persist in Docker volume"
-                ;;
-            2|external|External|postgres|sqlserver|mysql)
-                # If user selected 2 but we don't have a previous provider, ask which one
-                if [ "$DB_CHOICE" = "2" ] || [ "$DB_CHOICE" = "external" ] || [ "$DB_CHOICE" = "External" ]; then
-                    local prev_external="${DB_PROVIDER:-postgres}"
-                    [ "$prev_external" = "sqlite" ] && prev_external="postgres"
-                    prompt_with_default "External database type [postgres/sqlserver/mysql]:" "$prev_external" "DB_PROVIDER"
-                fi
-                
-                case "$DB_PROVIDER" in
-                    postgres)
-                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                        ;;
-                    sqlserver)
-                        prompt_with_default "SQL Server connection string:" "Server=your-sql-server;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;" "CONNECTION_STRING"
-                        ;;
-                    mysql)
-                        prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
-                        ;;
-                    *)
-                        print_warning "Unknown database type, using PostgreSQL as fallback"
-                        DB_PROVIDER="postgres"
-                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                        ;;
-                esac
-                ;;
-            *)
-                print_warning "Unknown choice, using PostgreSQL as fallback"
-                DB_PROVIDER="postgres"
-                prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                ;;
-        esac
-    else
-        echo -e "${BLUE}Microservices deployment supports:${NC}"
         echo "1. PostgreSQL (recommended) - Included container"
         echo "2. SQL Server - Included container"
-        echo "3. MySQL - Included container"
-        echo "4. External database - Your own database server"
         echo
         
         # Map DB_PROVIDER to menu choice number for default
@@ -3264,11 +3147,87 @@ configure_database() {
         case "${DB_PROVIDER:-postgres}" in
             postgres) default_choice="1" ;;
             sqlserver) default_choice="2" ;;
-            mysql) default_choice="3" ;;
+        esac
+        
+        prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server]:" "$default_choice" "DB_CHOICE"
+        
+        case "$DB_CHOICE" in
+            1|postgres|PostgreSQL)
+                DB_PROVIDER="postgres"
+                prompt_with_default "PostgreSQL database name:" "${POSTGRES_DB:-printfarmer}" "POSTGRES_DB"
+                prompt_with_default "PostgreSQL username:" "${POSTGRES_USER:-postgres}" "POSTGRES_USER"
+                if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+                    POSTGRES_PASSWORD=$(generate_random_password)
+                    DB_PASSWORD=${DB_PASSWORD:-$POSTGRES_PASSWORD}
+                fi
+                prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
+                DB_PASSWORD="$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                INCLUDE_POSTGRES="yes"
+                ;;
+            2|sqlserver|"SQL Server")
+                DB_PROVIDER="sqlserver"
+                echo
+                echo -e "${BLUE}SQL Server Edition:${NC}"
+                echo "1. Developer - Free, full-featured (recommended for development/testing)"
+                echo "2. Express - Free, limited features (10GB max, production-ready)"
+                echo
+                prompt_with_default "Choose SQL Server edition [1=Developer, 2=Express]:" "${SQLSERVER_EDITION:-1}" "SQLSERVER_EDITION_CHOICE"
+                
+                case "$SQLSERVER_EDITION_CHOICE" in
+                    1|developer|Developer)
+                        SQLSERVER_EDITION="Developer"
+                        ;;
+                    2|express|Express)
+                        SQLSERVER_EDITION="Express"
+                        ;;
+                    *)
+                        SQLSERVER_EDITION="Developer"
+                        print_info "Using Developer edition as default"
+                        ;;
+                esac
+                
+                print_info "Using SQL Server $SQLSERVER_EDITION edition"
+                echo
+                prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
+                if [ -z "${SQLSERVER_PASSWORD:-}" ]; then
+                    SQLSERVER_PASSWORD=$(generate_random_password)
+                    DB_PASSWORD=${DB_PASSWORD:-$SQLSERVER_PASSWORD}
+                fi
+                prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
+                prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
+                DB_PASSWORD="$SQLSERVER_PASSWORD"
+                CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+                INCLUDE_SQLSERVER="yes"
+                ;;
+            *)
+                print_warning "Unknown choice, using PostgreSQL as fallback"
+                DB_PROVIDER="postgres"
+                POSTGRES_DB="printfarmer"
+                POSTGRES_USER="postgres"
+                POSTGRES_PASSWORD="postgres"
+                DB_PASSWORD="postgres"
+                CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                INCLUDE_POSTGRES="yes"
+                ;;
+        esac
+    else
+        echo -e "${BLUE}Microservices deployment supports:${NC}"
+        echo "1. PostgreSQL (recommended) - Included container"
+        echo "2. SQL Server - Included container"
+        echo "3. External database - Your own database server"
+        echo
+        
+        # Map DB_PROVIDER to menu choice number for default
+        local default_choice="1"
+        case "${DB_PROVIDER:-postgres}" in
+            postgres) default_choice="1" ;;
+            sqlserver) default_choice="2" ;;
+
             external) default_choice="4" ;;
         esac
         
-        prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=MySQL, 4=External]:" "$default_choice" "DB_CHOICE"
+        prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=External]:" "$default_choice" "DB_CHOICE"
         
         case "$DB_CHOICE" in
             1|postgres|PostgreSQL)
@@ -3332,22 +3291,8 @@ configure_database() {
                 CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
                 INCLUDE_SQLSERVER="yes"
                 ;;
-            3|mysql|MySQL)
-                DB_PROVIDER="mysql"
-                prompt_with_default "MySQL database name:" "${MYSQL_DB:-printfarmer}" "MYSQL_DB"
-                prompt_with_default "MySQL username:" "${MYSQL_USER:-root}" "MYSQL_USER"
-                # Pre-generate MySQL password if none exists so interactive prompt shows a secure default
-                if [ -z "${MYSQL_PASSWORD:-}" ]; then
-                    MYSQL_PASSWORD=$(generate_random_password)
-                    DB_PASSWORD=${DB_PASSWORD:-$MYSQL_PASSWORD}
-                fi
-                prompt_with_default "MySQL password:" "${MYSQL_PASSWORD:-example}" "MYSQL_PASSWORD"
-                DB_PASSWORD="$MYSQL_PASSWORD"
-                CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
-                INCLUDE_MYSQL="yes"
-                ;;
-            4|external|External)
-                prompt_with_default "External database provider [postgres/sqlserver/mysql]:" "postgres" "EXT_DB_TYPE"
+            3|external|External)
+                prompt_with_default "External database provider [postgres/sqlserver]:" "postgres" "EXT_DB_TYPE"
                 prompt_with_default "Database host:" "your-host" "EXT_DB_HOST"
                 prompt_with_default "Database name:" "printfarmer" "EXT_DB_NAME"
                 prompt_with_default "Database username:" "user" "EXT_DB_USER"
@@ -3359,9 +3304,6 @@ configure_database() {
                         ;;
                     sqlserver)
                         CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User Id=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;TrustServerCertificate=True;"
-                        ;;
-                    mysql)
-                        CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;"
                         ;;
                 esac
                 DB_PROVIDER="$EXT_DB_TYPE"
@@ -3494,9 +3436,9 @@ configure_external_storage() {
         
         # Prompt for appropriate database/app data path based on architecture
         if [ "$ARCHITECTURE" = "monolithic" ]; then
-            # Application data storage (SQLite database for monolithic)
+            # Application data storage for monolithic deployment
             local default_app_data_path="${EXTERNAL_APP_DATA_PATH:-$HOME/.printfarmer/data}"
-            prompt_with_default "Host directory for application data (monolithic SQLite database):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
+            prompt_with_default "Host directory for application data (monolithic application data):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
             
             # Ensure directory exists
             if ! mkdir -p "$EXTERNAL_APP_DATA_PATH" 2>/dev/null; then
@@ -3509,9 +3451,9 @@ configure_external_storage() {
             # Clear database path for monolithic
             EXTERNAL_DATABASE_PATH=""
         else
-            # Database storage directory (PostgreSQL/MySQL/SQL Server for microservices)
+            # Database storage directory (PostgreSQL/SQL Server for microservices)
             local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
-            prompt_with_default "Host directory for database storage (PostgreSQL/MySQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
+            prompt_with_default "Host directory for database storage (PostgreSQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
             
             # Ensure directory exists
             if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
@@ -3530,9 +3472,9 @@ configure_external_storage() {
         echo "  • G-code:       $EXTERNAL_GCODE_PATH"
         echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
         if [ "$ARCHITECTURE" = "monolithic" ]; then
-            echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic SQLite)"
+            echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic)"
         else
-            echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/MySQL/SQL Server)"
+            echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/SQL Server)"
         fi
         echo
         print_info "⚠️  Data Persistence Guarantee:"
@@ -4015,7 +3957,6 @@ EOF
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
     INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
-    INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
 
     # Emit provider-specific database environment variables and derive canonical connection string
     # NOTE: do not default to 'postgres' here — if DB_PROVIDER is not explicitly set, skip provider-specific secrets
@@ -4057,22 +3998,6 @@ EOF
             echo "MSSQL_SA_PASSWORD=$MSSQL_SA_PASSWORD" >> "$ENV_FILE"
             CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
             ;;
-        mysql)
-            MYSQL_DB=${MYSQL_DB:-printfarmer}
-            MYSQL_USER=${MYSQL_USER:-root}
-            # Generate a random password if none supplied
-            MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
-            if [ -z "$MYSQL_PASSWORD" ]; then
-                MYSQL_PASSWORD=$(generate_random_password)
-                print_info "Generated random MySQL password (saved to env file)"
-            fi
-            MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-$MYSQL_PASSWORD}
-            echo "MYSQL_DB=$MYSQL_DB" >> "$ENV_FILE"
-            echo "MYSQL_USER=$MYSQL_USER" >> "$ENV_FILE"
-            echo "MYSQL_PASSWORD=$MYSQL_PASSWORD" >> "$ENV_FILE"
-            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$ENV_FILE"
-            CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
-            ;;
         external)
             # External DB details were collected during configure_database() into EXT_DB_* variables
             EXT_DB_TYPE=${EXT_DB_TYPE:-postgres}
@@ -4085,9 +4010,6 @@ EOF
             # Use connection string previously built in configure_database()
             CONNECTION_STRING=${CONNECTION_STRING:-}
             ;;
-        sqlite)
-            CONNECTION_STRING=${CONNECTION_STRING:-"Data Source=/data/farm.db"}
-            ;;
         *)
             # Unknown provider: fall back to any pre-derived CONNECTION_STRING
             CONNECTION_STRING=${CONNECTION_STRING:-}
@@ -4096,7 +4018,7 @@ EOF
 
     # Write unified default connection string key consumed by Program.cs
     # If we're deploying in host network mode, rewrite any Docker service hostnames
-    # (e.g., 'database', 'postgres', 'mysql', 'sqlserver') to 'localhost' so the
+    # (e.g., 'database', 'postgres', 'sqlserver') to 'localhost' so the
     # API running in host network mode connects to the host services correctly.
     # Use the configured connection string as-is (bridge networking expected)
     CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
@@ -4174,7 +4096,6 @@ UBUNTU_TAG=$(resolve_image_tag "ubuntu" "${UBUNTU_TAG:-24.04}")
 NGINX_IMAGE=nginx:alpine
 POSTGRES_IMAGE=postgres:16-alpine
 SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
-MYSQL_IMAGE=mysql:8.0
 
 # Spoolman
 SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
@@ -4235,16 +4156,8 @@ EOF
             echo "  SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}"
             echo "  MSSQL_SA_PASSWORD=$(mask_secret "$MSSQL_SA_PASSWORD")"
             ;;
-        mysql)
-            print_info "MySQL credentials included (masked):"
-            echo "  MYSQL_USER=$(mask_secret "$MYSQL_USER")"
-            echo "  MYSQL_PASSWORD=$(mask_secret "$MYSQL_PASSWORD")"
-            ;;
         external)
             print_info "External DB configuration included (credentials not displayed)."
-            ;;
-        sqlite)
-            print_info "Using SQLite - no DB credentials included."
             ;;
     esac
     
@@ -4277,17 +4190,6 @@ ACCEPT_EULA=Y
 EOF
     fi
     
-    # Emit MySQL entries only if MySQL is selected or explicitly requested
-    if [ "${DB_PROVIDER:-}" = "mysql" ] || [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
-        cat >> "$ENV_FILE" << EOF
-
-# MySQL Configuration
-MYSQL_DB=${MYSQL_DB:-printfarmer}
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-$DB_PASSWORD}
-MYSQL_DATABASE=${MYSQL_DB:-printfarmer}
-EOF
-    fi
     
     # Generate JWT signing key (only if not already set - preserves existing key on redeploy)
     # This prevents user sessions from being invalidated on every deployment
@@ -4344,13 +4246,13 @@ EOF
 # Detect credential divergence between generated env and existing DB container
 # Non-destructive by default: warns and exits in non-interactive mode if mismatch found.
 detect_db_credential_divergence() {
-    # Skip detection during dry-run or when DB provider is external/sqlite
+    # Skip detection during dry-run or when DB provider is external
     if [ "${DRY_RUN:-false}" = "true" ]; then
         return 0
     fi
 
     local provider="${DB_PROVIDER:-postgres}"
-    if [ "$provider" = "external" ] || [ "$provider" = "sqlite" ]; then
+    if [ "$provider" = "external" ]; then
         return 0
     fi
 
@@ -4389,10 +4291,9 @@ detect_db_credential_divergence() {
     }
 
     # Get generated passwords from env file if set
-    local gen_pg_pw gen_sql_pw gen_mysql_pw
+    local gen_pg_pw gen_sql_pw
     gen_pg_pw=$(get_env_value "POSTGRES_PASSWORD" || true)
     gen_sql_pw=$(get_env_value "SQLSERVER_PASSWORD" || get_env_value "MSSQL_SA_PASSWORD" || true)
-    gen_mysql_pw=$(get_env_value "MYSQL_ROOT_PASSWORD" || get_env_value "MYSQL_PASSWORD" || true)
 
     local mismatch_info=""
 
@@ -4415,18 +4316,6 @@ detect_db_credential_divergence() {
                 for pattern in "printfarmer-database-sqlserver" "printfarmer-database" "pfarm-sqlserver"; do
                     local result
                     result=$(compare_container_env "$pattern" "MSSQL_SA_PASSWORD" "$gen_sql_pw" ) || true
-                    if [ -n "$result" ]; then
-                        mismatch_info="$result"
-                        break
-                    fi
-                done
-            fi
-            ;;
-        mysql)
-            if [ -n "$gen_mysql_pw" ]; then
-                for pattern in "printfarmer-database-mysql" "printfarmer-database" "pfarm-mysql"; do
-                    local result
-                    result=$(compare_container_env "$pattern" "MYSQL_ROOT_PASSWORD" "$gen_mysql_pw" ) || true
                     if [ -n "$result" ]; then
                         mismatch_info="$result"
                         break
@@ -4510,7 +4399,7 @@ EOF
 
 # Generate docker-compose override if needed
 generate_compose_override() {
-    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] || [ "${INCLUDE_MYSQL:-no}" = "yes" ]; }; then
+    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; }; then
         print_info "Creating docker-compose override for database services"
         
         cat > docker-compose.override.yml << EOF
@@ -4561,24 +4450,6 @@ EOF
 EOF
         fi
         
-        if [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-  mysql:
-    image: mysql:8.0
-    environment:
-      - MYSQL_ROOT_PASSWORD=\${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=\${MYSQL_DATABASE}
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p\${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-EOF
-        fi
         
         cat >> docker-compose.override.yml << EOF
 
@@ -4587,7 +4458,6 @@ EOF
         
         [ "${INCLUDE_POSTGRES:-no}" = "yes" ] && echo "  postgres_data:" >> docker-compose.override.yml
         [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] && echo "  sqlserver_data:" >> docker-compose.override.yml
-        [ "${INCLUDE_MYSQL:-no}" = "yes" ] && echo "  mysql_data:" >> docker-compose.override.yml
         
         print_success "Docker Compose override file created: docker-compose.override.yml"
         # Ensure no top-level `version:` key remains in generated override
@@ -4937,7 +4807,7 @@ EOF
         # If microservices architecture, start the database first to speed up readiness
         if [ "$ARCHITECTURE" = "microservices" ]; then
             print_info "Bringing up database service first to speed readiness"
-            # Attempt to start postgres/mysql/sqlserver only
+            # Attempt to start postgres/sqlserver only
             local seed_cmd=("")
             # Build a minimal compose command for core infra
             local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
@@ -5173,11 +5043,6 @@ wait_for_database() {
                 print_success "SQL Server port ${SQLSERVER_PORT:-1433} reachable on localhost"
                 return 0
             fi
-        elif [ "${DB_PROVIDER:-postgres}" = "mysql" ]; then
-            if nc -z localhost 3306 2>/dev/null; then
-                print_success "MySQL port 3306 reachable on localhost"
-                return 0
-            fi
         fi
 
         if [ $((elapsed % 15)) -eq 0 ]; then
@@ -5226,7 +5091,6 @@ wait_for_database() {
     print_error "3. Check for port conflicts:"
     print_error "   - PostgreSQL: sudo lsof -i :5432"
     print_error "   - SQL Server: sudo lsof -i :1433"
-    print_error "   - MySQL: sudo lsof -i :3306"
     print_error "4. Check Docker logs for the database container:"
     print_error "   docker compose logs database"
     print_error "5. Increase timeout if on slow system:"
@@ -5574,7 +5438,7 @@ prepare_external_storage_directories() {
         paths_to_create+=("${EXTERNAL_PROFILES_PATH}:Slicer Profiles")
     fi
     if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
-        paths_to_create+=("${EXTERNAL_APP_DATA_PATH}:Application Data (SQLite)")
+        paths_to_create+=("${EXTERNAL_APP_DATA_PATH}:Application Data")
     fi
     if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
         paths_to_create+=("${EXTERNAL_DATABASE_PATH}:Database")

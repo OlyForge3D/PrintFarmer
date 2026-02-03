@@ -64,6 +64,9 @@ export interface ImportOrcaBundleRequest {
   importPrinters?: boolean;
   importFilaments?: boolean;
   importProcesses?: boolean;
+  selectedPrinters?: string[];
+  selectedFilaments?: string[];
+  selectedProcesses?: string[];
 }
 
 export interface ImportOrcaBundleResult {

@@ -115,10 +115,10 @@ OPTIONS:
     --include-telemetry     Include telemetry/observability
     --include-security      Include security configurations  
     --include-registry      Include local registry
-    --include-discovery     Include printer discovery service (microservices only)
+    --include-discovery     Include printer discovery service
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
 
-    --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
+    --db-provider PROVIDER  Database provider (postgres|sqlserver, default: postgres)
     --cleanup-generated     Remove generated files after deployment (default keeps them)
     --keep-generated        Preserve generated files (default; retained for compatibility)
     --dry-run              Show what would be generated without creating files
@@ -147,9 +147,7 @@ generate_database_config() {
         "sqlserver"|"mssql"|"sql-server")
             provider="sqlserver"
             ;;
-        "mysql"|"mariadb")
-            provider="mysql"
-            ;;
+
         *)
             log_warning "Unknown database provider '$provider', defaulting to postgres"
             provider="postgres"
@@ -704,16 +702,11 @@ generate_compose() {
     fi
     
     if [[ "$INCLUDE_DISCOVERY" == "true" ]]; then
-        # Printer discovery is only supported in microservices mode
-        if [[ "$arch" == "microservices" ]]; then
-            if merge_addon_services "$compose_file" "discovery"; then
-                log_info "Merged printer discovery service"
-                addons_merged=true
-            else
-                log_warning "Failed to merge discovery service, continuing without it"
-            fi
+        if merge_addon_services "$compose_file" "discovery"; then
+            log_info "Merged printer discovery service"
+            addons_merged=true
         else
-            log_warning "Printer discovery service is only supported in microservices architecture (skipping)"
+            log_warning "Failed to merge discovery service, continuing without it"
         fi
     fi
     
@@ -1002,9 +995,7 @@ main() {
         postgres|sqlserver)
             : # Valid provider for Docker deployments
             ;;
-        mysql)
-            log_warning "MySQL support is experimental - PostgreSQL recommended for production"
-            ;;
+
         sqlite)
             log_error "SQLite is not supported for Docker deployments"
             log_error "Docker deployments require a separate database container for:"
@@ -1018,7 +1009,7 @@ main() {
             ;;
         *)
             log_error "Invalid database provider: $DB_PROVIDER"
-            log_error "Valid options: postgres (default), sqlserver, mysql"
+            log_error "Valid options: postgres (default), sqlserver"
             return 1
             ;;
     esac

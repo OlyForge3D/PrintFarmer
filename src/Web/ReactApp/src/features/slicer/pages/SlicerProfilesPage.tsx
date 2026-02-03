@@ -23,7 +23,7 @@ import {
   CustomProfilesListResponse,
   UpdateCustomProfileRequest
 } from '@/services/slicerProfilesService';
-import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
+import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
