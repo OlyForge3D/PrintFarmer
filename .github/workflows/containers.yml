@@ -6,7 +6,7 @@ name: Build Containers
 
 on:
   push:
-    branches: [main, dev/*]
+    branches: [main, release/*]
     paths:
       - 'src/**'
       - 'scripts/docker/dockerfiles/**'
