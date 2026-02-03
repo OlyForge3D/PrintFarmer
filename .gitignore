@@ -110,4 +110,4 @@ src/api/uploads/
 /dockerfiles/
 /docker-entrypoint-config.sh
 /Dockerfile.multistage
-src/publish/
+/src/publish/
