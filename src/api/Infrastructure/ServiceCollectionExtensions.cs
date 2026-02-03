@@ -5,6 +5,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -18,6 +19,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
@@ -62,6 +64,12 @@ public static class ServiceCollectionExtensions
             ?? configuration.GetValue<string>("DB_CONNECTION")
             ?? "Data Source=farm.db";
 
+        // Register the encryption interceptor as a singleton (it needs ISensitiveDataProtector)
+        // Note: We don't use the interceptor in EF Core because it causes DI lifetime issues.
+        // Instead, encryption is handled at the service layer in PrintersService.
+        _ = services.AddSingleton<SensitiveDataEncryptionInterceptor>();
+
+        // Register DbContext with scoped lifetime (default)
         _ = services.AddDbContext<AppDbContext>(options =>
         {
             if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
@@ -79,7 +87,7 @@ public static class ServiceCollectionExtensions
             }
         });
 
-        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons
+        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons.
         // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
         // register it as a Singleton so the factory and other singletons can consume it safely.
         DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();

@@ -72,7 +72,8 @@ public class PrintersService(
     IMultiPrinterStatusCoordinator coordinator,
     IPrinterStatusClientFactory statusClientFactory,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
-    Farm.Infrastructure.Services.Locations.ILocationService locationService) : IPrintersService
+    Farm.Infrastructure.Services.Locations.ILocationService locationService,
+    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
@@ -85,6 +86,7 @@ public class PrintersService(
     private readonly IPrinterStatusClientFactory _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
     private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
+    private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -361,6 +363,8 @@ public class PrintersService(
     /// </remarks>
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
+        // Encrypt sensitive data before saving
+        EncryptSensitiveData(p);
         await _unitOfWork.Printers.AddAsync(p, ct);
     }
 
@@ -848,6 +852,86 @@ public class PrintersService(
     /// Maps an integer backend value to the PrinterBackend enum.
     /// </summary>
     private static PrinterBackend MapBackendEnum(int backendValue) => (PrinterBackend)backendValue;
+
+    /// <summary>
+    /// Gets the appropriate credential string for a printer based on its backend type.
+    /// For PrusaLink: returns "username:password" format for digest auth.
+    /// For other backends: returns the ApiKey directly.
+    /// Decrypts encrypted credentials as needed.
+    /// </summary>
+    private string? GetCredentialForBackend(Printer p)
+    {
+        var backend = (PrinterBackend)p.Backend;
+
+        // PrusaLink uses HTTP Digest Auth with username:password
+        if (backend == PrinterBackend.PrusaLink)
+        {
+            // If we have dedicated Username and Password fields, use them
+            if (!string.IsNullOrWhiteSpace(p.Username) && !string.IsNullOrWhiteSpace(p.Password))
+            {
+                // Decrypt the password (Username is not encrypted, only Password and ApiKey are)
+                string? decryptedPassword = DecryptIfNeeded(p.Password);
+                if (!string.IsNullOrWhiteSpace(decryptedPassword))
+                {
+                    return $"{p.Username}:{decryptedPassword}";
+                }
+            }
+
+            // Fall back to ApiKey if it already contains credentials (backward compatibility)
+            return DecryptIfNeeded(p.ApiKey);
+        }
+
+        // Other backends use ApiKey directly - decrypt if needed
+        return DecryptIfNeeded(p.ApiKey);
+    }
+
+    /// <summary>
+    /// Decrypts a potentially encrypted value. Returns the original value if decryption fails
+    /// (e.g., if the data is already in plaintext for backward compatibility).
+    /// </summary>
+    private string? DecryptIfNeeded(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // Try to decrypt - if it fails, the data might be plaintext (migration scenario)
+        string? decrypted = _sensitiveDataProtector.Unprotect(value);
+
+        // If decryption returned null, assume the data is plaintext
+        return decrypted ?? value;
+    }
+
+    /// <summary>
+    /// Encrypts sensitive data on a printer entity before saving to the database.
+    /// Only encrypts ApiKey and Password fields if they are not already encrypted.
+    /// </summary>
+    private void EncryptSensitiveData(Printer p)
+    {
+        // Encrypt ApiKey if present and not already encrypted
+        if (!string.IsNullOrEmpty(p.ApiKey) && !IsAlreadyEncrypted(p.ApiKey))
+        {
+            p.ApiKey = _sensitiveDataProtector.Protect(p.ApiKey);
+        }
+
+        // Encrypt Password if present and not already encrypted
+        if (!string.IsNullOrEmpty(p.Password) && !IsAlreadyEncrypted(p.Password))
+        {
+            p.Password = _sensitiveDataProtector.Protect(p.Password);
+        }
+    }
+
+    /// <summary>
+    /// Simple heuristic to check if data is already encrypted.
+    /// Data Protection produces Base64-encoded strings that are typically longer than plain text credentials.
+    /// </summary>
+    private static bool IsAlreadyEncrypted(string value)
+    {
+        // Data Protection output is Base64 and typically starts with "CfDJ8" for default configuration
+        // It's also significantly longer than typical plaintext passwords/API keys
+        return value.Length > 100 && value.StartsWith("CfDJ", StringComparison.Ordinal);
+    }
 
     private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -1636,9 +1720,9 @@ public class PrintersService(
             }
 
             // Use capability interface for movement
-            if (backend == PrinterBackend.OctoPrint)
+            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
             {
-                return await movement.HomeAsync(p.BackendUrl, p.ApiKey).ConfigureAwait(false);
+                return await movement.HomeAsync(p.BackendUrl, GetCredentialForBackend(p)).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1790,7 +1874,7 @@ public class PrintersService(
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.ApiKey, ct).ConfigureAwait(false);
+                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, GetCredentialForBackend(p), ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1918,7 +2002,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.PauseAsync(p!.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                ? await controlClient!.PauseAsync(p!.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -1954,7 +2038,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.ResumeAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                ? await controlClient!.ResumeAsync(p.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -1991,7 +2075,7 @@ public class PrintersService(
 
             // Try print job control capability - calls CancelAsync which routes to backend-specific cancel
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.CancelAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                ? await controlClient!.CancelAsync(p.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)

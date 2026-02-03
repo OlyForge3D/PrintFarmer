@@ -92,22 +92,29 @@ npm run build
 
 **5. Run tests:**
 ```powershell
-# .NET API tests
+# .NET API tests - ALWAYS log output to file for review (avoid re-running long tests!)
 cd ./src
-dotnet test ./farm-web.sln -c Debug --logger "trx;LogFileName=test-results.trx" > test-run.log 2>&1
+dotnet test ./farm-web.sln -c Debug 2>&1 | tee /tmp/test-results.log
+# Review results: tail -30 /tmp/test-results.log
 
 # React tests (use test:run for non-interactive mode - exits after tests complete)
 cd ./src/Web/ReactApp
-npm run test:run
+npm run test:run 2>&1 | tee /tmp/react-test-results.log
 ```
+⚠️ **CRITICAL: ALWAYS LOG TEST OUTPUT TO FILE!**
+- .NET tests take **3+ minutes** - NEVER run them multiple times without reviewing output
+- Use `tee` to capture output while displaying: `dotnet test ... 2>&1 | tee /tmp/test-results.log`
+- Review results from log file: `tail -50 /tmp/test-results.log` or `grep -E "Failed|Passed|Error" /tmp/test-results.log`
+- Only re-run tests after fixing issues identified in the log file
+
 ✅ **ALL TESTS PASSING - CLEAN BUILD!**
-- **API Tests**: 1572/1572 PASS (4 skipped, 0 failures) - ✅ ALL PASSING
+- **API Tests**: 1709/1709 PASS (0 failures) - ✅ ALL PASSING
   - Complete coverage including discovery probe validation tests
   - Discovery probes migrated to backend plugins (all tests updated and passing)
 - **React Tests**: 365/365 PASS (all tests passing) - ✅ ALL PASSING
   - Use `npm run test:run` for non-interactive mode (exits after tests complete)
   - Use `npm test` for interactive watch mode (requires 'q' or 'h' input to exit)
-*Note: .NET tests take ~2m 39s. React tests take ~12 seconds. Set timeout to 180+ seconds for full test suite.*
+*Note: .NET tests take ~3m 30s. React tests take ~12 seconds. Set timeout to 240+ seconds for full test suite.*
 
 ```
 
@@ -768,7 +775,7 @@ These instructions have been thoroughly tested and validated with .NET 10.0.101 
 | `dotnet build ./farm-web.sln -c Debug` | ~82 seconds | 150 seconds | Includes compilation warnings (VERIFIED) |
 | `npm run build` (React production build) | ~10 seconds | 30 seconds | Successful build, 0 errors (VERIFIED 2026-01-11) |
 | `npm run dev` (React dev server) | ~5 seconds | 30 seconds | Development mode works fine (VERIFIED) |
-| `dotnet test ./farm-web.sln -c Release` | ~2m 39s | 180 seconds | 1572/1572 PASS (4 skipped, 0 failures) - ALL PASSING |
+| `dotnet test ./farm-web.sln -c Release` | ~3m 30s | 240 seconds | 1709/1709 PASS (0 failures) - ALL PASSING |
 | `npm run test:run` (React tests) | ~12 seconds | 30 seconds | 365/365 PASS - ✅ ALL TESTS PASSING (use for automated testing) |
 | `npm test` (React tests) | ~12 seconds | N/A | Interactive watch mode (requires 'q' to exit) |
 | `dotnet format ./farm-web.sln` | ~104 seconds | 180 seconds | Longer than expected (VERIFIED) |
@@ -778,7 +785,7 @@ These instructions have been thoroughly tested and validated with .NET 10.0.101 
 
 **CRITICAL WARNINGS:**
 - **NEVER CANCEL** builds or long-running commands. Always set appropriate timeouts
-- **ALL API TESTS PASS** - 1572/1572 (0 failures) ✅ Complete test coverage
+- **ALL API TESTS PASS** - 1709/1709 (0 failures) ✅ Complete test coverage
 - **ALL REACT TESTS PASS** - 365/365 (0 failures) ✅ Use `npm run test:run` for non-interactive testing
 - **ESLint passes** - 0 errors, 0 warnings ✅ (resolved 2026-01-11)
 - **Production build succeeds** - 0 TypeScript errors ✅ (resolved 2026-01-11)

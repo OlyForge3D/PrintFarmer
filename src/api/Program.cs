@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AutoMapper;
+using Microsoft.AspNetCore.DataProtection;
 using Farm.Infrastructure;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -107,6 +108,18 @@ catch
 
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
+
+// Configure Data Protection for encrypting sensitive data (API keys, passwords)
+// Keys are stored in the data-protection-keys directory for persistence across restarts
+var keysDirectory = Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
+Directory.CreateDirectory(keysDirectory);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
+    .SetApplicationName("PrintFarmer");
+
+// Register sensitive data encryption service
+builder.Services.AddSingleton<Farm.Infrastructure.Services.Security.ISensitiveDataProtector,
+    Farm.Infrastructure.Services.Security.SensitiveDataProtector>();
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
