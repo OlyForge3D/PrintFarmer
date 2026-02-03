@@ -577,15 +577,46 @@ npm run lint 2>&1 | head -20
 - When implementing features: search for existing related documentation first, then update it with new information
 - Reduces documentation debt and prevents duplication
 
-**Entity Framework:**
-- **⚠️ CRITICAL: DO NOT CREATE MIGRATIONS** - The project uses `EnsureCreated()` for development
-- Database schema is initialized automatically via `EnsureCreated()` on startup
-- Database safety checks handle missing columns gracefully
+**Entity Framework & Migrations:**
+- **⚠️ CRITICAL: CREATE MIGRATIONS FOR ALL SCHEMA CHANGES** - Production deployments use EF Core migrations
 - Multi-provider support: SQLite (default), SQL Server, PostgreSQL, MySQL
 - Provider selection via `DB_PROVIDER` environment variable
 - Connection strings configured in appsettings.json or via environment variables
-- **Schema changes**: Modify domain models directly; `EnsureCreated()` will rebuild schema on fresh DB
-- **Migration strategy**: Deferred until production readiness; development uses drop/recreate workflow
+- **Creating Migrations** (MUST create for BOTH providers when schema changes):
+  ```bash
+  # ALWAYS run from /home/pi/pfarm/src directory
+  cd /home/pi/pfarm/src
+  
+  # 1. PostgreSQL migration (primary production database)
+  DB_PROVIDER=postgres dotnet ef migrations add <MigrationName> \
+    --project ./migrations/Farm.Migrations.PostgreSQL \
+    --startup-project ./api \
+    --context AppDbContext
+  
+  # 2. SQL Server migration (enterprise deployments)
+  DB_PROVIDER=sqlserver dotnet ef migrations add <MigrationName> \
+    --project ./migrations/Farm.Migrations.SqlServer \
+    --startup-project ./api \
+    --context AppDbContext
+  ```
+- **Migration Naming Convention**: Use descriptive PascalCase names (e.g., `AddPrinterDigestAuthCredentials`, `AddSliceJobPriorityColumn`)
+- **Applying Migrations**:
+  - **Production**: Migrations auto-apply on startup via `Database.Migrate()` in Program.cs
+  - **Existing Container**: Apply manually via psql:
+    ```bash
+    # Find container and credentials
+    docker ps | grep postgres
+    docker exec <container> env | grep POSTGRES
+    
+    # Apply SQL directly (example)
+    docker exec <container> psql -U postgres -d printfarmer -c "ALTER TABLE \"TableName\" ADD COLUMN IF NOT EXISTS \"ColumnName\" text;"
+    
+    # Record migration in history (prevents reapplication)
+    docker exec <container> psql -U postgres -d printfarmer -c "INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('<MigrationId>', '10.0.0') ON CONFLICT DO NOTHING;"
+    ```
+- **Development**: SQLite uses `EnsureCreated()` for simplicity; delete `farm.db` for schema changes
+- **Database safety checks**: Handle missing columns gracefully for backward compatibility
+- **Verification**: After creating migrations, verify files exist in `src/migrations/Farm.Migrations.{Provider}/Migrations/`
 
 **Tag Management (Model3DTag):**
 - **Normalization**: All tag names are normalized to PascalCase at service layer (TagService.cs)
@@ -649,6 +680,26 @@ npm run lint 2>&1 | head -20
 - Database provider testing scripts: `test-providers.sh`, `test-providers-simple.sh`
 - Docker Compose with database services for testing
 - ⚠️ **Note**: Main Dockerfile may need updates to reference "api" directory instead of "server"
+
+**PostgreSQL Container Access** ⚠️ **QUICK REFERENCE**:
+- **Container name**: `printfarmer-database-postgres`
+- **Database name**: `printfarmer`
+- **Username**: `postgres` (check with `docker exec printfarmer-database-postgres env | grep POSTGRES_USER`)
+- **Password**: Check with `docker exec printfarmer-database-postgres env | grep POSTGRES_PASSWORD`
+- **Quick psql access**:
+  ```bash
+  # Interactive psql shell
+  docker exec -it printfarmer-database-postgres psql -U postgres -d printfarmer
+  
+  # Run single query
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "SELECT * FROM \"Printers\";"
+  
+  # Describe table schema
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "\d \"Printers\""
+  
+  # List all tables
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "\dt"
+  ```
 
 **Docker Deployment** ⚠️ **CRITICAL USAGE NOTES**:
 - **Location**: Deploy script is at `/home/pi/pfarm/scripts/deploy-docker.sh`
