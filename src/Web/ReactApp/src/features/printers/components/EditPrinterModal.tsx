@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels, TestConnectionResponse } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -11,6 +11,7 @@ import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionB
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
 import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
+import { useSlicer } from '@/hooks/useSlicer';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -22,6 +23,7 @@ interface EditPrinterModalProps {
 export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: EditPrinterModalProps) {
   const { data: printerDetails } = usePrinterDetails(printerId || '');
   const { data: manufacturers } = useManufacturers();
+  const { isSlicerAvailable } = useSlicer();
   const { data: filamentTypes } = useFilamentTypes();
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | undefined>();
   const { data: models } = useModels(selectedManufacturer);
@@ -43,6 +45,10 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [toolheads, setToolheads] = useState<UpdateToolheadDto[]>([]);
   const [originalToolheads, setOriginalToolheads] = useState<UpdateToolheadDto[]>([]);
   const [expandedToolheads, setExpandedToolheads] = useState<Set<string>>(new Set());
+  
+  // Test connection state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
@@ -381,9 +387,13 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
       toast.success(`Printer "${result.name}" updated`);
       onSuccess?.();
-      // Show clone profiles modal if printer was just created or updated
+      // Show clone profiles modal only if slicing is enabled
       // (user may want to clone profiles from template machine)
-      setShowCloneProfilesModal(true);
+      if (isSlicerAvailable) {
+        setShowCloneProfilesModal(true);
+      } else {
+        onClose();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update printer';
       toast.error(message);
@@ -416,6 +426,66 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
   };
 
+  /**
+   * Tests connectivity to the printer using current form credentials.
+   * Uses backend-specific test methods (Moonraker, PrusaLink, OctoPrint).
+   */
+  const handleTestConnection = async () => {
+    if (!formData) return;
+    
+    // Validate required fields for test
+    if (!formData.serverUrl?.trim()) {
+      setTestResult({ success: false, message: 'Server URL is required' });
+      return;
+    }
+
+    try {
+      new URL(formData.serverUrl);
+    } catch {
+      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
+      return;
+    }
+
+    // Check authentication requirements per backend
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: 'Password is required for PrusaLink printers (get it from printer Settings → Network → Credentials)' 
+      });
+      return;
+    }
+    
+    if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: 'API Key is required for OctoPrint printers' 
+      });
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      const result = await apiClient.testConnection({
+        serverUrl: formData.serverUrl,
+        backend: formData.backend,
+        apiKey: formData.apiKey,
+        username: formData.username,
+        password: formData.password,
+        backendPort: formData.backendPort,
+      });
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ 
+        success: false, 
+        message: err instanceof Error ? err.message : 'Connection test failed' 
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   if (!isOpen || !formData) return null;
 
   const filteredModels = models || [];
@@ -429,24 +499,46 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   const modalFooter = (
-    <div className="flex gap-2">
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={handleClose}
-      >
-        Cancel
-      </Button>
-      <Button
-        type="button"
-        onClick={handleSaveClick}
-        variant="primary"
-        disabled={updateMutation.status === 'pending' || !hasChanges}
-        iconLeft={<CheckIcon className="w-4 h-4" />}
-        title={!hasChanges ? 'No changes to save' : undefined}
-      >
-        {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-      </Button>
+    <div className="space-y-3">
+      {/* Test Connection Result */}
+      {testResult && (
+        <Alert 
+          type={testResult.success ? 'success' : 'error'} 
+          className="mb-0"
+        >
+          {testResult.message}
+        </Alert>
+      )}
+      
+      {/* Buttons */}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleClose}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleTestConnection}
+          disabled={isTesting || !formData?.serverUrl?.trim()}
+          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+        >
+          {isTesting ? 'Testing...' : 'Test'}
+        </Button>
+        <Button
+          type="button"
+          onClick={handleSaveClick}
+          variant="primary"
+          disabled={updateMutation.status === 'pending' || !hasChanges}
+          iconLeft={<CheckIcon className="w-4 h-4" />}
+          title={!hasChanges ? 'No changes to save' : undefined}
+        >
+          {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
+        </Button>
+      </div>
     </div>
   );
 

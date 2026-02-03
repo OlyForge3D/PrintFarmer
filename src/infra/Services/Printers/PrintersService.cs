@@ -1055,18 +1055,25 @@ public class PrintersService(
         {
             return new PrinterWithCapabilitiesDto
             {
-                PrinterId = p.Id,
-                PrinterName = p.Name,
-                PrinterModel = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
-                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
+                // Identity (standard naming)
+                Id = p.Id,
+                Name = p.Name,
                 Backend = MapBackendEnum(p.Backend),
 
-                // Add import-friendly fields for re-importing
+                // Metadata (standard naming)
+                ModelName = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
+                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
+                Notes = p.Notes,
+
+                // Connection (IpAddress extracted from ServerUrl if needed)
                 ServerUrl = p.ServerUrl,
                 BackendPort = p.BackendPort,
                 FrontendPort = p.FrontendPort,
+
+                // Credentials
                 ApiKey = p.ApiKey,
-                Notes = p.Notes,
+                Username = p.Username,
+                Password = p.Password,
 
                 // Export hardware specs from Printer instance (populated at creation time from PrinterModel)
                 // NozzleDiameter and MaxHotendTemp are derived from the primary toolhead's component models
