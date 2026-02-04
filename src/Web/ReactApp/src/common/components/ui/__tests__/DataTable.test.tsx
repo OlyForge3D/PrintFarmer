@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { DataTable, DataTableColumn } from '../DataTable';
 
@@ -205,7 +205,7 @@ describe('DataTable', () => {
         data={mockData}
         columns={mockColumns}
         getRowKey={(item) => item.id}
-        renderActions={(item) => <button>Edit</button>}
+        renderActions={() => <button>Edit</button>}
         actionsWidth="w-32"
       />
     );
