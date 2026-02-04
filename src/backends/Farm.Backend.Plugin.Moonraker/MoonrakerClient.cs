@@ -2604,12 +2604,43 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         MoonrakerPrinterInfo? info = await GetPrinterInfoAsync(baseUrl, ct);
+        ServerInfo? server = await GetServerInfoAsync(baseUrl, ct);
         return new StandardPrinterInfo
         {
             Name = info?.Hostname ?? "Unknown",
             Firmware = info?.SoftwareVersion ?? "Unknown",
+            BackendVersion = string.IsNullOrWhiteSpace(server?.MoonrakerVersion) ? null : server!.MoonrakerVersion,
+            ApiVersion = string.IsNullOrWhiteSpace(server?.ApiVersionString) ? null : server!.ApiVersionString,
             Model = info?.ConfigFile ?? "Unknown"
         };
+    }
+
+    private async Task<ServerInfo?> GetServerInfoAsync(string baseUrl, CancellationToken ct)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "server/info");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            MoonrakerResponse<ServerInfo>? parsed = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<ServerInfo>>(cancellationToken: cts.Token);
+            return parsed?.Result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
     }
 #pragma warning restore CA1033
 #pragma warning restore S1006

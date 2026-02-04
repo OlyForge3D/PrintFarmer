@@ -125,6 +125,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
     refetchOnWindowFocus: false,
   });
 
+  const printerVersionQuery = useQuery({
+    queryKey: ['printerVersion', printerId],
+    queryFn: () => apiClient.getPrinterVersionInfo(printerId!),
+    enabled: !!printerId,
+    staleTime: 10 * 60_000,
+    gcTime: 60 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
   // Use provided printer or fall back to API data, merged with realtime SignalR updates
   const basePrinter = printerProp || apiPrinter;
   const printer = usePrinterDisplay((basePrinter || {}) as Printer);
@@ -233,7 +242,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
   // Check if axes are homed based on homedAxes string from Moonraker
   // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
-  const homedAxes = (displayPrinter?.homedAxes ?? '').toLowerCase();
+  const homedAxesRaw = displayPrinter?.homedAxes;
+  const isHomedStateKnown = typeof homedAxesRaw === 'string';
+  const homedAxes = (homedAxesRaw ?? '').toLowerCase();
 
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
@@ -249,9 +260,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   }
 
   // Determine if each axis is homed
-  const isXHomed = homedAxes.includes('x');
-  const isYHomed = homedAxes.includes('y');
-  const isZHomed = homedAxes.includes('z');
+  const isXHomed = isHomedStateKnown && homedAxes.includes('x');
+  const isYHomed = isHomedStateKnown && homedAxes.includes('y');
+  const isZHomed = isHomedStateKnown && homedAxes.includes('z');
   const isXYHomed = isXHomed && isYHomed;
 
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
@@ -263,7 +274,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
 
   // Get button class based on homed state
-  const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
+  const getHomeButtonStyle = (homingStateKnown: boolean, isHomed: boolean): { className?: string; style?: React.CSSProperties } => {
+    if (!homingStateKnown) {
+      return {};
+    }
+
     if (isHomed) {
       return {
         className: 'text-white!',
@@ -522,6 +537,57 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           )}
         </section>
 
+        {/* Version */}
+        <section aria-labelledby="printer-version-heading" className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 id="printer-version-heading" className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+              Version
+            </h3>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void printerVersionQuery.refetch()}
+              className="p-1! h-auto!"
+              title="Refresh version info"
+              aria-label="Refresh version info"
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+            ></Button>
+          </div>
+
+          {printerVersionQuery.isLoading ? (
+            <div className="text-sm text-pf-text-secondary">Loading version…</div>
+          ) : printerVersionQuery.data ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Firmware</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Backend</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.backendVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">API</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.apiVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Supported</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.supported ? 'Yes' : 'No'}</dd>
+              </div>
+              {printerVersionQuery.data.message ? (
+                <div className="col-span-2">
+                  <dt className="text-xs text-pf-text-secondary">Message</dt>
+                  <dd className="text-pf-text-primary break-words">{printerVersionQuery.data.message}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
+          )}
+        </section>
+
         {/* Control Section - MOVED TO TOP */}
         <div className="flex flex-col gap-2">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
@@ -605,8 +671,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isAllHomed).className}`}
-                style={getHomeButtonStyle(isAllHomed).style}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -646,8 +712,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isXYHomed).className}`}
-                style={getHomeButtonStyle(isXYHomed).style}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -693,8 +759,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isZHomed).className}`}
-                style={getHomeButtonStyle(isZHomed).style}
+                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button

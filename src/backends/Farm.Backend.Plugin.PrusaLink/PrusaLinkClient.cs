@@ -721,6 +721,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             {
                 Name = info?.Name ?? "Unknown",
                 Firmware = info?.FirmwareVersion ?? "Unknown",
+                BackendVersion = info?.PrusaLinkVersion,
+                ApiVersion = info?.ApiVersion,
                 Model = "Prusa MK" // PrusaLink doesn't expose model info directly
             };
         }

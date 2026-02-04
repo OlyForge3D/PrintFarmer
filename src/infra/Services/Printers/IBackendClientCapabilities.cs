@@ -560,6 +560,18 @@ public class StandardPrinterInfo
     public string Firmware { get; set; } = string.Empty;
 
     /// <summary>
+    /// The backend/server software version (e.g., Moonraker/PrusaLink/OctoPrint version).
+    /// Optional; may be null or empty if not available.
+    /// </summary>
+    public string? BackendVersion { get; set; }
+
+    /// <summary>
+    /// The backend API version (string form when available).
+    /// Optional; may be null or empty if not available.
+    /// </summary>
+    public string? ApiVersion { get; set; }
+
+    /// <summary>
     /// The printer model or hardware type (e.g., "Prusa i3 MK3S+", "Voron 2.4").
     /// </summary>
     public string Model { get; set; } = string.Empty;

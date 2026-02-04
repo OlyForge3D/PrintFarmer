@@ -78,14 +78,20 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   const isPaused = state === 'Paused';
   const isShutdown = state === 'Shutdown' || state === 'Halted';
 
-  const homedAxes = (printer.homedAxes ?? '').toLowerCase();
-  const isXHomed = homedAxes.includes('x');
-  const isYHomed = homedAxes.includes('y');
-  const isZHomed = homedAxes.includes('z');
+  const homedAxesRaw = printer.homedAxes;
+  const isHomedStateKnown = typeof homedAxesRaw === 'string';
+  const homedAxes = (homedAxesRaw ?? '').toLowerCase();
+  const isXHomed = isHomedStateKnown && homedAxes.includes('x');
+  const isYHomed = isHomedStateKnown && homedAxes.includes('y');
+  const isZHomed = isHomedStateKnown && homedAxes.includes('z');
   const isXYHomed = isXHomed && isYHomed;
   const isAllHomed = isXYHomed && isZHomed;
 
-  const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
+  const getHomeButtonStyle = (homingStateKnown: boolean, isHomed: boolean): { className?: string; style?: React.CSSProperties } => {
+    if (!homingStateKnown) {
+      return {};
+    }
+
     if (isHomed) {
       return {
         className: 'text-white!',
@@ -495,8 +501,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome()}
                   title="Home all axes"
                   padSize="small"
-                  className={getHomeButtonStyle(isAllHomed).className}
-                  style={getHomeButtonStyle(isAllHomed).style}
+                  className={getHomeButtonStyle(isHomedStateKnown, isAllHomed).className}
+                  style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
@@ -529,8 +535,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome('xy')}
                   title="Home X/Y"
                   padSize="small"
-                  className={getHomeButtonStyle(isXYHomed).className}
-                  style={getHomeButtonStyle(isXYHomed).style}
+                  className={getHomeButtonStyle(isHomedStateKnown, isXYHomed).className}
+                  style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
@@ -568,8 +574,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome('z')}
                   title="Home Z"
                   padSize="small"
-                  className={getHomeButtonStyle(isZHomed).className}
-                  style={getHomeButtonStyle(isZHomed).style}
+                  className={getHomeButtonStyle(isHomedStateKnown, isZHomed).className}
+                  style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>

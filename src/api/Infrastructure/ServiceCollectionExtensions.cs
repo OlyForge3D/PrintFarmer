@@ -343,9 +343,12 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddMemoryCache();
         _ = services.AddOptions<CatalogCacheOptions>();
+        _ = services.AddOptions<PrinterVersionCacheOptions>();
 
         // CatalogCache resolves scoped AppDbContext per-call, so it can be a Singleton
         _ = services.AddSingleton<ICatalogCache, CatalogCache>();
+
+        _ = services.AddScoped<IPrinterVersionCache, PrinterVersionCache>();
     }
 
     #endregion

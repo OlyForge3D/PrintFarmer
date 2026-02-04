@@ -240,6 +240,17 @@ export interface PrinterCameraUrls {
   cameraSnapshotUrl?: string;
 }
 
+export interface PrinterVersionInfo {
+  printerId: string;
+  backend: PrinterBackend;
+  supported: boolean;
+  firmwareVersion?: string | null;
+  backendVersion?: string | null;
+  apiVersion?: string | null;
+  retrievedAtUtc: string;
+  message?: string | null;
+}
+
 export interface PrinterBackendCapabilitiesDto {
   printerId: string;
   printerName: string;

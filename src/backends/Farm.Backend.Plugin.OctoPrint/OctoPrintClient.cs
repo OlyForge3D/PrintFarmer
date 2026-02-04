@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
@@ -1834,11 +1835,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     {
         try
         {
-            OctoPrintPrinterState? state = await GetPrinterStateAsync(baseUrl, credential);
+            string versionJson = await GetVersionInfoAsync(baseUrl, credential);
+            OctoPrintVersionResponse? version = JsonSerializer.Deserialize<OctoPrintVersionResponse>(versionJson);
             return new StandardPrinterInfo
             {
                 Name = "OctoPrint Printer",
                 Firmware = "OctoPrint",
+                BackendVersion = version?.Server,
+                ApiVersion = version?.Api,
                 Model = "Unknown"
             };
         }

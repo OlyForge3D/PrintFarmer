@@ -17,6 +17,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
@@ -46,7 +47,8 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Services.Slicing.ISlicersService slicersService)
+    Services.Slicing.ISlicersService slicersService,
+    IPrinterVersionCache printerVersionCache)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -58,6 +60,7 @@ public class PrintersController(
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
+    private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
 #pragma warning disable CA1823 // Avoid unused private fields
@@ -127,6 +130,35 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves firmware/backend/API version information for a specific printer.
+    /// Values are best-effort and may be null when not available.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpGet("{printerId:guid}/version")]
+    [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
+            return dto == null ? NotFound($"Printer with ID {printerId} not found") : Ok(dto);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[PRINTER-VERSION] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/version. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
