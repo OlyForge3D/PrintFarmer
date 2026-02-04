@@ -60,6 +60,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="statusClientFactory">Factory for backend-specific status clients</param>
 /// <param name="statusCache">Cache reader for SignalR-updated status</param>
 /// <param name="locationService">Service for location management</param>
+/// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -128,7 +129,7 @@ public class PrintersService(
             // Use factory to get strongly-typed history client
             if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
                 if (response == null)
                 {
                     _logger.LogWarning($"[History] No response from history API for printer {printerId}");
@@ -185,7 +186,7 @@ public class PrintersService(
                 throw new InvalidOperationException("History is only available for backends that support it");
             }
 
-            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
 
             // Set ThumbnailUrl
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
@@ -225,14 +226,14 @@ public class PrintersService(
 
             if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
-                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
                 if (totals != null)
                 {
                     return totals;
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.Credential, ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);
@@ -270,7 +271,7 @@ public class PrintersService(
 
         return !_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient)
             ? throw new InvalidOperationException("History deletion is only available for backends that support it")
-            : await historyClient!.DeleteHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false);
+            : await historyClient!.DeleteHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -284,6 +285,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllAsync(ct);
     }
 
@@ -298,6 +300,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
     }
 
@@ -308,6 +311,7 @@ public class PrintersService(
     /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
     public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllForTemplateUpdateAsync(ct);
     }
 
@@ -334,6 +338,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.FindByIdAsync(id, ct);
     }
 
@@ -574,8 +579,8 @@ public class PrintersService(
                     // indicates camera support. Frontend can validate accessibility.
                     if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
                     {
-                        streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
-                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                        streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -852,56 +857,6 @@ public class PrintersService(
     /// Maps an integer backend value to the PrinterBackend enum.
     /// </summary>
     private static PrinterBackend MapBackendEnum(int backendValue) => (PrinterBackend)backendValue;
-
-    /// <summary>
-    /// Gets the appropriate credential string for a printer based on its backend type.
-    /// For PrusaLink: returns "username:password" format for digest auth.
-    /// For other backends: returns the ApiKey directly.
-    /// Decrypts encrypted credentials as needed.
-    /// </summary>
-    private string? GetCredentialForBackend(Printer p)
-    {
-        var backend = (PrinterBackend)p.Backend;
-
-        // PrusaLink uses HTTP Digest Auth with username:password
-        if (backend == PrinterBackend.PrusaLink)
-        {
-            // If we have dedicated Username and Password fields, use them
-            if (!string.IsNullOrWhiteSpace(p.Username) && !string.IsNullOrWhiteSpace(p.Password))
-            {
-                // Decrypt the password (Username is not encrypted, only Password and ApiKey are)
-                string? decryptedPassword = DecryptIfNeeded(p.Password);
-                if (!string.IsNullOrWhiteSpace(decryptedPassword))
-                {
-                    return $"{p.Username}:{decryptedPassword}";
-                }
-            }
-
-            // Fall back to ApiKey if it already contains credentials (backward compatibility)
-            return DecryptIfNeeded(p.ApiKey);
-        }
-
-        // Other backends use ApiKey directly - decrypt if needed
-        return DecryptIfNeeded(p.ApiKey);
-    }
-
-    /// <summary>
-    /// Decrypts a potentially encrypted value. Returns the original value if decryption fails
-    /// (e.g., if the data is already in plaintext for backward compatibility).
-    /// </summary>
-    private string? DecryptIfNeeded(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return value;
-        }
-
-        // Try to decrypt - if it fails, the data might be plaintext (migration scenario)
-        string? decrypted = _sensitiveDataProtector.Unprotect(value);
-
-        // If decryption returned null, assume the data is plaintext
-        return decrypted ?? value;
-    }
 
     /// <summary>
     /// Encrypts sensitive data on a printer entity before saving to the database.
@@ -1202,6 +1157,8 @@ public class PrintersService(
             BedTarget: null,
             Backend: MapBackendEnum(p.Backend),
             ApiKey: p.ApiKey,
+            Username: p.Username,
+            Password: p.Password,
             OriginalServerUrl: p.OriginalServerUrl,
 
             BackendPort: p.BackendPort,
@@ -1629,7 +1586,7 @@ public class PrintersService(
                     : p.BackendUrl;
 
                 // Get camera snapshot URL using capability interface
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(snapshotUrl))
                 {
                     return await FetchBytesFromUrlAsync(snapshotUrl, p.ApiKey, ct).ConfigureAwait(false);
@@ -1681,8 +1638,8 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
             {
-                string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 return (streamUrl, snapshotUrl);
             }
 
@@ -1729,7 +1686,7 @@ public class PrintersService(
             // Use capability interface for movement
             if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
             {
-                return await movement.HomeAsync(p.BackendUrl, GetCredentialForBackend(p)).ConfigureAwait(false);
+                return await movement.HomeAsync(p.BackendUrl, p.Credential).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1767,13 +1724,20 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is ISupportsMovement movement)
+            if (client is not ISupportsMovement movement)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.HomeXYAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return false;
             }
 
-            return false;
+            // PrusaLink and OctoPrint need credentials via apiKey parameter
+            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
+            {
+                return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
+            }
+
+            // Moonraker doesn't need credentials
+            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            return await movement.HomeXYAsync(moonrakerUrl, null, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1810,7 +1774,7 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.HomeZAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return await movement.HomeZAsync(moonrakerUrl, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1881,7 +1845,7 @@ public class PrintersService(
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, GetCredentialForBackend(p), ct).ConfigureAwait(false);
+                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1970,7 +1934,7 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, ct).ConfigureAwait(false);
+                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -2009,7 +1973,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.PauseAsync(p!.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
+                ? await controlClient!.PauseAsync(p!.BackendUrl, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2045,7 +2009,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.ResumeAsync(p.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
+                ? await controlClient!.ResumeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2082,7 +2046,7 @@ public class PrintersService(
 
             // Try print job control capability - calls CancelAsync which routes to backend-specific cancel
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.CancelAsync(p.BackendUrl, GetCredentialForBackend(p), ct).ConfigureAwait(false)
+                ? await controlClient!.CancelAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2241,7 +2205,7 @@ public class PrintersService(
 
             // Try start print capability
             return _capabilityFactory.TryGetStartPrintClientTyped(backend, out ISupportsStartPrint? startPrintClient)
-                ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.ApiKey, ct).ConfigureAwait(false)
+                ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2346,7 +2310,7 @@ public class PrintersService(
         {
             var backend = (PrinterBackend)p.Backend;
             return _capabilityFactory.TryGetFileUploadClientTyped(backend, out ISupportsFileUpload? uploadClient)
-                ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.ApiKey, ct).ConfigureAwait(false)
+                ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2394,7 +2358,7 @@ public class PrintersService(
 
             // Get file list with standardized PrinterFileInfo objects
             // Backend clients are responsible for retrieving thumbnails and converting timestamps to Unix format
-            List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.ApiKey, ct).ConfigureAwait(false);
+            List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.Credential, ct).ConfigureAwait(false);
 
             if (fileInfos.Count == 0)
             {
@@ -2788,7 +2752,7 @@ public class PrintersService(
                 ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                 : printer.BackendUrl;
 
-            PrinterJob? job = await jobClient.GetJobAsync(url, printer.ApiKey, ct).ConfigureAwait(false);
+            PrinterJob? job = await jobClient.GetJobAsync(url, printer.Credential, ct).ConfigureAwait(false);
 
             return job != null
                 ? new PrintJobStatusDto
@@ -3161,7 +3125,7 @@ public class PrintersService(
                 (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
                     baseUrlForCamera,
                     printer.FrontendPort,
-                    printer.ApiKey,
+                    printer.Credential,
                     ct).ConfigureAwait(false);
 
                 _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from detection - stream={streamUrl}, snapshot={snapshotUrl}");
@@ -3178,8 +3142,8 @@ public class PrintersService(
                         ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                         : printer.BackendUrl;
 
-                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
+                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
 
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from standard interface - stream={streamUrl}, snapshot={snapshotUrl}");
                 }

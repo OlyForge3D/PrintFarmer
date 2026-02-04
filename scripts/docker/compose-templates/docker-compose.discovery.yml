@@ -19,7 +19,7 @@ services:
   printer-discovery:
     build:
       context: .
-      dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
+      dockerfile: Dockerfile.multistage
       target: printer-discovery-runtime
       args:
         SDK_TAG: ${SDK_TAG}
@@ -29,6 +29,7 @@ services:
         UBUNTU_TAG: ${UBUNTU_TAG}
     image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
+    restart: unless-stopped
     # Use bridge network for microservices deployments (host network reserved for specific scenarios)
     networks:
       - printfarmer-network

@@ -22,7 +22,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light hover:border-pf-border',
   danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
-  ghost: 'bg-transparent hover:bg-pf-bg-0/50 text-inherit border-transparent shadow-none',
+  ghost: '[background:none] hover:[background:rgba(255,255,255,0.10)] text-inherit border-transparent shadow-none',
   success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
   toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent',
@@ -61,14 +61,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
 
   // Link variant should not apply size padding classes
   // Unstyled variant should not apply any base styles
+  // Ghost variant should not apply shadow or ring-offset (needs to blend into any background)
   const applySizeClasses = variant !== 'link' && variant !== 'unstyled';
   const applyBaseStyles = variant !== 'unstyled';
+  const applyShadow = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
 
   return (
     <button
       ref={ref}
       className={clsx(
-        applyBaseStyles && 'rounded-xs font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-xs',
+        applyBaseStyles && 'rounded-xs font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+        applyShadow && 'shadow-xs focus-visible:ring-offset-2',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],
         tabActiveClasses,

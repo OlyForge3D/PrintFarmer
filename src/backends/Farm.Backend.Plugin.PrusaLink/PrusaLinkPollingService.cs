@@ -191,9 +191,10 @@ public sealed class PrusaLinkPollingService(
                     using IServiceScope scope = _scopeFactory.CreateScope();
                     IPrusaLinkClient prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
 
+                    // Use the Credential property populated by the repository layer
                     PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
-                        printer.ApiKey,
+                        printer.Credential,
                         ct);
 
                     _logger.LogDebug($"PrusaLink {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
@@ -238,13 +239,13 @@ public sealed class PrusaLinkPollingService(
                         ThumbnailUrl: status.ThumbnailUrl,
                         CameraStreamUrl: status.CameraStreamUrl,
                         CameraSnapshotUrl: null,
-                        X: null,
-                        Y: null,
-                        Z: null,
-                        HotendTemp: null,
-                        BedTemp: null,
-                        HotendTarget: null,
-                        BedTarget: null,
+                        X: status.AxisX,
+                        Y: status.AxisY,
+                        Z: status.AxisZ,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
                         SpoolInfo: null);
 
                     // Update cache before broadcasting to clients

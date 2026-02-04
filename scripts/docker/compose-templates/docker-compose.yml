@@ -1,16 +1,12 @@
-# PrintFarmer - Monolithic Deployment
-# All services on single docker-compose, single host network
-# Multi-container "monolith" - single deployment unit with separate containers for each service
-# Database is always a separate container (PostgreSQL default, SQL Server optional)
-# NOTE: Health check and shared definitions are automatically injected by compose-generator.sh
-# from docker-compose.common.yml during deployment
-# NOTE: Database service is replaced by compose-generator.sh based on --db-provider flag
+# PrintFarmer Docker Compose Template
+# Base deployment with API, Frontend, Database, and Nginx reverse proxy
+# Optional addons (OrcaSlicer worker, monitoring, telemetry) can be merged via compose-generator.sh
+# NOTE: Health check and shared definitions are automatically injected from docker-compose.common.yml
 
 name: printfarmer
 
 services:
-  # Database service placeholder - replaced by compose-generator.sh with provider-specific config
-  # Supports: PostgreSQL (default), SQL Server
+  # Database (configurable via environment - supports PostgreSQL, SQL Server)
   database:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: printfarmer-database
@@ -28,10 +24,11 @@ services:
     networks:
       printfarmer-network:
         aliases:
-          - postgres
-          - database
+          - postgres    # For PostgreSQL: Host=postgres
+          - sqlserver   # For SQL Server: Server=sqlserver
+          - database    # Generic alias works for either
     volumes:
-      - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data
+      - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data  # Database persistence (maps to host directory or docker volume)
     restart: unless-stopped
     healthcheck:
       test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
@@ -40,43 +37,43 @@ services:
       retries: 5
       start_period: 15s
 
-  # .NET API Backend - Multi-stage build for efficiency
+  # PrintFarmer API - Core microservice with multi-stage build
   api:
     build:
       context: .
       dockerfile: Dockerfile.multistage
       target: api-runtime
+      args:
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
     image: printfarmer-api
     container_name: printfarmer-api
+    restart: unless-stopped
     ports:
-      - "5245:5245" # HTTP API / SignalR (bind host 5245 -> container 5245)
+      - "${API_PORT:-5245}:5245"
     depends_on:
       database:
         condition: service_healthy
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5245
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=${CONNECTION_STRING}
+      - ConnectionStrings__Default=${ConnectionStrings__Default}
       - DB_STARTUP_TIMEOUT=${DB_STARTUP_TIMEOUT:-120}
       - DB_CONNECTION_RETRY_COUNT=${DB_CONNECTION_RETRY_COUNT:-3}
       - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}
-      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
-      - DEPLOYMENT_MODE=monolithic
+      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
+      - DEPLOYMENT_MODE=microservices
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
-      - ALLOW_LOCAL_NETWORK=true
-      - ALLOWED_NETWORK_RANGES=10.0.0.0/24,172.16.0.0/12
-      - DOCKER_HOST_NETWORK=false
-      - ENABLE_LOCAL_NETWORK_ACCESS=true
-      - DISCOVERY_PORTS=7125,80
-      # Persist model storage & gcode library (map to host)
-      - GCODE_STORAGE_PATH=/app/gcode
-      - MODEL_UPLOAD_PATH=/app/models
-      # Optional Spoolman integration (values may be overridden by .env file generated via deploy script)
-      - SPOOLMAN_ENABLED=${SPOOLMAN_ENABLED:-}
-      - SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
-      - SPOOLMAN_PORT=${SPOOLMAN_PORT:-}
-      # Application Settings - Pre-populate Setup Wizard
+      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
+      - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
+      - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://orcaslicer-worker:8080}
       - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
@@ -88,40 +85,41 @@ services:
       - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
-      # Profile task check - disable when slicing workers are not enabled
-      - ProfileTaskCheck__Enabled=${PROFILE_TASK_CHECK_ENABLED:-true}
     volumes:
       - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
+      - ${EXTERNAL_DATAPROTECTION_PATH:-.volumes/printfarmer-dataprotection-keys}:/root/.aspnet/DataProtection-Keys
 
     networks:
       - printfarmer-network
     healthcheck: *api-healthcheck
 
-  # React Frontend with Nginx - Multi-stage build
-  # NOTE: No external port binding - nginx-proxy handles all external traffic
+  # React Frontend with multi-stage build
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.multistage
       target: frontend-runtime
       args:
-        # Build-time args baked into React bundle - use relative paths for nginx proxy routing
+        SDK_TAG: ${SDK_TAG}
+        ASPNET_TAG: ${ASPNET_TAG}
+        NODE_TAG: ${NODE_TAG}
+        NGINX_TAG: ${NGINX_TAG}
+        UBUNTU_TAG: ${UBUNTU_TAG}
         VITE_API_BASE_URL: /api
         VITE_SIGNALR_PRINTERS_URL: /hubs/printers
         VITE_SIGNALR_HARVEST_URL: /hubs/harvest
     image: printfarmer-frontend
     container_name: printfarmer-frontend
-    # No external ports - nginx-proxy routes traffic to this container
-    expose:
-      - "80"
+    restart: unless-stopped
     environment:
       # Runtime env vars (for reference, but React reads build-time args)
       - VITE_API_BASE_URL=/api
       - VITE_SIGNALR_PRINTERS_URL=/hubs/printers
       - VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+      - NGINX_PROXY_API=http://api:5245
     networks:
       - printfarmer-network
     depends_on:
@@ -133,10 +131,11 @@ services:
   nginx-proxy:
     image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: printfarmer-nginx-proxy
+    restart: unless-stopped
     ports:
       - "${HTTP_PORT:-8080}:80"
     volumes:
-      - ./deploy/nginx/nginx-monolithic.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - api
@@ -145,10 +144,6 @@ services:
       - printfarmer-network
 
 volumes:
-  printfarmer-gcode-storage:
-  printfarmer-slicer-profiles:
-  printfarmer-model-storage:
-  printfarmer-orcaslicer-temp:
 
 networks:
   printfarmer-network: *printfarmer-network

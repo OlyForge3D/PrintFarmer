@@ -8,6 +8,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: printfarmer-prometheus
+    restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -27,6 +28,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: printfarmer-grafana
+    restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
@@ -44,6 +46,7 @@ services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
     container_name: printfarmer-elasticsearch
+    restart: unless-stopped
     environment:
       - node.name=elasticsearch
       - cluster.name=printfarmer-logs
@@ -60,6 +63,7 @@ services:
   logstash:
     image: docker.elastic.co/logstash/logstash:8.10.0
     container_name: printfarmer-logstash
+    restart: unless-stopped
     volumes:
       - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
       - ./monitoring/logstash/config:/usr/share/logstash/config
@@ -78,6 +82,7 @@ services:
   kibana:
     image: docker.elastic.co/kibana/kibana:8.10.0
     container_name: printfarmer-kibana
+    restart: unless-stopped
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
     ports:

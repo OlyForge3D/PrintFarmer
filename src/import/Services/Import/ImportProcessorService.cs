@@ -308,6 +308,8 @@ public class ImportProcessorService : IImportProcessorService
             BedTarget: null,
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
+            Username: p.Username,
+            Password: p.Password,
             OriginalServerUrl: p.OriginalServerUrl,
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,

@@ -18,35 +18,35 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// Gets comprehensive status information combining printer state, job progress, and camera information.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server (e.g., http://printer-ip)</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing detailed printer status including state, progress, and camera URLs</returns>
-    Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
     // Analyzer-friendly overload (non-breaking): allow Uri input too
-    Task<PrusaCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the basic status information from a PrusaLink printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing printer status information including online status and state</returns>
-    Task<PrusaStatus> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaStatus> GetStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
-    Task<PrusaStatus> GetStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaStatus> GetStatusAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the current print job information from a PrusaLink printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing current job information, or null if job is active</returns>
-    Task<PrusaJob?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaJob?> GetJobAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
-    Task<PrusaJob?> GetJobAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default);
+    Task<PrusaJob?> GetJobAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the URL for accessing the camera snapshot image.
@@ -76,57 +76,57 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
     /// <param name="fileName">The name to save the file as</param>
     /// <param name="fileContent">Stream containing the G-code file content</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the upload was successful</returns>
-    Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Starts printing a G-code file by name on the PrusaLink printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
     /// <param name="fileName">The name of the G-code file to print</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the print start command was successfully sent</returns>
-    Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> StartPrintAsync(Uri baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Stops (cancels) the current print job on the PrusaLink printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the stop command was successfully sent</returns>
-    Task<bool> StopPrintAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StopPrintAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> StopPrintAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StopPrintAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a list of G-code file names available on the PrusaLink printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink</param>
+    /// <param name="credential">Printer credential for digest authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing an array of G-code file names</returns>
-    Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<string[]> GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<string[]> GetFileListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<string[]> GetFileListAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets a list of file details including names and paths for metadata retrieval.
     /// Used internally for thumbnail extraction.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="credential">Printer credential for digest authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets detailed file information including metadata and thumbnail URLs.
@@ -135,21 +135,21 @@ public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupports
     /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
     /// <param name="storagePath">The storage path on the printer (e.g., 'usb' or 'local').</param>
     /// <param name="filePath">The file path within the storage location.</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="credential">Printer credential for digest authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
+    Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
+    Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets detailed printer information from a PrusaLink printer (name, firmware, capabilities, etc.)
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink server.</param>
-    /// <param name="apiKey">API key for authentication with PrusaLink.</param>
+    /// <param name="credential">Printer credential for digest authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Creates a PrinterDto from a database Printer entity and its composite status.

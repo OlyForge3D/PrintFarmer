@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 
@@ -40,7 +41,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     // Intentionally caches HttpClient instances per credential set for connection reuse
 #pragma warning disable IDISP015 // Member should not return created and cached instance
-    private HttpClient GetClientForCredentials(PrusaLinkCredentials? credentials)
+    private HttpClient GetClientForCredentials(PrinterCredential? credentials)
 #pragma warning restore IDISP015
     {
         // If no digest auth credentials, use the default client
@@ -95,7 +96,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // API Version Information
-    public async Task<VersionInfo> GetVersionAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<VersionInfo> GetVersionAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/version").ToString();
         HttpClient client = GetClientForCredentials(credentials);
@@ -129,7 +130,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // API Version Information (Uri overload co-located for S4136)
-    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<VersionInfo> GetVersionAsync(Uri baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
 
@@ -165,7 +166,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Printer Information
-    public async Task<PrinterInfo> GetInfoAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<PrinterInfo> GetInfoAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/info").ToString();
         HttpClient client = GetClientForCredentials(credentials);
@@ -199,7 +200,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Status Information
-    public async Task<StatusInfo> GetStatusAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<StatusInfo> GetStatusAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/status").ToString();
         HttpClient client = GetClientForCredentials(credentials);
@@ -233,7 +234,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Job Management
-    public async Task<Job?> GetJobAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<Job?> GetJobAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/job").ToString(), credentials);
@@ -249,7 +250,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return JsonSerializer.Deserialize<Job>(json, _jsonOptions);
     }
 
-    public async Task<bool> StopJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> StopJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}").ToString(), credentials);
@@ -257,7 +258,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> PauseJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> PauseJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/pause").ToString(), credentials);
@@ -265,7 +266,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ResumeJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> ResumeJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/resume").ToString(), credentials);
@@ -273,7 +274,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ContinueJobAsync(string baseUrl, int jobId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> ContinueJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/continue").ToString(), credentials);
@@ -282,7 +283,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Storage Management
-    public async Task<StorageListResponse> GetStorageAsync(string baseUrl, PrusaLinkCredentials? credentials = null, string? acceptLanguage = null, CancellationToken ct = default)
+    public async Task<StorageListResponse> GetStorageAsync(string baseUrl, PrinterCredential? credentials = null, string? acceptLanguage = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/storage").ToString(), credentials);
@@ -298,7 +299,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Transfer Management
-    public async Task<Transfer?> GetTransferAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<Transfer?> GetTransferAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/transfer").ToString(), credentials);
@@ -314,7 +315,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return JsonSerializer.Deserialize<Transfer>(json, _jsonOptions);
     }
 
-    public async Task<bool> StopTransferAsync(string baseUrl, int transferId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> StopTransferAsync(string baseUrl, int transferId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/transfer/{transferId}").ToString(), credentials);
@@ -323,7 +324,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // File Management
-    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null,
+    public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
@@ -366,7 +367,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     public async Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream,
-        PrusaLinkCredentials? credentials = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default)
+        PrinterCredential? credentials = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(fileStream);
 
@@ -384,7 +385,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
@@ -394,7 +395,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<FileStatus> CheckFileStatusAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<FileStatus> CheckFileStatusAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Head, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
@@ -413,7 +414,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return new FileStatus(true, readOnly, currentlyPrinted);
     }
 
-    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrusaLinkCredentials? credentials = null,
+    public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         bool force = false, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
@@ -425,17 +426,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Camera Management
-    public async Task<Camera[]> GetCamerasAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<Farm.Infrastructure.Contracts.Printers.PrusaLink.Camera[]> GetCamerasAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<Camera[]>(json, _jsonOptions)!;
+        return JsonSerializer.Deserialize<Farm.Infrastructure.Contracts.Printers.PrusaLink.Camera[]>(json, _jsonOptions)!;
     }
 
-    public async Task<bool> SetCameraOrderAsync(string baseUrl, string[] cameraIds, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> SetCameraOrderAsync(string baseUrl, string[] cameraIds, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
@@ -445,7 +446,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<CameraConfig> GetCameraConfigAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<CameraConfig> GetCameraConfigAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
@@ -455,7 +456,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return JsonSerializer.Deserialize<CameraConfig>(json, _jsonOptions)!;
     }
 
-    public async Task<bool> SetupCameraAsync(string baseUrl, string cameraId, CameraConfigSet config, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> SetupCameraAsync(string baseUrl, string cameraId, CameraConfigSet config, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
@@ -465,7 +466,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> DeleteCameraAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> DeleteCameraAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
@@ -473,7 +474,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras/snap").ToString(), credentials);
@@ -488,7 +489,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
@@ -503,7 +504,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
@@ -513,7 +514,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return !response.IsSuccessStatusCode ? null : await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Patch, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
@@ -523,7 +524,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> ResetCameraConfigAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> ResetCameraConfigAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
@@ -531,7 +532,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> RegisterCameraToConnectAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> RegisterCameraToConnectAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
@@ -539,7 +540,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<bool> UnregisterCameraFromConnectAsync(string baseUrl, string cameraId, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> UnregisterCameraFromConnectAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
@@ -548,7 +549,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     }
 
     // Update Management
-    public async Task<UpdateInfo?> GetUpdateInfoAsync(string baseUrl, string environment = "prusalink", PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<UpdateInfo?> GetUpdateInfoAsync(string baseUrl, string environment = "prusalink", PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
@@ -573,7 +574,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return updateInfo;
     }
 
-    public async Task<bool> StartUpdateAsync(string baseUrl, string environment = "prusalink", PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<bool> StartUpdateAsync(string baseUrl, string environment = "prusalink", PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
@@ -583,14 +584,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     /// <summary>
     /// Gets file list using the legacy /api/files endpoint (OctoPrint compatibility endpoint).
-    /// This endpoint also requires API key authentication and returns files grouped by storage location.
+    /// This endpoint also requires authentication and returns files grouped by storage location.
     /// Used as a fallback when /api/v1/files fails due to authentication issues.
     /// Reference: FDM-Monster implementation at https://github.com/fdm-monster/fdm-monster
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink printer.</param>
-    /// <param name="credentials">Optional credentials for authentication (API key and/or digest auth).</param>
+    /// <param name="credentials">Optional credentials for digest authentication.</param>
     /// <param name="ct">The cancellation token.</param>
-    public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, PrusaLinkCredentials? credentials = null, CancellationToken ct = default)
+    public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         HttpClient client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/files").ToString();
@@ -639,14 +640,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     /// <summary>
     /// Creates an HTTP request message with appropriate authentication headers.
-    /// Adds X-Api-Key header if API key is provided in credentials.
     /// Digest authentication is handled by DigestAuthHandler at the HttpClient level.
     /// </summary>
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, PrusaLinkCredentials? credentials)
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, PrinterCredential? credentials)
     {
         HttpRequestMessage request = new(method, url);
 
-        // Always add X-Api-Key header if available - PrusaLink uses this for read operations
+        // Add X-Api-Key header if available (for compatibility with some PrusaLink endpoints)
         if (credentials?.HasApiKey == true)
         {
             request.Headers.Add("X-Api-Key", credentials.ApiKey);
@@ -655,51 +655,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return request;
     }
 
-    // ========== BACKWARD COMPATIBLE OVERLOADS (string apiKey) ==========
-    // These methods provide backward compatibility for existing code that passes string? apiKey.
-    // They delegate to the primary methods after converting apiKey to PrusaLinkCredentials.
-    private static PrusaLinkCredentials? ToCredentials(string? apiKey)
-        => string.IsNullOrEmpty(apiKey) ? null : PrusaLinkCredentials.FromApiKey(apiKey);
-
-    public Task<VersionInfo> GetVersionAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetVersionAsync(baseUrl, ToCredentials(apiKey), ct);
-
-    public Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetInfoAsync(baseUrl, ToCredentials(apiKey), ct);
-
-    public Task<StatusInfo> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetStatusAsync(baseUrl, ToCredentials(apiKey), ct);
-
-    public Task<Job?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetJobAsync(baseUrl, ToCredentials(apiKey), ct);
-
-    public Task<bool> StopJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
-        => StopJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
-
-    public Task<bool> PauseJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
-        => PauseJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
-
-    public Task<bool> ResumeJobAsync(string baseUrl, int jobId, string? apiKey, CancellationToken ct)
-        => ResumeJobAsync(baseUrl, jobId, ToCredentials(apiKey), ct);
-
-    public Task<StorageListResponse> GetStorageAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetStorageAsync(baseUrl, ToCredentials(apiKey), acceptLanguage: null, ct);
-
-    public Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct)
-        => GetFileInfoAsync(baseUrl, storagePath, filePath, ToCredentials(apiKey), acceptLanguage: null, accept: null, ct);
-
-    public Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey, CancellationToken ct)
-        => GetFilesLegacyAsync(baseUrl, ToCredentials(apiKey), ct);
-
-    public Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream, string? apiKey, bool printAfterUpload, bool overwrite, CancellationToken ct)
-        => UploadFileAsync(baseUrl, storagePath, filePath, fileStream, ToCredentials(apiKey), printAfterUpload, overwrite, ct);
-
-    public Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey, CancellationToken ct)
-        => StartPrintAsync(baseUrl, storagePath, filePath, ToCredentials(apiKey), ct);
-
     // ========== LEGACY ENDPOINT IMPLEMENTATIONS (OctoPrint-compatible, require HTTP Digest Auth) ==========
     // These endpoints provide pause/resume, temperature control, and movement capabilities
-    public async Task<bool> PausePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    public async Task<bool> PausePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)
@@ -729,7 +687,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    public async Task<bool> ResumePrintLegacyAsync(string baseUrl, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    public async Task<bool> ResumePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)
@@ -759,7 +717,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    public async Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, int toolIndex = 0, CancellationToken ct = default)
+    public async Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, int toolIndex = 0, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)
@@ -793,7 +751,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    public async Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    public async Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)
@@ -823,7 +781,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    public async Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    public async Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)
@@ -860,7 +818,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    public async Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrusaLinkCredentials credentials, CancellationToken ct = default)
+    public async Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrinterCredential? credentials, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(credentials);
         if (!credentials.HasDigestAuth)

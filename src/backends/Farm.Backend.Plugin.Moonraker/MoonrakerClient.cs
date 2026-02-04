@@ -566,6 +566,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             BedTarget: status.BedTarget,
             Backend: PrinterBackend.Moonraker,
             ApiKey: printer.ApiKey,
+            Username: printer.Username,
+            Password: printer.Password,
             OriginalServerUrl: printer.OriginalServerUrl,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
@@ -578,10 +580,20 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "G28", ct);
 
-    public async Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default)
+    // Interface implementation (no credential)
+    public Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default)
+        => HomeXYAsync(baseUrl, null, ct);
+
+    // Interface implementation (no credential)
+    public Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default)
+        => HomeZAsync(baseUrl, null, ct);
+
+    // Overload with credential for ISupportsMovement
+    public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
 
-    public async Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default)
+    // Overload with credential for ISupportsMovement
+    public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
@@ -2413,9 +2425,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// ISupportsFileList implementation - gets the list of files on the printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Use the new method that extracts file metadata including size
         return await GetFileListWithMetadataAsync(baseUrl, ct);
@@ -2430,9 +2442,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="fileName">The name of the file to upload.</param>
     /// <param name="fileContent">The file content stream.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
         => await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
 
     /// <summary>
@@ -2440,24 +2452,24 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="fileName">The name of the file to print.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
         => await StartPrintAsync(baseUrl, fileName, ct);
 
     /// <summary>
     /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await PauseAsync(baseUrl, ct);
 
-    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await ResumeAsync(baseUrl, ct);
 
-    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await CancelPrintAsync(baseUrl, ct);
 
     /// <summary>
@@ -2465,12 +2477,12 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="frontendPort">Optional frontend port for camera URL.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetCameraStreamUrlAsync(baseUrl, frontendPort, ct: ct);
 
-    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetCameraSnapshotUrlAsync(baseUrl, ct: ct);
 
     /// <summary>
@@ -2480,9 +2492,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="frontendPort">Optional frontend port for camera URL.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<(string? StreamUrl, string? SnapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<(string? StreamUrl, string? SnapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Query the actual API to get configured camera URLs
         (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
@@ -2494,9 +2506,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="filePath">The path of the file to get metadata for.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default)
+    async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         GCodeMetadata? metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
         if (metadata == null)
@@ -2531,24 +2543,24 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// ISupportsMovement implementations - home and move operations.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await SendHomeAsync(baseUrl, ct);
 
     async Task<bool> ISupportsMovement.SendHomeAsync(string baseUrl, CancellationToken ct = default)
         => await SendHomeAsync(baseUrl, ct);
 
-    async Task<bool> ISupportsMovement.HomeXYAsync(string baseUrl, CancellationToken ct = default)
-        => await HomeXYAsync(baseUrl, ct);
+    async Task<bool> ISupportsMovement.HomeXYAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+        => await HomeXYAsync(baseUrl, credential, ct);
 
-    async Task<bool> ISupportsMovement.HomeZAsync(string baseUrl, CancellationToken ct = default)
-        => await HomeZAsync(baseUrl, ct);
+    async Task<bool> ISupportsMovement.HomeZAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
+        => await HomeZAsync(baseUrl, credential, ct);
 
-    async Task<bool> ISupportsMovement.MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsMovement.MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await MoveAsync(baseUrl, x, y, z, f, ct: ct);
 
-    async Task<bool> ISupportsMovement.MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    async Task<bool> ISupportsMovement.MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await MoveToAsync(baseUrl, x, y, z, f, ct);
 
     /// <summary>
@@ -2557,9 +2569,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="hotendTemp">Optional target hotend temperature in Celsius.</param>
     /// <param name="bedTemp">Optional target bed temperature in Celsius.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await SetTempsAsync(baseUrl, hotendTemp, bedTemp, ct);
 
     /// <summary>
@@ -2569,27 +2581,27 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="start">Index to start from for pagination.</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetHistoryListAsync(baseUrl, limit, start, since: since, ct: ct);
 
-    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetHistoryJobAsync(baseUrl, jobId, ct);
 
-    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetHistoryTotalsAsync(baseUrl, ct);
 
-    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
         => await DeleteHistoryJobAsync(baseUrl, jobId, ct);
 
     /// <summary>
     /// ISupportsPrinterInformation implementation - get detailed printer information.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
+    /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         MoonrakerPrinterInfo? info = await GetPrinterInfoAsync(baseUrl, ct);
         return new StandardPrinterInfo

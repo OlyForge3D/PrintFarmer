@@ -2,12 +2,7 @@
 
 /// <summary>
 /// Factory for creating HttpClient instances configured for PrusaLink authentication.
-/// Supports both API key authentication (X-Api-Key header) and HTTP Digest Authentication.
-///
-/// PrusaLink Authentication modes:
-/// - API Key only: Read access to most endpoints
-/// - Digest Auth: Full access including privileged operations (settings, system control)
-/// - Both: API Key for read operations, Digest for write operations
+/// Uses HTTP Digest Authentication with credential Username and Password.
 /// </summary>
 public interface IPrusaLinkHttpClientFactory
 {

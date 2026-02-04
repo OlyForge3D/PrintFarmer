@@ -1,7 +1,7 @@
 FROM nginx:alpine
 
 # Copy nginx configuration
-COPY deploy/nginx/nginx-microservices.conf /etc/nginx/nginx.conf
+COPY deploy/nginx/nginx-proxy.conf /etc/nginx/nginx.conf
 
 # Install curl for health checks and pre-create nginx directories with proper permissions
 RUN apk add --no-cache curl && \

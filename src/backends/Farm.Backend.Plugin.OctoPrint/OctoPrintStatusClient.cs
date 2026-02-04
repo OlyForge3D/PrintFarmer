@@ -47,11 +47,11 @@ namespace Farm.Backend.Plugin.OctoPrint
 
                 // Retrieve both printer state and job status - now returns typed objects
                 OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
-                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.Credential),
                     ct);
 
                 OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
-                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.Credential),
                     ct);
 
                 // Create status DTO from typed objects
@@ -106,11 +106,11 @@ namespace Farm.Backend.Plugin.OctoPrint
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
 
                 OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
-                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.Credential),
                     ct);
 
                 OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
-                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
+                    async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.Credential),
                     ct);
 
                 // Build PrinterDto from typed objects
@@ -137,6 +137,8 @@ namespace Farm.Backend.Plugin.OctoPrint
                         BedTarget: null,
                         Backend: (PrinterBackend)printer.Backend,
                         ApiKey: printer.ApiKey,
+                        Username: printer.Username,
+                        Password: printer.Password,
                         OriginalServerUrl: printer.OriginalServerUrl,
                         BackendPort: printer.BackendPort,
                         FrontendPort: printer.FrontendPort,

@@ -38,7 +38,7 @@ public class DigestAuthHandler : DelegatingHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        // If no credentials, just pass through (will use API key auth)
+        // If no credentials, just pass through (no authentication)
         if (string.IsNullOrWhiteSpace(_username) || string.IsNullOrWhiteSpace(_password))
         {
             return await base.SendAsync(request, cancellationToken);

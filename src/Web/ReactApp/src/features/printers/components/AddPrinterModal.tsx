@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { LoadingIcon, CheckIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, CheckIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto, TestConnectionResponse } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { apiClient } from '@/services/api';
@@ -56,6 +56,7 @@ function AddPrinterModalContent({
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
@@ -363,13 +364,24 @@ function AddPrinterModalContent({
                   error={validationErrors.password?.[0]}
                   helper="Get this from printer: Settings → Network → Credentials"
                 >
-                  <Input
-                    type="password"
-                    value={formData.password || ''}
-                    onChange={(e) => handleInputChange('password', e.target.value)}
-                    placeholder="Enter password from printer"
-                    aria-label="Password for PrusaLink"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password || ''}
+                      onChange={(e) => handleInputChange('password', e.target.value)}
+                      placeholder="Enter password from printer"
+                      aria-label="Password for PrusaLink"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                    />
+                  </div>
                 </FormField>
               </>
             )}

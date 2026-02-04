@@ -783,7 +783,9 @@ public class PrintersController(
             p.BackendPort,
             p.FrontendPort,
             capabilitiesDto,
-            toolheadDtos);
+            toolheadDtos,
+            p.Username,
+            p.Password);
     }
 
     /// <summary>

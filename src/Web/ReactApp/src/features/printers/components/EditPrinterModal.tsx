@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels, TestConnectionResponse } from '@/types/api';
 import { toast } from 'sonner';
@@ -49,6 +49,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
@@ -69,8 +70,21 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backend: typeof printerDetails.backend === 'string'
           ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
           : printerDetails.backend,
-        apiKey: printerDetails.apiKey,
-        username: printerDetails.username,
+        // PrusaLink doesn't use API keys - only username/password for Digest Auth
+        // Clear apiKey for PrusaLink to prevent confusion with legacy data
+        apiKey: (typeof printerDetails.backend === 'string' 
+          ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
+          : printerDetails.backend) === PrinterBackend.PrusaLink 
+            ? undefined 
+            : printerDetails.apiKey,
+        // Default username to 'maker' for PrusaLink if not set
+        username: printerDetails.username || (
+          (typeof printerDetails.backend === 'string' 
+            ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
+            : printerDetails.backend) === PrinterBackend.PrusaLink 
+            ? 'maker' 
+            : undefined
+        ),
         password: printerDetails.password,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
@@ -133,7 +147,17 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     onClose();
     setValidationErrors({});
     setError('');
+    setTestResult(null);
+    setShowPassword(false);
   }, [onClose]);
+
+  // Reset test result and password visibility when modal opens or printer changes
+  useEffect(() => {
+    if (isOpen) {
+      setTestResult(null);
+      setShowPassword(false);
+    }
+  }, [isOpen, printerId]);
 
   // Helper to compare two values, treating null/undefined/NaN as equal
   const valuesEqual = useCallback((a: unknown, b: unknown): boolean => {
@@ -380,8 +404,16 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     setError('');
     try {
       // Include toolheads in the update if we have any
+      // Ensure username defaults to 'maker' for PrusaLink printers
+      // Clear apiKey for PrusaLink (uses Digest Auth, not API key)
       const updateData: UpdatePrinterDto = {
         ...formData,
+        apiKey: formData.backend === PrinterBackend.PrusaLink 
+          ? undefined 
+          : formData.apiKey,
+        username: formData.backend === PrinterBackend.PrusaLink 
+          ? (formData.username || 'maker') 
+          : formData.username,
         toolheads: toolheads.length > 0 ? toolheads : undefined,
       };
       const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
@@ -499,46 +531,57 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   const modalFooter = (
-    <div className="space-y-3">
-      {/* Test Connection Result */}
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleClose}
+      >
+        Cancel
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleTestConnection}
+        disabled={isTesting || !formData?.serverUrl?.trim()}
+        iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+      >
+        {isTesting ? 'Testing...' : 'Test'}
+      </Button>
+      
+      {/* Test Connection Result - inline status */}
       {testResult && (
-        <Alert 
-          type={testResult.success ? 'success' : 'error'} 
-          className="mb-0"
+        <span 
+          className={`text-sm flex items-center gap-1.5 px-2 py-1 rounded ${
+            testResult.success 
+              ? 'text-pf-success bg-pf-success-bg' 
+              : 'text-pf-error-text bg-pf-error-bg'
+          }`}
+          role={testResult.success ? undefined : 'alert'}
         >
-          {testResult.message}
-        </Alert>
+          {testResult.success ? (
+            <CheckIcon className="w-4 h-4" />
+          ) : (
+            <span className="w-4 h-4 flex items-center justify-center">✕</span>
+          )}
+          <span className="truncate max-w-[200px]" title={testResult.message}>
+            {testResult.success ? 'Connected' : testResult.message}
+          </span>
+        </span>
       )}
       
-      {/* Buttons */}
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleClose}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleTestConnection}
-          disabled={isTesting || !formData?.serverUrl?.trim()}
-          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
-        >
-          {isTesting ? 'Testing...' : 'Test'}
-        </Button>
-        <Button
-          type="button"
-          onClick={handleSaveClick}
-          variant="primary"
-          disabled={updateMutation.status === 'pending' || !hasChanges}
-          iconLeft={<CheckIcon className="w-4 h-4" />}
-          title={!hasChanges ? 'No changes to save' : undefined}
-        >
-          {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-        </Button>
-      </div>
+      {/* Spacer to push Save to the right */}
+      <div className="flex-1" />
+      <Button
+        type="button"
+        onClick={handleSaveClick}
+        variant="primary"
+        disabled={updateMutation.status === 'pending' || !hasChanges}
+        iconLeft={<CheckIcon className="w-4 h-4" />}
+        title={!hasChanges ? 'No changes to save' : undefined}
+      >
+        {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
+      </Button>
     </div>
   );
 
@@ -629,13 +672,24 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   />
                 </FormField>
                 <FormField label="Password">
-                  <Input
-                    type="password"
-                    value={formData.password || ''}
-                    onChange={e => handleInputChange('password', e.target.value)}
-                    placeholder="From printer Settings → Network → Credentials"
-                    title="PrusaLink password from printer settings"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password || ''}
+                      onChange={e => handleInputChange('password', e.target.value)}
+                      placeholder="From printer Settings → Network → Credentials"
+                      title="PrusaLink password from printer settings"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                    />
+                  </div>
                 </FormField>
               </div>
             )}

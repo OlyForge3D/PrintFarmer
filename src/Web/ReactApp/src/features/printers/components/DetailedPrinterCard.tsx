@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { getBackendIcon } from '@/common/utils/printerBackendIcon';
+import { PanelRightOpen } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -17,7 +17,6 @@ import {
   RefreshIcon,
   ExternalLinkIcon,
   CameraIcon,
-  CloseIcon,
   SnowflakeIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
@@ -79,12 +78,38 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   const isPaused = state === 'Paused';
   const isShutdown = state === 'Shutdown' || state === 'Halted';
 
-  const stateColorClasses = (() => {
-    if (!isOnline) return 'bg-slate-500 text-white';
-    if (isPrinting) return 'bg-pf-success-bg text-white font-bold';
-    if (isPaused) return 'bg-yellow-600 text-white';
-    if (isShutdown) return 'bg-red-600 text-white';
-    return 'bg-blue-600 text-white';
+  const homedAxes = (printer.homedAxes ?? '').toLowerCase();
+  const isXHomed = homedAxes.includes('x');
+  const isYHomed = homedAxes.includes('y');
+  const isZHomed = homedAxes.includes('z');
+  const isXYHomed = isXHomed && isYHomed;
+  const isAllHomed = isXYHomed && isZHomed;
+
+  const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
+    if (isHomed) {
+      return {
+        className: 'text-white!',
+        style: {
+          backgroundColor: '#2096f3',
+          backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
+        },
+      };
+    }
+    return {
+      className: 'text-white!',
+      style: {
+        backgroundColor: '#fb8c00',
+        backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
+      },
+    };
+  };
+
+  const statusDotClasses = (() => {
+    if (!isOnline) return 'bg-slate-400';
+    if (isPrinting) return 'bg-pf-success-bg';
+    if (isPaused) return 'bg-yellow-500';
+    if (isShutdown) return 'bg-red-500';
+    return 'bg-blue-500';
   })();
 
   // Update progress bar width
@@ -242,105 +267,117 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   return (
     <div className={`rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 w-full min-w-92`}>
       {/* Header */}
-      <div className="flex justify-between items-start mb-4 gap-4">
-        <div className="flex justify-between items-start flex-1 gap-4">
-          <div className="flex-1">
-            <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
+      <div className="mb-4">
+        {/* Top row: Name + Status Pill (match collapsed card) */}
+        <div className="flex justify-between items-center mb-2 gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
               {printer.name}
             </div>
             {(printer.modelName) && (
-              <div className="text-pf-text-secondary text-xs">
+              <div className="text-pf-text-secondary text-xs truncate">
                 {`${printer.modelName || ''}`.trim()}
               </div>
             )}
-            <div className="flex items-center gap-2 mb-1">
-              <a 
-                href={printer.frontendUrl} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-pf-text-secondary hover:text-pf-text-primary"
-                aria-label={`Open printer ${printer.name} in new tab`}
-                title={`Open printer ${printer.name}`}
-              >
-                <ExternalLinkIcon className="h-4 w-4" />
-              </a>
-              {/* Camera button - always visible, enabled/disabled based on camera URLs */}
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/[0.04] border border-white/10 text-pf-text-primary">
+            <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
+            <span className="text-pf-text-secondary">
+              {isOnline ? toCamelCase(state) : 'Offline'}
+            </span>
+          </div>
+        </div>
+
+        {/* Subtle separator above actions (match collapsed card) */}
+        <div className="h-px w-full bg-white/10 mb-2" aria-hidden />
+
+        {/* Action buttons row */}
+        <div className="flex w-full items-center justify-between gap-2" role="toolbar" aria-label="Printer actions">
+          <div className="flex items-center gap-1">
+            <a
+              href={printer.frontendUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
+              aria-label={`Open printer ${printer.name} in new tab`}
+              title={`Open printer ${printer.name}`}
+            >
+              <ExternalLinkIcon className="h-4 w-4" />
+            </a>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowCamera(!showCamera)}
+              disabled={!hasCameraUrls}
+              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+              aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+              title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+              iconCenter={<CameraIcon className="h-4 w-4" />}
+            >
+            </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleViewHistory}
+              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+              title="View print history"
+              aria-label="View print history"
+              iconCenter={<HistoryIcon className="h-4 w-4" />}
+            >
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onEdit?.(printer)}
+              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+              title="Edit details"
+              aria-label="Edit details"
+              iconCenter={<EditIcon className="h-4 w-4" />}
+            >
+            </Button>
+            {onDismiss && (
               <Button
                 type="button"
-                variant="subtle"
+                variant="ghost"
                 size="sm"
-                onClick={() => setShowCamera(!showCamera)}
-                disabled={!hasCameraUrls}
-                className="p-1! h-auto!"
-                aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-                title={hasCameraUrls ? `Camera available` : 'No camera configured'}
-                iconCenter={<CameraIcon className="h-4 w-4" />}
+                onClick={onDismiss}
+                className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+                title="Close details sidebar"
+                aria-label="Close details sidebar"
+                iconCenter={<PanelRightOpen className="h-4 w-4" />}
               >
               </Button>
-            </div>
-            {showCamera && (
-              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-                {cameraStreamUrl && expandedImageVisible ? (
-                    <img 
-                      src={cameraStreamUrl} 
-                      alt="webcam snapshot"
-                      className="max-w-full max-h-full object-contain"
-                      onError={() => setExpandedImageVisible(false)}
-                      onLoad={() => setExpandedImageVisible(true)}
-                    />
-                  ) : (
-                  <div className="text-center text-pf-text-secondary p-4">
-                    <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No camera configured</p>
-                  </div>
-                )}
+            )}
+          </div>
+        </div>
+
+        {showCamera && (
+          <div className="mt-3 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
+            {cameraStreamUrl && expandedImageVisible ? (
+              <img
+                src={cameraStreamUrl}
+                alt="webcam snapshot"
+                className="max-w-full max-h-full object-contain"
+                onError={() => setExpandedImageVisible(false)}
+                onLoad={() => setExpandedImageVisible(true)}
+              />
+            ) : (
+              <div className="text-center text-pf-text-secondary p-4">
+                <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No camera configured</p>
               </div>
             )}
           </div>
-          
-          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
-            {getBackendIcon(printer.backend)}
-            {isOnline ? toCamelCase(state) : 'Offline'}
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={handleViewHistory}
-            className="p-1! h-auto!"
-            title="View print history"
-            aria-label="View print history"
-            iconCenter={<HistoryIcon className="h-4 w-4" />}
-          >
-        </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={() => onEdit?.(printer)}
-            className="p-1! h-auto!"
-            title="Edit details"
-            aria-label="Edit details"
-            iconCenter={<EditIcon className="h-4 w-4" />}
-          >
-          </Button>
-          {onDismiss && (
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={onDismiss}
-              className="p-1! h-auto!"
-              title="Close"
-              aria-label="Close"
-              iconCenter={<CloseIcon className="h-4 w-4" />}
-            >
-        </Button>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Progress bar for active prints */}
@@ -458,6 +495,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome()}
                   title="Home all axes"
                   padSize="small"
+                  className={getHomeButtonStyle(isAllHomed).className}
+                  style={getHomeButtonStyle(isAllHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
@@ -490,6 +529,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome('xy')}
                   title="Home X/Y"
                   padSize="small"
+                  className={getHomeButtonStyle(isXYHomed).className}
+                  style={getHomeButtonStyle(isXYHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
@@ -527,6 +568,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   onClick={() => handleHome('z')}
                   title="Home Z"
                   padSize="small"
+                  className={getHomeButtonStyle(isZHomed).className}
+                  style={getHomeButtonStyle(isZHomed).style}
                 >
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>

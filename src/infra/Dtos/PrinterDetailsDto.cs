@@ -28,4 +28,6 @@ public record PrinterDetailsDto(
     int? BackendPort = null,
     int? FrontendPort = null,
     PrinterCapabilitiesDto? Capabilities = null,
-    ToolheadDto[]? Toolheads = null);
+    ToolheadDto[]? Toolheads = null,
+    string? Username = null,
+    string? Password = null);
