@@ -31,10 +31,6 @@ import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
-import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
-import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
-import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
-import { OrcaSlicerPage } from '@/features/slicer/pages/OrcaSlicerPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
@@ -51,15 +47,60 @@ import { MaintenanceDashboardPage } from '@/features/maintenance/pages/Maintenan
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
 import { CameraManagementPage } from '@/features/cameras/pages/CameraManagementPage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
+import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
 import { Toaster } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
+
+const LazyWorkerManagementPage = lazy(() =>
+  import('@/features/slicer/pages/WorkerManagementPage').then(mod => ({ default: mod.WorkerManagementPage }))
+);
+const LazySlicerProfilesPage = lazy(() =>
+  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
+);
+const LazyNewSliceJobPage = lazy(() =>
+  import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
+);
+const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicerPage'));
+
+function RouteLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading">
+      <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+    </div>
+  );
+}
+
+function RouteSuspense({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<RouteLoader />}>{children}</Suspense>;
+}
+
+function SlicerUnavailableMessage() {
+  return (
+    <div className="p-6 max-w-3xl">
+      <h1 className="text-xl font-semibold text-pf-text-primary">Slicer is not available</h1>
+      <p className="mt-2 text-pf-text-secondary">
+        The 3D slicer workspace loads only when a slicer worker is enabled and registered.
+      </p>
+      <p className="mt-2 text-sm text-pf-text-tertiary">
+        If you expect slicing to work here, enable the worker and/or register at least one slicer service.
+      </p>
+    </div>
+  );
+}
+
+function SlicerGate({ children }: { children: React.ReactNode }) {
+  const { isLoading, isSlicerAvailable } = useSlicer();
+  if (isLoading) return <RouteLoader />;
+  if (!isSlicerAvailable) return <SlicerUnavailableMessage />;
+  return children;
+}
 
 // Create a query client for React Query
 const queryClient = new QueryClient({
@@ -134,16 +175,25 @@ function AuthenticatedAppRoutes() {
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
           <Route path="printers" element={<PrintersPage />} />
-          <Route path="workers" element={<WorkerManagementPage />} />
+          <Route path="workers" element={<RouteSuspense><LazyWorkerManagementPage /></RouteSuspense>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
+          <Route path="slicer-profiles" element={<RouteSuspense><LazySlicerProfilesPage /></RouteSuspense>} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
           <Route path="cameras" element={<CameraManagementPage />} />
         </Route>
-        <Route path="jobs/new" element={<NewSliceJobPage />} />
-        <Route path="slicer" element={<OrcaSlicerPage />} />
+        <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
+        <Route
+          path="slicer"
+          element={
+            <SlicerGate>
+              <RouteSuspense>
+                <LazyOrcaSlicerPage />
+              </RouteSuspense>
+            </SlicerGate>
+          }
+        />
         <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>
     </Routes>
