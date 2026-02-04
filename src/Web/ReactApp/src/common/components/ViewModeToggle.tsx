@@ -58,6 +58,8 @@ const coreViewModes: ViewModeOption<ViewMode>[] = [
  * - Experimental modes (glass, segmented, statusGlow, dashboard, flip, drawer)
  */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
+  const experimentalOptions: ViewModeOption<ViewMode>[] = [];
+
   return (
     <div className="flex flex-col gap-1">
       {/* Core view modes */}
@@ -71,14 +73,16 @@ export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
       />
       
       {/* Experimental view modes */}
-      <ViewToggle
-        value={viewMode}
-        onChange={onChange}
-        options={[] /* experimentalViewModes */}
-        size="sm"
-        className="p-1"
-        ariaLabel="Experimental view modes"
-      />
+      {experimentalOptions.length > 0 && (
+        <ViewToggle
+          value={viewMode}
+          onChange={onChange}
+          options={experimentalOptions}
+          size="sm"
+          className="p-1"
+          ariaLabel="Experimental view modes"
+        />
+      )}
     </div>
   );
 }

@@ -23,7 +23,7 @@ fi
 # Ensure required compose templates exist (monolithic and microservices)
 required_templates=(
     "$TEMPLATES_DIR/docker-compose.yml"
-    "$TEMPLATES_DIR/docker-compose.microservices.yml"
+    "$TEMPLATES_DIR/docker-compose.yml"
     "$TEMPLATES_DIR/docker-compose.common.yml"
 )
 for tf in "${required_templates[@]}"; do
@@ -562,7 +562,7 @@ generate_compose() {
             base_template="$TEMPLATES_DIR/docker-compose.yml"
             ;;
         "microservices")
-            base_template="$TEMPLATES_DIR/docker-compose.microservices.yml"
+            base_template="$TEMPLATES_DIR/docker-compose.yml"
             ;;
         *)
             log_error "Unsupported architecture: $arch"

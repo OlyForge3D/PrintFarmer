@@ -11,6 +11,7 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Services.Security;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork;
 
@@ -18,15 +19,18 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork;
 /// Unit of Work implementation providing coordinated access to all repositories.
 /// Ensures all repositories share a single DbContext instance for atomic transactions.
 /// </summary>
-public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
+public class AppUnitOfWork(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector) : IUnitOfWork
 {
 #pragma warning disable CA2213 // DbContext is injected and managed by DI container lifetime
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
 #pragma warning restore CA2213
     private ICameraRepository? _cameraRepository;
     private IGcodeRepository? _gcodeRepository;
     private IHarvestRepository? _harvestRepository;
+#pragma warning disable CA1859 // Use concrete types when possible for improved performance
     private IPrintersRepository? _printersRepository;
+#pragma warning restore CA1859 // Use concrete types when possible for improved performance
     private IFolderRepository? _folderRepository;
     private IModel3DFileRepository? _model3dFileRepository;
     private ILocationRepository? _locationRepository;
@@ -54,7 +58,7 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
     /// Lazy-initializes the Printers repository, reusing the same DbContext.
     /// Coordinated with harvest operations for cascading updates.
     /// </summary>
-    public IPrintersRepository Printers => _printersRepository ??= new EfPrintersRepository(_db);
+    public IPrintersRepository Printers => _printersRepository ??= new EfPrintersRepository(_db, _sensitiveDataProtector);
 
     /// <summary>
     /// Lazy-initializes the Folders repository, reusing the same DbContext.
@@ -89,9 +93,15 @@ public class AppUnitOfWork(AppDbContext db) : IUnitOfWork
 
     /// <summary>
     /// Persists all pending changes from both repositories in a single atomic transaction.
+    /// Automatically encrypts sensitive fields on Printer entities before saving.
     /// </summary>
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
+        // Encrypt sensitive fields on any modified Printer entities before saving.
+        // This is the encryption counterpart to PopulateCredential/DecryptIfNeeded.
+        // Only runs if the Printers repository was accessed (meaning Printer entities may have been modified).
+        _printersRepository?.EncryptSensitiveFieldsOnTrackedEntities();
+
         return await _db.SaveChangesAsync(ct);
     }
 

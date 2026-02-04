@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Capability marker interface for backend clients that support file download functionality.
@@ -26,10 +28,10 @@ public interface ISupportsFileList
     /// Retrieves a list of files stored on the printer with basic information (name, size, modification date).
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A list of PrinterFileInfo objects containing file metadata, or empty list if no files found</returns>
-    Task<List<PrinterFileInfo>> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<List<PrinterFileInfo>> GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -44,10 +46,10 @@ public interface ISupportsFileUpload
     /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
     /// <param name="fileName">The name for the uploaded file (e.g., "model.gcode")</param>
     /// <param name="fileContent">The file content stream to upload</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the upload operation</param>
     /// <returns>True if upload succeeded, false if it failed</returns>
-    Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -61,10 +63,10 @@ public interface ISupportsStartPrint
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
     /// <param name="fileName">The path/name of the G-code file to print (e.g., "gcodes/model.gcode")</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if print started successfully, false if the file was not found or printer was not ready</returns>
-    Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -77,28 +79,28 @@ public interface ISupportsControlOperations
     /// Pauses the currently executing print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if pause command succeeded, false if no job is active or pause failed</returns>
-    Task<bool> PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Resumes a paused print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if resume command succeeded, false if no paused job exists or resume failed</returns>
-    Task<bool> ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Cancels the currently executing print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if cancel command succeeded, false if no job is active or cancel failed</returns>
-    Task<bool> CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -112,20 +114,20 @@ public interface ISupportsCamera
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>The camera stream URL, or null if no camera is available or stream cannot be retrieved</returns>
-    Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+    Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the URL for a camera snapshot (still image) from the printer.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>The camera snapshot URL, or null if no camera is available or snapshot cannot be retrieved</returns>
-    Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+    Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -142,13 +144,13 @@ public interface ISupportsConfiguredCameraDetection
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>
     /// A tuple containing (streamUrl, snapshotUrl). Both values are null if no cameras are configured.
     /// Only non-null values represent actually configured and accessible cameras.
     /// </returns>
-    Task<(string? StreamUrl, string? SnapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+    Task<(string? StreamUrl, string? SnapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -162,10 +164,10 @@ public interface ISupportsFileMetadata
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="filePath">The path to the G-code file (e.g., "gcodes/model.gcode")</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>PrinterFileMetadata containing print time, layer height, temperatures, and thumbnail information, or null if metadata cannot be extracted</returns>
-    Task<PrinterFileMetadata?> GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterFileMetadata?> GetFileMetadataAsync(string baseUrl, string filePath, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -179,10 +181,10 @@ public interface ISupportsMovement
     /// Sends the printer to home position for all axes (X, Y, Z).
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if home command succeeded, false if operation failed</returns>
-    Task<bool> HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Sends the printer to home position for all axes (alternative implementation).
@@ -196,17 +198,19 @@ public interface ISupportsMovement
     /// Homes the X and Y axes only, leaving Z position unchanged.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="credential">Optional credential for authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if home XY command succeeded, false if operation failed</returns>
-    Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default);
+    Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Homes the Z axis only, leaving X and Y positions unchanged.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="credential">Optional credential for authentication</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if home Z command succeeded, false if operation failed</returns>
-    Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default);
+    Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Moves the printer by the specified distances (relative movement).
@@ -216,10 +220,10 @@ public interface ISupportsMovement
     /// <param name="y">Relative Y distance in millimeters, or null to not move Y axis</param>
     /// <param name="z">Relative Z distance in millimeters, or null to not move Z axis</param>
     /// <param name="f">Feed rate in mm/min, or null to use default speed</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if move command succeeded, false if operation failed</returns>
-    Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Moves the printer to an absolute position (absolute positioning).
@@ -229,9 +233,10 @@ public interface ISupportsMovement
     /// <param name="y">Absolute Y position in millimeters, or null to not move Y axis</param>
     /// <param name="z">Absolute Z position in millimeters, or null to not move Z axis</param>
     /// <param name="f">Feed rate in mm/min, or null to use default speed</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if move command succeeded, false if operation failed</returns>
-    Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
+    Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -247,10 +252,10 @@ public interface ISupportsTemperatureControl
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="hotendTemp">Target hotend temperature in Celsius, or null to leave unchanged</param>
     /// <param name="bedTemp">Target bed temperature in Celsius, or null to leave unchanged</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if temperature commands succeeded, false if operation failed</returns>
-    Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -263,10 +268,10 @@ public interface ISupportsPrinterInformation
     /// Retrieves detailed printer information including name, firmware version, and model.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>StandardPrinterInfo containing printer name, firmware, and model information</returns>
-    Task<StandardPrinterInfo> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<StandardPrinterInfo> GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -282,43 +287,43 @@ public interface ISupportsHistory
     /// <param name="limit">Maximum number of history entries to return, or null for default limit</param>
     /// <param name="start">Starting index for pagination, or null to start from beginning</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp (for incremental seeding)</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>HistoryListResponse containing paginated history entries, or null if history cannot be retrieved</returns>
     /// <remarks>
     /// The 'since' parameter enables incremental history seeding. Backends that support server-side
     /// filtering (Moonraker) will use it directly. Backends that don't (OctoPrint) will filter client-side.
     /// </remarks>
-    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, string? apiKey = null, CancellationToken ct = default);
+    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Retrieves detailed information about a specific historical print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="jobId">The unique identifier of the history job to retrieve</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>HistoryJob containing detailed job information, or null if job not found</returns>
-    Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default);
+    Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Retrieves aggregated statistics about all historical print jobs (total prints, total time, etc.).
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>HistoryTotals containing aggregated statistics, or null if statistics cannot be retrieved</returns>
-    Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a specific print job from the history.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
     /// <param name="jobId">The unique identifier of the history job to delete</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if deletion succeeded, false if job not found or deletion failed</returns>
-    Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default);
+    Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -362,10 +367,10 @@ public interface ISupportsJobControl
     /// Retrieves information about the current or last print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the backend printer server</param>
-    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>PrinterJob containing current/last job information, or null if no job exists</returns>
-    Task<PrinterJob?> GetJobAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterJob?> GetJobAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -553,6 +558,18 @@ public class StandardPrinterInfo
     /// The firmware version running on the printer (e.g., "v0.11.0", "Marlin 2.1.1").
     /// </summary>
     public string Firmware { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The backend/server software version (e.g., Moonraker/PrusaLink/OctoPrint version).
+    /// Optional; may be null or empty if not available.
+    /// </summary>
+    public string? BackendVersion { get; set; }
+
+    /// <summary>
+    /// The backend API version (string form when available).
+    /// Optional; may be null or empty if not available.
+    /// </summary>
+    public string? ApiVersion { get; set; }
 
     /// <summary>
     /// The printer model or hardware type (e.g., "Prusa i3 MK3S+", "Voron 2.4").

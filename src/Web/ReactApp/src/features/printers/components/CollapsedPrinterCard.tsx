@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { PanelRightOpen } from 'lucide-react';
 import {
   HistoryIcon,
   FileIcon,
@@ -10,41 +10,14 @@ import {
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
-  PanelRightIcon,
   ImageIcon,
-  VideoIcon,
-  ClockIcon,
-  CheckCircleIcon,
-  PackageIcon,
-  ChevronDownIcon,
-  ChevronRightIcon
+  VideoIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
-import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { PrinterBackend, type Printer } from '@/types/api';
-import { maintenanceService } from '@/services/maintenanceService';
-
-/**
- * Formats hours into a human-readable string (e.g., "12.5h" or "1,234h")
- */
-function formatHours(hours: number | undefined | null): string {
-  const h = hours ?? 0;
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 100) return `${h.toFixed(1)}h`;
-  return `${Math.round(h).toLocaleString()}h`;
-}
-
-/**
- * Formats filament usage (grams or kg)
- */
-function formatFilament(grams: number | undefined | null): string {
-  const g = grams ?? 0;
-  if (g < 1000) return `${Math.round(g)}g`;
-  return `${(g / 1000).toFixed(1)}kg`;
-}
 
 interface CollapsedPrinterCardProps {
   printer: Printer;
@@ -63,7 +36,6 @@ export function CollapsedPrinterCard({
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [showStats, setShowStats] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
   // Use printer data directly (already contains merged realtime status from API)
@@ -77,23 +49,12 @@ export function CollapsedPrinterCard({
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  // Fetch printer statistics (cached, stale time 5 minutes)
-  const { data: stats } = useQuery({
-    queryKey: ['printerStatistics', printer.id],
-    queryFn: () => maintenanceService.getPrinterStatistics(printer.id),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    retry: false, // Don't retry on failure (printer may not have stats yet)
-  });
-
-  const hasStats = stats && (stats.totalPrintHours > 0 || stats.totalJobsCompleted > 0 || stats.totalFilamentUsedGrams > 0);
-
-  // State color classes (matches DetailedPrinterCard)
-  const stateColorClasses = (() => {
-    if (!isOnline) return 'bg-slate-500 text-white';
-    if (isPrinting) return 'bg-pf-success-bg text-white font-bold';
-    if (isPaused) return 'bg-yellow-600 text-white';
-    if (isShutdown) return 'bg-red-600 text-white';
-    return 'bg-blue-600 text-white';
+  const statusDotClasses = (() => {
+    if (!isOnline) return 'bg-slate-400';
+    if (isPrinting) return 'bg-pf-success-bg';
+    if (isPaused) return 'bg-yellow-500';
+    if (isShutdown) return 'bg-red-500';
+    return 'bg-blue-500';
   })();
 
   const toCamelCase = (str: string): string => {
@@ -117,11 +78,11 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full max-w-sm overflow-hidden flex flex-col min-h-0">
+    <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-gradient-to-b from-white/[0.06] to-white/[0.03] border border-white/10 hover:border-white/15 transition-colors w-full overflow-hidden flex flex-col min-h-0">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase truncate">
+          <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
           </div>
           {(printer.modelName) && (
@@ -131,25 +92,34 @@ export function CollapsedPrinterCard({
           )}
         </div>
         
-        {/* Status pill - matches DetailedPrinterCard */}
-        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium shrink-0 ${stateColorClasses}`}>
-          {getBackendIcon(printer.backend)}
-          {isOnline ? toCamelCase(state) : 'Offline'}
+        {/* Status chip (enterprise/subtle) */}
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium shrink-0 bg-white/[0.04] border border-white/10 text-pf-text-primary">
+          <span className={`h-2 w-2 rounded-full ${statusDotClasses}`} aria-hidden />
+          <span className="text-pf-text-secondary">
+            {isOnline ? toCamelCase(state) : 'Offline'}
+          </span>
         </div>
       </div>
 
-      {/* Action buttons row - all grouped together */}
-      <div className="flex items-center gap-1 mb-2">
+      {/* Subtle separator above actions */}
+      <div className="h-px w-full bg-white/10 mb-2" aria-hidden />
+
+      {/* Action buttons row */}
+      <div
+        className="flex w-full items-center justify-between mb-2"
+        role="toolbar"
+        aria-label="Printer actions"
+      >
         {/* Details/Sidebar button */}
         <Button
           type="button"
-          variant="subtle"
+          variant="ghost"
           size="sm"
           onClick={onExpand}
-          className="p-1! h-auto!"
+          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
           title="Open details sidebar"
           aria-label="Open details sidebar"
-          iconCenter={<PanelRightIcon className="h-4 w-4" />}
+          iconCenter={<PanelRightOpen className="h-4 w-4" />}
         >
         </Button>
         
@@ -158,7 +128,7 @@ export function CollapsedPrinterCard({
           href={printer.frontendUrl} 
           target="_blank" 
           rel="noopener noreferrer"
-          className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 p-1"
+          className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
           aria-label={`Open printer ${printer.name} in new tab`}
           title={`Open printer ${printer.name}`}
         >
@@ -168,11 +138,11 @@ export function CollapsedPrinterCard({
         {/* Camera button */}
         <Button
           type="button"
-          variant="subtle"
+          variant="ghost"
           size="sm"
           onClick={() => setShowCamera(!showCamera)}
           disabled={!hasCameraUrls}
-          className="p-1! h-auto!"
+          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
           title={hasCameraUrls ? `Camera available` : 'No camera configured'}
           iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -183,10 +153,10 @@ export function CollapsedPrinterCard({
         {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
           <Button
             type="button"
-            variant="subtle"
+            variant="ghost"
             size="sm"
             onClick={handleViewHistory}
-            className="p-1! h-auto!"
+            className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
             title="View print history"
             aria-label="View print history"
             iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -197,10 +167,10 @@ export function CollapsedPrinterCard({
         {/* Files button */}
         <Button
           type="button"
-          variant="subtle"
+          variant="ghost"
           size="sm"
           onClick={() => setShowFiles(true)}
-          className="p-1! h-auto!"
+          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
           title="View printer files"
           aria-label="View printer files"
           iconCenter={<FileIcon className="h-4 w-4" />}
@@ -210,10 +180,10 @@ export function CollapsedPrinterCard({
         {/* Edit button */}
         <Button
           type="button"
-          variant="subtle"
+          variant="ghost"
           size="sm"
           onClick={() => onEdit?.(printer)}
-          className="p-1! h-auto!"
+          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
           title="Edit details"
           aria-label="Edit details"
           iconCenter={<EditIcon className="h-4 w-4" />}
@@ -222,12 +192,12 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Control buttons */}
-      <div className="flex gap-1 mb-2">
+      <div className="flex items-center justify-between gap-2 mb-2 w-full">
         <ControlPadButton
           disabled={!isPrinting}
           onClick={() => handleControlAction('pause')}
           title="Pause"
-          padSize="small"
+          padSize="medium"
         >
           <PauseIcon className="h-4 w-4" />
         </ControlPadButton>
@@ -236,7 +206,7 @@ export function CollapsedPrinterCard({
           disabled={!isPaused}
           onClick={() => handleControlAction('resume')}
           title="Resume"
-          padSize="small"
+          padSize="medium"
         >
           <PlayIcon className="h-4 w-4" />
         </ControlPadButton>
@@ -245,48 +215,11 @@ export function CollapsedPrinterCard({
           disabled={!isOnline}
           onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-          padSize="small"
+          padSize="medium"
         >
           {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
         </ControlPadButton>
       </div>
-
-      {/* Print Statistics Section */}
-      {hasStats && stats && (
-        <div className="mb-2 bg-pf-bg-2 rounded-sm overflow-hidden">
-          {/* Collapsible header */}
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={() => setShowStats(!showStats)}
-            className="w-full! justify-start! gap-1! px-2! py-1.5! h-auto! text-xs text-pf-text-secondary hover:text-pf-text-primary"
-            aria-expanded={showStats}
-            aria-controls="printer-stats-content"
-            iconLeft={showStats ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronRightIcon className="w-3.5 h-3.5" />}
-          >
-            <span className="font-medium">Statistics</span>
-          </Button>
-          
-          {/* Stats content */}
-          {showStats && (
-            <div id="printer-stats-content" className="grid grid-cols-3 gap-1 py-2 px-1 text-center border-t border-pf-border/30">
-              <div className="flex flex-col items-center" title="Total print time">
-                <ClockIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
-                <span className="text-xs font-medium text-pf-text-primary">{formatHours(stats.totalPrintHours ?? 0)}</span>
-              </div>
-              <div className="flex flex-col items-center" title="Jobs completed">
-                <CheckCircleIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
-                <span className="text-xs font-medium text-pf-text-primary">{(stats.totalJobsCompleted ?? 0).toLocaleString()}</span>
-              </div>
-              <div className="flex flex-col items-center" title="Filament used">
-                <PackageIcon className="w-3.5 h-3.5 text-pf-text-secondary mb-0.5" />
-                <span className="text-xs font-medium text-pf-text-primary">{formatFilament(stats.totalFilamentUsedGrams ?? 0)}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Progress bar for active prints */}
       {(() => {

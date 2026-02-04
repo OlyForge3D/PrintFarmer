@@ -2309,6 +2309,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("Password")
+                        .HasColumnType("text");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -2324,6 +2327,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<Guid?>("TemplateMachineProfileId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Username")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 

@@ -111,3 +111,6 @@ src/api/uploads/
 /docker-entrypoint-config.sh
 /Dockerfile.multistage
 /src/publish/
+/publish/
+# Data Protection Keys (auto-generated, contain encryption keys)
+src/api/data-protection-keys/

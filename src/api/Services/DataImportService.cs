@@ -636,7 +636,9 @@ public class DataImportService : IDataImportService
                         ModelId = modelId,
                         LocationId = location?.Id,
                         Backend = dto.Backend,
-                        IsAvailable = false // Always set to unavailable on import for safety
+                        IsAvailable = false, // Always set to unavailable on import for safety
+                        Username = dto.Username,
+                        Password = dto.Password
                     });
                     imported++;
                 }
@@ -655,6 +657,8 @@ public class DataImportService : IDataImportService
                     existing.LocationId = location?.Id;
                     existing.Backend = dto.Backend;
                     existing.IsAvailable = false; // Always set to unavailable on import for safety
+                    existing.Username = dto.Username;
+                    existing.Password = dto.Password;
                     imported++;
                 }
             }

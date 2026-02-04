@@ -195,7 +195,7 @@ public class GcodeHarvestService(
         Guid printerId = printer.Id;
         string printerName = printer.Name;
         string printerBackendUrl = printer.BackendUrl;  // Use calculated BackendUrl with port
-        string printerApiKey = printer.ApiKey ?? string.Empty;
+        PrinterCredential? printerCredential = printer.Credential;
         PrinterBackend printerBackend = (PrinterBackend)printer.Backend;
 
         _logger.LogError($"[DIAGNOSTIC-HARVEST] Extracted printer data: id={printerId}, name={printerName}, backendUrl={printerBackendUrl}, backend={printerBackend}");
@@ -209,7 +209,7 @@ public class GcodeHarvestService(
             {
                 _logger.LogError($"🚀 Background harvest task STARTED for operation {operation.Id} on printer {printerName}");
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Background task: Calling DiscoverAndQueueFilesAsync");
-                await DiscoverAndQueueFilesAsync(operation, printerName, printerBackendUrl, printerApiKey, printerBackend);
+                await DiscoverAndQueueFilesAsync(operation, printerName, printerBackendUrl, printerCredential, printerBackend);
                 await Console.Error.WriteLineAsync($"[HARVEST] Background harvest completed for op {operation.Id}");
                 _logger.LogError($"✅ Background harvest task COMPLETED successfully for operation {operation.Id}");
             }
@@ -263,9 +263,9 @@ public class GcodeHarvestService(
     /// <param name="operation">The harvest operation to process.</param>
     /// <param name="printerName">The display name of the printer.</param>
     /// <param name="printerBackendUrl">The backend URL for the printer API.</param>
-    /// <param name="printerApiKey">The API key for authentication.</param>
+    /// <param name="printerCredential">The credential for authentication.</param>
     /// <param name="printerBackend">The backend type of the printer.</param>
-    private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, string printerName, string printerBackendUrl, string printerApiKey, PrinterBackend printerBackend)
+    private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, string printerName, string printerBackendUrl, PrinterCredential? printerCredential, PrinterBackend printerBackend)
     {
         await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
         IUnitOfWork scopedUnitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -299,7 +299,7 @@ public class GcodeHarvestService(
                     try
                     {
                         // Use the capability interface directly - no switch statement needed!
-                        List<Printers.PrinterFileInfo>? infrastructureFiles = await fileListCapability.GetFileListAsync(printerBackendUrl, printerApiKey, CancellationToken.None);
+                        List<Printers.PrinterFileInfo>? infrastructureFiles = await fileListCapability.GetFileListAsync(printerBackendUrl, printerCredential, CancellationToken.None);
                         _logger.LogError($"[DIAGNOSTIC-HARVEST] GetFileListAsync returned {infrastructureFiles?.Count ?? 0} files");
 
                         // Map from Infrastructure.PrinterFileInfo to local PrinterFileInfo
@@ -1183,7 +1183,7 @@ public class GcodeHarvestService(
         Guid printerId = printer.Id;
         string printerName = printer.Name;
         string printerBackendUrl = printer.BackendUrl;  // Use calculated BackendUrl with port
-        string printerApiKey = printer.ApiKey ?? string.Empty;
+        PrinterCredential? printerCredential = printer.Credential;
         PrinterBackend printerBackend = (PrinterBackend)printer.Backend;
 
         // Start fresh discovery in background (using same pattern as StartHarvestAsync)
@@ -1192,7 +1192,7 @@ public class GcodeHarvestService(
             try
             {
                 _logger.LogInformation($"🔄 Background harvest restart task STARTED for operation {operationId} on printer {printerName}");
-                await DiscoverAndQueueFilesAsync(operation, printerName, printerBackendUrl, printerApiKey, printerBackend);
+                await DiscoverAndQueueFilesAsync(operation, printerName, printerBackendUrl, printerCredential, printerBackend);
                 _logger.LogInformation($"✅ Background harvest restart task COMPLETED successfully for operation {operationId}");
             }
             catch (Exception ex)

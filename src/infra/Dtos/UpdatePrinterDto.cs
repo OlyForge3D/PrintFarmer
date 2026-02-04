@@ -20,6 +20,9 @@ public record UpdatePrinterDto(
     DateTime? DateAcquired = null,
     PrinterBackend? Backend = null,
     string? ApiKey = null,
+    string? Username = null,
+    string? Password = null,
+
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,

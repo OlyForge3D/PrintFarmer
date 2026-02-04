@@ -42,7 +42,9 @@ describe('AlertsWidget', () => {
   };
 
   it('should render without crashing', () => {
-    vi.mocked(usePrinters).mockReturnValue({ data: [], isLoading: false } as any);
+    vi.mocked(usePrinters).mockReturnValue(
+      { data: [], isLoading: false } as unknown as ReturnType<typeof usePrinters>
+    );
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,
@@ -59,7 +61,7 @@ describe('AlertsWidget', () => {
         { id: '2', name: 'Printer 2', isOnline: true, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,
@@ -76,7 +78,7 @@ describe('AlertsWidget', () => {
         { id: '2', name: 'Printer 2', isOnline: true, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,
@@ -97,7 +99,7 @@ describe('AlertsWidget', () => {
         { id: '2', name: 'Printer 2', isOnline: true, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,
@@ -118,7 +120,7 @@ describe('AlertsWidget', () => {
         { id: '3', name: 'Printer 3', isOnline: false, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,
@@ -137,7 +139,7 @@ describe('AlertsWidget', () => {
         { id: '1', name: 'Printer 1', isOnline: false, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: false,
@@ -157,7 +159,7 @@ describe('AlertsWidget', () => {
         { id: '2', name: 'Printer 2', isOnline: false, inMaintenance: false },
       ],
       isLoading: false,
-    } as any);
+    } as unknown as ReturnType<typeof usePrinters>);
     vi.mocked(apiClient.getSettings).mockResolvedValue({
       enabled: true,
       showOfflinePrinterAlerts: true,

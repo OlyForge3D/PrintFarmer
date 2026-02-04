@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls -- File input with custom label styling and complex checkbox lists require raw controls */
 /**
  * ⚠️ IMPORTANT: This component uses PrintFarmer Design System
  * 

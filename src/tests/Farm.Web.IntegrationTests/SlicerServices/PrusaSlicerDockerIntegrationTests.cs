@@ -21,7 +21,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
         _output = output;
         _logger = CreateLogger();
         _baseDirectory = DockerTestHelpers.GetRepositoryRoot();
-        _dockerComposeFile = Path.Combine(_baseDirectory, "docker-compose.microservices.yml");
+        _dockerComposeFile = Path.Combine(_baseDirectory, "docker-compose.yml");
     }
 
     public async Task InitializeAsync()

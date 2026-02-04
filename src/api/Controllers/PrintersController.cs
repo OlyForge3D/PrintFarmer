@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.PrusaLink;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
@@ -16,6 +17,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
@@ -45,7 +47,8 @@ public class PrintersController(
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
-    Services.Slicing.ISlicersService slicersService)
+    Services.Slicing.ISlicersService slicersService,
+    IPrinterVersionCache printerVersionCache)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -57,6 +60,7 @@ public class PrintersController(
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
+    private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
 #pragma warning disable CA1823 // Avoid unused private fields
@@ -131,6 +135,35 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Retrieves firmware/backend/API version information for a specific printer.
+    /// Values are best-effort and may be null when not available.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpGet("{printerId:guid}/version")]
+    [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
+            return dto == null ? NotFound($"Printer with ID {printerId} not found") : Ok(dto);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[PRINTER-VERSION] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/version. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Retrieves backend capabilities for a specific printer.
     /// Indicates which features the printer's backend (Moonraker, PrusaLink, etc.) supports.
     /// </summary>
@@ -191,7 +224,7 @@ public class PrintersController(
 
         try
         {
-            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.Username, request.Password, request.BackendPort, ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -209,7 +242,7 @@ public class PrintersController(
     /// Tests connection to a printer backend based on the backend type.
     /// </summary>
     private async Task<TestConnectionResponse> TestBackendConnectionAsync(
-        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+        Uri serverUrl, PrinterBackend backend, string? apiKey, string? username, string? password, int? backendPort, CancellationToken ct)
     {
         using HttpClient httpClient = _httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
@@ -217,7 +250,7 @@ public class PrintersController(
         return backend switch
         {
             PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
-            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, username, password, ct),
             PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
             PrinterBackend.SDCP => new TestConnectionResponse
             {
@@ -279,34 +312,43 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with API key.
+    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with Digest Authentication.
     /// </summary>
     private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
-        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+        Uri serverUrl, string? username, string? password, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (string.IsNullOrWhiteSpace(password))
         {
-            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers" };
+            return new TestConnectionResponse { Success = false, Message = "Password is required for PrusaLink printers. Get it from printer Settings → Network → Credentials" };
         }
+
+        // Default username to "maker" if not provided
+        string effectiveUsername = string.IsNullOrWhiteSpace(username) ? "maker" : username;
 
         var builder = new UriBuilder(serverUrl)
         {
             Path = "/api/v1/status"
         };
 
+        // Create a new HttpClient with Digest auth handler for this test
+        using var digestHandler = new DigestAuthHandler(effectiveUsername, password);
+        using var digestClient = new HttpClient(digestHandler)
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+
         var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
-        request.Headers.Add("X-Api-Key", apiKey);
 
         try
         {
-            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+            HttpResponseMessage response = await digestClient.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {
                 return new TestConnectionResponse
                 {
                     Success = true,
-                    Message = "Successfully connected to PrusaLink printer"
+                    Message = "Successfully connected to PrusaLink printer using Digest authentication"
                 };
             }
 
@@ -315,7 +357,7 @@ public class PrintersController(
                 return new TestConnectionResponse
                 {
                     Success = false,
-                    Message = "Invalid API key - authentication failed"
+                    Message = "Invalid credentials - authentication failed. Verify username (usually 'maker') and password from printer settings."
                 };
             }
 
@@ -773,7 +815,9 @@ public class PrintersController(
             p.BackendPort,
             p.FrontendPort,
             capabilitiesDto,
-            toolheadDtos);
+            toolheadDtos,
+            p.Username,
+            p.Password);
     }
 
     /// <summary>
@@ -1302,6 +1346,17 @@ public class PrintersController(
         if (dto.ApiKey != null)
         {
             p.ApiKey = dto.ApiKey;
+        }
+
+        // Update digest authentication credentials (primarily for PrusaLink)
+        if (dto.Username != null)
+        {
+            p.Username = dto.Username;
+        }
+
+        if (dto.Password != null)
+        {
+            p.Password = dto.Password;
         }
 
         // Update port settings

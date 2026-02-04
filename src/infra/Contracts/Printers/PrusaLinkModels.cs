@@ -583,3 +583,144 @@ public static class CameraCapabilities
     public const string Exposure = "EXPOSURE";
     public const string Focus = "FOCUS";
 }
+
+// ========== Legacy API DTOs (OctoPrint-compatible endpoints) ==========
+// These DTOs are used for the legacy /api/* endpoints that require HTTP Digest Auth
+// and provide pause/resume/temperature/movement control
+
+/// <summary>
+/// Command request for legacy /api/job endpoint (pause/resume/cancel operations).
+/// </summary>
+public class LegacyJobCommand
+{
+    /// <summary>
+    /// The command to execute: "pause", "resume", or "cancel".
+    /// For pause, can also include "action": "pause" or "action": "toggle".
+    /// </summary>
+    public string Command { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional action modifier for pause command: "pause", "resume", or "toggle".
+    /// </summary>
+    public string? Action { get; set; }
+}
+
+/// <summary>
+/// Response from legacy /api/job endpoint containing current job and printer state.
+/// </summary>
+public class LegacyJobResponse
+{
+    public LegacyJobInfo? Job { get; set; }
+
+    public LegacyJobProgress? Progress { get; set; }
+
+    public string? State { get; set; }
+}
+
+public class LegacyJobInfo
+{
+    public LegacyJobFile? File { get; set; }
+
+    public double? EstimatedPrintTime { get; set; }
+
+    public double? AveragePrintTime { get; set; }
+
+    public double? LastPrintTime { get; set; }
+}
+
+public class LegacyJobFile
+{
+    public string? Name { get; set; }
+
+    public string? Display { get; set; }
+
+    public string? Path { get; set; }
+
+    public string? Type { get; set; }
+
+    [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Source API shape")]
+    public string? TypePath { get; set; }
+}
+
+public class LegacyJobProgress
+{
+    public double? Completion { get; set; }
+
+    public int? FilePos { get; set; }
+
+    public int? PrintTime { get; set; }
+
+    public int? PrintTimeLeft { get; set; }
+}
+
+/// <summary>
+/// Command request for legacy /api/printer/tool endpoint (hotend temperature control).
+/// </summary>
+public class LegacyToolCommand
+{
+    /// <summary>
+    /// The command: "target" to set target temperature, "offset" to set offset.
+    /// </summary>
+    public string Command { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Target temperatures for each tool (tool0, tool1, etc.).
+    /// For single extruder, use { "tool0": temperature }.
+    /// </summary>
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read only", Justification = "DTO for JSON transport")]
+    public Dictionary<string, double>? Targets { get; set; }
+}
+
+/// <summary>
+/// Command request for legacy /api/printer/bed endpoint (bed temperature control).
+/// </summary>
+public class LegacyBedCommand
+{
+    /// <summary>
+    /// The command: "target" to set target temperature, "offset" to set offset.
+    /// </summary>
+    public string Command { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Target bed temperature in Celsius.
+    /// </summary>
+    public double? Target { get; set; }
+}
+
+/// <summary>
+/// Command request for legacy /api/printer/printhead endpoint (movement control).
+/// </summary>
+public class LegacyPrintheadCommand
+{
+    /// <summary>
+    /// The command: "jog" for relative movement, "home" for homing.
+    /// </summary>
+    public string Command { get; set; } = string.Empty;
+
+    /// <summary>
+    /// X axis movement in mm (for jog) or true to home (for home).
+    /// </summary>
+    public double? X { get; set; }
+
+    /// <summary>
+    /// Y axis movement in mm (for jog) or true to home (for home).
+    /// </summary>
+    public double? Y { get; set; }
+
+    /// <summary>
+    /// Z axis movement in mm (for jog) or true to home (for home).
+    /// </summary>
+    public double? Z { get; set; }
+
+    /// <summary>
+    /// Feed rate for movement in mm/min (optional, jog only).
+    /// </summary>
+    [JsonPropertyName("speed")]
+    public double? Speed { get; set; }
+
+    /// <summary>
+    /// Axes to home: ["x", "y", "z"] for home command.
+    /// </summary>
+    [SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "DTO for JSON transport")]
+    public string[]? Axes { get; set; }
+}

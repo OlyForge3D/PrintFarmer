@@ -253,91 +253,106 @@ export function PrintersPage() {
     );
   }
 
+  const isCollapsedSidebarOpen = viewMode === 'collapsed' && !!expandedPrinterId;
+
   return (
     <PageTemplate
       title="Printers"
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
     >
-      {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
-      <div className="flex flex-col gap-4 mb-8">
-        {/* Primary Actions Zone (Left) - All consistent sizing and styling */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          {hasPermission('printers', 'create') && (
-            <AddPrinterButton onSuccess={refetchPrinters} />
-          )}
-          {hasPermission('printers', 'admin') && discoveryAvailable && (
-            <Button
-              variant="secondary"
-              aria-label="Trigger network discovery to find printers on local network"
-              onClick={() => setShowDiscovery(true)}
-              iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
-            >
-              Discover Printers
-            </Button>
-          )}
-          {hasPermission('printers', 'admin') && (
-            <>
-              <PrinterImportExportControls />
-            </>
-          )}
-        </div>
-
-        {/* View & Filter Controls Zone (Right) */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
-          {/* State Filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="state-filter" className="text-sm text-pf-text-secondary hidden sm:inline">State:</label>
-            <Select
-              id="state-filter"
-              value={stateFilter}
-              onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
-              aria-label="Filter by printer state"
-              className="min-w-0"
-            >
-              <option value="all">All States</option>
-              <option value="online">Online</option>
-              <option value="printing">Printing</option>
-              <option value="paused">Paused</option>
-              <option value="offline">Offline</option>
-            </Select>
-          </div>
-
-          {/* Backend Filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="backend-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Backend:</label>
-            <Select
-              id="backend-filter"
-              value={backendFilter}
-              onChange={e => setBackendFilter(e.target.value as BackendFilter)}
-              aria-label="Filter by backend"
-              className="min-w-0"
-            >
-              <option value="all">All Backends</option>
-              <option value="Moonraker">Moonraker</option>
-              <option value="PrusaLink">PrusaLink</option>
-              <option value="SDCP">SDCP</option>
-              <option value="OctoPrint">OctoPrint</option>
-            </Select>
-          </div>
-
-          {/* View Mode Toggle */}
-          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-        </div>
-      </div>
-
-        {/* Content Area */}
-        <div className="space-y-6">
-          {(
-            (userPrinters.length === 0) ? (
-              <div className="text-center py-12">
-                <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
-                <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
+      <div className={isCollapsedSidebarOpen ? 'min-w-0 lg:pr-96' : 'min-w-0'}>
+        <div className="min-w-0">
+          {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
+          <div className="flex flex-col gap-4 mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {/* Primary Actions (Left) */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                {hasPermission('printers', 'create') && (
+                  <AddPrinterButton onSuccess={refetchPrinters} />
+                )}
+                {hasPermission('printers', 'admin') && discoveryAvailable && (
+                  <Button
+                    variant="secondary"
+                    aria-label="Trigger network discovery to find printers on local network"
+                    onClick={() => setShowDiscovery(true)}
+                    iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
+                  >
+                    Discover Printers
+                  </Button>
+                )}
+                {hasPermission('printers', 'admin') && (
+                  <PrinterImportExportControls />
+                )}
               </div>
-            ) : viewMode === 'collapsed' ? (
-              <div className="flex gap-6 items-start min-w-0">
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200 min-w-0">
+
+              {/* View & Filters (Right) */}
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-3">
+                {/* State Filter */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="state-filter" className="text-sm text-pf-text-secondary hidden sm:inline">State:</label>
+                  <Select
+                    id="state-filter"
+                    value={stateFilter}
+                    onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
+                    aria-label="Filter by printer state"
+                    className="min-w-0"
+                  >
+                    <option value="all">All States</option>
+                    <option value="online">Online</option>
+                    <option value="printing">Printing</option>
+                    <option value="paused">Paused</option>
+                    <option value="offline">Offline</option>
+                  </Select>
+                </div>
+
+                {/* Backend Filter */}
+                <div className="flex items-center gap-2">
+                  <label htmlFor="backend-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Backend:</label>
+                  <Select
+                    id="backend-filter"
+                    value={backendFilter}
+                    onChange={e => setBackendFilter(e.target.value as BackendFilter)}
+                    aria-label="Filter by backend"
+                    className="min-w-0"
+                  >
+                    <option value="all">All Backends</option>
+                    <option value="Moonraker">Moonraker</option>
+                    <option value="PrusaLink">PrusaLink</option>
+                    <option value="SDCP">SDCP</option>
+                    <option value="OctoPrint">OctoPrint</option>
+                  </Select>
+                </div>
+
+                {/* View Mode Toggle */}
+                <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar (Collapsed View) - small screens: between toolbar and grid */}
+          {isCollapsedSidebarOpen && (
+            <div className="lg:hidden mb-6 min-w-0">
+              <PrinterDetailsSidebar
+                printerId={expandedPrinterId}
+                printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
+                onClose={() => setExpandedPrinterId(null)}
+                layout="content"
+              />
+            </div>
+          )}
+
+          {/* Content Area */}
+          <div className="space-y-6">
+            {(
+              (userPrinters.length === 0) ? (
+                <div className="text-center py-12">
+                  <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
+                  <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
+                </div>
+              ) : viewMode === 'collapsed' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,14rem)] gap-4 transition-opacity duration-200 min-w-0">
                   {userPrinters.map((printer) => (
                     <CollapsedPrinterCard
                       key={printer.id}
@@ -347,61 +362,63 @@ export function PrintersPage() {
                     />
                   ))}
                 </div>
-                {expandedPrinterId && (
-                  <div className="w-96 shrink-0">
-                    <PrinterDetailsSidebar
-                      printerId={expandedPrinterId}
-                      printer={printersById[expandedPrinterId]}
-                      onClose={() => setExpandedPrinterId(null)}
+              ) : viewMode === 'expandable' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,23rem)] gap-4 justify-center">
+                  {userPrinters.map((p) => (
+                    <DetailedPrinterCard
+                      key={p.id}
+                      printer={p}
+                      onEdit={() => handleEditPrinter(p)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <PrinterBulkControls
+                      selectedIds={selectedPrinterIds}
+                      printersById={printersById}
+                      onDelete={(ps) => handleDeleteClick(ps)}
+                      onBulkSetMaintenance={handleBulkSetMaintenance}
                     />
                   </div>
-                )}
-              </div>
-            ) : viewMode === 'expandable' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(23rem,1fr))] gap-4">
-                {userPrinters.map((p) => (
-                  <DetailedPrinterCard
-                    key={p.id}
-                    printer={p}
-                    onEdit={() => handleEditPrinter(p)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <>
-                <div className="mb-4">
-                  <PrinterBulkControls
-                    selectedIds={selectedPrinterIds}
-                    printersById={printersById}
-                    onDelete={(ps) => handleDeleteClick(ps)}
+
+                  <PrinterTableView
+                    printers={userPrinters}
+                    onEdit={handleEditPrinter}
+                    onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}
+                    showEnableColumn={hasPermission('printers', 'admin')}
+                    onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
+                    onToggleEnabled={async (printer) => {
+                      try {
+                        const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
+                        await apiClient.updatePrinter(printer.id, updated);
+                        toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
+                        await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                      } catch (err) {
+                        console.error('Failed to toggle enabled', err);
+                        toast.error('Failed to toggle enabled state');
+                      }
+                    }}
                   />
-                </div>
-
-                <PrinterTableView
-                  printers={userPrinters}
-                  onEdit={handleEditPrinter}
-                  onDelete={handleDeleteClick}
-                  onBulkSetMaintenance={handleBulkSetMaintenance}
-                  showEnableColumn={hasPermission('printers', 'admin')}
-                  onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
-                  onToggleEnabled={async (printer) => {
-                  try {
-                    const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
-                    await apiClient.updatePrinter(printer.id, updated);
-                    toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
-                    await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                  } catch (err) {
-                    console.error('Failed to toggle enabled', err);
-                    toast.error('Failed to toggle enabled state');
-                  }
-                }}
-              />
-              </>
-            )
-          )}
-
+                </>
+              )
+            )}
+          </div>
         </div>
+
+        {/* Sidebar (Collapsed View) - large screens: fixed overlay on the right */}
+        {isCollapsedSidebarOpen && (
+          <div className="hidden lg:block fixed right-0 top-12 bottom-0 w-96 z-40">
+            <PrinterDetailsSidebar
+              printerId={expandedPrinterId}
+              printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
+              onClose={() => setExpandedPrinterId(null)}
+            />
+          </div>
+        )}
+      </div>
 
         {/* Modals */}
         <DeleteConfirmationModal

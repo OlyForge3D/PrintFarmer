@@ -48,6 +48,18 @@ public class DiscoveryPrinterInfoDto
     /// <summary>API key for backend authentication (if required)</summary>
     public string? ApiKey { get; set; }
 
+    /// <summary>
+    /// Username for HTTP Digest authentication (primarily for PrusaLink).
+    /// Defaults to "maker" for PrusaLink printers if not specified.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Password for HTTP Digest authentication (primarily for PrusaLink).
+    /// User must obtain this from the printer's web interface under Settings → Network → Credentials.
+    /// </summary>
+    public string? Password { get; set; }
+
     /// <summary>Timestamp when printer was discovered</summary>
     public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;
 

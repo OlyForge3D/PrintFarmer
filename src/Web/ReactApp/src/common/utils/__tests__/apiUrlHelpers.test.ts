@@ -3,7 +3,8 @@ import { getApiBaseUrl, getAuthHeaders, getHubUrl } from '../apiUrlHelpers';
 
 describe('apiUrlHelpers', () => {
   // Save original values
-  const originalEnv = import.meta.env;
+  const hadOriginalApiBaseUrl = Object.prototype.hasOwnProperty.call(import.meta.env, 'VITE_API_BASE_URL');
+  const originalApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
   const originalLocalStorage = global.localStorage;
 
   beforeEach(() => {
@@ -23,6 +24,12 @@ describe('apiUrlHelpers', () => {
   });
 
   afterEach(() => {
+    if (hadOriginalApiBaseUrl) {
+      import.meta.env.VITE_API_BASE_URL = originalApiBaseUrl;
+    } else {
+      delete import.meta.env.VITE_API_BASE_URL;
+    }
+
     // Restore original localStorage
     Object.defineProperty(global, 'localStorage', {
       value: originalLocalStorage,

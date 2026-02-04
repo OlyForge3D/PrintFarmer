@@ -76,7 +76,9 @@ public class DataExportService : IDataExportService
                 ModelName = p.Model?.Name,
                 LocationName = p.Location?.Name,
                 Backend = p.Backend,
-                IsAvailable = p.IsAvailable
+                IsAvailable = p.IsAvailable,
+                Username = p.Username,
+                Password = p.Password
             }).ToList();
 
             _logger.LogInformation($"[DataExport] Printers export complete: {exportData.Count} printers");

@@ -447,6 +447,8 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             BedTarget: status.BedTarget,
             Backend: PrinterBackend.SDCP,
             ApiKey: printer.ApiKey,
+            Username: printer.Username,
+            Password: printer.Password,
             OriginalServerUrl: printer.OriginalServerUrl,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
@@ -859,7 +861,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     }
 
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // TODO: SDCP file list implementation needs to parse actual response from SDCP protocol
         // Currently returns placeholder data - should extract size and modified timestamp from SDCP response
@@ -877,13 +879,13 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         }).ToList() ?? new();
     }
 
-    Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
         return Task.FromResult<string?>(null);
     }
 
-    Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
         return Task.FromResult<string?>(null);

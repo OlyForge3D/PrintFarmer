@@ -40,6 +40,7 @@ import {
   PrinterFast,
   PrinterFileDto,
   PrinterModelDto,
+  PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
   QueueOverviewDto,
   RegisterRequest,
@@ -357,6 +358,11 @@ export class ApiClient {
 
   async getPrinter(id: string): Promise<Printer> {
     const response = await this.client.get<Printer>(`/printers/${id}`);
+    return response.data;
+  }
+
+  async getPrinterVersionInfo(printerId: string): Promise<PrinterVersionInfo> {
+    const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`);
     return response.data;
   }
 

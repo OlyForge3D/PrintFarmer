@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, RefreshIcon, CheckIcon, PlusIcon, DeleteIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities, useHotendModels, useExtruderModels, useToolheadModels, useNozzleModels } from '@/common/hooks/useApi';
-import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels } from '@/types/api';
+import { UpdatePrinterDto, UpdateToolheadDto, PrinterBackend, ToolheadDto, PrinterBackendString, NozzleTypeStringLabels, TestConnectionResponse } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
@@ -11,6 +11,7 @@ import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, AccordionB
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
 import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
+import { useSlicer } from '@/hooks/useSlicer';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -22,6 +23,7 @@ interface EditPrinterModalProps {
 export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: EditPrinterModalProps) {
   const { data: printerDetails } = usePrinterDetails(printerId || '');
   const { data: manufacturers } = useManufacturers();
+  const { isSlicerAvailable } = useSlicer();
   const { data: filamentTypes } = useFilamentTypes();
   const [selectedManufacturer, setSelectedManufacturer] = useState<string | undefined>();
   const { data: models } = useModels(selectedManufacturer);
@@ -44,6 +46,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [originalToolheads, setOriginalToolheads] = useState<UpdateToolheadDto[]>([]);
   const [expandedToolheads, setExpandedToolheads] = useState<Set<string>>(new Set());
   
+  // Test connection state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
 
@@ -63,7 +70,22 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backend: typeof printerDetails.backend === 'string'
           ? (printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString) ?? PrinterBackend.Unknown)
           : printerDetails.backend,
-        apiKey: printerDetails.apiKey,
+        // PrusaLink doesn't use API keys - only username/password for Digest Auth
+        // Clear apiKey for PrusaLink to prevent confusion with legacy data
+        apiKey: (typeof printerDetails.backend === 'string' 
+          ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
+          : printerDetails.backend) === PrinterBackend.PrusaLink 
+            ? undefined 
+            : printerDetails.apiKey,
+        // Default username to 'maker' for PrusaLink if not set
+        username: printerDetails.username || (
+          (typeof printerDetails.backend === 'string' 
+            ? printerBackendStringToEnum(printerDetails.backend as unknown as PrinterBackendString)
+            : printerDetails.backend) === PrinterBackend.PrusaLink 
+            ? 'maker' 
+            : undefined
+        ),
+        password: printerDetails.password,
         cameraStreamUrl: printerDetails.cameraStreamUrl,
         cameraSnapshotUrl: printerDetails.cameraSnapshotUrl,
         // Printer capabilities
@@ -125,7 +147,17 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     onClose();
     setValidationErrors({});
     setError('');
+    setTestResult(null);
+    setShowPassword(false);
   }, [onClose]);
+
+  // Reset test result and password visibility when modal opens or printer changes
+  useEffect(() => {
+    if (isOpen) {
+      setTestResult(null);
+      setShowPassword(false);
+    }
+  }, [isOpen, printerId]);
 
   // Helper to compare two values, treating null/undefined/NaN as equal
   const valuesEqual = useCallback((a: unknown, b: unknown): boolean => {
@@ -152,7 +184,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     // Compare each field
     const fields: (keyof UpdatePrinterDto)[] = [
       'name', 'serverUrl', 'notes', 'manufacturerId', 'modelId',
-      'newManufacturerName', 'newModelName', 'backend', 'apiKey',
+      'newManufacturerName', 'newModelName', 'backend', 'apiKey', 'username', 'password',
       'cameraStreamUrl', 'cameraSnapshotUrl', 'nozzleDiameter',
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
@@ -372,16 +404,28 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     setError('');
     try {
       // Include toolheads in the update if we have any
+      // Ensure username defaults to 'maker' for PrusaLink printers
+      // Clear apiKey for PrusaLink (uses Digest Auth, not API key)
       const updateData: UpdatePrinterDto = {
         ...formData,
+        apiKey: formData.backend === PrinterBackend.PrusaLink 
+          ? undefined 
+          : formData.apiKey,
+        username: formData.backend === PrinterBackend.PrusaLink 
+          ? (formData.username || 'maker') 
+          : formData.username,
         toolheads: toolheads.length > 0 ? toolheads : undefined,
       };
       const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
       toast.success(`Printer "${result.name}" updated`);
       onSuccess?.();
-      // Show clone profiles modal if printer was just created or updated
+      // Show clone profiles modal only if slicing is enabled
       // (user may want to clone profiles from template machine)
-      setShowCloneProfilesModal(true);
+      if (isSlicerAvailable) {
+        setShowCloneProfilesModal(true);
+      } else {
+        onClose();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update printer';
       toast.error(message);
@@ -414,6 +458,66 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
   };
 
+  /**
+   * Tests connectivity to the printer using current form credentials.
+   * Uses backend-specific test methods (Moonraker, PrusaLink, OctoPrint).
+   */
+  const handleTestConnection = async () => {
+    if (!formData) return;
+    
+    // Validate required fields for test
+    if (!formData.serverUrl?.trim()) {
+      setTestResult({ success: false, message: 'Server URL is required' });
+      return;
+    }
+
+    try {
+      new URL(formData.serverUrl);
+    } catch {
+      setTestResult({ success: false, message: 'Please enter a valid HTTP/HTTPS URL' });
+      return;
+    }
+
+    // Check authentication requirements per backend
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: 'Password is required for PrusaLink printers (get it from printer Settings → Network → Credentials)' 
+      });
+      return;
+    }
+    
+    if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: 'API Key is required for OctoPrint printers' 
+      });
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      const result = await apiClient.testConnection({
+        serverUrl: formData.serverUrl,
+        backend: formData.backend,
+        apiKey: formData.apiKey,
+        username: formData.username,
+        password: formData.password,
+        backendPort: formData.backendPort,
+      });
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ 
+        success: false, 
+        message: err instanceof Error ? err.message : 'Connection test failed' 
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   if (!isOpen || !formData) return null;
 
   const filteredModels = models || [];
@@ -427,7 +531,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   const modalFooter = (
-    <div className="flex gap-2">
+    <div className="flex items-center gap-2">
       <Button
         type="button"
         variant="secondary"
@@ -435,6 +539,39 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       >
         Cancel
       </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleTestConnection}
+        disabled={isTesting || !formData?.serverUrl?.trim()}
+        iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+      >
+        {isTesting ? 'Testing...' : 'Test'}
+      </Button>
+      
+      {/* Test Connection Result - inline status */}
+      {testResult && (
+        <span 
+          className={`text-sm flex items-center gap-1.5 px-2 py-1 rounded ${
+            testResult.success 
+              ? 'text-pf-success bg-pf-success-bg' 
+              : 'text-pf-error-text bg-pf-error-bg'
+          }`}
+          role={testResult.success ? undefined : 'alert'}
+        >
+          {testResult.success ? (
+            <CheckIcon className="w-4 h-4" />
+          ) : (
+            <span className="w-4 h-4 flex items-center justify-center">✕</span>
+          )}
+          <span className="truncate max-w-[200px]" title={testResult.message}>
+            {testResult.success ? 'Connected' : testResult.message}
+          </span>
+        </span>
+      )}
+      
+      {/* Spacer to push Save to the right */}
+      <div className="flex-1" />
       <Button
         type="button"
         onClick={handleSaveClick}
@@ -522,15 +659,50 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
-            {(formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && (
+            {/* PrusaLink uses Digest Authentication (username/password) */}
+            {formData.backend === PrinterBackend.PrusaLink && (
+              <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Username">
+                  <Input
+                    type="text"
+                    value={formData.username || 'maker'}
+                    onChange={e => handleInputChange('username', e.target.value)}
+                    placeholder="maker"
+                    title="PrusaLink username (usually 'maker')"
+                  />
+                </FormField>
+                <FormField label="Password">
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password || ''}
+                      onChange={e => handleInputChange('password', e.target.value)}
+                      placeholder="From printer Settings → Network → Credentials"
+                      title="PrusaLink password from printer settings"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1! h-auto!"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                    />
+                  </div>
+                </FormField>
+              </div>
+            )}
+            {/* OctoPrint uses API Key authentication */}
+            {formData.backend === PrinterBackend.OctoPrint && (
               <div className="col-span-2">
-                <FormField label={formData.backend === PrinterBackend.PrusaLink ? "API Key (PrusaLink)" : "API Key (OctoPrint)"}>
+                <FormField label="API Key (OctoPrint)">
                   <Input
                     type="text"
                     value={formData.apiKey || ''}
                     onChange={e => handleInputChange('apiKey', e.target.value)}
-                    placeholder={formData.backend === PrinterBackend.PrusaLink ? "Enter PrusaLink API Key" : "Enter OctoPrint API Key"}
-                    title={formData.backend === PrinterBackend.PrusaLink ? "PrusaLink API Key" : "OctoPrint API Key"}
+                    placeholder="Enter OctoPrint API Key"
+                    title="OctoPrint API Key"
                   />
                 </FormField>
               </div>

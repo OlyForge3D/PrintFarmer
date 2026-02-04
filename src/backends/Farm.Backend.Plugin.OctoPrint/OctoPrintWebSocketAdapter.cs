@@ -284,15 +284,15 @@ public sealed class OctoPrintWebSocketAdapter(
 
         try
         {
-            if (string.IsNullOrEmpty(_printer.ApiKey))
+            if (_printer.Credential == null || !_printer.Credential.HasApiKey)
             {
                 _logger.LogWarning($"OctoPrint HTTP Fallback {_printerId}: No API key configured");
                 _apiState = "authFail";
                 return null;
             }
 
-            OctoPrintPrinterState? printerState = await _octoPrintClient.GetPrinterStateAsync(_printer.ServerUrl, _printer.ApiKey);
-            OctoPrintJobStatus? jobStatus = await _octoPrintClient.GetJobStatusAsync(_printer.ServerUrl, _printer.ApiKey);
+            OctoPrintPrinterState? printerState = await _octoPrintClient.GetPrinterStateAsync(_printer.ServerUrl, _printer.Credential);
+            OctoPrintJobStatus? jobStatus = await _octoPrintClient.GetJobStatusAsync(_printer.ServerUrl, _printer.Credential);
 
             if (printerState == null || jobStatus == null)
             {
@@ -354,7 +354,7 @@ public sealed class OctoPrintWebSocketAdapter(
         try
         {
             var request = new HttpRequestMessage(HttpMethod.Post, $"{_printer.ServerUrl}/api/login");
-            request.Headers.Add("X-Api-Key", _printer.ApiKey);
+            request.Headers.Add("X-Api-Key", _printer.Credential?.ApiKey);
             request.Content = new StringContent("{\"passive\":true}", Encoding.UTF8, "application/json");
 
             HttpResponseMessage response = await _octoPrintClient.SendAsync(request, ct);

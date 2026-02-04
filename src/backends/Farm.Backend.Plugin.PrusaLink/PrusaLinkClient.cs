@@ -17,7 +17,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsStartPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
-    ISupportsControlOperations
+    ISupportsControlOperations,
+    ISupportsMovement,
+    ISupportsTemperatureControl
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly IUnifiedLoggingService? _logger;
@@ -35,12 +37,12 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         _logger = logger;
     }
 
-    public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
+    public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         try
         {
-            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, credential, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
 
             // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions that include these fields)
@@ -65,7 +67,14 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 job?.File?.Name,
                 thumbnailUrl,
                 null, // Camera stream URL would need camera configuration
-                null);  // Camera snapshot URL would need camera configuration
+                null,  // Camera snapshot URL would need camera configuration
+                status?.Printer?.TempNozzle,
+                status?.Printer?.TempBed,
+                status?.Printer?.TargetNozzle,
+                status?.Printer?.TargetBed,
+                status?.Printer?.AxisX,
+                status?.Printer?.AxisY,
+                status?.Printer?.AxisZ);
         }
         catch (Exception ex)
         {
@@ -75,17 +84,17 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     }
 
     // Analyzer-friendly overloads that accept Uri and delegate to string versions
-    public Task<PrusaCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default)
+    public Task<PrusaCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetCompositeStatusAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetCompositeStatusAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
-    public async Task<PrusaStatus> GetStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
+    public async Task<PrusaStatus> GetStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         try
         {
-            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, credential, ct);
 
             // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions)
@@ -104,17 +113,17 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<PrusaStatus> GetStatusAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default)
+    public Task<PrusaStatus> GetStatusAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetStatusAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetStatusAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
-    public async Task<PrusaJob?> GetJobAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
+    public async Task<PrusaJob?> GetJobAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         try
         {
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
             if (job == null)
             {
                 return null;
@@ -143,10 +152,10 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<PrusaJob?> GetJobAsync(Uri baseUrl, string? apiKey, CancellationToken ct = default)
+    public Task<PrusaJob?> GetJobAsync(Uri baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetJobAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetJobAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
     public async Task<PrinterDto> CreatePrinterDtoAsync(
@@ -174,6 +183,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             CameraSnapshotUrl: cameraSnapshotUrl,
             Backend: PrinterBackend.PrusaLink,
             ApiKey: printer.ApiKey,
+            Username: printer.Username,
+            Password: printer.Password,
             OriginalServerUrl: printer.OriginalServerUrl,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
@@ -249,7 +260,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     }
 
     // File upload and management methods - Using comprehensive API client
-    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -259,7 +270,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Build a rooted path using Uri to avoid manual separators
             // Note: Uri(Uri, string) requires the baseUri to be absolute
             string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
-            return await _apiClient.UploadFileAsync(baseUrl, "/local", filePath, fileContent, apiKey, printAfterUpload: false, overwrite: true, ct);
+            return await _apiClient.UploadFileAsync(baseUrl, "/local", filePath, fileContent, credential, printAfterUpload: false, overwrite: true, ct);
         }
         catch (Exception ex)
         {
@@ -268,13 +279,13 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return UploadGcodeAsync(baseUrl.ToString().TrimEnd('/'), fileName, fileContent, apiKey, ct);
+        return UploadGcodeAsync(baseUrl.ToString().TrimEnd('/'), fileName, fileContent, credential, ct);
     }
 
-    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -283,7 +294,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Build a rooted path using Uri to avoid manual separators
             // Note: Uri(Uri, string) requires the baseUri to be absolute
             string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
-            return await _apiClient.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
+            return await _apiClient.StartPrintAsync(baseUrl, "/local", filePath, credential, ct);
         }
         catch (Exception ex)
         {
@@ -292,18 +303,18 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+    public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return StartPrintAsync(baseUrl.ToString().TrimEnd('/'), fileName, apiKey, ct);
+        return StartPrintAsync(baseUrl.ToString().TrimEnd('/'), fileName, credential, ct);
     }
 
-    public async Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<string[]> GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries; FolderInfo.Children is an array so prefer Length checks
@@ -321,11 +332,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         catch (Exception ex)
         {
             // Fallback to legacy /api/files endpoint (OctoPrint compatibility)
-            // This endpoint also requires API key authentication
+            // This endpoint also requires authentication
             _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
             try
             {
-                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
                 return legacyFiles
                     .Where(f => f.Type != "FOLDER" && !string.IsNullOrEmpty(f.Display))
                     .Select(f => f.Display)
@@ -339,10 +350,10 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<string[]> GetFileListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public Task<string[]> GetFileListAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetFileListAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetFileListAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
     /// <summary>
@@ -350,15 +361,15 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     /// Used internally for thumbnail extraction.
     /// </summary>
     /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">The API key for authentication.</param>
+    /// <param name="credential">Printer credential for digest authentication.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    public async Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         List<(string, string)> result = [];
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder && folder.Children != null)
             {
                 foreach (FileInfoBase child in folder.Children)
@@ -380,7 +391,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             _logger?.LogWarning($"Failed to get file details from v1 API, trying legacy endpoint: {ex.Message}");
             try
             {
-                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
                 foreach (FileChild file in legacyFiles)
                 {
                     if (file.Type != "FOLDER" && !string.IsNullOrEmpty(file.Display) && !string.IsNullOrEmpty(file.Path))
@@ -398,10 +409,10 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetFileDetailsListAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetFileDetailsListAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
     /// <summary>
@@ -411,25 +422,25 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
     /// <param name="storagePath">The storage path (e.g., /local).</param>
     /// <param name="filePath">The path to the file within the storage.</param>
-    /// <param name="apiKey">The API key for authentication.</param>
+    /// <param name="credential">Printer credential for digest authentication.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    public async Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    public async Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await _apiClient.GetFileInfoAsync(baseUrl, storagePath, filePath, apiKey, ct: ct);
+        return await _apiClient.GetFileInfoAsync(baseUrl, storagePath, filePath, credential, ct: ct);
     }
 
-    public Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    public Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetFileDetailsAsync(baseUrl.ToString().TrimEnd('/'), storagePath, filePath, apiKey, ct);
+        return GetFileDetailsAsync(baseUrl.ToString().TrimEnd('/'), storagePath, filePath, credential, ct);
     }
 
     // Convenience helpers previously provided as extensions
-    public async Task<PrintJobProgress?> GetPrintProgressAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<PrintJobProgress?> GetPrintProgressAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
             return job == null
                 ? null
                 : new PrintJobProgress
@@ -449,11 +460,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public async Task<SimplePrinterStatus?> GetPrinterStatusAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<SimplePrinterStatus?> GetPrinterStatusAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, credential, ct);
 
             return new SimplePrinterStatus
             {
@@ -477,11 +488,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public async Task<bool> IsPrintingAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> IsPrintingAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
+            StatusInfo status = await _apiClient.GetStatusAsync(baseUrl, credential, ct);
             return string.Equals(status.Printer.State, PrinterStates.Printing, StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -490,12 +501,12 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public async Task<bool> PausePrintAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> PausePrintAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            return job?.Id != null ? await _apiClient.PauseJobAsync(baseUrl, job.Id, apiKey, ct) : false;
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
+            return job?.Id != null ? await _apiClient.PauseJobAsync(baseUrl, job.Id, credential, ct) : false;
         }
         catch
         {
@@ -503,12 +514,12 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public async Task<bool> ResumePrintAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> ResumePrintAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            return job?.Id != null ? await _apiClient.ResumeJobAsync(baseUrl, job.Id, apiKey, ct) : false;
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
+            return job?.Id != null ? await _apiClient.ResumeJobAsync(baseUrl, job.Id, credential, ct) : false;
         }
         catch
         {
@@ -516,12 +527,12 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public async Task<bool> StopPrintAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> StopPrintAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
-            return job?.Id != null ? await _apiClient.StopJobAsync(baseUrl, job.Id, apiKey, ct) : false;
+            Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
+            return job?.Id != null ? await _apiClient.StopJobAsync(baseUrl, job.Id, credential, ct) : false;
         }
         catch
         {
@@ -529,18 +540,18 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<bool> StopPrintAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public Task<bool> StopPrintAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return StopPrintAsync(baseUrl.ToString(), apiKey, ct);
+        return StopPrintAsync(baseUrl.ToString(), credential, ct);
     }
 
-    public async Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
-            VersionInfo versionInfo = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
+            PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, credential, ct);
+            VersionInfo versionInfo = await _apiClient.GetVersionAsync(baseUrl, credential, ct);
 
             return new PrinterInformation
             {
@@ -567,17 +578,17 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    public Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public Task<PrinterInformation?> GetPrinterInformationAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return GetPrinterInformationAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+        return GetPrinterInformationAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
     }
 
-    public async Task<StorageInformation[]> GetStorageInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<StorageInformation[]> GetStorageInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            StorageListResponse storageList = await _apiClient.GetStorageAsync(baseUrl, apiKey, ct: ct);
+            StorageListResponse storageList = await _apiClient.GetStorageAsync(baseUrl, credential, ct: ct);
             return storageList.StorageList.Select(s => new StorageInformation
             {
                 Name = s.Name,
@@ -603,18 +614,18 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     public IPrusaLinkApiClient ApiClient => _apiClient;
 
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
-    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         // Use the new method that extracts file metadata including size
-        return await GetFileListWithMetadataAsync(baseUrl, apiKey, ct);
+        return await GetFileListWithMetadataAsync(baseUrl, credential, ct);
     }
 
-    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
             // Try the v1 API first (more official, supports metadata)
-            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, apiKey, ct: ct);
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
                 // Return names of non-folder entries with size information
@@ -645,7 +656,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
             try
             {
-                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
                 return legacyFiles
                     .Where(f => f.Type != "FOLDER" && !string.IsNullOrEmpty(f.Display))
                     .Select(f => new PrinterFileInfo
@@ -668,13 +679,13 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
-        => await UploadGcodeAsync(baseUrl, fileName, fileContent, apiKey, ct);
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
+        => await UploadGcodeAsync(baseUrl, fileName, fileContent, credential, ct);
 
-    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
-        => await StartPrintAsync(baseUrl, fileName, apiKey, ct);
+    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
+        => await StartPrintAsync(baseUrl, fileName, credential, ct);
 
-    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -688,7 +699,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -701,15 +712,17 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
     }
 
-    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
-            PrinterInformation? info = await GetPrinterInformationAsync(baseUrl, apiKey, ct);
+            PrinterInformation? info = await GetPrinterInformationAsync(baseUrl, credential, ct);
             return new StandardPrinterInfo
             {
                 Name = info?.Name ?? "Unknown",
                 Firmware = info?.FirmwareVersion ?? "Unknown",
+                BackendVersion = info?.PrusaLinkVersion,
+                ApiVersion = info?.ApiVersion,
                 Model = "Prusa MK" // PrusaLink doesn't expose model info directly
             };
         }
@@ -721,24 +734,141 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
     /// <summary>
     /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
-    /// PrusaLink supports job cancel via StopPrintAsync. Pause/Resume are not fully supported.
+    /// PrusaLink supports job cancel via StopPrintAsync.
+    /// Pause/Resume require HTTP Digest Auth via legacy /api/job endpoint.
+    /// Credential should contain Username and Password for digest auth operations.
     /// </summary>
-    public async Task<bool> PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // PrusaLink doesn't have a dedicated pause API - would need to send M25 via G-code if supported
-        _logger?.LogWarning($"[PrusaLink] Pause not supported for PrusaLink printers at {baseUrl}");
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Pause requires digest auth credentials (format: username:password) at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.PausePrintLegacyAsync(baseUrl, credential, ct);
+    }
+
+    public async Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Resume requires digest auth credentials (format: username:password) at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.ResumePrintLegacyAsync(baseUrl, credential, ct);
+    }
+
+    public async Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => await StopPrintAsync(baseUrl, credential, ct);
+
+    /// <summary>
+    /// ISupportsMovement implementations - home and jog operations.
+    /// These require HTTP Digest Auth via legacy /api/printer/printhead endpoint.
+    /// Credential should contain Username and Password for digest auth operations.
+    /// </summary>
+    public async Task<bool> HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Home requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.HomePrintHeadLegacyAsync(baseUrl, homeX: true, homeY: true, homeZ: true, credential, ct);
+    }
+
+    public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
+    {
+        // Without credentials, we can't perform the operation
+        _logger?.LogWarning($"[PrusaLink] SendHome requires digest auth credentials at {baseUrl}");
         return false;
     }
 
-    public async Task<bool> ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // PrusaLink doesn't have a dedicated resume API - would need to send M24 via G-code if supported
-        _logger?.LogWarning($"[PrusaLink] Resume not supported for PrusaLink printers at {baseUrl}");
+        // Use PrinterCredential directly
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] HomeXY requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.HomePrintHeadLegacyAsync(baseUrl, homeX: true, homeY: true, homeZ: false, credential, ct);
+    }
+
+    public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        // Use PrinterCredential directly
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] HomeZ requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.HomePrintHeadLegacyAsync(baseUrl, homeX: false, homeY: false, homeZ: true, credential, ct);
+    }
+
+    public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        // Use PrinterCredential directly
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] Move requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        return await _apiClient.JogPrintHeadLegacyAsync(baseUrl, x, y, z, f, credential, ct);
+    }
+
+    public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        // PrusaLink legacy API only supports relative jog, not absolute positioning
+        _logger?.LogWarning($"[PrusaLink] MoveToAsync (absolute positioning) not supported via legacy API at {baseUrl}");
         return false;
     }
 
-    public async Task<bool> CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
-        => await StopPrintAsync(baseUrl, apiKey, ct);
+    /// <summary>
+    /// ISupportsTemperatureControl implementation - set hotend and bed temperatures.
+    /// Requires HTTP Digest Auth via legacy /api/printer/tool and /api/printer/bed endpoints.
+    /// Credential should contain Username and Password for digest auth operations.
+    /// </summary>
+    public async Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        // Use PrinterCredential directly
+        if (credential?.HasDigestAuth != true)
+        {
+            _logger?.LogWarning($"[PrusaLink] SetTemperatures requires digest auth credentials at {baseUrl}");
+            return false;
+        }
+
+        bool success = true;
+
+        // Set hotend temperature if specified
+        if (hotendTemp.HasValue)
+        {
+            bool toolResult = await _apiClient.SetToolTemperatureLegacyAsync(baseUrl, hotendTemp.Value, credential, toolIndex: 0, ct);
+            if (!toolResult)
+            {
+                _logger?.LogWarning($"[PrusaLink] Failed to set hotend temperature to {hotendTemp.Value}°C at {baseUrl}");
+                success = false;
+            }
+        }
+
+        // Set bed temperature if specified
+        if (bedTemp.HasValue)
+        {
+            bool bedResult = await _apiClient.SetBedTemperatureLegacyAsync(baseUrl, bedTemp.Value, credential, ct);
+            if (!bedResult)
+            {
+                _logger?.LogWarning($"[PrusaLink] Failed to set bed temperature to {bedTemp.Value}°C at {baseUrl}");
+                success = false;
+            }
+        }
+
+        return success;
+    }
 }
 
 #pragma warning restore CS1066

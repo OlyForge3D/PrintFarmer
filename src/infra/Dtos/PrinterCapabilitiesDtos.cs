@@ -145,42 +145,61 @@ public class PrinterCapabilitiesExportDto
 /// <summary>
 /// Combined printer identity with capabilities snapshot.
 /// </summary>
+/// <summary>
+/// Combined printer identity with capabilities snapshot.
+/// Used for export/import operations with standard field naming (id, name, modelName).
+/// </summary>
 public class PrinterWithCapabilitiesDto
 {
-    public Guid PrinterId { get; set; }
+    // Identity (standard naming for consistency across all printer DTOs)
+    public Guid Id { get; set; }
 
-    public string PrinterName { get; set; } = string.Empty;
-
-    public string PrinterModel { get; set; } = string.Empty;
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public PrinterCapabilitiesExportDto? Capabilities { get; set; }
-
-    // Additional export-friendly fields
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ManufacturerName { get; set; }
+    public string Name { get; set; } = string.Empty;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PrinterBackend? Backend { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? IpAddress { get; set; }
-
-    // Import-friendly fields (for re-importing exported printers)
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ServerUrl { get; set; } // Base URL without port (e.g., "http://192.168.1.100")
+    // Metadata (standard naming)
+    public string ModelName { get; set; } = string.Empty;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? BackendPort { get; set; } // Backend API port (e.g., 7125 for Moonraker)
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? FrontendPort { get; set; } // Frontend port if applicable (e.g., 5000 for PrusaLink)
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ApiKey { get; set; }
+    public string? ManufacturerName { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Notes { get; set; }
+
+    // Connection
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServerUrl { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IpAddress { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? BackendPort { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FrontendPort { get; set; }
+
+    // Credentials
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Username for HTTP Digest authentication (primarily for PrusaLink).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Password for HTTP Digest authentication.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Password { get; set; }
+
+    // Capabilities (unique to export DTO)
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PrinterCapabilitiesExportDto? Capabilities { get; set; }
 }
 
 /// <summary>
