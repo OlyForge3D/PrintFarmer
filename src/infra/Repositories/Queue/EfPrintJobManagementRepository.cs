@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.IO;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -45,6 +46,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public void Add(PrintJob job)
     {
         _context.PrintJobs.Add(job);
+    }
+
+    public void Remove(PrintJob job)
+    {
+        _context.PrintJobs.Remove(job);
     }
 
     public async Task<PrintJob> UpdateAsync(PrintJob job, CancellationToken ct = default)
@@ -249,7 +255,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         query = sortBy.ToLowerInvariant() switch
         {
             "duration" => query.OrderByDescending(pj => pj.ActualPrintTime),
-            "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.FileName : string.Empty),
+            "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),
             "status" => query.OrderBy(pj => pj.Status),
             "oldest" => query.OrderBy(pj => pj.ActualEndTime ?? pj.QueuedAt),
             _ => query.OrderByDescending(pj => pj.ActualEndTime ?? pj.QueuedAt)
@@ -270,6 +276,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
+            .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
             .AsQueryable();
 
@@ -302,6 +309,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public async Task<PrintJob?> GetJobWithStateHistoryAsync(Guid jobId, CancellationToken ct = default)
     {
         return await _context.PrintJobs
+            .Include(pj => pj.GcodeFile)
             .Include(pj => pj.StateHistory)
             .FirstOrDefaultAsync(pj => pj.Id == jobId, ct);
     }
@@ -416,6 +424,49 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .FirstOrDefaultAsync(
                 pj => pj.SourcePrinterId == printerId && pj.ExternalJobId == externalJobId,
                 ct);
+    }
+
+    public async Task<PrintJob?> FindExistingJobForHistoryMatchAsync(
+        Guid printerId,
+        string filename,
+        DateTime startTimeUtc,
+        DateTime? endTimeUtc,
+        CancellationToken ct = default)
+    {
+        string fileNameOnly = Path.GetFileName(filename);
+        string fileStem = Path.GetFileNameWithoutExtension(filename);
+
+        // Allow some clock drift and differences in how providers report start times.
+        DateTime startMinUtc = startTimeUtc.AddMinutes(-15);
+        DateTime startMaxUtc = startTimeUtc.AddMinutes(15);
+
+        IQueryable<PrintJob> query = _context.PrintJobs
+            .Include(pj => pj.GcodeFile)
+            .Where(pj => pj.AssignedPrinterId == printerId)
+
+            // If ExternalJobId is already set, it will be deduped by GetExternalJobIdsForPrinterAsync.
+            // We only want to match jobs that were created by PrintFarmer but not yet linked to a printer history ID.
+            .Where(pj => pj.ExternalJobId == null && pj.SourcePrinterId == null)
+            .Where(pj => !pj.WasSeededFromHistory)
+            .Where(pj => (pj.ActualStartTime ?? pj.QueuedAt) >= startMinUtc && (pj.ActualStartTime ?? pj.QueuedAt) <= startMaxUtc)
+            .Where(pj =>
+                pj.Name == fileNameOnly ||
+                pj.Name == fileStem ||
+                (pj.GcodeFile != null && (pj.GcodeFile.Name == fileNameOnly || pj.GcodeFile.FileName == fileNameOnly)));
+
+        // If we have an end time, prefer a tighter match.
+        if (endTimeUtc.HasValue)
+        {
+            DateTime endMinUtc = endTimeUtc.Value.AddMinutes(-15);
+            DateTime endMaxUtc = endTimeUtc.Value.AddMinutes(15);
+            query = query.Where(pj => (pj.ActualEndTime ?? pj.UpdatedAt) >= endMinUtc && (pj.ActualEndTime ?? pj.UpdatedAt) <= endMaxUtc);
+        }
+
+        // Pick the most recently-started candidate within the match window.
+        // (We avoid provider-specific date diff functions to keep this working across SQLite/PostgreSQL/MySQL/SQL Server.)
+        return await query
+            .OrderByDescending(pj => pj.ActualStartTime ?? pj.QueuedAt)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<GcodeFile?> FindGcodeFileByFilenameAsync(string filename, CancellationToken ct = default)

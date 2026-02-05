@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
-// PrintFarmerLogo import removed - unused in this component
+import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Input } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -117,7 +117,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             variant="subtle"
             disabled={isLoading}
           >
-            Need an account? Register
+            Register
           </Button>
           <Button
             type="submit"
@@ -144,8 +144,10 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
       isOpen={isOpen}
       onClose={handleClose}
       title="Sign In"
+      titleIcon={<PrintFarmerLogo size={28} />}
       width="max-w-md"
       isDisabled={isLoading}
+      showCloseButton={false}
     >
       {formContent}
     </Modal>

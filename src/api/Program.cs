@@ -110,11 +110,23 @@ catch
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
 // Configure Data Protection for encrypting sensitive data (API keys, passwords)
-// Keys are stored in the data-protection-keys directory for persistence across restarts
-var keysDirectory = Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
-Directory.CreateDirectory(keysDirectory);
+// IMPORTANT: In Docker deployments we mount a persistent host volume at
+// /root/.aspnet/DataProtection-Keys. Persisting keys here ensures secrets can
+// be decrypted across container restarts and upgrades.
+var keysDirectoryPath = Environment.GetEnvironmentVariable("DATAPROTECTION_KEYS_PATH");
+
+if (string.IsNullOrWhiteSpace(keysDirectoryPath))
+{
+    var userProfileDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    keysDirectoryPath = string.IsNullOrWhiteSpace(userProfileDirectoryPath)
+        ? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys")
+        : Path.Combine(userProfileDirectoryPath, ".aspnet", "DataProtection-Keys");
+}
+
+Directory.CreateDirectory(keysDirectoryPath);
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
+    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectoryPath))
     .SetApplicationName("PrintFarmer");
 
 // Register sensitive data encryption service

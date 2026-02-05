@@ -172,7 +172,7 @@ public class PrintJobManagementService(
                 .Select(pj => new QueueHistoryEntryDto
                 {
                     Id = pj.Id.ToString(),
-                    JobName = pj.Name,
+                    JobName = pj.GcodeFile?.Name ?? pj.Name,
                     PrinterName = pj.AssignedPrinter?.Name ?? "Unassigned",
                     Status = pj.Status.ToString(),
                     CompletionPercentage = pj.Status == PrintJobStatus.Completed ? 100 : 0,
@@ -245,7 +245,10 @@ public class PrintJobManagementService(
             var job = new PrintJob
             {
                 Id = Guid.NewGuid(),
-                Name = gcodeFile.FileName,
+
+                // Store a human-friendly name (original filename) for display.
+                // The internal GUID-based filename is stored on the GcodeFile entity.
+                Name = gcodeFile.Name,
                 GcodeFileId = Guid.Parse(request.GcodeFileId),
                 AssignedPrinterId = assignedPrinterId,
                 Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
@@ -801,11 +804,22 @@ public class PrintJobManagementService(
             PrintJob originalJob = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken)
                 ?? throw new InvalidOperationException($"Job {jobId} not found");
 
+            // Prefer a user-friendly name (original filename) when the linked G-code file still exists.
+            string newJobName = originalJob.Name;
+            if (originalJob.GcodeFileId.HasValue)
+            {
+                GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(originalJob.GcodeFileId.Value, cancellationToken);
+                if (gcodeFile != null)
+                {
+                    newJobName = gcodeFile.Name;
+                }
+            }
+
             // Create new print job with same properties as original
             var newJob = new PrintJob
             {
                 Id = Guid.NewGuid(),
-                Name = originalJob.Name,
+                Name = newJobName,
                 GcodeFileId = originalJob.GcodeFileId,
                 AssignedPrinterId = originalJob.AssignedPrinterId,
                 Status = PrintJobStatus.Queued,
@@ -975,38 +989,67 @@ public class PrintJobManagementService(
                 continue;
             }
 
-            // Convert job timestamp for incremental filtering
-            DateTime jobTimestampUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+            DateTime startTimeUtc = DateTimeOffset.FromUnixTimeSeconds((long)historyJob.StartTime).UtcDateTime;
+            DateTime? endTimeUtc = historyJob.EndTime.HasValue
+                ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
+                : null;
 
             // On incremental seed, skip jobs older than or equal to last seed timestamp.
             // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).
             // Moonraker already filters server-side via the 'since' parameter, but this acts as a safety net.
-            if (!isInitialSeed && seedSinceUtc.HasValue && jobTimestampUtc <= seedSinceUtc.Value)
+            if (!isInitialSeed && seedSinceUtc.HasValue && startTimeUtc <= seedSinceUtc.Value)
             {
                 skipped++;
                 continue;
             }
 
             // Track the latest job timestamp for updating LastHistorySeedUtc
-            if (jobTimestampUtc > latestJobTimestamp)
+            if (startTimeUtc > latestJobTimestamp)
             {
-                latestJobTimestamp = jobTimestampUtc;
+                latestJobTimestamp = startTimeUtc;
             }
 
             try
             {
                 if (existingExternalJobIds.Contains(historyJob.JobId))
                 {
-                    // Job exists - update it (only on initial seed or if somehow we see it again)
-                    if (isInitialSeed)
+                    // Job exists. First, try to clean up a previously-created duplicate (print initiated via PrintFarmer)
+                    // by linking the PrintFarmer job to the history external ID and removing the seeded duplicate.
+                    PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
+                        printer.Id,
+                        historyJob.Filename,
+                        startTimeUtc,
+                        endTimeUtc,
+                        cancellationToken);
+
+                    PrintJob? seededJob = null;
+                    if (matchingExisting != null)
                     {
-                        PrintJob? existingJob = await _repository.GetByExternalIdAsync(
+                        seededJob = await _repository.GetByExternalIdAsync(
                             printer.Id, historyJob.JobId, cancellationToken);
 
-                        if (existingJob != null)
+                        if (seededJob != null && seededJob.Id != matchingExisting.Id)
                         {
-                            UpdatePrintJobFromHistory(existingJob, historyJob);
-                            existingJob.UpdatedAt = DateTime.UtcNow;
+                            matchingExisting.ExternalJobId = historyJob.JobId;
+                            matchingExisting.SourcePrinterId = printer.Id;
+                            UpdatePrintJobFromHistory(matchingExisting, historyJob);
+                            matchingExisting.UpdatedAt = DateTime.UtcNow;
+                            _repository.Remove(seededJob);
+                            updated++;
+                            continue;
+                        }
+                    }
+
+                    // Otherwise, update the seeded job only on initial seed (for completeness).
+                    if (isInitialSeed)
+                    {
+                        seededJob ??= await _repository.GetByExternalIdAsync(
+                            printer.Id, historyJob.JobId, cancellationToken);
+
+                        if (seededJob != null)
+                        {
+                            UpdatePrintJobFromHistory(seededJob, historyJob);
+                            seededJob.UpdatedAt = DateTime.UtcNow;
                             updated++;
                         }
                     }
@@ -1018,6 +1061,26 @@ public class PrintJobManagementService(
                 }
                 else
                 {
+                    // If this print was initiated through PrintFarmer, it may already exist in our DB without
+                    // an ExternalJobId/SourcePrinterId link. In that case, update/link it instead of inserting a duplicate.
+                    PrintJob? matchingExisting = await _repository.FindExistingJobForHistoryMatchAsync(
+                        printer.Id,
+                        historyJob.Filename,
+                        startTimeUtc,
+                        endTimeUtc,
+                        cancellationToken);
+
+                    if (matchingExisting != null)
+                    {
+                        matchingExisting.ExternalJobId = historyJob.JobId;
+                        matchingExisting.SourcePrinterId = printer.Id;
+                        UpdatePrintJobFromHistory(matchingExisting, historyJob);
+                        matchingExisting.UpdatedAt = DateTime.UtcNow;
+                        existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
+                        updated++;
+                        continue;
+                    }
+
                     // New job - create it
                     PrintJob newJob = await CreatePrintJobFromHistoryAsync(historyJob, printer.Id, cancellationToken);
 
@@ -1619,7 +1682,7 @@ public class PrintJobManagementService(
             var events = jobs.Select(job => new TimelineEventDto
             {
                 JobId = job.Id.ToString(),
-                JobName = job.Name,
+                JobName = job.GcodeFile?.Name ?? job.Name,
                 PrinterName = job.AssignedPrinter?.Name ?? "Unassigned",
                 State = job.Status.ToString(),
                 EnteredAtUtc = job.Status == PrintJobStatus.Queued ? job.CreatedAt : job.ActualStartTime ?? job.CreatedAt,
@@ -1724,7 +1787,7 @@ public class PrintJobManagementService(
             return new JobStateHistoryDto
             {
                 JobId = job.Id.ToString(),
-                JobName = job.Name,
+                JobName = job.GcodeFile?.Name ?? job.Name,
                 Transitions = transitions,
                 TotalDurationSeconds = totalDuration,
                 EstimatedDurationSeconds = estimatedDuration,

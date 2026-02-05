@@ -37,6 +37,12 @@ public interface IPrintJobManagementRepository
     void Add(PrintJob job);
 
     /// <summary>
+    /// Remove a print job from the change tracker without saving.
+    /// Call SaveChangesAsync() separately to persist.
+    /// </summary>
+    void Remove(PrintJob job);
+
+    /// <summary>
     /// Update an existing print job.
     /// </summary>
     Task<PrintJob> UpdateAsync(PrintJob job, CancellationToken ct = default);
@@ -194,6 +200,18 @@ public interface IPrintJobManagementRepository
     /// Get a job by external job ID and source printer ID (for history seeding updates).
     /// </summary>
     Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds an existing PrintFarmer-managed job that likely corresponds to a printer history entry.
+    /// Used to prevent duplicate history rows when a print is started via PrintFarmer and later
+    /// appears in the printer-provided history sync.
+    /// </summary>
+    Task<PrintJob?> FindExistingJobForHistoryMatchAsync(
+        Guid printerId,
+        string filename,
+        DateTime startTimeUtc,
+        DateTime? endTimeUtc,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Find a GCode file by filename (for history seeding).

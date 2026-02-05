@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from 'react';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui/Button';
+import { Button, type ButtonVariant } from '@/common/components/ui/Button';
 import clsx from 'clsx';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -42,6 +42,10 @@ export interface ModalProps {
   closeOnEscape?: boolean;
   /** Whether to show the close button (default: true) */
   showCloseButton?: boolean;
+  /** Close button variant (default: subtle) */
+  closeButtonVariant?: ButtonVariant;
+  /** Additional className for the close button */
+  closeButtonClassName?: string;
   /** Additional className for the modal content */
   className?: string;
 }
@@ -91,6 +95,8 @@ export function Modal({
   closeOnBackdrop = false,
   closeOnEscape = true,
   showCloseButton = true,
+  closeButtonVariant = 'subtle',
+  closeButtonClassName,
   className,
 }: ModalProps) {
   // Compute width class - explicit width takes precedence, then size, then default
@@ -172,10 +178,10 @@ export function Modal({
               <Button
                 onClick={onClose}
                 disabled={isDisabled}
-                variant="subtle"
+                variant={closeButtonVariant}
                 size="sm"
                 aria-label={closeAriaLabel}
-                className="!p-1 !h-auto"
+                className={clsx('!p-1 !h-auto', closeButtonClassName)}
               >
                 <CloseIcon className="w-6 h-6" />
               </Button>

@@ -215,6 +215,11 @@ public class PrinterExportDto
     public bool IsAvailable { get; set; }
 
     /// <summary>
+    /// API key for backend authentication (OctoPrint and some PrusaLink setups).
+    /// </summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>
     /// Username for Digest authentication (PrusaLink)
     /// </summary>
     public string? Username { get; set; }

@@ -531,57 +531,62 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   };
 
   const modalFooter = (
-    <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={handleClose}
-      >
-        Cancel
-      </Button>
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={handleTestConnection}
-        disabled={isTesting || !formData?.serverUrl?.trim()}
-        iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
-      >
-        {isTesting ? 'Testing...' : 'Test'}
-      </Button>
-      
-      {/* Test Connection Result - inline status */}
-      {testResult && (
-        <span 
-          className={`text-sm flex items-center gap-1.5 px-2 py-1 rounded ${
-            testResult.success 
-              ? 'text-pf-success bg-pf-success-bg' 
-              : 'text-pf-error-text bg-pf-error-bg'
-          }`}
-          role={testResult.success ? undefined : 'alert'}
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleClose}
         >
-          {testResult.success ? (
-            <CheckIcon className="w-4 h-4" />
-          ) : (
-            <span className="w-4 h-4 flex items-center justify-center">✕</span>
-          )}
-          <span className="truncate max-w-[200px]" title={testResult.message}>
-            {testResult.success ? 'Connected' : testResult.message}
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleTestConnection}
+          disabled={isTesting || !formData?.serverUrl?.trim()}
+          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+        >
+          {isTesting ? 'Testing...' : 'Test'}
+        </Button>
+      </div>
+
+      {/* Test Connection Result - wraps on small widths to avoid obstructing actions */}
+      {testResult && (
+        <div className="sm:flex-1 sm:min-w-0">
+          <span
+            className={`text-sm flex w-full items-center gap-1.5 rounded px-2 py-1 sm:w-auto ${
+              testResult.success
+                ? 'text-pf-success bg-pf-success-bg'
+                : 'text-pf-error-text bg-pf-error-bg'
+            }`}
+            role={testResult.success ? 'status' : 'alert'}
+            aria-live={testResult.success ? 'polite' : 'assertive'}
+          >
+            {testResult.success ? (
+              <CheckIcon className="w-4 h-4" />
+            ) : (
+              <span className="w-4 h-4 flex items-center justify-center">✕</span>
+            )}
+            <span className="min-w-0 truncate sm:max-w-[360px]" title={testResult.message}>
+              {testResult.success ? 'Connected' : testResult.message}
+            </span>
           </span>
-        </span>
+        </div>
       )}
-      
-      {/* Spacer to push Save to the right */}
-      <div className="flex-1" />
-      <Button
-        type="button"
-        onClick={handleSaveClick}
-        variant="primary"
-        disabled={updateMutation.status === 'pending' || !hasChanges}
-        iconLeft={<CheckIcon className="w-4 h-4" />}
-        title={!hasChanges ? 'No changes to save' : undefined}
-      >
-        {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-      </Button>
+
+      <div className="sm:ml-auto">
+        <Button
+          type="button"
+          onClick={handleSaveClick}
+          variant="primary"
+          disabled={updateMutation.status === 'pending' || !hasChanges}
+          iconLeft={<CheckIcon className="w-4 h-4" />}
+          title={!hasChanges ? 'No changes to save' : undefined}
+        >
+          {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
+        </Button>
+      </div>
     </div>
   );
 

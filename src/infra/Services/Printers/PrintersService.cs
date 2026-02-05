@@ -901,7 +901,7 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>CSV content as UTF-8 encoded byte array</returns>
     /// <remarks>
-    /// CSV format includes: Name, ServerUrl, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
+    /// CSV format includes: Name, ServerUrl, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, Username, Password, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
     /// Format matches AdminCli CSV format for consistency across tools.
     /// Properly escapes CSV values to handle commas and quotes in string fields.
     /// </remarks>
@@ -916,7 +916,25 @@ public class PrintersService(
 
         // Export fields matching discovery DTO format for consistency
         // Use IpAddress (not ServerUrl) to match discovery DTOs and be more user-friendly
-        List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired", "LocationName" };
+        List<string> headerParts = new()
+        {
+            "Name",
+            "IpAddress",
+            "Backend",
+            "BackendPort",
+            "FrontendPort",
+            "ManufacturerName",
+            "ModelName",
+            "Notes",
+            "ApiKey",
+            "Username",
+            "Password",
+            "IsEnabled",
+            "CameraStreamUrl",
+            "CameraSnapshotUrl",
+            "DateAcquired",
+            "LocationName"
+        };
 
         await writer.WriteLineAsync(string.Join(',', headerParts));
 
@@ -930,12 +948,50 @@ public class PrintersService(
 
             string backendPort = p.BackendPort.ToString();
             string frontendPort = p.FrontendPort?.ToString() ?? string.Empty;
-            string apiKey = p.ApiKey ?? string.Empty;
+
+            string apiKeyProtected = p.ApiKey ?? string.Empty;
+            string apiKey = apiKeyProtected;
+            string username = p.Username ?? string.Empty;
+            string password = p.Password ?? string.Empty;
+
+            // Decrypt for export (GetPrintersForExportAsync should already have decrypted,
+            // but this is a safe extra pass to avoid exporting protected blobs).
+            apiKey = string.IsNullOrWhiteSpace(apiKey) ? string.Empty : (_sensitiveDataProtector.Unprotect(apiKey) ?? apiKey);
+            password = string.IsNullOrWhiteSpace(password) ? string.Empty : (_sensitiveDataProtector.Unprotect(password) ?? password);
+
+            // PrusaLink uses digest auth (username/password). Older CSV imports sometimes placed the
+            // password into ApiKey; normalize for export so re-import works.
+            if (backend == PrinterBackend.PrusaLink)
+            {
+                // Legacy: password stored in ApiKey.
+                // Only treat ApiKey as password when it looks like a protected blob, or when a username
+                // is present (digest auth expected).
+                if (string.IsNullOrWhiteSpace(password)
+                    && !string.IsNullOrWhiteSpace(apiKey)
+                    && (!string.IsNullOrWhiteSpace(username) || IsAlreadyEncrypted(apiKeyProtected)))
+                {
+                    password = apiKey;
+                    apiKey = string.Empty;
+                }
+
+                bool hasDigestCreds = !string.IsNullOrWhiteSpace(username) || !string.IsNullOrWhiteSpace(password);
+                if (hasDigestCreds)
+                {
+                    if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+                    {
+                        username = "maker";
+                    }
+
+                    // Export digest auth only for PrusaLink (do not duplicate secrets across columns).
+                    apiKey = string.Empty;
+                }
+            }
+
             string cameraStreamUrl = p.CameraStreamUrl ?? string.Empty;
             string cameraSnapshotUrl = p.CameraSnapshotUrl ?? string.Empty;
             string dateAcquired = p.DateAcquired?.ToString("O") ?? string.Empty;
             string locationName = p.Location?.Name ?? string.Empty;
-            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(ipAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
+            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(ipAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{EscapeCsvValue(username)},{EscapeCsvValue(password)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
             await writer.WriteLineAsync(csvLine);
         }
 
@@ -1068,8 +1124,44 @@ public class PrintersService(
         return raw.Contains(',') || raw.Contains('"') || raw.Contains('\n') ? '"' + raw.Replace("\"", "\"\"") + '"' : raw;
     }
 
-    private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
+    private Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
     {
+        var backend = (PrinterBackend)p.Backend;
+
+        string? apiKeyProtected = p.ApiKey;
+        string? apiKey = p.ApiKey;
+        string? username = p.Username;
+        string? password = p.Password;
+
+        // Decrypt for export (GetPrintersForExportAsync should already have decrypted,
+        // but this is a safe extra pass to avoid exporting protected blobs).
+        apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : (_sensitiveDataProtector.Unprotect(apiKey) ?? apiKey);
+        password = string.IsNullOrWhiteSpace(password) ? null : (_sensitiveDataProtector.Unprotect(password) ?? password);
+
+        // Normalize legacy PrusaLink auth where password was stored in ApiKey.
+        if (backend == PrinterBackend.PrusaLink)
+        {
+            if (string.IsNullOrWhiteSpace(password)
+                && !string.IsNullOrWhiteSpace(apiKey)
+                && (!string.IsNullOrWhiteSpace(username) || (!string.IsNullOrWhiteSpace(apiKeyProtected) && IsAlreadyEncrypted(apiKeyProtected))))
+            {
+                password = apiKey;
+                apiKey = null;
+            }
+
+            bool hasDigestCreds = !string.IsNullOrWhiteSpace(username) || !string.IsNullOrWhiteSpace(password);
+            if (hasDigestCreds)
+            {
+                if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+                {
+                    username = "maker";
+                }
+
+                // Export digest auth only for PrusaLink (do not duplicate secrets across fields).
+                apiKey = null;
+            }
+        }
+
         Dictionary<string, object?> dict = new Dictionary<string, object?>
         {
             // Core configuration (always present)
@@ -1086,7 +1178,9 @@ public class PrintersService(
             ["backend"] = p.Backend,
             ["backendPort"] = p.BackendPort,
             ["frontendPort"] = p.FrontendPort,
-            ["apiKey"] = p.ApiKey,
+            ["apiKey"] = apiKey,
+            ["username"] = username,
+            ["password"] = password,
             ["dateAcquired"] = p.DateAcquired,
 
             // Hardware specs from Printer instance (populated at creation time from PrinterModel)
@@ -2873,6 +2967,8 @@ public class PrintersService(
                 int manufacturerNameIdx = Array.IndexOf(headers, "manufacturername");
                 int modelNameIdx = Array.IndexOf(headers, "modelname");
                 int apiKeyIdx = Array.IndexOf(headers, "apikey");
+                int usernameIdx = Array.IndexOf(headers, "username");
+                int passwordIdx = Array.IndexOf(headers, "password");
                 int isEnabledIdx = Array.IndexOf(headers, "isenabled");
                 int backendPortIdx = Array.IndexOf(headers, "backendport");
                 int frontendPortIdx = Array.IndexOf(headers, "frontendport");
@@ -2940,6 +3036,8 @@ public class PrintersService(
                             NewManufacturerName = manufacturerNameIdx >= 0 && manufacturerNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[manufacturerNameIdx]) ? values[manufacturerNameIdx] : null,
                             NewModelName = modelNameIdx >= 0 && modelNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[modelNameIdx]) ? values[modelNameIdx] : null,
                             ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
+                            Username = usernameIdx >= 0 && usernameIdx < values.Length ? values[usernameIdx] : null,
+                            Password = passwordIdx >= 0 && passwordIdx < values.Length ? values[passwordIdx] : null,
                             Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
                             IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out bool ie) ? ie : true,
                             BackendPort = backendPort,
@@ -2951,6 +3049,21 @@ public class PrintersService(
 #pragma warning restore S6580
                             LocationName = locationNameIdx >= 0 && locationNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[locationNameIdx]) ? values[locationNameIdx] : null
                         };
+
+                        // Backward compatibility: older CSV exports/imports used ApiKey for PrusaLink password.
+                        if (printer.Backend == PrinterBackend.PrusaLink)
+                        {
+                            if (string.IsNullOrWhiteSpace(printer.Password) && !string.IsNullOrWhiteSpace(printer.ApiKey))
+                            {
+                                printer.Password = printer.ApiKey;
+                                printer.ApiKey = null;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(printer.Username) && !string.IsNullOrWhiteSpace(printer.Password))
+                            {
+                                printer.Username = "maker";
+                            }
+                        }
 
                         if (string.IsNullOrWhiteSpace(printer.Name))
                         {
