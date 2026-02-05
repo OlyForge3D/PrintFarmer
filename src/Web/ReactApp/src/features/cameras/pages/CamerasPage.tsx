@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
 import { CameraIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { CameraDto } from '@/types/api';
-import { Link } from 'react-router';
+import { useSearchParams } from 'react-router';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 
 /**
  * CamerasPage - Display all enabled cameras in a grid view
@@ -13,9 +15,18 @@ import { Link } from 'react-router';
  * Supports both stream and snapshot modes for each camera.
  */
 export function CamerasPage() {
+  const auth = useAuth();
   const [cameras, setCameras] = useState<CameraDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const canManageCameras = auth.hasRole('farm_admin');
+  const activeTab = useMemo<'view' | 'manage'>(() => {
+    const requestedTab = searchParams.get('tab');
+    if (requestedTab === 'manage' && canManageCameras) return 'manage';
+    return 'view';
+  }, [canManageCameras, searchParams]);
 
   useEffect(() => {
     loadCameras();
@@ -36,53 +47,84 @@ export function CamerasPage() {
     }
   };
 
+  const setTab = (nextTab: 'view' | 'manage') => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextTab === 'manage') {
+      nextParams.set('tab', 'manage');
+    } else {
+      nextParams.delete('tab');
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
   return (
     <PageTemplate
       title="Cameras"
       subtitle="Live camera feeds from your print farm"
       icon={CameraIcon}
       actions={
-        <Link to="/admin/cameras">
-          <Button variant="secondary" iconLeft={<SettingsIcon className="w-4 h-4" />}>
-            Manage Cameras
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          {canManageCameras && (
+            <Button
+              variant="secondary"
+              iconLeft={<SettingsIcon className="w-4 h-4" />}
+              onClick={() => setTab(activeTab === 'manage' ? 'view' : 'manage')}
+            >
+              {activeTab === 'manage' ? 'View Cameras' : 'Manage'}
+            </Button>
+          )}
+
+          {activeTab === 'view' && (
+            <Button variant="secondary" onClick={loadCameras}>
+              Refresh
+            </Button>
+          )}
+        </div>
       }
     >
-      <div className="space-y-6">
-        {/* Error message */}
-        {error && (
-          <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
-            {error}
-          </div>
-        )}
+      {activeTab === 'manage' ? (
+        <CameraManagementPanel onCamerasChanged={loadCameras} />
+      ) : (
+        <div className="space-y-6">
+          {/* Error message */}
+          {error && (
+            <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
+              {error}
+            </div>
+          )}
 
-        {/* Loading state */}
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="animate-pulse text-pf-text-secondary">Loading cameras...</div>
-          </div>
-        ) : cameras.length === 0 ? (
-          <div className="text-center py-12">
-            <CameraIcon className="h-16 w-16 text-pf-text-tertiary mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Cameras Configured</h3>
-            <p className="text-pf-text-secondary mb-6 max-w-md mx-auto">
-              Add cameras to monitor your print farm. You can add standalone webcams or import cameras from your printers.
-            </p>
-            <Link to="/admin/cameras">
-              <Button iconLeft={<SettingsIcon className="w-4 h-4" />}>
-                Configure Cameras
-              </Button>
-            </Link>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {cameras.map((camera) => (
-              <CameraViewCard key={camera.id} camera={camera} />
-            ))}
-          </div>
-        )}
-      </div>
+          {/* Loading state */}
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-pulse text-pf-text-secondary">Loading cameras...</div>
+            </div>
+          ) : cameras.length === 0 ? (
+            <div className="text-center py-12">
+              <CameraIcon className="h-16 w-16 text-pf-text-tertiary mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Cameras Configured</h3>
+              <p className="text-pf-text-secondary mb-4 max-w-md mx-auto">
+                Add cameras to monitor your print farm. You can add standalone webcams or import cameras from your printers.
+              </p>
+              {canManageCameras && (
+                <Button iconLeft={<SettingsIcon className="w-4 h-4" />} onClick={() => setTab('manage')}>
+                  Configure Cameras
+                </Button>
+              )}
+              {!canManageCameras && (
+                <p className="text-sm text-pf-text-tertiary max-w-md mx-auto">
+                  Ask an administrator to configure cameras.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {cameras.map((camera) => (
+                <CameraViewCard key={camera.id} camera={camera} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </PageTemplate>
   );
 }
@@ -118,7 +160,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
           <img
             src={activeUrl}
             alt={`${camera.name} camera feed`}
-            className="w-full h-full object-contain"
+            className="w-full h-full object-cover"
             loading="lazy"
             onError={() => setImageError(true)}
           />
@@ -137,7 +179,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
               variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('snapshot')}
-              className="p-1! h-auto!"
+              className="!p-1 !h-auto"
               title="Snapshot"
               aria-label="Snapshot mode"
               iconCenter={<ImageIcon className="w-4 h-4" />}
@@ -147,7 +189,7 @@ function CameraViewCard({ camera }: CameraViewCardProps) {
               variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('stream')}
-              className="p-1! h-auto!"
+              className="!p-1 !h-auto"
               title="Stream"
               aria-label="Stream mode"
               iconCenter={<VideoIcon className="w-4 h-4" />}

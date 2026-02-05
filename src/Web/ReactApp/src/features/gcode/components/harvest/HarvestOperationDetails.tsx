@@ -166,7 +166,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           variant="subtle"
           size="sm"
           onClick={onClose}
-          className="absolute top-2 right-2 p-1! h-auto!"
+          className="absolute top-2 right-2 !p-1 !h-auto"
           aria-label="Close details"
         >
           <CloseIcon className="h-4 w-4" />

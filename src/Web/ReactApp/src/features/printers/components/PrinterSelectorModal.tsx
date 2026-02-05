@@ -79,7 +79,7 @@ export function PrinterSelectorModal({
                                 key={printer.id}
                                 variant={isSelected ? 'primary' : 'secondary'}
                                 onClick={() => handleSelect(printer.id)}
-                                className="group relative overflow-hidden h-auto p-0 rounded-lg! justify-start!"
+                                className="group relative overflow-hidden h-auto p-0 !rounded-lg !justify-start"
                             >
                                 {/* Cover Image (uses fallback SVG if no model image or on error) */}
                                 <div className="relative w-full h-40 overflow-hidden bg-pf-bg-1">

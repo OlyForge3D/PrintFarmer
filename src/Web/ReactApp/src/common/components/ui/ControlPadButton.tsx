@@ -28,7 +28,7 @@ export function ControlPadButton({
     <Button
       variant={variant}
       size="sm"
-      className={`${sizeClasses[padSize]} p-0! ${className ?? ''}`}
+      className={`${sizeClasses[padSize]} !p-0 ${className ?? ''}`}
       {...props}
     >
       {children}

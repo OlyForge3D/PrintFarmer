@@ -59,7 +59,7 @@ export function ForgotPasswordPage() {
               onClick={handleClose}
               variant="subtle"
               size="sm"
-              className="p-0! h-auto!"
+              className="!p-0 !h-auto"
               aria-label="Close"
               title="Close"
             >
@@ -111,7 +111,7 @@ export function ForgotPasswordPage() {
             disabled={isLoading}
             variant="subtle"
             size="sm"
-            className="p-0! h-auto!"
+            className="!p-0 !h-auto"
             aria-label="Close forgot password"
             title="Close"
           >

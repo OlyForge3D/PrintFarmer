@@ -466,7 +466,7 @@ export function UserManagementPage() {
                           setSelectedUser(user);
                           setShowPermissionsModal(true);
                         }}
-                        className="p-2! h-auto!"
+                        className="!p-2 !h-auto"
                         title="Manage permissions"
                       >
                         <Shield className="h-4 w-4" />
@@ -479,7 +479,7 @@ export function UserManagementPage() {
                           setSelectedUser(user);
                           setShowEditModal(true);
                         }}
-                        className="p-2! h-auto!"
+                        className="!p-2 !h-auto"
                         title="Edit user"
                       >
                         <EditIcon className="h-4 w-4" />
@@ -489,7 +489,7 @@ export function UserManagementPage() {
                         variant="subtle"
                         size="sm"
                         onClick={() => setUserToDelete(user)}
-                        className="p-2! h-auto! hover:text-red-500"
+                        className="!p-2 !h-auto hover:text-red-500"
                         title="Delete user"
                       >
                         <DeleteIcon className="h-4 w-4" />

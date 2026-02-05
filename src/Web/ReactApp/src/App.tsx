@@ -45,7 +45,6 @@ import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
-import { CameraManagementPage } from '@/features/cameras/pages/CameraManagementPage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { useSlicer } from '@/hooks/useSlicer';
 
@@ -181,7 +180,7 @@ function AuthenticatedAppRoutes() {
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
-          <Route path="cameras" element={<CameraManagementPage />} />
+          <Route path="cameras" element={<Navigate to="/cameras?tab=manage" replace />} />
         </Route>
         <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
         <Route

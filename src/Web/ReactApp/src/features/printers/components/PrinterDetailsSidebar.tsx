@@ -281,7 +281,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
     if (isHomed) {
       return {
-        className: 'text-white!',
+        className: '!text-white',
         style: {
           backgroundColor: '#2096f3',
           backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
@@ -289,7 +289,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
       };
     }
     return {
-      className: 'text-white!',
+      className: '!text-white',
       style: {
         backgroundColor: '#fb8c00',
         backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
@@ -456,7 +456,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           variant="subtle"
           size="sm"
           onClick={handleClose}
-          className="p-1! h-auto! shrink-0"
+          className="!p-1 !h-auto shrink-0"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
@@ -475,7 +475,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 onClick={() => setIsStatisticsExpanded(v => !v)}
                 aria-expanded={isStatisticsExpanded}
                 aria-controls="printer-statistics-panel"
-                className="px-0! py-0! h-auto! text-pf-text-secondary hover:text-pf-text-primary"
+                className="!px-0 !py-0 !h-auto text-pf-text-secondary hover:text-pf-text-primary"
                 iconLeft={
                   <ChevronDownIcon
                     className={`h-4 w-4 transition-transform ${isStatisticsExpanded ? 'rotate-180' : ''}`}
@@ -493,7 +493,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 variant="ghost"
                 size="sm"
                 onClick={() => void printerStatisticsQuery.refetch()}
-                className="p-1! h-auto!"
+                className="!p-1 !h-auto"
                 title="Refresh statistics"
                 aria-label="Refresh statistics"
                 iconCenter={<RefreshIcon className="h-4 w-4" />}
@@ -549,7 +549,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               variant="ghost"
               size="sm"
               onClick={() => void printerVersionQuery.refetch()}
-              className="p-1! h-auto!"
+              className="!p-1 !h-auto"
               title="Refresh version info"
               aria-label="Refresh version info"
               iconCenter={<RefreshIcon className="h-4 w-4" />}
@@ -603,7 +603,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isPrinting}
                 onClick={() => handleControlAction('pause')}
                 title="Pause print"
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<PauseIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -613,7 +613,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isPaused}
                 onClick={() => handleControlAction('resume')}
                 title="Resume print"
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<PlayIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -623,7 +623,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isOnline}
                 onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                 title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconLeft={isShutdown ? (
                   <RefreshIcon className="h-6 w-6" />
                 ) : (
@@ -671,7 +671,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
                 style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -681,7 +681,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<ArrowUpIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -691,7 +691,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={!isOnline || isPrinting}
                 onClick={() => handleControlAction('disable-motors')}
                 title="Disable Motors (M84)"
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<DisableMotorsIcon className="w-6 h-6" />}
               ></Button>
 
@@ -702,7 +702,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', -step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<ArrowLeftIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -712,7 +712,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
                 style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -722,7 +722,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<ArrowRightIcon className="h-6 w-6" />}
               ></Button>
 
@@ -734,7 +734,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', -step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
                 iconCenter={<ArrowDownIcon className="h-6 w-6" />}
               ></Button>
               <div></div>
@@ -748,7 +748,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
               >
                 Z+
               </Button>
@@ -759,7 +759,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`w-full h-full p-0! ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
                 style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
@@ -769,7 +769,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', -step)}
-                className="w-full h-full p-0!"
+                className="w-full h-full !p-0"
               >
                 Z-
               </Button>
@@ -829,21 +829,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               value={moveX}
               onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-              className="w-full!"
+              className="!w-full"
             />
             <MovementInput
               axis="Y"
               value={moveY}
               onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-              className="w-full!"
+              className="!w-full"
             />
             <MovementInput
               axis="Z"
               value={moveZ}
               onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-              className="w-full!"
+              className="!w-full"
             />
           </div>
         </div>

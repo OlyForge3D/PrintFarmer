@@ -100,7 +100,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                             variant="subtle"
                             size="sm"
                             onClick={() => removeTag(tag.id)}
-                            className="p-0! h-auto! hover:opacity-80"
+                            className="!p-0 !h-auto hover:opacity-80"
                             title="Remove tag"
                         >
                             <CloseIcon className="w-3 h-3" />
@@ -191,7 +191,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                                 variant="subtle"
                                 size="sm"
                                 onClick={() => selectTag(tag.id)}
-                                className="w-full flex items-center gap-3 p-2 rounded-sm text-left justify-start!"
+                                className="w-full flex items-center gap-3 p-2 rounded-sm text-left !justify-start"
                             >
                                 <div
                                     className="w-3 h-3 rounded-full shrink-0"

@@ -133,12 +133,6 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Camera Admin',
-    href: '/admin/cameras',
-    icon: CameraIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,
@@ -446,7 +440,7 @@ export function Layout() {
                           onClick={() => setUserMenuOpen(false)}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full justify-start!"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
                           <SettingsIcon className="h-4 w-4" />
                           <span>Profile</span>
@@ -456,7 +450,7 @@ export function Layout() {
                           onClick={handleLogout}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full justify-start!"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
                           <LogoutIcon className="h-4 w-4" />
                           <span>Sign out</span>
@@ -472,7 +466,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center gap-2 w-full justify-start!"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
                           <LoginIcon className="h-4 w-4" />
                           <span>Sign In</span>
@@ -485,7 +479,7 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full justify-start!"
+                          className="flex items-center w-full !justify-start"
                         >
                           Register
                         </Button>

@@ -103,7 +103,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
             type="button"
             variant="secondary"
             onClick={() => setIsModalOpen(true)}
-            className="w-full justify-start! p-3! rounded-lg!"
+            className="w-full !justify-start !p-3 !rounded-lg"
           >
             {selectedPrinter ? (
               <div className="flex items-start gap-3 w-full text-left">

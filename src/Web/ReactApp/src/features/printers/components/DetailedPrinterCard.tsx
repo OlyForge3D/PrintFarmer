@@ -94,7 +94,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
 
     if (isHomed) {
       return {
-        className: 'text-white!',
+        className: '!text-white',
         style: {
           backgroundColor: '#2096f3',
           backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
@@ -102,7 +102,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
       };
     }
     return {
-      className: 'text-white!',
+      className: '!text-white',
       style: {
         backgroundColor: '#fb8c00',
         backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
@@ -367,12 +367,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
         </div>
 
         {showCamera && (
-          <div className="mt-3 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
+          <div className="mt-3 w-52 aspect-video flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
             {cameraStreamUrl && expandedImageVisible ? (
               <img
                 src={cameraStreamUrl}
                 alt="webcam snapshot"
-                className="max-w-full max-h-full object-contain"
+                className="w-full h-full object-cover"
                 onError={() => setExpandedImageVisible(false)}
                 onLoad={() => setExpandedImageVisible(true)}
               />
@@ -438,14 +438,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
-            className="w-full!"
+            className="!w-full"
           />
           
           <TemperatureInput
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
-            className="w-full!"
+            className="!w-full"
           />
           
           <div className="flex gap-1 items-stretch h-9 min-w-0">
@@ -670,21 +670,21 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             disabled={isPrinting}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
+            className="!w-full"
           />
           <MovementInput
             axis="Y"
             disabled={isPrinting}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
+            className="!w-full"
           />
           <MovementInput
             axis="Z"
             disabled={isPrinting}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-            className="w-full!"
+            className="!w-full"
           />
           <Button
             type="button"
@@ -697,7 +697,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 console.log('[PrintFarmer] DetailedPrinterCard: Moving to', moveX, moveY, moveZ);
               }
             }}
-            className="w-full h-full p-0!"
+            className="w-full h-full !p-0"
           >
             GO
           </Button>

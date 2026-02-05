@@ -472,7 +472,7 @@ export const ModelDetailPage: React.FC = () => {
                                     onClick={() => setIsEditingTags(true)}
                                     variant="subtle"
                                     size="sm"
-                                    className="p-1! h-auto!"
+                                    className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
                                     <PlusIcon className="w-4 h-4" />
@@ -486,7 +486,7 @@ export const ModelDetailPage: React.FC = () => {
                                     onClick={() => setIsEditingTags(true)}
                                     variant="subtle"
                                     size="sm"
-                                    className="p-1! h-auto!"
+                                    className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
                                     <PlusIcon className="w-4 h-4" />

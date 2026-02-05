@@ -201,7 +201,7 @@ export const SlicerSettingsPage: React.FC = () => {
                         variant="subtle"
                         size="sm"
                         onClick={() => setOpenExamplesEngine(openExamplesEngine === engine ? null : engine)}
-                        className="justify-start!"
+                        className="!justify-start"
                       >
                         {openExamplesEngine === engine ? '▼ Hide examples' : '▶ Show Orca examples'}
                       </Button>

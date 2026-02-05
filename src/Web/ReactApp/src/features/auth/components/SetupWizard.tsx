@@ -479,7 +479,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             onClick={() => setShowPassword(p => !p)}
             variant="subtle"
             size="sm"
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-0! h-auto!"
+            className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
             disabled={submitting}
             title={showPassword ? 'Hide password' : 'Show password'}
           >

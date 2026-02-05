@@ -44,7 +44,7 @@ export function CameraCard({
           <img
             src={activeUrl ?? ''}
             alt={`${p.name} camera feed`}
-            className="w-full h-full object-contain"
+            className="w-full h-full object-cover"
             loading="lazy"
             onError={() => setImageError(true)}
           />
@@ -79,7 +79,7 @@ export function CameraCard({
               variant={cameraMode === 'snapshot' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('snapshot')}
-              className="p-1! h-auto!"
+              className="!p-1 !h-auto"
               title="Snapshot"
               aria-label="Snapshot mode"
               iconCenter={<ImageIcon className="w-4 h-4" />}
@@ -89,7 +89,7 @@ export function CameraCard({
               variant={cameraMode === 'stream' ? 'primary' : 'subtle'}
               size="sm"
               onClick={() => setCameraMode('stream')}
-              className="p-1! h-auto!"
+              className="!p-1 !h-auto"
               title="Stream"
               aria-label="Stream mode"
               iconCenter={<VideoIcon className="w-4 h-4" />}

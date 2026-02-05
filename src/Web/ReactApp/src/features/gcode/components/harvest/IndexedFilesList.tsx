@@ -551,7 +551,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage(0)}
-                className="px-2! py-1!"
+                className="!px-2 !py-1"
                 title="First page"
                 iconLeft={<ChevronsLeftIcon className="h-3 w-3" />}
               />
@@ -560,7 +560,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === 0}
                 onClick={() => setCurrentPage(currentPage - 1)}
-                className="px-2! py-1!"
+                className="!px-2 !py-1"
                 title="Previous page"
                 iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
               />
@@ -570,7 +570,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === totalPages - 1}
                 onClick={() => setCurrentPage(currentPage + 1)}
-                className="px-2! py-1!"
+                className="!px-2 !py-1"
                 title="Next page"
                 iconLeft={<ArrowRightIcon className="h-3 w-3" />}
               />
@@ -579,7 +579,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 size="sm"
                 disabled={currentPage === totalPages - 1}
                 onClick={() => setCurrentPage(totalPages - 1)}
-                className="px-2! py-1!"
+                className="!px-2 !py-1"
                 title="Last page"
                 iconLeft={<ChevronsRightIcon className="h-3 w-3" />}
               />

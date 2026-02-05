@@ -216,7 +216,7 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
                       onClick={() => removeItem(item.id)}
                       variant="subtle"
                       size="sm"
-                      className="p-1!"
+                      className="!p-1"
                     >
                       <DeleteIcon className="w-4 h-4" />
                     </Button>

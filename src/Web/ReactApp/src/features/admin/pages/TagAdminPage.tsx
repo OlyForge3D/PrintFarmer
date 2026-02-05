@@ -464,7 +464,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={handleSaveEdit}
                                                         variant="success"
                                                         size="sm"
-                                                        className="p-2! h-auto!"
+                                                        className="!p-2 !h-auto"
                                                         title="Save changes"
                                                     >
                                                         <CheckIcon className="w-4 h-4" />
@@ -474,7 +474,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={handleCancelEdit}
                                                         variant="danger"
                                                         size="sm"
-                                                        className="p-2! h-auto!"
+                                                        className="!p-2 !h-auto"
                                                         title="Cancel editing"
                                                     >
                                                         <CloseIcon className="w-4 h-4" />
@@ -487,7 +487,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={() => handleStartEdit(tag)}
                                                         variant="subtle"
                                                         size="sm"
-                                                        className="p-2! h-auto!"
+                                                        className="!p-2 !h-auto"
                                                         title="Edit tag (E)"
                                                         disabled={isPending}
                                                     >
@@ -498,7 +498,7 @@ export const TagAdminPage: React.FC = () => {
                                                         onClick={() => handleDeleteTag(tag.id)}
                                                         variant="danger"
                                                         size="sm"
-                                                        className="p-2! h-auto!"
+                                                        className="!p-2 !h-auto"
                                                         title="Delete tag"
                                                         disabled={isPending}
                                                     >

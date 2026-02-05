@@ -91,7 +91,7 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
               onClick={() => setIsExpanded(!isExpanded)}
               variant="subtle"
               size="sm"
-              className="p-0! h-auto!"
+              className="!p-0 !h-auto"
             >
               <span className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                 ►

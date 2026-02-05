@@ -149,7 +149,7 @@ export function ResetPasswordPage() {
             disabled={isLoading}
             variant="subtle"
             size="sm"
-            className="p-0! h-auto!"
+            className="!p-0 !h-auto"
             aria-label="Close reset password"
             title="Close"
           >
@@ -201,7 +201,7 @@ export function ResetPasswordPage() {
                 onClick={() => setShowNewPassword(!showNewPassword)}
                 variant="subtle"
                 size="sm"
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-0! h-auto!"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
                 aria-label={showNewPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
@@ -227,7 +227,7 @@ export function ResetPasswordPage() {
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 variant="subtle"
                 size="sm"
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-0! h-auto!"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
                 aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >

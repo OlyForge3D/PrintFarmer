@@ -175,7 +175,7 @@ export function Modal({
                 variant="subtle"
                 size="sm"
                 aria-label={closeAriaLabel}
-                className="p-1! h-auto!"
+                className="!p-1 !h-auto"
               >
                 <CloseIcon className="w-6 h-6" />
               </Button>

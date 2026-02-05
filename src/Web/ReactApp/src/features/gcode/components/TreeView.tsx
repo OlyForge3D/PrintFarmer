@@ -123,7 +123,7 @@ const TreeItem: React.FC<{
             onClick={handleToggleExpand}
             variant="subtle"
             size="sm"
-            className="p-0! bg-transparent! border-0! shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
+            className="!p-0 !bg-transparent !border-0 shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
             aria-hidden="true"
           >
             <ChevronRightIcon

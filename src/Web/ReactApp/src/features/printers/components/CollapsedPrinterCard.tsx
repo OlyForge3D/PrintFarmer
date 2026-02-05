@@ -280,13 +280,13 @@ export function CollapsedPrinterCard({
           )}
           
           {/* Camera display */}
-          <div className="min-h-32 flex items-center justify-center overflow-hidden">
+          <div className="w-full aspect-video bg-pf-bg-0 flex items-center justify-center overflow-hidden">
             {hasCameraUrls ? (
               cameraMode === 'snapshot' && cameraSnapshotUrl ? (
                 <img 
                   src={cameraSnapshotUrl}
                   alt="webcam snapshot"
-                  className="max-w-full max-h-full object-contain"
+                  className="w-full h-full object-cover"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
@@ -294,7 +294,7 @@ export function CollapsedPrinterCard({
                 <img 
                   src={cameraStreamUrl}
                   alt="webcam stream"
-                  className="max-w-full max-h-full object-contain"
+                  className="w-full h-full object-cover"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
@@ -302,7 +302,7 @@ export function CollapsedPrinterCard({
                 <img 
                   src={cameraSnapshotUrl}
                   alt="webcam snapshot"
-                  className="max-w-full max-h-full object-contain"
+                  className="w-full h-full object-cover"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
@@ -310,7 +310,7 @@ export function CollapsedPrinterCard({
                 <img 
                   src={cameraStreamUrl}
                   alt="webcam stream"
-                  className="max-w-full max-h-full object-contain"
+                  className="w-full h-full object-cover"
                   onError={() => {}}
                   onLoad={() => {}}
                 />

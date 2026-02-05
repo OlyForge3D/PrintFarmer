@@ -274,7 +274,7 @@ export function PrinterCard({
                     title="Pause print"
                     variant="subtle"
                     size="sm"
-                    className="p-2! h-auto! text-pf-warning"
+                    className="!p-2 !h-auto text-pf-warning"
                     iconCenter={<PauseIcon className="h-4 w-4" />}
                   >
                   </Button>
@@ -286,7 +286,7 @@ export function PrinterCard({
                     title="Resume print"
                     variant="subtle"
                     size="sm"
-                    className="p-2! h-auto! text-pf-success"
+                    className="!p-2 !h-auto text-pf-success"
                     iconCenter={<PlayIcon className="h-4 w-4" />}
                   >
                   </Button>
@@ -297,7 +297,7 @@ export function PrinterCard({
                   title="Stop print"
                   variant="subtle"
                   size="sm"
-                  className="p-2! h-auto! text-pf-error"
+                  className="!p-2 !h-auto text-pf-error"
                   iconCenter={<StopIcon className="h-4 w-4" />}
                 >
                 </Button>
@@ -311,7 +311,7 @@ export function PrinterCard({
                 title="Manage printer"
                 variant="subtle"
                 size="sm"
-                className="p-2! h-auto! text-pf-accent"
+                className="!p-2 !h-auto text-pf-accent"
                 iconCenter={<GearIcon className="h-4 w-4" />}
               >
               </Button>
