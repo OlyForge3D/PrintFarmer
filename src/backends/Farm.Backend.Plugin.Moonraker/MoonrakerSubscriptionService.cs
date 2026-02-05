@@ -1024,7 +1024,9 @@ public sealed class MoonrakerSubscriptionService(
         // Extract homed_axes
         if (th.TryGetProperty("homed_axes", out JsonElement ha) && ha.ValueKind == JsonValueKind.String)
         {
-            homedAxes = ha.GetString();
+            // Klipper reports homed_axes as a string (e.g., "xyz") or an empty string when not homed.
+            // Treat empty string as a *known* state so the UI can show "not homed" rather than "unknown".
+            homedAxes = ha.GetString() ?? string.Empty;
         }
 
         // Update persistent state
@@ -1043,7 +1045,9 @@ public sealed class MoonrakerSubscriptionService(
             state.Z = z;
         }
 
-        if (!string.IsNullOrEmpty(homedAxes))
+        // Persist homed axes state whenever the field is present, even when it's empty.
+        // This allows downstream consumers to distinguish "known but not homed" ("") from "unknown" (null).
+        if (homedAxes is not null)
         {
             state.HomedAxes = homedAxes;
         }
