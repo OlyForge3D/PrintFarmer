@@ -328,12 +328,14 @@ require_command node
 # Verify .NET version
 if ! dotnet --version | grep -q "^10\.0\."; then
   log_error ".NET SDK 10.0+ required. Current version: $(dotnet --version)"
+  exit 1
 fi
 
 # Verify Node.js version
 node_version=$(node --version | sed 's/v//')
 if ! printf '%s\n18.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^18"; then
   log_error "Node.js >=20.19 required. Current version: $node_version"
+  exit 1
 fi
 
 log_success "Prerequisites check passed"
@@ -375,6 +377,7 @@ if [[ ! -f "$API_DIR/bin/Debug/net10.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]
   dotnet restore ./farm-web.sln
   if ! dotnet build ./farm-web.sln -c Debug; then
     log_error "❌ .NET build failed! Fix build errors before starting services."
+    exit 1
   fi
   log_success "✅ .NET build completed successfully"
 fi
@@ -384,9 +387,20 @@ if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
   log_info "Installing React dependencies..."
   if ! npm install --legacy-peer-deps; then
     log_error "❌ npm install failed! Check npm errors before starting services."
+    exit 1
   fi
   log_success "✅ React dependencies installed successfully"
 fi
+
+# Verify critical dependencies are installed (Tailwind CSS v4 PostCSS plugin)
+log_info "Verifying Tailwind CSS v4 PostCSS plugin..."
+if [[ ! -d "node_modules/@tailwindcss/postcss" ]]; then
+  log_error "❌ Critical dependency @tailwindcss/postcss not found!"
+  log_error "   This is required for Tailwind CSS v4 to work with Vite."
+  log_error "   Try running: npm install --legacy-peer-deps"
+  exit 1
+fi
+log_success "✅ Tailwind CSS v4 PostCSS plugin verified"
 
 # Always clear Vite cache to ensure fresh dev server with latest code
 log_info "Clearing Vite cache for fresh development..."
@@ -409,6 +423,7 @@ export ALLOW_LOCAL_NETWORK="true"
 if [[ "$AUTO_ADMIN" == "true" ]]; then
   if [[ -z "$AUTO_ADMIN_PASSWORD" ]]; then
     log_error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
+    exit 1
   fi
   log_info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
   # Export AUTO_ADMIN variables so API can use them
