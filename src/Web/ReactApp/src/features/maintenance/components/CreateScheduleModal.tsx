@@ -279,19 +279,21 @@ export function CreateScheduleModal({
             Maintenance Interval <span className="text-red-500">*</span>
           </label>
           <div className="flex gap-2">
-            <Input
-              type="number"
-              min="1"
-              value={intervalValue}
-              onChange={(e) => setIntervalValue(e.target.value)}
-              placeholder="Enter value"
-              className="flex-1"
-              required
-            />
+            <div className="flex-1">
+              <Input
+                type="number"
+                min="1"
+                value={intervalValue}
+                onChange={(e) => setIntervalValue(e.target.value)}
+                placeholder="Enter value"
+                className="w-full"
+                required
+              />
+            </div>
             <Select
               value={intervalType}
               onChange={(e) => setIntervalType(e.target.value as 'hours' | 'days')}
-              className="w-40"
+              containerClassName="w-40"
             >
               <option value="hours">Print Hours</option>
               <option value="days">Calendar Days</option>

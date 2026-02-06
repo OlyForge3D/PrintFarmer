@@ -16,6 +16,7 @@ interface PrinterTableViewProps {
   onEdit: (printer: Printer) => void;
   onDelete: (printers: Printer[]) => void;
   onBulkSetMaintenance: (printers: Printer[], inMaintenance: boolean) => void;
+  onOpenMaintenance: (printer: Printer) => void;
   showEnableColumn?: boolean;
   onToggleEnabled?: (printer: Printer) => void;
   onSelectionChange?: (ids: string[]) => void;
@@ -26,8 +27,10 @@ export function PrinterTableView({
   onEdit,
   onDelete,
   onBulkSetMaintenance,
+  onOpenMaintenance,
   showEnableColumn = false,
-  onToggleEnabled
+  onToggleEnabled,
+  onSelectionChange
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
   const displayPrinters = usePrinterDisplays(printers);
@@ -44,7 +47,7 @@ export function PrinterTableView({
       setSelectedPrinters(next);
       onSelectionChange?.(Array.from(next));
     }
-  }, [printers, selectedPrinters.size]);
+  }, [onSelectionChange, printers, selectedPrinters.size]);
 
   const toggleSelectPrinter = useCallback((printerId: string) => {
     const newSelection = new Set(selectedPrinters);
@@ -55,7 +58,7 @@ export function PrinterTableView({
     }
     setSelectedPrinters(newSelection);
     onSelectionChange?.(Array.from(newSelection));
-  }, [selectedPrinters]);
+  }, [onSelectionChange, selectedPrinters]);
 
   const handleBulkAction = useCallback(() => {
     const selectedPrinterObjects = printers.filter(p => selectedPrinters.has(p.id));
@@ -173,7 +176,7 @@ export function PrinterTableView({
                   onClick={toggleSelectAll}
                   variant="subtle"
                   size="sm"
-                  className="!p-0 !h-auto"
+                  className="p-0! h-auto!"
                   aria-label={selectedPrinters.size === printers.length ? "Deselect all printers" : "Select all printers"}
                   iconCenter={
                     selectedPrinters.size === printers.length ? (
@@ -226,7 +229,7 @@ export function PrinterTableView({
                       onClick={() => toggleSelectPrinter(printer.id)}
                       variant="subtle"
                       size="sm"
-                      className="!p-0 !h-auto"
+                      className="p-0! h-auto!"
                       aria-label={selectedPrinters.has(printer.id) ? `Deselect ${printer.name}` : `Select ${printer.name}`}
                       iconCenter={
                         selectedPrinters.has(printer.id) ? (
@@ -312,7 +315,7 @@ export function PrinterTableView({
                           onClick={() => onToggleEnabled(printer)}
                           variant="subtle"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title={printer.isEnabled ? 'Disable printer' : 'Enable printer'}
                         >
                           {printer.isEnabled ? <CheckCircleIcon className="w-4 h-4" /> : <CircleIcon className="w-4 h-4" />}
@@ -328,17 +331,17 @@ export function PrinterTableView({
                     <div className="flex items-center justify-center space-x-1">
                       <Button
                         type="button"
-                        onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
+                        onClick={() => onOpenMaintenance(printer)}
                         variant={printer.inMaintenance ? 'primary' : 'subtle'}
                         size="sm"
-                        className={`!p-2 !h-auto ${printer.inMaintenance ? '!text-white' : ''}`}
+                        className={`p-2! h-auto! ${printer.inMaintenance ? 'text-white!' : ''}`}
                         style={printer.inMaintenance ? { 
                           backgroundColor: '#fb8c00',
                           backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
                           borderColor: '#fb8c00'
                         } : undefined}
-                        title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
-                        aria-label={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
+                        title="Maintenance"
+                        aria-label={printer.inMaintenance ? 'Maintenance (currently enabled)' : 'Maintenance'}
                         iconCenter={<ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />}
                       ></Button>
                       
@@ -348,7 +351,7 @@ export function PrinterTableView({
                           onClick={() => onEdit(printer)}
                           variant="subtle"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title="Edit printer"
                           aria-label="Edit printer"
                           iconCenter={<EditIcon className="w-4 h-4" />}
@@ -361,7 +364,7 @@ export function PrinterTableView({
                           onClick={() => onDelete([printer])}
                           variant="danger"
                           size="sm"
-                          className="!p-2 !h-auto"
+                          className="p-2! h-auto!"
                           title="Delete printer"
                           aria-label="Delete printer"
                           iconCenter={<DeleteIcon className="w-4 h-4" />}

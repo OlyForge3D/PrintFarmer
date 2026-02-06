@@ -25,6 +25,7 @@ import { PrinterBackend } from '@/types/api';
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
+import { PrinterMaintenanceActionsModal } from '@/features/maintenance/components/PrinterMaintenanceActionsModal';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -71,6 +72,8 @@ export function PrintersPage() {
     isOpen: boolean;
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
+
+  const [maintenancePrinter, setMaintenancePrinter] = useState<Printer | null>(null);
 
   // Discovery availability state
   const [discoveryAvailable, setDiscoveryAvailable] = useState(false);
@@ -201,6 +204,10 @@ export function PrintersPage() {
   const handleEditPrinter = (printer: Printer) => {
     setEditPrinterId(printer.id);
     setShowEditModal(true);
+  };
+
+  const handleOpenMaintenance = (printer: Printer) => {
+    setMaintenancePrinter(printer);
   };
 
 
@@ -388,6 +395,7 @@ export function PrintersPage() {
                     onEdit={handleEditPrinter}
                     onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}
+                    onOpenMaintenance={handleOpenMaintenance}
                     showEnableColumn={hasPermission('printers', 'admin')}
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
                     onToggleEnabled={async (printer) => {
@@ -441,6 +449,14 @@ export function PrintersPage() {
           onClose={() => setShowDiscovery(false)}
           onSuccess={() => { setShowDiscovery(false); refetchPrinters(); }}
         />
+
+        {maintenancePrinter && (
+          <PrinterMaintenanceActionsModal
+            isOpen={true}
+            printer={maintenancePrinter}
+            onClose={() => setMaintenancePrinter(null)}
+          />
+        )}
     </PageTemplate>
   );
 }

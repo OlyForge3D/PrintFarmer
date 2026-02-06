@@ -8,6 +8,7 @@ import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfir
 import type { Printer } from '@/types/api';
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { Button, Alert } from '@/common/components/ui';
+import { PrinterMaintenanceActionsModal } from '@/features/maintenance/components/PrinterMaintenanceActionsModal';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
@@ -17,6 +18,7 @@ export function PrinterTableViewPage() {
   const [printersToDelete, setPrintersToDelete] = useState<Printer[]>([]);
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [maintenancePrinter, setMaintenancePrinter] = useState<Printer | null>(null);
 
   // Handler functions
   const handleEditPrinter = (printer: Printer) => {
@@ -58,6 +60,10 @@ export function PrinterTableViewPage() {
     } catch (error) {
       console.error('Failed to update maintenance status:', error);
     }
+  };
+
+  const handleOpenMaintenance = (printer: Printer) => {
+    setMaintenancePrinter(printer);
   };
 
   if (isLoading) {
@@ -121,6 +127,7 @@ export function PrinterTableViewPage() {
           onEdit={handleEditPrinter}
           onDelete={handleDeletePrinters}
           onBulkSetMaintenance={handleBulkSetMaintenance}
+          onOpenMaintenance={handleOpenMaintenance}
         />
       ) : (
         <div className="text-center py-12">
@@ -166,6 +173,14 @@ export function PrinterTableViewPage() {
           refetch();
         }}
       />
+
+      {maintenancePrinter && (
+        <PrinterMaintenanceActionsModal
+          isOpen={true}
+          printer={maintenancePrinter}
+          onClose={() => setMaintenancePrinter(null)}
+        />
+      )}
     </div>
   );
 }
