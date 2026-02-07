@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback, useEffectEvent, useMemo } from 'react';
-import { CubeIcon, FileIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
+import { CubeIcon, FileIcon, TrendingUpIcon, LayersIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayout';
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
+import { ProjectsPage } from '@/features/projects/pages/ProjectsPage';
 import { useLocation } from 'react-router';
 import { useSlicer } from '@/hooks/useSlicer';
 
+type TabId = 'models' | 'gcode' | 'harvest' | 'projects';
+
 interface Tab {
-  id: 'models' | 'gcode' | 'harvest';
+  id: TabId;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   description: string;
@@ -31,6 +34,12 @@ const ALL_TABS: Tab[] = [
     description: 'View and manage sliced G-code files'
   },
   {
+    id: 'projects',
+    label: 'Projects',
+    icon: LayersIcon,
+    description: 'Track multi-print jobs and progress'
+  },
+  {
     id: 'harvest',
     label: 'Print Harvest',
     icon: TrendingUpIcon,
@@ -48,17 +57,17 @@ export function FilesPage() {
   }, [isSlicerAvailable]);
   
   // Initialize from localStorage, respecting URL params and slicer availability
-  const [activeTab, setActiveTab] = useState<'models' | 'gcode' | 'harvest'>(() => {
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
     // First check URL params (they take precedence)
     const params = new URLSearchParams(window.location.search);
-    const urlTab = params.get('tab') as 'models' | 'gcode' | 'harvest' | null;
-    if (urlTab && (urlTab === 'gcode' || urlTab === 'harvest' || urlTab === 'models')) {
+    const urlTab = params.get('tab') as TabId | null;
+    if (urlTab && (urlTab === 'gcode' || urlTab === 'harvest' || urlTab === 'models' || urlTab === 'projects')) {
       // Will be validated later against available tabs
       return urlTab;
     }
     // Then check localStorage
     const saved = localStorage.getItem('pf.filesPageActiveTab');
-    if (saved === 'models' || saved === 'gcode' || saved === 'harvest') {
+    if (saved === 'models' || saved === 'gcode' || saved === 'harvest' || saved === 'projects') {
       return saved;
     }
     return 'gcode';
@@ -86,7 +95,7 @@ export function FilesPage() {
   }, [validActiveTab, activeTab]);
 
   // Persist tab change to localStorage
-  const handleTabChange = useCallback((tab: 'models' | 'gcode' | 'harvest') => {
+  const handleTabChange = useCallback((tab: TabId) => {
     setActiveTab(tab);
     localStorage.setItem('pf.filesPageActiveTab', tab);
   }, []);
@@ -94,7 +103,7 @@ export function FilesPage() {
   // Sync active tab with URL params when location changes
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const tab = params.get('tab') as 'models' | 'gcode' | 'harvest' | null;
+    const tab = params.get('tab') as TabId | null;
     if (tab && TABS.some(t => t.id === tab)) {
       // Schedule the state update to avoid synchronous setState in effect
       queueMicrotask(() => {
@@ -131,6 +140,8 @@ export function FilesPage() {
         return <GcodeLibraryPage />;
       case 'harvest':
         return <HarvestPage />;
+      case 'projects':
+        return <ProjectsPage />;
       case 'models':
       default:
         return <ModelsPage />;

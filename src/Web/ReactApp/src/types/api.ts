@@ -2001,3 +2001,171 @@ export interface DisplayCameraDto {
   printerState?: string;
   isPrinterOnline?: boolean;
 }
+
+// ============== Print Project Types ==============
+
+/**
+ * Status of a print project
+ */
+export enum PrintProjectStatus {
+  Open = 'Open',
+  InProgress = 'InProgress',
+  Completed = 'Completed',
+  Cancelled = 'Cancelled',
+  OnHold = 'OnHold'
+}
+
+/**
+ * Color requirement for a file in a project
+ */
+export enum PrintColorRequirement {
+  Base = 'Base',
+  Accent = 'Accent',
+  Custom = 'Custom'
+}
+
+/**
+ * Status of a file within a project
+ */
+export enum PrintProjectFileStatus {
+  Pending = 'Pending',
+  Printing = 'Printing',
+  Completed = 'Completed',
+  Skipped = 'Skipped'
+}
+
+/**
+ * Summary DTO for displaying projects in lists
+ */
+export interface PrintProjectListDto {
+  id: string;
+  name: string;
+  description?: string;
+  status: PrintProjectStatus;
+  priority: number;
+  dueDate?: string;
+  totalFiles: number;
+  completedFiles: number;
+  totalPrints: number;
+  completedPrints: number;
+  createdAt: string;
+  completedAt?: string;
+  progressPercent: number;
+}
+
+/**
+ * Detailed DTO for single project view with all files
+ */
+export interface PrintProjectDetailDto {
+  id: string;
+  name: string;
+  description?: string;
+  status: PrintProjectStatus;
+  priority: number;
+  dueDate?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  files: PrintProjectFileDto[];
+  totalPrints: number;
+  completedPrints: number;
+  progressPercent: number;
+}
+
+/**
+ * DTO for a file within a project
+ */
+export interface PrintProjectFileDto {
+  id: string;
+  gcodeFileId: string;
+  fileName: string;
+  thumbnailUrl?: string;
+  colorRequirement: PrintColorRequirement;
+  materialRequirement?: string;
+  printCount: number;
+  printedCount: number;
+  status: PrintProjectFileStatus;
+  sortOrder: number;
+  notes?: string;
+  lastPrintedAt?: string;
+  lastPrintJobId?: string;
+  isComplete: boolean;
+  remainingPrints: number;
+}
+
+/**
+ * Request to create a new print project
+ */
+export interface CreatePrintProjectRequest {
+  name: string;
+  description?: string;
+  priority?: number;
+  dueDate?: string;
+  notes?: string;
+  files?: AddFileToProjectRequest[];
+}
+
+/**
+ * Request to update an existing print project
+ */
+export interface UpdatePrintProjectRequest {
+  name?: string;
+  description?: string;
+  status?: PrintProjectStatus;
+  priority?: number;
+  dueDate?: string;
+  notes?: string;
+}
+
+/**
+ * Request to add a file to a project
+ */
+export interface AddFileToProjectRequest {
+  gcodeFileId: string;
+  colorRequirement?: PrintColorRequirement;
+  materialRequirement?: string;
+  printCount?: number;
+  notes?: string;
+}
+
+/**
+ * Request to update a file within a project
+ */
+export interface UpdateProjectFileRequest {
+  colorRequirement?: PrintColorRequirement;
+  materialRequirement?: string;
+  printCount?: number;
+  printedCount?: number;
+  status?: PrintProjectFileStatus;
+  sortOrder?: number;
+  notes?: string;
+}
+
+/**
+ * Progress summary for a project
+ */
+export interface PrintProjectProgressDto {
+  projectId: string;
+  projectName: string;
+  status: PrintProjectStatus;
+  totalFiles: number;
+  completedFiles: number;
+  totalPrints: number;
+  completedPrints: number;
+  progressPercent: number;
+  fileProgress: FileProgressDto[];
+}
+
+/**
+ * Progress summary for a single file within a project
+ */
+export interface FileProgressDto {
+  fileId: string;
+  fileName: string;
+  colorRequirement: PrintColorRequirement;
+  status: PrintProjectFileStatus;
+  printCount: number;
+  printedCount: number;
+  isComplete: boolean;
+}
