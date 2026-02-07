@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Infrastructure.Caching;
+﻿namespace Farm.Web.Api.Infrastructure.Caching;
 
 internal sealed class PrinterVersionCacheOptions
 {
