@@ -126,6 +126,143 @@ public class EfMaintenanceScheduleRepository(AppDbContext context) : IMaintenanc
             .ToList();
     }
 
+    public async Task<Dictionary<Guid, List<MaintenanceSchedule>>> GetTemplateSchedulesForPrintersAsync(
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (printerIds.Count == 0)
+        {
+            return new Dictionary<Guid, List<MaintenanceSchedule>>();
+        }
+
+        var printers = await _context.Printers
+            .AsNoTracking()
+            .Where(p => printerIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.ModelId })
+            .ToListAsync(cancellationToken);
+
+        if (printers.Count == 0)
+        {
+            return new Dictionary<Guid, List<MaintenanceSchedule>>();
+        }
+
+        var modelIds = printers.Select(p => p.ModelId).Distinct().ToList();
+        var models = await _context.PrinterModels
+            .AsNoTracking()
+            .Where(m => modelIds.Contains(m.Id))
+            .Select(m => new { m.Id, m.ManufacturerId, m.MotionType })
+            .ToListAsync(cancellationToken);
+
+        var modelsById = models.ToDictionary(m => m.Id);
+
+        var manufacturerIds = models.Select(m => m.ManufacturerId).Distinct().ToList();
+        var motionTypes = models.Where(m => m.MotionType != null).Select(m => m.MotionType!.Value).Distinct().ToList();
+
+        List<MaintenanceSchedule> globalSchedules = await _context.MaintenanceSchedules
+            .AsNoTracking()
+            .Where(s => s.IsActive && s.PrinterId == null && s.PrinterModelId == null && s.ManufacturerId == null && s.MotionType == null)
+            .ToListAsync(cancellationToken);
+
+        List<MaintenanceSchedule> manufacturerSchedules = manufacturerIds.Count == 0
+            ? []
+            : await _context.MaintenanceSchedules
+                .AsNoTracking()
+                .Where(s => s.IsActive && s.PrinterId == null && s.PrinterModelId == null && s.MotionType == null && s.ManufacturerId != null && manufacturerIds.Contains(s.ManufacturerId.Value))
+                .ToListAsync(cancellationToken);
+
+        List<MaintenanceSchedule> motionTypeSchedules = motionTypes.Count == 0
+            ? []
+            : await _context.MaintenanceSchedules
+                .AsNoTracking()
+                .Where(s => s.IsActive && s.PrinterId == null && s.PrinterModelId == null && s.ManufacturerId == null && s.MotionType != null && motionTypes.Contains(s.MotionType.Value))
+                .ToListAsync(cancellationToken);
+
+        List<MaintenanceSchedule> modelSchedules = modelIds.Count == 0
+            ? []
+            : await _context.MaintenanceSchedules
+                .AsNoTracking()
+                .Where(s => s.IsActive && s.PrinterId == null && s.PrinterModelId != null && modelIds.Contains(s.PrinterModelId.Value))
+                .Include(s => s.PrinterModel)
+                .ToListAsync(cancellationToken);
+
+        var manufacturerSchedulesById = manufacturerSchedules
+            .Where(s => s.ManufacturerId != null)
+            .GroupBy(s => s.ManufacturerId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var motionTypeSchedulesByValue = motionTypeSchedules
+            .Where(s => s.MotionType != null)
+            .GroupBy(s => s.MotionType!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var modelSchedulesById = modelSchedules
+            .Where(s => s.PrinterModelId != null)
+            .GroupBy(s => s.PrinterModelId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var result = new Dictionary<Guid, List<MaintenanceSchedule>>();
+        foreach (var printer in printers)
+        {
+            if (!modelsById.TryGetValue(printer.ModelId, out var model))
+            {
+                result[printer.Id] = [];
+                continue;
+            }
+
+            var byKey = new Dictionary<string, MaintenanceSchedule>(StringComparer.OrdinalIgnoreCase);
+            foreach (MaintenanceSchedule schedule in globalSchedules)
+            {
+                byKey[BuildOverrideKey(schedule)] = schedule;
+            }
+
+            if (manufacturerSchedulesById.TryGetValue(model.ManufacturerId, out var manufacturerDefaults))
+            {
+                foreach (MaintenanceSchedule schedule in manufacturerDefaults)
+                {
+                    byKey[BuildOverrideKey(schedule)] = schedule;
+                }
+            }
+
+            if (model.MotionType != null && motionTypeSchedulesByValue.TryGetValue(model.MotionType.Value, out var motionDefaults))
+            {
+                foreach (MaintenanceSchedule schedule in motionDefaults)
+                {
+                    byKey[BuildOverrideKey(schedule)] = schedule;
+                }
+            }
+
+            if (modelSchedulesById.TryGetValue(printer.ModelId, out var modelDefaults))
+            {
+                foreach (MaintenanceSchedule schedule in modelDefaults)
+                {
+                    byKey[BuildOverrideKey(schedule)] = schedule;
+                }
+            }
+
+            result[printer.Id] = byKey.Values
+                .OrderBy(s => s.Component)
+                .ThenBy(s => s.TaskName)
+                .ToList();
+        }
+
+        return result;
+    }
+
+    public async Task<List<MaintenanceSchedule>> GetPrinterSpecificSchedulesForPrintersAsync(
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (printerIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await _context.MaintenanceSchedules
+            .AsNoTracking()
+            .Where(s => s.PrinterId != null && printerIds.Contains(s.PrinterId.Value))
+            .ToListAsync(cancellationToken);
+    }
+
     private async Task<(Printer printer, PrinterModel model)?> GetPrinterContextAsync(Guid printerId, CancellationToken cancellationToken)
     {
         Printer? printer = await _context.Printers

@@ -678,6 +678,7 @@ public class MaintenanceController(
             };
 
             await _scheduleRepository.AddAsync(schedule, ct);
+            await _scheduleRepository.SaveChangesAsync(ct);
 
             return CreatedAtAction(nameof(GetAllSchedulesAsync), new { id = schedule.Id }, schedule);
         }
@@ -715,6 +716,7 @@ public class MaintenanceController(
             schedule.IsActive = request.IsActive ?? schedule.IsActive;
 
             await _scheduleRepository.UpdateAsync(schedule, ct);
+            await _scheduleRepository.SaveChangesAsync(ct);
 
             return Ok(schedule);
         }
@@ -742,6 +744,7 @@ public class MaintenanceController(
             }
 
             await _scheduleRepository.DeleteAsync(id, ct);
+            await _scheduleRepository.SaveChangesAsync(ct);
 
             return NoContent();
         }
@@ -750,6 +753,233 @@ public class MaintenanceController(
             _logger.LogError(ex, $"[MaintenanceController] Error deleting schedule {id}");
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Applies recommended (template) schedules by materializing printer-specific overrides for each selected printer.
+    /// Does not create schedules automatically except when explicitly invoked.
+    /// </summary>
+    [HttpPost("bulk-schedules/apply-recommended")]
+    [ProducesResponseType(typeof(BulkScheduleOperationResponse), 200)]
+    public async Task<ActionResult<BulkScheduleOperationResponse>> ApplyRecommendedSchedulesAsync(
+        [FromBody] BulkApplyRecommendedSchedulesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request.PrinterIds == null || request.PrinterIds.Count == 0)
+            {
+                return BadRequest("printerIds is required");
+            }
+
+            var printerIds = request.PrinterIds.Distinct().ToList();
+            bool overwriteExisting = request.OverwriteExisting ?? false;
+
+            Dictionary<Guid, List<MaintenanceSchedule>> templatesByPrinter =
+                await _scheduleRepository.GetTemplateSchedulesForPrintersAsync(printerIds, ct);
+
+            List<MaintenanceSchedule> existingPrinterSchedules =
+                await _scheduleRepository.GetPrinterSpecificSchedulesForPrintersAsync(printerIds, ct);
+
+            var existingByPrinter = existingPrinterSchedules
+                .Where(s => s.PrinterId != null)
+                .GroupBy(s => s.PrinterId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            int created = 0;
+            int updated = 0;
+            int skipped = 0;
+
+            foreach (Guid printerId in printerIds)
+            {
+                templatesByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? templates);
+                templates ??= [];
+
+                existingByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? existing);
+                existing ??= [];
+
+                var existingByKey = existing.ToDictionary(
+                    s => BuildOverrideKey(s.TaskName, s.Component),
+                    s => s,
+                    StringComparer.OrdinalIgnoreCase);
+
+                foreach (MaintenanceSchedule template in templates)
+                {
+                    string key = BuildOverrideKey(template.TaskName, template.Component);
+                    if (existingByKey.TryGetValue(key, out MaintenanceSchedule? existingSchedule))
+                    {
+                        if (!overwriteExisting)
+                        {
+                            skipped++;
+                            continue;
+                        }
+
+                        existingSchedule.TaskName = template.TaskName;
+                        existingSchedule.Description = template.Description;
+                        existingSchedule.Component = template.Component;
+                        existingSchedule.IntervalHours = template.IntervalHours;
+                        existingSchedule.IntervalDays = template.IntervalDays;
+                        existingSchedule.IsActive = template.IsActive;
+
+                        await _scheduleRepository.UpdateAsync(existingSchedule, ct);
+                        updated++;
+                        continue;
+                    }
+
+                    var newSchedule = new MaintenanceSchedule
+                    {
+                        Id = Guid.NewGuid(),
+                        PrinterId = printerId,
+                        TaskName = template.TaskName,
+                        Description = template.Description,
+                        Component = template.Component,
+                        IntervalHours = template.IntervalHours,
+                        IntervalDays = template.IntervalDays,
+                        IsActive = template.IsActive,
+                        IsDefault = false,
+                        PrinterModelId = null,
+                        ManufacturerId = null,
+                        MotionType = null,
+                        EstimatedDurationMinutes = template.EstimatedDurationMinutes,
+                        Priority = template.Priority
+                    };
+
+                    await _scheduleRepository.AddAsync(newSchedule, ct);
+                    created++;
+                }
+            }
+
+            await _scheduleRepository.SaveChangesAsync(ct);
+
+            return Ok(new BulkScheduleOperationResponse(
+                PrintersProcessed: printerIds.Count,
+                SchedulesCreated: created,
+                SchedulesUpdated: updated,
+                SchedulesSkipped: skipped));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error applying recommended schedules in bulk");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates the same printer-specific maintenance schedule for multiple printers.
+    /// Does not create model/global templates.
+    /// </summary>
+    [HttpPost("bulk-schedules/create")]
+    [ProducesResponseType(typeof(BulkScheduleOperationResponse), 200)]
+    public async Task<ActionResult<BulkScheduleOperationResponse>> BulkCreateSchedulesAsync(
+        [FromBody] BulkCreateSchedulesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request.PrinterIds == null || request.PrinterIds.Count == 0)
+            {
+                return BadRequest("printerIds is required");
+            }
+
+            if (request.Schedule == null)
+            {
+                return BadRequest("schedule is required");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Schedule.TaskName))
+            {
+                return BadRequest("schedule.taskName is required");
+            }
+
+            if ((request.Schedule.IntervalHours == null || request.Schedule.IntervalHours <= 0)
+                && (request.Schedule.IntervalDays == null || request.Schedule.IntervalDays <= 0))
+            {
+                return BadRequest("schedule intervalHours or intervalDays must be provided");
+            }
+
+            var printerIds = request.PrinterIds.Distinct().ToList();
+            bool overwriteExisting = request.OverwriteExisting ?? false;
+
+            List<MaintenanceSchedule> existingPrinterSchedules =
+                await _scheduleRepository.GetPrinterSpecificSchedulesForPrintersAsync(printerIds, ct);
+
+            var existingByPrinter = existingPrinterSchedules
+                .Where(s => s.PrinterId != null)
+                .GroupBy(s => s.PrinterId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            string desiredKey = BuildOverrideKey(request.Schedule.TaskName.Trim(), request.Schedule.ComponentName);
+
+            int created = 0;
+            int updated = 0;
+            int skipped = 0;
+
+            foreach (Guid printerId in printerIds)
+            {
+                existingByPrinter.TryGetValue(printerId, out List<MaintenanceSchedule>? existing);
+                existing ??= [];
+
+                MaintenanceSchedule? existingSchedule = existing
+                    .FirstOrDefault(s => string.Equals(BuildOverrideKey(s.TaskName, s.Component), desiredKey, StringComparison.OrdinalIgnoreCase));
+
+                if (existingSchedule != null)
+                {
+                    if (!overwriteExisting)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    existingSchedule.TaskName = request.Schedule.TaskName.Trim();
+                    existingSchedule.Description = request.Schedule.Description;
+                    existingSchedule.Component = request.Schedule.ComponentName;
+                    existingSchedule.IntervalHours = request.Schedule.IntervalHours;
+                    existingSchedule.IntervalDays = request.Schedule.IntervalDays;
+                    existingSchedule.IsActive = request.Schedule.IsActive ?? true;
+
+                    await _scheduleRepository.UpdateAsync(existingSchedule, ct);
+                    updated++;
+                    continue;
+                }
+
+                var schedule = new MaintenanceSchedule
+                {
+                    Id = Guid.NewGuid(),
+                    TaskName = request.Schedule.TaskName.Trim(),
+                    Description = request.Schedule.Description,
+                    IntervalHours = request.Schedule.IntervalHours,
+                    IntervalDays = request.Schedule.IntervalDays,
+                    Component = request.Schedule.ComponentName,
+                    PrinterId = printerId,
+                    PrinterModelId = null,
+                    ManufacturerId = null,
+                    MotionType = null,
+                    IsActive = request.Schedule.IsActive ?? true,
+                    IsDefault = false
+                };
+
+                await _scheduleRepository.AddAsync(schedule, ct);
+                created++;
+            }
+
+            await _scheduleRepository.SaveChangesAsync(ct);
+
+            return Ok(new BulkScheduleOperationResponse(
+                PrintersProcessed: printerIds.Count,
+                SchedulesCreated: created,
+                SchedulesUpdated: updated,
+                SchedulesSkipped: skipped));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error bulk creating schedules");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    private static string BuildOverrideKey(string taskName, string? component)
+    {
+        return $"{taskName}||{component ?? string.Empty}";
     }
 
     #endregion
@@ -1085,6 +1315,21 @@ public record CreateMaintenanceScheduleRequest(
     Guid? PrinterModelId,
     Guid? PrinterId,
     bool? IsActive);
+
+public record BulkApplyRecommendedSchedulesRequest(
+    List<Guid> PrinterIds,
+    bool? OverwriteExisting);
+
+public record BulkCreateSchedulesRequest(
+    List<Guid> PrinterIds,
+    CreateMaintenanceScheduleRequest Schedule,
+    bool? OverwriteExisting);
+
+public record BulkScheduleOperationResponse(
+    int PrintersProcessed,
+    int SchedulesCreated,
+    int SchedulesUpdated,
+    int SchedulesSkipped);
 
 public record UpdateMaintenanceScheduleRequest(
     string? TaskName,

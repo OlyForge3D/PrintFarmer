@@ -39,6 +39,22 @@ public interface IMaintenanceScheduleRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets all active template schedules applicable to each printer in a batch.
+    /// Uses the same merge/override semantics as <see cref="GetTemplateSchedulesForPrinterAsync"/>, but avoids per-printer query fanout.
+    /// </summary>
+    Task<Dictionary<Guid, List<MaintenanceSchedule>>> GetTemplateSchedulesForPrintersAsync(
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all schedules that are explicitly tied to any of the specified printers.
+    /// Includes both active and inactive schedules.
+    /// </summary>
+    Task<List<MaintenanceSchedule>> GetPrinterSpecificSchedulesForPrintersAsync(
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets a specific schedule by ID.
     /// </summary>
     /// <param name="id">The schedule ID</param>

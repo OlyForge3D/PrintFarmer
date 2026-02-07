@@ -17,7 +17,8 @@ import type {
   CreateMaintenanceLogRequest,
   CreateMaintenanceScheduleRequest,
   UpdateMaintenanceScheduleRequest,
-  UpdateMaintenanceModeRequest
+  UpdateMaintenanceModeRequest,
+  BulkScheduleOperationResponse
 } from '@/types/maintenance';
 
 // Analytics response types
@@ -297,6 +298,42 @@ export class MaintenanceService {
    */
   async deleteSchedule(id: string): Promise<void> {
     await apiClient.delete(`/maintenance/schedules/${id}`);
+  }
+
+  /**
+   * Applies recommended (template) schedules to multiple printers by creating printer-specific overrides.
+   */
+  async bulkApplyRecommendedSchedules(options: {
+    printerIds: string[];
+    overwriteExisting?: boolean;
+  }): Promise<BulkScheduleOperationResponse> {
+    const response = await apiClient.post<BulkScheduleOperationResponse>(
+      '/maintenance/bulk-schedules/apply-recommended',
+      {
+        printerIds: options.printerIds,
+        overwriteExisting: options.overwriteExisting ?? false,
+      }
+    );
+    return response.data;
+  }
+
+  /**
+   * Creates the same printer-specific schedule for multiple printers.
+   */
+  async bulkCreateScheduleForPrinters(options: {
+    printerIds: string[];
+    schedule: CreateMaintenanceScheduleRequest;
+    overwriteExisting?: boolean;
+  }): Promise<BulkScheduleOperationResponse> {
+    const response = await apiClient.post<BulkScheduleOperationResponse>(
+      '/maintenance/bulk-schedules/create',
+      {
+        printerIds: options.printerIds,
+        schedule: options.schedule,
+        overwriteExisting: options.overwriteExisting ?? false,
+      }
+    );
+    return response.data;
   }
 
   // ============================================================================

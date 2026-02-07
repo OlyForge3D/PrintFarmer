@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -17,19 +17,36 @@ interface PrinterItem {
 interface PrinterSelectorModalProps {
     isOpen: boolean;
     printers: PrinterItem[];
-    onSelect: (printerId: string) => void;
+    onSelect?: (printerId: string) => void;
+    onSelectMany?: (printerIds: string[]) => void;
     onClose: () => void;
     selectedPrinterId?: string;
+    selectedPrinterIds?: string[];
+    multiSelect?: boolean;
+    title?: string;
+    confirmLabel?: string;
 }
 
 export function PrinterSelectorModal({
     isOpen,
     printers,
     onSelect,
+    onSelectMany,
     onClose,
-    selectedPrinterId
+    selectedPrinterId,
+    selectedPrinterIds,
+    multiSelect = false,
+    title,
+    confirmLabel
 }: PrinterSelectorModalProps) {
     const [searchText, setSearchText] = useState('');
+    const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(selectedPrinterIds ?? []);
+
+    const handleClose = () => {
+        setSearchText('');
+        setLocalSelectedIds(selectedPrinterIds ?? []);
+        onClose();
+    };
 
     const filteredPrinters = useMemo(() => {
         if (!searchText.trim()) return printers;
@@ -42,8 +59,21 @@ export function PrinterSelectorModal({
     }, [printers, searchText]);
 
     const handleSelect = (printerId: string) => {
-        onSelect(printerId);
-        onClose();
+        if (multiSelect) {
+            setLocalSelectedIds((prev) => {
+                if (prev.includes(printerId)) return prev.filter((id) => id !== printerId);
+                return [...prev, printerId];
+            });
+            return;
+        }
+
+        onSelect?.(printerId);
+        handleClose();
+    };
+
+    const handleConfirm = () => {
+        onSelectMany?.(localSelectedIds);
+        handleClose();
     };
 
     {/* Search */}
@@ -71,7 +101,9 @@ export function PrinterSelectorModal({
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredPrinters.map((printer) => {
-                        const isSelected = printer.id === selectedPrinterId;
+                        const isSelected = multiSelect
+                            ? localSelectedIds.includes(printer.id)
+                            : printer.id === selectedPrinterId;
 
                         return (
                             <Button
@@ -80,6 +112,7 @@ export function PrinterSelectorModal({
                                 variant={isSelected ? 'primary' : 'secondary'}
                                 onClick={() => handleSelect(printer.id)}
                                 className="group relative overflow-hidden h-auto p-0 !rounded-lg !justify-start"
+                                aria-pressed={multiSelect ? isSelected : undefined}
                             >
                                 {/* Cover Image (uses fallback SVG if no model image or on error) */}
                                 <div className="relative w-full h-40 overflow-hidden bg-pf-bg-1">
@@ -136,9 +169,26 @@ export function PrinterSelectorModal({
     return (
         <Modal
             isOpen={isOpen}
-            onClose={onClose}
-            title="Select Printer"
+            onClose={handleClose}
+            title={title ?? (multiSelect ? 'Select Printers' : 'Select Printer')}
             width="max-w-4xl"
+            footer={
+                multiSelect ? (
+                    <>
+                        <Button type="button" variant="subtle" onClick={handleClose}>
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="primary"
+                            onClick={handleConfirm}
+                            disabled={localSelectedIds.length === 0}
+                        >
+                            {confirmLabel ?? 'Confirm'}
+                        </Button>
+                    </>
+                ) : undefined
+            }
         >
             {searchContent}
             {printerGrid}
