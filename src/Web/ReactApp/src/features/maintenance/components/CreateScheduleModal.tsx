@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
@@ -6,6 +7,8 @@ import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import type { CreateMaintenanceScheduleRequest } from '@/types/maintenance';
+import type { MaintenanceSchedule } from '@/types/maintenance';
+import { maintenanceService } from '@/services/maintenanceService';
 import { CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 interface CreateScheduleModalProps {
@@ -16,35 +19,11 @@ interface CreateScheduleModalProps {
   onClose: () => void;
 }
 
-// Common preset schedules with recommended intervals
-const presetSchedules = [
-  { taskName: 'Nozzle Inspection', component: 'Nozzle', intervalHours: 100, intervalDays: null, description: 'Check for wear and clogs' },
-  { taskName: 'Belt Tensioning', component: 'Belts', intervalHours: 500, intervalDays: null, description: 'Check and adjust belt tension' },
-  { taskName: 'Lubrication', component: 'Bearings', intervalHours: 200, intervalDays: null, description: 'Lubricate linear rails and bearings' },
-  { taskName: 'Bed Leveling Check', component: 'Bed', intervalHours: null, intervalDays: 30, description: 'Verify bed mesh is accurate' },
-  { taskName: 'Fan Cleaning', component: 'Fans', intervalHours: null, intervalDays: 30, description: 'Clean dust from cooling fans' },
-  { taskName: 'Extruder Cleaning', component: 'Extruder', intervalHours: 200, intervalDays: null, description: 'Clean extruder gears and tension spring' },
-  { taskName: 'Firmware Update Check', component: 'Electronics', intervalHours: null, intervalDays: 90, description: 'Check for firmware updates' },
-  { taskName: 'Z-Axis Calibration', component: 'Z-Axis', intervalHours: null, intervalDays: 60, description: 'Verify Z-axis alignment' },
-  { taskName: 'General Cleaning', component: 'Frame', intervalHours: null, intervalDays: 7, description: 'Clean printer exterior and build plate' },
-  { taskName: 'PTFE Tube Check', component: 'Extruder', intervalHours: 500, intervalDays: null, description: 'Inspect PTFE tube for wear' },
-  { taskName: 'Thermistor Check', component: 'Hotend', intervalHours: 1000, intervalDays: null, description: 'Verify temperature readings are accurate' },
-];
-
-// Common components for selection
-const commonComponents = [
-  'Hotend',
-  'Nozzle',
-  'Bed',
-  'Belts',
-  'Bearings',
-  'Fans',
-  'Extruder',
-  'Z-Axis',
-  'Electronics',
-  'Frame',
-  'Other',
-];
+function getTemplateIntervalLabel(schedule: MaintenanceSchedule): string {
+  if (schedule.intervalHours != null) return `${schedule.intervalHours}h`;
+  if (schedule.intervalDays != null) return `${schedule.intervalDays}d`;
+  return '';
+}
 
 // Priority options
 const priorityOptions = [
@@ -77,9 +56,34 @@ export function CreateScheduleModal({
   const [priority, setPriority] = useState('2'); // Default to Medium
   const [isActive, setIsActive] = useState(true);
 
+  const { data: printerTemplates = [] } = useQuery({
+    queryKey: ['maintenanceScheduleTemplates', printerId],
+    enabled: isOpen && !!printerId,
+    queryFn: () => maintenanceService.getPrinterScheduleTemplates(printerId!),
+  });
+
+  const { data: globalTemplates = [] } = useQuery({
+    queryKey: ['maintenanceScheduleTemplates', 'global'],
+    enabled: isOpen && !printerId,
+    queryFn: () => maintenanceService.getAllScheduleTemplates(),
+  });
+
+  const templates = printerId ? printerTemplates : globalTemplates;
+
+  const componentOptions = useMemo(() => {
+    const unique = new Set<string>();
+    for (const schedule of templates) {
+      if (schedule.component) unique.add(schedule.component);
+    }
+
+    const result = Array.from(unique).sort((a, b) => a.localeCompare(b));
+    if (!result.includes('Other')) result.push('Other');
+    return result;
+  }, [templates]);
+
   // Handle preset selection
-  const handlePresetChange = (presetIndex: string) => {
-    if (presetIndex === '') {
+  const handlePresetChange = (templateId: string) => {
+    if (templateId === '') {
       // Custom entry - clear fields
       setTaskName('');
       setDescription('');
@@ -87,15 +91,15 @@ export function CreateScheduleModal({
       setIntervalValue('');
       setIntervalType('hours');
     } else {
-      const preset = presetSchedules[parseInt(presetIndex, 10)];
+      const preset = templates.find(t => t.id === templateId);
       if (preset) {
         setTaskName(preset.taskName);
-        setDescription(preset.description);
-        setComponent(preset.component);
-        if (preset.intervalHours) {
+        setDescription(preset.description ?? '');
+        setComponent(preset.component ?? '');
+        if (preset.intervalHours != null) {
           setIntervalType('hours');
           setIntervalValue(preset.intervalHours.toString());
-        } else if (preset.intervalDays) {
+        } else if (preset.intervalDays != null) {
           setIntervalType('days');
           setIntervalValue(preset.intervalDays.toString());
         }
@@ -217,9 +221,11 @@ export function CreateScheduleModal({
             className="w-full"
           >
             <option value="">Select a preset or create custom...</option>
-            {presetSchedules.map((preset, index) => (
-              <option key={index} value={index}>
-                {preset.taskName} ({preset.component}) - {preset.intervalHours ? `${preset.intervalHours}h` : `${preset.intervalDays}d`}
+            {templates.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.taskName}
+                {preset.component ? ` (${preset.component})` : ''}
+                {getTemplateIntervalLabel(preset) ? ` - ${getTemplateIntervalLabel(preset)}` : ''}
               </option>
             ))}
           </Select>
@@ -267,7 +273,7 @@ export function CreateScheduleModal({
             className="w-full"
           >
             <option value="">Select component...</option>
-            {commonComponents.map(c => (
+            {componentOptions.map(c => (
               <option key={c} value={c}>{c}</option>
             ))}
           </Select>

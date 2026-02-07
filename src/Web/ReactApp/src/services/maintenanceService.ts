@@ -216,6 +216,23 @@ export class MaintenanceService {
   }
 
   /**
+   * Gets all active schedule templates (defaults not tied to a specific printer).
+   */
+  async getAllScheduleTemplates(): Promise<MaintenanceSchedule[]> {
+    const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedule-templates');
+    return response.data;
+  }
+
+  /**
+   * Gets all active schedule templates applicable to a specific printer.
+   * Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
+   */
+  async getPrinterScheduleTemplates(printerId: string): Promise<MaintenanceSchedule[]> {
+    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedule-templates`);
+    return response.data;
+  }
+
+  /**
    * Creates a new maintenance schedule.
    * @param request - The schedule details
    */

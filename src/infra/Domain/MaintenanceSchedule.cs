@@ -64,6 +64,12 @@ public class MaintenanceSchedule
     public Guid? ManufacturerId { get; set; }
 
     /// <summary>
+    /// Optional: Motion type this schedule applies to (for motion-type-wide defaults).
+    /// Uses <see cref="MotionType"/> numeric values (e.g., Cartesian=0, CoreXY=1).
+    /// </summary>
+    public int? MotionType { get; set; }
+
+    /// <summary>
     /// Estimated duration of this maintenance task in minutes (for reporting/analytics)
     /// </summary>
     public int? EstimatedDurationMinutes { get; set; }

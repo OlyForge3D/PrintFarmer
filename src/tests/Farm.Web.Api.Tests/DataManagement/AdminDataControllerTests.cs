@@ -20,7 +20,8 @@ public class AdminDataControllerTests : IAsyncLifetime
         _factory = new CustomWebApplicationFactory();
         _client = _factory.CreateClient();
 
-        // Ensure database is reset to empty state
+        // Ensure database is reset to a known baseline state.
+        // Note: the application seeds baseline catalog data on startup.
         await _factory.ResetDatabaseAsync();
     }
 
@@ -42,8 +43,10 @@ public class AdminDataControllerTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         CatalogExportDto? catalog = await response.Content.ReadFromJsonAsync<CatalogExportDto>();
         catalog.Should().NotBeNull();
-        catalog!.Manufacturers.Should().BeEmpty();
-        catalog.FilamentTypes.Should().BeEmpty();
+        catalog!.Manufacturers.Should().NotBeNull();
+        catalog.FilamentTypes.Should().NotBeNull();
+        catalog.Manufacturers.Should().NotBeEmpty();
+        catalog.FilamentTypes.Should().NotBeEmpty();
     }
 
     [Fact]

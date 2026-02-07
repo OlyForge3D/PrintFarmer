@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260207211110_AddPrinterDigestAuthCredentials")]
+    partial class AddPrinterDigestAuthCredentials
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1595,9 +1598,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("ManufacturerId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("MotionType")
-                        .HasColumnType("int");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uniqueidentifier");

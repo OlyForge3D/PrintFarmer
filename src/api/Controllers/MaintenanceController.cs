@@ -380,6 +380,46 @@ public class MaintenanceController(
     }
 
     /// <summary>
+    /// Gets all active template schedules (defaults not tied to a specific printer).
+    /// Useful for building preset dropdowns and admin-managed default schedules.
+    /// </summary>
+    [HttpGet("schedule-templates")]
+    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
+    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetAllScheduleTemplatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetAllAsync(ct);
+            return Ok(schedules.Where(s => s.IsActive && s.PrinterId == null));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting schedule templates");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets all active template schedules applicable to a specific printer.
+    /// Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
+    /// </summary>
+    [HttpGet("printers/{printerId:guid}/schedule-templates")]
+    [ProducesResponseType(typeof(IEnumerable<MaintenanceSchedule>), 200)]
+    public async Task<ActionResult<IEnumerable<MaintenanceSchedule>>> GetPrinterScheduleTemplatesAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            List<MaintenanceSchedule> schedules = await _scheduleRepository.GetTemplateSchedulesForPrinterAsync(printerId, ct);
+            return Ok(schedules);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[MaintenanceController] Error getting schedule templates for printer {printerId}");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Creates a new maintenance schedule.
     /// </summary>
     [HttpPost("schedules")]

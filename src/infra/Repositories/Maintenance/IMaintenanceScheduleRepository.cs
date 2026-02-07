@@ -30,6 +30,15 @@ public interface IMaintenanceScheduleRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets all active template schedules applicable to a printer.
+    /// Template schedules are those without a specific PrinterId (i.e., defaults).
+    /// Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
+    /// </summary>
+    Task<List<MaintenanceSchedule>> GetTemplateSchedulesForPrinterAsync(
+        Guid printerId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets a specific schedule by ID.
     /// </summary>
     /// <param name="id">The schedule ID</param>
