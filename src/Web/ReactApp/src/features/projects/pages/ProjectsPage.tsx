@@ -45,14 +45,15 @@ export const ProjectsPage: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<PrintProjectDetailDto | null>(null);
 
-  // Fetch projects
+  // Fetch projects with auto-refresh for real-time-like updates
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ['projects', statusFilter, searchQuery],
     queryFn: () => projectService.getProjects({
       status: statusFilter || undefined,
       search: searchQuery || undefined,
     }),
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 10 * 1000, // 10 seconds
+    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds for progress updates
   });
 
   // Delete mutation
