@@ -2217,6 +2217,146 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PrintJobStatistics");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Priority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("DueDate");
+
+                    b.HasIndex("Priority");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("PrintProjects");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ColorRequirement")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GcodeFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastPrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastPrintedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MaterialRequirement")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("PrintCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<Guid>("PrintProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("PrintedCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ColorRequirement");
+
+                    b.HasIndex("GcodeFileId");
+
+                    b.HasIndex("LastPrintJobId");
+
+                    b.HasIndex("PrintProjectId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("PrintProjectId", "GcodeFileId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId");
+
+                    b.ToTable("PrintProjectFiles");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2312,6 +2452,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("Password")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -2327,6 +2470,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("TemplateMachineProfileId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Username")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -4149,6 +4295,32 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("PrinterModel");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectFile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
+                        .WithMany()
+                        .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "LastPrintJob")
+                        .WithMany()
+                        .HasForeignKey("LastPrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintProject", "PrintProject")
+                        .WithMany("Files")
+                        .HasForeignKey("PrintProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("GcodeFile");
+
+                    b.Navigation("LastPrintJob");
+
+                    b.Navigation("PrintProject");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Location", "Location")
@@ -4553,6 +4725,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("StateHistory");
 
                     b.Navigation("Statistics");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>
+                {
+                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
