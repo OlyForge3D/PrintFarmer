@@ -125,6 +125,7 @@ export function QueueJobsTable({
               />
             </th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">File</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Project</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Printer</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Model</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Material</th>
@@ -145,6 +146,7 @@ export function QueueJobsTable({
             const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "-";
             const status = job.status || "Unknown";
             const priority = job.priority || 0;
+            const projectName = job.projectName;
             
             // Get estimated time from job or gcode file metadata
             const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
@@ -180,6 +182,15 @@ export function QueueJobsTable({
                 </td>
                 <td className="px-4 py-3">
                   <div className="font-medium text-pf-text-primary">{fileName}</div>
+                </td>
+                <td className="px-4 py-3">
+                  {projectName ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
+                      {projectName}
+                    </span>
+                  ) : (
+                    <span className="text-pf-text-tertiary">-</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-pf-text-secondary">{printerName}</td>
                 <td className="px-4 py-3 text-pf-text-secondary">{model}</td>

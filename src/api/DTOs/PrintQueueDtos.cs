@@ -88,6 +88,16 @@ public class QueuedPrintJobDto
     /// Tags assigned to this job for organization
     /// </summary>
     public string[]? Tags { get; set; }
+
+    /// <summary>
+    /// ID of the project this job belongs to (if any)
+    /// </summary>
+    public Guid? ProjectId { get; set; }
+
+    /// <summary>
+    /// Name of the project this job belongs to (denormalized for display)
+    /// </summary>
+    public string? ProjectName { get; set; }
 }
 
 /// <summary>

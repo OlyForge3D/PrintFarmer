@@ -1753,6 +1753,10 @@ export interface QueuedPrintJobDto {
   createdAtUtc: string;
   updatedAtUtc: string;
   queuedAtUtc: string;
+  notes?: string;
+  tags?: string[];
+  projectId?: string;
+  projectName?: string;
 }
 
 export interface QueueGcodeFileMetaDto {
