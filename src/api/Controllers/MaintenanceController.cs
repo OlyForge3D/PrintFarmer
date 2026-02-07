@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Maintenance;
 using Microsoft.AspNetCore.Authorization;
@@ -171,6 +172,9 @@ public class MaintenanceController(
                 return NotFound($"Alert with ID {id} not found");
             }
 
+            // Capture current printer hours for accurate hour-based maintenance baselines.
+            PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(alert.PrinterId, ct);
+
             // Create maintenance log
             var maintenanceLog = new MaintenanceLog
             {
@@ -183,7 +187,8 @@ public class MaintenanceController(
                 Notes = request.Notes,
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
-                PartsReplaced = request.PartsReplaced
+                PartsReplaced = request.PartsReplaced,
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours
             };
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(maintenanceLog, ct);
@@ -271,6 +276,234 @@ public class MaintenanceController(
 
     #endregion
 
+    #region Upcoming Maintenance
+
+    /// <summary>
+    /// Gets upcoming maintenance tasks across the fleet, computed server-side.
+    /// Day-based tasks include real due dates; hour-based tasks include remaining hours and no synthetic dates.
+    /// </summary>
+    [HttpGet("upcoming")]
+    [ProducesResponseType(typeof(IEnumerable<UpcomingMaintenanceTaskDto>), 200)]
+    public async Task<ActionResult<IEnumerable<UpcomingMaintenanceTaskDto>>> GetUpcomingMaintenanceAsync(
+        [FromQuery] int lookaheadDays = 30,
+        [FromQuery] bool includeOverdue = true,
+        [FromQuery] Guid? printerId = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            DateTime now = DateTime.UtcNow;
+
+            List<Printer> printers;
+            if (printerId.HasValue)
+            {
+                Printer? printer = await _printersService.FindByIdAsync(printerId.Value, ct);
+                if (printer == null)
+                {
+                    return NotFound($"Printer with ID {printerId} not found");
+                }
+
+                printers = [printer];
+            }
+            else
+            {
+                printers = await _printersService.GetAllAsync(ct);
+            }
+
+            List<UpcomingMaintenanceTaskDto> tasks = [];
+
+            foreach (Printer printer in printers)
+            {
+                PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(printer.Id, ct);
+                List<MaintenanceSchedule> schedules = await _scheduleRepository.GetActivePrinterSchedulesAsync(printer.Id, ct);
+                if (schedules.Count == 0)
+                {
+                    continue;
+                }
+
+                List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printer.Id, ct);
+                Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logs
+                    .Where(l => l.MaintenanceScheduleId.HasValue)
+                    .GroupBy(l => l.MaintenanceScheduleId!.Value)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
+
+                foreach (MaintenanceSchedule schedule in schedules)
+                {
+                    if (!schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
+                    {
+                        continue;
+                    }
+
+                    lastLogByScheduleId.TryGetValue(schedule.Id, out MaintenanceLog? lastLog);
+
+                    // Compute day-based due date (real calendar date)
+                    DateTime baselineDate = lastLog?.PerformedAt ?? schedule.CreatedAt;
+                    DateTime? dueDate = schedule.IntervalDays.HasValue
+                        ? baselineDate.AddDays(schedule.IntervalDays.Value)
+                        : null;
+                    int? daysUntilDue = dueDate.HasValue
+                        ? (int)(dueDate.Value.Date - now.Date).TotalDays
+                        : null;
+
+                    // Compute hour-based remaining time (no synthetic date)
+                    double? hoursUntilDue = null;
+                    if (schedule.IntervalHours.HasValue)
+                    {
+                        // If we can't compute hours (missing stats), skip hour-only schedules.
+                        if (stats == null && !schedule.IntervalDays.HasValue)
+                        {
+                            continue;
+                        }
+
+                        if (stats != null)
+                        {
+                            double hoursSinceLast = lastLog?.PrinterHoursAtMaintenance is double baselineHours
+                                ? Math.Max(0, stats.TotalPrintHours - baselineHours)
+                                : stats.TotalPrintHours;
+                            hoursUntilDue = schedule.IntervalHours.Value - hoursSinceLast;
+                        }
+                    }
+
+                    // Choose how to present either/or schedules: whichever is due sooner.
+                    string intervalType;
+                    double intervalValue;
+                    DateTime? effectiveDueDate;
+                    int? effectiveDaysUntilDue;
+                    double? effectiveHoursUntilDue;
+
+                    if (schedule.IntervalDays.HasValue && !schedule.IntervalHours.HasValue)
+                    {
+                        intervalType = "days";
+                        intervalValue = schedule.IntervalDays.Value;
+                        effectiveDueDate = dueDate;
+                        effectiveDaysUntilDue = daysUntilDue;
+                        effectiveHoursUntilDue = null;
+                    }
+                    else if (schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
+                    {
+                        intervalType = "hours";
+                        intervalValue = schedule.IntervalHours.Value;
+                        effectiveDueDate = null;
+                        effectiveDaysUntilDue = null;
+                        effectiveHoursUntilDue = hoursUntilDue;
+                    }
+                    else
+                    {
+                        // Both set
+                        if (hoursUntilDue.HasValue && daysUntilDue.HasValue)
+                        {
+                            double daysAsHours = daysUntilDue.Value * 24.0;
+                            bool hoursComesFirst = hoursUntilDue.Value <= daysAsHours;
+
+                            intervalType = hoursComesFirst ? "hours" : "days";
+                            intervalValue = hoursComesFirst ? schedule.IntervalHours!.Value : schedule.IntervalDays!.Value;
+                            effectiveDueDate = hoursComesFirst ? null : dueDate;
+                            effectiveDaysUntilDue = hoursComesFirst ? null : daysUntilDue;
+                            effectiveHoursUntilDue = hoursComesFirst ? hoursUntilDue : null;
+                        }
+                        else
+                        {
+                            // If we can't compare, prefer day-based (real due date).
+                            intervalType = "days";
+                            intervalValue = schedule.IntervalDays!.Value;
+                            effectiveDueDate = dueDate;
+                            effectiveDaysUntilDue = daysUntilDue;
+                            effectiveHoursUntilDue = null;
+                        }
+                    }
+
+                    bool isOverdue = intervalType == "days"
+                        ? (effectiveDaysUntilDue ?? 0) < 0
+                        : (effectiveHoursUntilDue ?? double.PositiveInfinity) <= 0;
+
+                    bool isDueToday = intervalType == "days" && effectiveDueDate.HasValue && effectiveDueDate.Value.Date == now.Date;
+
+                    if (!includeOverdue && isOverdue)
+                    {
+                        continue;
+                    }
+
+                    // Apply lookahead window.
+                    if (intervalType == "days" && effectiveDaysUntilDue.HasValue && effectiveDaysUntilDue.Value > lookaheadDays)
+                    {
+                        continue;
+                    }
+
+                    if (intervalType == "hours" && effectiveHoursUntilDue.HasValue && effectiveHoursUntilDue.Value > lookaheadDays * 24.0)
+                    {
+                        continue;
+                    }
+
+                    string taskId = $"{printer.Id}-{schedule.Id}";
+
+                    tasks.Add(new UpcomingMaintenanceTaskDto(
+                        taskId,
+                        schedule.Id,
+                        printer.Id,
+                        printer.Name ?? "Unknown Printer",
+                        schedule.TaskName,
+                        schedule.Component,
+                        schedule.Description,
+                        schedule.Priority,
+                        intervalType,
+                        intervalValue,
+                        effectiveDueDate,
+                        effectiveDaysUntilDue,
+                        effectiveHoursUntilDue,
+                        isOverdue,
+                        isDueToday,
+                        lastLog?.PerformedAt));
+                }
+            }
+
+            // Sort: overdue first, then by whichever remaining value we have.
+            tasks.Sort((a, b) =>
+            {
+                if (a.IsOverdue && !b.IsOverdue)
+                {
+                    return -1;
+                }
+
+                if (!a.IsOverdue && b.IsOverdue)
+                {
+                    return 1;
+                }
+
+                if (a.DueDate.HasValue && b.DueDate.HasValue)
+                {
+                    return a.DueDate.Value.CompareTo(b.DueDate.Value);
+                }
+
+                if (a.HoursUntilDue.HasValue && b.HoursUntilDue.HasValue)
+                {
+                    return a.HoursUntilDue.Value.CompareTo(b.HoursUntilDue.Value);
+                }
+
+                // Prefer real dates over hour-only when mixed.
+                if (a.DueDate.HasValue && !b.DueDate.HasValue)
+                {
+                    return -1;
+                }
+
+                if (!a.DueDate.HasValue && b.DueDate.HasValue)
+                {
+                    return 1;
+                }
+
+                return string.CompareOrdinal(a.TaskName, b.TaskName);
+            });
+
+            return Ok(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaintenanceController] Error getting upcoming maintenance");
+            return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    #endregion
+
     #region Maintenance Logs
 
     /// <summary>
@@ -301,6 +534,8 @@ public class MaintenanceController(
     {
         try
         {
+            PrinterStatistics? stats = await _statisticsRepository.GetByPrinterIdAsync(request.PrinterId, ct);
+
             var log = new MaintenanceLog
             {
                 Id = Guid.NewGuid(),
@@ -313,7 +548,8 @@ public class MaintenanceController(
                 Notes = request.Notes,
                 DurationMinutes = request.DurationMinutes,
                 Cost = request.Cost,
-                PartsReplaced = request.PartsReplaced
+                PartsReplaced = request.PartsReplaced,
+                PrinterHoursAtMaintenance = stats?.TotalPrintHours
             };
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(log, ct);

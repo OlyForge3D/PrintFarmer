@@ -119,11 +119,15 @@ export function MaintenanceOverviewWidget({
               <p className={`text-xs font-medium ${
                 task.isOverdue ? 'text-red-400' : task.isDueToday ? 'text-amber-400' : 'text-pf-text-secondary'
               }`}>
-                {task.isOverdue 
-                  ? `${Math.abs(task.daysUntilDue)}d overdue`
-                  : task.isDueToday 
-                    ? 'Today'
-                    : `${task.daysUntilDue}d`
+                {task.intervalType === 'hours'
+                  ? (task.isOverdue
+                      ? `${Math.ceil(Math.abs(task.hoursUntilDue ?? 0))}h overdue`
+                      : `${Math.ceil(task.hoursUntilDue ?? 0)}h`)
+                  : (task.isOverdue
+                      ? `${Math.abs(task.daysUntilDue ?? 0)}d overdue`
+                      : task.isDueToday
+                        ? 'Today'
+                        : `${task.daysUntilDue ?? 0}d`)
                 }
               </p>
             </div>

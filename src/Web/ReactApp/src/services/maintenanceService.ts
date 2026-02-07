@@ -48,6 +48,25 @@ export interface PrinterUptimeEntry {
   totalDowntimeMinutes: number;
 }
 
+export interface UpcomingMaintenanceTaskDto {
+  id: string;
+  scheduleId: string;
+  printerId: string;
+  printerName: string;
+  taskName: string;
+  component?: string | null;
+  description?: string | null;
+  priority: number;
+  intervalType: 'hours' | 'days';
+  intervalValue: number;
+  dueDate?: string | null;
+  daysUntilDue?: number | null;
+  hoursUntilDue?: number | null;
+  isOverdue: boolean;
+  isDueToday: boolean;
+  lastPerformedAt?: string | null;
+}
+
 /**
  * Service for managing printer maintenance alerts, logs, schedules, and statistics.
  * Provides methods for all maintenance-related API operations.
@@ -203,6 +222,27 @@ export class MaintenanceService {
    */
   async getAllSchedules(): Promise<MaintenanceSchedule[]> {
     const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedules');
+    return response.data;
+  }
+
+  /**
+   * Gets upcoming maintenance tasks computed server-side.
+   * Day-based tasks include real due dates; hour-based tasks include remaining hours and no synthetic dates.
+   */
+  async getUpcomingMaintenance(options?: {
+    lookaheadDays?: number;
+    includeOverdue?: boolean;
+    printerId?: string;
+  }): Promise<UpcomingMaintenanceTaskDto[]> {
+    const params = new URLSearchParams();
+    if (options?.lookaheadDays != null) params.append('lookaheadDays', String(options.lookaheadDays));
+    if (options?.includeOverdue != null) params.append('includeOverdue', String(options.includeOverdue));
+    if (options?.printerId) params.append('printerId', options.printerId);
+
+    const queryString = params.toString();
+    const url = `/maintenance/upcoming${queryString ? `?${queryString}` : ''}`;
+
+    const response = await apiClient.get<UpcomingMaintenanceTaskDto[]>(url);
     return response.data;
   }
 
