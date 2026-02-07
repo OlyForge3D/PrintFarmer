@@ -73,6 +73,7 @@ export function MaintenanceDashboardPage() {
   const [bulkMode, setBulkMode] = useState<'applyRecommended' | 'createCustom' | null>(null);
   const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const [bulkOverwriteExisting, setBulkOverwriteExisting] = useState(false);
   const [isBulkCreateOpen, setIsBulkCreateOpen] = useState(false);
   const [isBulkBusy, setIsBulkBusy] = useState(false);
   
@@ -117,12 +118,14 @@ export function MaintenanceDashboardPage() {
   const openBulkApplyRecommended = () => {
     setBulkMode('applyRecommended');
     setSelectedPrinterIds([]);
+    setBulkOverwriteExisting(false);
     setIsPrinterSelectorOpen(true);
   };
 
   const openBulkCreateCustom = () => {
     setBulkMode('createCustom');
     setSelectedPrinterIds([]);
+    setBulkOverwriteExisting(false);
     setIsPrinterSelectorOpen(true);
   };
 
@@ -134,7 +137,7 @@ export function MaintenanceDashboardPage() {
       try {
         const result = await maintenanceService.bulkApplyRecommendedSchedules({
           printerIds,
-          overwriteExisting: false,
+          overwriteExisting: bulkOverwriteExisting,
         });
         toast.success(
           `Applied recommended schedules: ${result.schedulesCreated} created, ${result.schedulesSkipped} skipped`
@@ -162,7 +165,7 @@ export function MaintenanceDashboardPage() {
     const result = await maintenanceService.bulkCreateScheduleForPrinters({
       printerIds: selectedPrinterIds,
       schedule: data,
-      overwriteExisting: false,
+      overwriteExisting: bulkOverwriteExisting,
     });
 
     toast.success(
@@ -560,6 +563,8 @@ export function MaintenanceDashboardPage() {
         printers={printerItems}
         multiSelect
         selectedPrinterIds={selectedPrinterIds}
+        overwriteExisting={bulkOverwriteExisting}
+        onOverwriteExistingChange={setBulkOverwriteExisting}
         title={bulkMode === 'applyRecommended' ? 'Apply Recommended Schedules' : 'Select Printers'}
         confirmLabel={bulkMode === 'applyRecommended' ? 'Apply Recommended' : 'Continue'}
         onSelectMany={handlePrintersSelected}

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Modal } from '@/common/components/modals/Modal';
 import { PrinterImage } from '@/common/components/PrinterImage';
 
@@ -25,6 +26,9 @@ interface PrinterSelectorModalProps {
     multiSelect?: boolean;
     title?: string;
     confirmLabel?: string;
+
+    overwriteExisting?: boolean;
+    onOverwriteExistingChange?: (value: boolean) => void;
 }
 
 export function PrinterSelectorModal({
@@ -37,7 +41,9 @@ export function PrinterSelectorModal({
     selectedPrinterIds,
     multiSelect = false,
     title,
-    confirmLabel
+    confirmLabel,
+    overwriteExisting,
+    onOverwriteExistingChange
 }: PrinterSelectorModalProps) {
     const [searchText, setSearchText] = useState('');
     const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(selectedPrinterIds ?? []);
@@ -91,6 +97,17 @@ export function PrinterSelectorModal({
             </div>
         </div>
     );
+
+    const optionsContent =
+        multiSelect && typeof overwriteExisting === 'boolean' && onOverwriteExistingChange ? (
+            <div className="px-6 pb-2">
+                <Checkbox
+                    label="Overwrite existing schedules"
+                    checked={overwriteExisting}
+                    onChange={(e) => onOverwriteExistingChange(e.target.checked)}
+                />
+            </div>
+        ) : null;
 
     const printerGrid = (
         <div className="flex-1 overflow-y-auto p-6">
@@ -191,6 +208,7 @@ export function PrinterSelectorModal({
             }
         >
             {searchContent}
+            {optionsContent}
             {printerGrid}
         </Modal>
     );
