@@ -8,12 +8,14 @@ import {
   SearchIcon,
 } from '@/common/components/icons/MdiIcons';
 import { projectService } from '@/services/projectService';
+import { templateService } from '@/services/templateService';
 import { apiClient } from '@/services/api';
 import type { 
   CreatePrintProjectRequest, 
   AddFileToProjectRequest,
   PrintColorRequirement,
   GcodeFile,
+  PrintProjectTemplateListDto,
 } from '@/types/api';
 
 interface CreateProjectModalProps {
@@ -35,6 +37,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [priority, setPriority] = useState(0);
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<AddFileToProjectRequest[]>(
     initialFileIds.map(id => ({
       gcodeFileId: id,
@@ -44,6 +47,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   );
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [fileSearch, setFileSearch] = useState('');
+
+  // Fetch available templates
+  const { data: templates = [] } = useQuery({
+    queryKey: ['project-templates'],
+    queryFn: () => templateService.getTemplates(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   // Fetch available gcode files for picker
   const { data: gcodeFiles = [] } = useQuery({
@@ -75,9 +85,34 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setPriority(0);
     setDueDate('');
     setNotes('');
+    setSelectedTemplate('');
     setSelectedFiles([]);
     setShowFilePicker(false);
     setFileSearch('');
+  };
+
+  const handleTemplateChange = async (templateId: string) => {
+    setSelectedTemplate(templateId);
+    if (!templateId) return;
+
+    // Load template details and apply defaults
+    try {
+      const template = await templateService.getTemplate(templateId);
+      if (!name.trim()) {
+        setName(template.name);
+      }
+      if (!description.trim() && template.description) {
+        setDescription(template.description);
+      }
+      if (template.defaultPriority) {
+        setPriority(template.defaultPriority);
+      }
+      if (template.defaultNotes) {
+        setNotes(template.defaultNotes);
+      }
+    } catch (err) {
+      console.error('Failed to load template:', err);
+    }
   };
 
   const handleClose = () => {
@@ -153,6 +188,32 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Template selector */}
+        {templates.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-pf-text-primary mb-1">
+              Start from Template
+            </label>
+            <select
+              value={selectedTemplate}
+              onChange={(e) => handleTemplateChange(e.target.value)}
+              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+            >
+              <option value="">-- No template (blank project) --</option>
+              {templates.map((template: PrintProjectTemplateListDto) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                  {template.category ? ` (${template.category})` : ''}
+                  {template.fileCount > 0 ? ` - ${template.fileCount} files` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-pf-text-tertiary">
+              Templates pre-fill project details and expected file entries
+            </p>
+          </div>
+        )}
+
         {/* Name */}
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1">

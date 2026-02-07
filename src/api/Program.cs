@@ -381,6 +381,7 @@ builder.Services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService
 
 // Print Projects Service (multi-file job tracking)
 builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectService, Farm.Web.Api.Services.Projects.PrintProjectService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
 
 // File Management Services
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();

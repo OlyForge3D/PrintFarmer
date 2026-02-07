@@ -2173,3 +2173,58 @@ export interface FileProgressDto {
   printedCount: number;
   isComplete: boolean;
 }
+
+// Print Project Templates
+export interface PrintProjectTemplateListDto {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  fileCount: number;
+  totalPrintCount: number;
+  isSystemTemplate: boolean;
+  sortOrder: number;
+}
+
+export interface PrintProjectTemplateDetailDto {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  defaultPriority: number;
+  defaultNotes: string | null;
+  isSystemTemplate: boolean;
+  sortOrder: number;
+  files: PrintProjectTemplateFileDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrintProjectTemplateFileDto {
+  id: string;
+  name: string;
+  fileNamePattern: string | null;
+  colorRequirement: PrintColorRequirement;
+  materialRequirement: string | null;
+  printCount: number;
+  sortOrder: number;
+  notes: string | null;
+}
+
+export interface CreatePrintProjectTemplateRequest {
+  name: string;
+  description?: string;
+  category?: string;
+  defaultPriority?: number;
+  defaultNotes?: string;
+  files?: CreateTemplateFileRequest[];
+}
+
+export interface CreateTemplateFileRequest {
+  name: string;
+  fileNamePattern?: string;
+  colorRequirement?: PrintColorRequirement;
+  materialRequirement?: string;
+  printCount?: number;
+  notes?: string;
+}
