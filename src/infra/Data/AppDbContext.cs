@@ -37,6 +37,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
 
+    // Print Projects (multi-file job tracking)
+    public DbSet<PrintProject> PrintProjects => Set<PrintProject>();
+
+    public DbSet<PrintProjectFile> PrintProjectFiles => Set<PrintProjectFile>();
+
+    // Print Project Templates
+    public DbSet<PrintProjectTemplate> PrintProjectTemplates => Set<PrintProjectTemplate>();
+
+    public DbSet<PrintProjectTemplateFile> PrintProjectTemplateFiles => Set<PrintProjectTemplateFile>();
+
     public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
 
     public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();

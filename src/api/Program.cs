@@ -379,6 +379,10 @@ builder.Services.AddScoped<Farm.Web.Api.Data.Repositories.IApiKeyRepository>(sp 
 // Print job approval service
 builder.Services.AddScoped<Farm.Web.Api.Services.PrintJobs.IPrintApprovalService, Farm.Web.Api.Services.PrintJobs.PrintApprovalService>();
 
+// Print Projects Service (multi-file job tracking)
+builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectService, Farm.Web.Api.Services.Projects.PrintProjectService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.Projects.IPrintProjectTemplateService, Farm.Web.Api.Services.Projects.PrintProjectTemplateService>();
+
 // File Management Services
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();

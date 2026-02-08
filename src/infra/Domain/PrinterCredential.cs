@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Strongly-typed credential container for printer backend authentication.
