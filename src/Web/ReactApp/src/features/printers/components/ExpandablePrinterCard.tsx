@@ -353,16 +353,16 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
   if (!isExpanded) {
     // Collapsed view - matching Blazor structure
     return (
-      <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[26rem] max-w-[26rem] overflow-hidden flex flex-col min-h-0">
+      <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 min-w-104 max-w-104 overflow-hidden flex flex-col min-h-0">
         <div className="flex justify-between items-start mb-4 gap-4">
           <div className="flex justify-between items-start flex-1 gap-4">
             <div className="flex-1">
               <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
                 {printer.name}
               </div>
-              {(printer.manufacturerName || printer.modelName) && (
+              {(printer.modelName) && (
                 <div className="text-pf-text-secondary text-sm mb-1">
-                  {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
+                  {`${printer.modelName || ''}`.trim()}
                 </div>
               )}
               <div className="flex items-center gap-2 mb-1">
@@ -489,12 +489,12 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
         )}
 
               {showCamera && (
-                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                <div className="mt-4 w-52 aspect-video flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
                   {cameraStreamUrl && collapsedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
                       alt="webcam snapshot"
-                      className="max-w-full max-h-full object-contain"
+                      className="w-full h-full object-cover"
                       onError={() => setCollapsedImageVisible(false)}
                       onLoad={() => setCollapsedImageVisible(true)}
                     />
@@ -509,7 +509,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
 
               {/* Optional debug panel controlled by window.PrintFarmerDebug.expandablePrinterCardDisplay */}
               {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
-                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
                   {renderUnknown({ printer })}
                 </div>
               )}
@@ -526,7 +526,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
 
   // Expanded view - matching Blazor structure exactly
   return (
-    <div className={`border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border min-w-[26rem] max-w-[26rem]`}>
+    <div className={`border rounded-xl p-3 bg-linear-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg border-pf-border min-w-104 max-w-104`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4 gap-4">
         <div className="flex justify-between items-start flex-1 gap-4">
@@ -568,12 +568,12 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
         </Button>
             </div>
             {showCamera && (
-              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+              <div className="mt-2 w-52 aspect-video flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
                 {cameraStreamUrl && expandedImageVisible ? (
                     <img 
                       src={cameraStreamUrl} 
                       alt="webcam snapshot"
-                      className="max-w-full max-h-full object-contain"
+                      className="w-full h-full object-cover"
                       onError={() => setExpandedImageVisible(false)}
                       onLoad={() => setExpandedImageVisible(true)}
                     />
@@ -651,10 +651,10 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
       {/* Temps Section */}
       <div className="mb-2">
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
-        <div className="grid grid-cols-3 gap-2 w-[24.5rem]">
+        <div className="grid grid-cols-3 gap-2 w-98">
           {/* Row 1: Labels */}
-          <div className="flex items-center h-5 w-[7.75rem]">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
+          <div className="flex items-center h-5 w-31">
+            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.hotendTemp,
@@ -663,8 +663,8 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             </span>
           </div>
           
-          <div className="flex items-center h-5 w-[7.75rem]">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
+          <div className="flex items-center h-5 w-31">
+            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
             <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.bedTemp,
@@ -701,7 +701,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               aria-label="Cooldown"
-              className="flex-shrink-0"
+              className="shrink-0"
               iconCenter={<SnowflakeIcon className="h-4 w-4" />}
             >
         </Button>

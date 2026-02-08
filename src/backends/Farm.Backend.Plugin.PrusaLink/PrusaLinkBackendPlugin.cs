@@ -103,7 +103,10 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
             typeof(ISupportsFileUpload),
             typeof(ISupportsStartPrint),
             typeof(ISupportsCamera),
-            typeof(ISupportsPrinterInformation)
+            typeof(ISupportsPrinterInformation),
+            typeof(ISupportsControlOperations),
+            typeof(ISupportsMovement),
+            typeof(ISupportsTemperatureControl)
         };
     }
 

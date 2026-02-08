@@ -55,8 +55,8 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
   return (
     <article className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8" role="region" aria-label="Job state history and timeline">
       <div className="mb-6 lg:mb-8 border-b border-pf-border pb-4 sm:pb-6">
-        <h2 className="text-xl font-semibold text-pf-text-primary mb-2 break-words">{history.jobName}</h2>
-        <p className="text-xs sm:text-sm text-pf-text-secondary">Job ID: <code className="font-mono text-pf-text-primary bg-pf-bg-2 px-2 py-1 rounded">{history.jobId}</code></p>
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-2 wrap-break-word">{history.jobName}</h2>
+        <p className="text-xs sm:text-sm text-pf-text-secondary">Job ID: <code className="font-mono text-pf-text-primary bg-pf-bg-2 px-2 py-1 rounded-sm">{history.jobId}</code></p>
       </div>
 
       {/* Summary Stats */}
@@ -97,17 +97,17 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
               >
                 <div className="flex items-center justify-between gap-3 sm:gap-4">
                   <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.fromState)}`}>
+                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded-sm text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.fromState)}`}>
                       {transition.fromState}
                     </span>
-                    <span className="text-pf-text-secondary flex-shrink-0" aria-hidden="true">→</span>
-                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.toState)}`}>
+                    <span className="text-pf-text-secondary shrink-0" aria-hidden="true">→</span>
+                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded-sm text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.toState)}`}>
                       {transition.toState}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                     <span className="text-xs sm:text-sm text-pf-text-secondary whitespace-nowrap">{formatDuration(transition.durationInStateSeconds)}</span>
-                    <span className={`transition-transform flex-shrink-0 text-pf-text-secondary ${expandedIndex === index ? 'rotate-180' : ''}`} aria-hidden="true">▼</span>
+                    <span className={`transition-transform shrink-0 text-pf-text-secondary ${expandedIndex === index ? 'rotate-180' : ''}`} aria-hidden="true">▼</span>
                   </div>
                 </div>
               </Button>
@@ -129,7 +129,7 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
                   {transition.notes && (
                     <div>
                       <p className="text-pf-text-secondary">Notes</p>
-                      <p className="text-pf-text-primary bg-pf-bg-1 rounded p-2 font-mono text-xs">{transition.notes}</p>
+                      <p className="text-pf-text-primary bg-pf-bg-1 rounded-sm p-2 font-mono text-xs">{transition.notes}</p>
                     </div>
                   )}
                 </div>

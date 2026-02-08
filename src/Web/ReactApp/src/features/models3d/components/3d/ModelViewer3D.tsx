@@ -279,8 +279,12 @@ function STLModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChan
 /**
  * Camera fitter optimized for 3D printing models (typical size: 20-200mm)
  * This component should be placed inside Canvas to have access to useThree
+ * 
+ * Note: Three.js requires direct camera property mutations for near/far planes.
+ * This is intentional and expected in the Three.js/R3F ecosystem.
  */
 function CameraFitter() {
+  "use no memo"; // Opt out of React Compiler - Three.js requires camera mutations
   const { camera, scene } = useThree();
 
   useEffect(() => {
@@ -335,6 +339,7 @@ function CameraFitter() {
     camera.lookAt(center);
 
     // Update near/far clipping planes to handle wider range of model sizes
+    // eslint-disable-next-line react-hooks/immutability -- Three.js requires direct camera property mutations
     camera.near = Math.max(0.1, cameraDistance / 500);
     camera.far = cameraDistance * 10;
     camera.updateProjectionMatrix();
@@ -563,7 +568,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   showGrid = true,
   showAxes = true,
   autoRotate = false,
-  className = "h-[40rem] w-full",
+  className = "h-160 w-full",
   bedDimensions,
   bedTextureUrl,
   bedTextureFormat
@@ -752,7 +757,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleGrid}
           variant="subtle"
           size="sm"
-          className={`${isGridVisible ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur hover:bg-pf-bg-3 rounded-lg p-2 transition-colors`}
+          className={`${isGridVisible ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-3 rounded-lg p-2 transition-colors`}
           title={isGridVisible ? "Hide Grid" : "Show Grid"}
         >
           <span className="text-xs font-medium text-pf-text-primary">📐</span>
@@ -762,7 +767,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleViewModeChange}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title={`Switch to ${viewMode === 'solid' ? 'Wireframe' : viewMode === 'wireframe' ? 'X-ray' : 'Solid'} View`}
         >
           <span className="text-xs font-medium text-pf-text-primary uppercase">
@@ -776,7 +781,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleProjection}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title={isPerspective ? "Switch to Orthographic View" : "Switch to Perspective View"}
         >
           {isPerspective ? (
@@ -790,7 +795,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleRecenter}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title="Recenter View"
         >
           <RecenterIcon className="w-5 h-5 text-pf-text-primary" />
@@ -798,7 +803,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       </div>
 
       {/* Model Information Panel */}
-      <div className="absolute top-4 left-4 bg-pf-bg-2/95 backdrop-blur px-3 py-2 rounded-lg text-sm border border-pf-border space-y-1">
+      <div className="absolute top-4 left-4 bg-pf-bg-2/95 backdrop-blur-sm px-3 py-2 rounded-lg text-sm border border-pf-border space-y-1">
         <div className="font-medium text-pf-text-primary">{fileType.toUpperCase()} Model</div>
         <div className="text-pf-text-secondary text-xs">
           Click and drag to rotate • Scroll to zoom • {isPerspective ? 'Perspective' : 'Orthographic'} • {viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} view{isGridVisible ? ' • Grid on' : ''}

@@ -17,6 +17,10 @@ import type {
   QueueStatsDto,
 } from "@/types/api";
 
+// localStorage keys for persisting user preferences
+const STORAGE_KEY_ACTIVE_TAB = 'printfarmer-queue-active-tab';
+const VALID_TABS = ['all-jobs', 'by-model', 'timing', 'history'] as const;
+
 export function PrintQueueDashboardPage() {
   const [jobs, setJobs] = useState<QueuedPrintJobWithFileMetaDto[]>([]);
   const [stats, setStats] = useState<QueueStatsDto | null>(null);
@@ -28,16 +32,28 @@ export function PrintQueueDashboardPage() {
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("all-jobs");
+  
+  // Persist active tab to localStorage
+  const [activeTab, setActiveTabState] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_TAB);
+    return saved && VALID_TABS.includes(saved as typeof VALID_TABS[number]) ? saved : 'all-jobs';
+  });
+  
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, tab);
+  }, []);
+  
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
+  const [dispatchingJobId, setDispatchingJobId] = useState<string | null>(null);
 
   // Keyboard navigation for job list (only for active tab)
   const { selectedIndex } = useKeyboardNavigation(
     jobs,
     (job: QueuedPrintJobWithFileMetaDto) => {
-      setSelectedJobId(job.id);
+      setSelectedJobId(job.job.id);
       setShowDetailPanel(true);
       setIsJobDetailsModalOpen(true);
     },
@@ -56,7 +72,7 @@ export function PrintQueueDashboardPage() {
       key: 'd',
       handler: () => {
         if (selectedIndex >= 0 && jobs[selectedIndex]) {
-          handleCancelJob(jobs[selectedIndex].id);
+          handleCancelJob(jobs[selectedIndex].job.id);
         }
       },
       description: 'Cancel selected job'
@@ -67,9 +83,9 @@ export function PrintQueueDashboardPage() {
         if (selectedIndex >= 0 && jobs[selectedIndex]) {
           const job = jobs[selectedIndex];
           if (job.job.status === 'Printing') {
-            await handlePauseJob(job.id);
+            await handlePauseJob(job.job.id);
           } else if (job.job.status === 'Paused') {
-            await handleResumeJob(job.id);
+            await handleResumeJob(job.job.id);
           }
         }
       },
@@ -82,7 +98,7 @@ export function PrintQueueDashboardPage() {
           const job = jobs[selectedIndex];
           // Only dispatch if job is in Queued or Assigned state and has an assigned printer
           if ((job.job.status === 'Queued' || job.job.status === 'Assigned') && job.assignedPrinter) {
-            await handleDispatchJob(job.id);
+            await handleDispatchJob(job.job.id);
           }
         }
       },
@@ -190,19 +206,22 @@ export function PrintQueueDashboardPage() {
   }, [loadJobs]);
 
   const handleDispatchJob = useCallback(async (jobId: string) => {
+    setDispatchingJobId(jobId);
     try {
-      await apiClient.dispatchJob(jobId);
+      await apiClient.dispatchPrintQueueJob(jobId);
       loadJobs(true);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to start print job";
       setError(errorMessage);
+    } finally {
+      setDispatchingJobId(null);
     }
   }, [loadJobs]);
 
   const handleRerunJob = async (jobId: string) => {
     try {
-      await apiClient.rerunJob(jobId);
+      await apiClient.rerunPrintQueueJob(jobId);
       setError(null);
       // Reload jobs to show the new job in the queue
       await loadJobs(true);
@@ -293,7 +312,7 @@ export function PrintQueueDashboardPage() {
           <Tabs.Panel id="all-jobs">
             <div className="flex flex-col h-full w-full min-h-0">
               {/* Filters */}
-              <div className="flex-shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
+              <div className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <TableFiltersBar
                   onStatusChange={setStatusFilter}
                   onModelChange={setModelFilter}
@@ -308,6 +327,7 @@ export function PrintQueueDashboardPage() {
                 <QueueJobsTable
                   jobs={jobs}
                   isLoading={loading}
+                  dispatchingJobId={dispatchingJobId}
                   onPause={handlePauseJob}
                   onResume={handleResumeJob}
                   onCancel={handleCancelJob}
@@ -359,8 +379,8 @@ export function PrintQueueDashboardPage() {
             <QueueHistoryTab
               onRerun={handleRerunJob}
               onViewDetails={(jobId) => {
-                // TODO: Navigate to job details page
-              if (window.PrintFarmerDebug?.utilities) console.log("View job details:", jobId);
+                setSelectedJobId(jobId);
+                setIsJobDetailsModalOpen(true);
               }}
             />
           </Tabs.Panel>

@@ -5,6 +5,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -18,6 +19,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
@@ -62,33 +64,40 @@ public static class ServiceCollectionExtensions
             ?? configuration.GetValue<string>("DB_CONNECTION")
             ?? "Data Source=farm.db";
 
+        // Register the encryption interceptor as a singleton (it needs ISensitiveDataProtector)
+        // Note: We don't use the interceptor in EF Core because it causes DI lifetime issues.
+        // Instead, encryption is handled at the service layer in PrintersService.
+        _ = services.AddSingleton<SensitiveDataEncryptionInterceptor>();
+
+        // Register DbContext with scoped lifetime (default)
         _ = services.AddDbContext<AppDbContext>(options =>
         {
             if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
             {
-                _ = options.UseSqlServer(connectionString);
+                _ = options.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
             }
             else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
             {
-                _ = options.UseNpgsql(connectionString);
+                _ = options.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
             }
             else
             {
+                // SQLite: Development only - uses EnsureCreated, no migrations
                 _ = options.UseSqlite(connectionString);
             }
         });
 
-        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons
+        // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons.
         // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
         // register it as a Singleton so the factory and other singletons can consume it safely.
         DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
         if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
-            _ = optionsBuilder.UseSqlServer(connectionString);
+            _ = optionsBuilder.UseSqlServer(connectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
         }
         else if (provider.Equals("postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
         {
-            _ = optionsBuilder.UseNpgsql(connectionString);
+            _ = optionsBuilder.UseNpgsql(connectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
         }
         else
         {
@@ -275,6 +284,7 @@ public static class ServiceCollectionExtensions
         // Slicing repositories
         _ = services.AddScoped<IProfilesRepository, EfProfilesRepository>();
         _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
+        _ = services.AddScoped<IMachineModelProfileRepository, EfMachineModelProfileRepository>();
         _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
         _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
@@ -282,6 +292,9 @@ public static class ServiceCollectionExtensions
 
         // Worker repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
+
+        // Task repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
 
         // Settings repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();
@@ -330,9 +343,12 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddMemoryCache();
         _ = services.AddOptions<CatalogCacheOptions>();
+        _ = services.AddOptions<PrinterVersionCacheOptions>();
 
         // CatalogCache resolves scoped AppDbContext per-call, so it can be a Singleton
         _ = services.AddSingleton<ICatalogCache, CatalogCache>();
+
+        _ = services.AddScoped<IPrinterVersionCache, PrinterVersionCache>();
     }
 
     #endregion
@@ -538,6 +554,9 @@ public static class ServiceCollectionExtensions
         // Register LocationService from Infrastructure layer - location management service
         _ = services.AddScoped<Farm.Infrastructure.Services.Locations.ILocationService, Farm.Infrastructure.Services.Locations.LocationService>();
 
+        // Register CameraService from Infrastructure layer - standalone camera management service
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
+
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
     }
@@ -550,6 +569,10 @@ public static class ServiceCollectionExtensions
     {
         // Tag services
         _ = services.AddScoped<Services.Tags.ITagService, Services.Tags.TagService>();
+
+        // Task services (user task management)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
         // SystemLogs service
         _ = services.AddScoped<Services.SystemLogs.ISystemLogService, Services.SystemLogs.SystemLogService>();
@@ -661,6 +684,9 @@ public static class ServiceCollectionExtensions
 
             // Stale worker cleanup service
             _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
+
+            // Profile task check service - creates tasks for printers without slicer profiles
+            _ = services.AddHostedService<Services.ProfileTaskCheckService>();
 
             // Backend-specific background services are now registered by their respective plugins
             // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:

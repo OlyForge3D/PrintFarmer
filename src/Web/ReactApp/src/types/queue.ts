@@ -64,19 +64,33 @@ export interface JobDetails {
   status: string;
   priority: number;
   queuePosition: number;
-  gcodeFileId: string;
+  gcodeFileId?: string;
   fileName?: string; // Original G-code filename for display
-  printerId: string;
-  printerName: string;
-  printerModel: string;
-  notes: string;
-  tags: string[];
+  assignedPrinterId?: string;
+  printerName?: string;
+  printerModel?: string;
+  notes?: string;
+  tags?: string[];
+  // Nozzle and material from gcode metadata
+  requiredMaterialType?: string;
+  requiredNozzleDiameter?: number;
+  // Estimated values from slicing
+  estimatedPrintTimeSeconds?: number;
+  estimatedFilamentUsageGrams?: number;
+  // Actual values from printing
+  actualPrintTimeSeconds?: number;
+  actualFilamentUsageGrams?: number;
+  actualStartTimeUtc?: string;
+  actualEndTimeUtc?: string;
+  // Legacy compatibility aliases
   materialType?: string;
   nozzleDiameter?: number;
-  estimatedPrintTimeSeconds: number;
   estimatedFilamentUsage?: string;
-  createdAt: string;
+  // Timestamps
+  createdAt?: string;
+  createdAtUtc?: string;
   queuedAt?: string;
+  queuedAtUtc?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -84,4 +98,4 @@ export interface JobDetails {
 /**
  * Type for tab selection in job details modal
  */
-export type JobDetailsTabType = 'overview' | 'details' | 'timing' | 'history';
+export type JobDetailsTabType = 'overview' | 'details' | 'history';

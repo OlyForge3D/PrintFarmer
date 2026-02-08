@@ -5,6 +5,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: printfarmer-prometheus
+    restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -24,6 +25,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: printfarmer-grafana
+    restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}

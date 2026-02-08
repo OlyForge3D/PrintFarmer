@@ -1,4 +1,5 @@
 // Slicer service interfaces and types
+import { apiClient } from './api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 export interface SliceRequest {
@@ -48,11 +49,6 @@ export interface SlicedModelSummary {
 }
 
 class SlicerService {
-  private getBaseUrl(): string {
-    // Use shared utility that properly constructs /api URLs
-    return getApiBaseUrl();
-  }
-
   async sliceModel(request: SliceRequest): Promise<SliceResult> {
     const formData = new FormData();
     formData.append('modelFile', request.modelFile);
@@ -60,19 +56,8 @@ class SlicerService {
     formData.append('printerId', request.printerId);
     formData.append('profile', JSON.stringify(request.profile));
 
-    const response = await fetch(`${this.getBaseUrl()}/slicer/slice`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Slicing failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.post<SliceResult>('/slicer/slice', formData);
+    return response.data;
   }
 
   async sliceUploadedModel(modelId: string, slicerEngine: 'prusaslicer' | 'orcaslicer', printerId: string, profile: SlicerProfile): Promise<SliceResult> {
@@ -81,57 +66,26 @@ class SlicerService {
     formData.append('printerId', printerId);
     formData.append('profile', JSON.stringify(profile));
 
-    const response = await fetch(`${this.getBaseUrl()}/slicer/slice-model/${modelId}`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Slicing failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.post<SliceResult>(`/slicer/slice-model/${modelId}`, formData);
+    return response.data;
   }
 
   async getAvailableProfiles(printerId: string): Promise<SlicerProfile[]> {
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/profiles?printerId=${printerId}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch profiles: ${response.statusText}`);
-    }
-    return response.json();
+    const response = await apiClient.get<SlicerProfile[]>(`/slicer/profiles?printerId=${printerId}`);
+    return response.data;
   }
 
   async validateModel(file: File): Promise<{ valid: boolean; issues?: string[] }> {
     const formData = new FormData();
     formData.append('modelFile', file);
 
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/3d-models/validate`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Model validation failed: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await apiClient.post<{ valid: boolean; issues?: string[] }>('/3d-models/validate', formData);
+    return response.data;
   }
 
   // Real-time slicing progress via SSE
   subscribeToSlicingProgress(jobId: string, onProgress: (progress: SlicingProgress) => void): EventSource {
-    const baseUrl = this.getBaseUrl();
+    const baseUrl = getApiBaseUrl();
     const eventSource = new EventSource(`${baseUrl}/slicer/progress/${jobId}`);
     
     eventSource.onmessage = (event) => {
@@ -147,32 +101,15 @@ class SlicerService {
   }
 
   async getSlicingJob(jobId: string): Promise<SliceResult> {
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/job/${jobId}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch slicing job: ${response.statusText}`);
-    }
-    return response.json();
+    const response = await apiClient.get<SliceResult>(`/slicer/job/${jobId}`);
+    return response.data;
   }
 
   async cancelSlicingJob(jobId: string): Promise<void> {
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/slicer/job/${jobId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to cancel slicing job: ${response.statusText}`);
-    }
+    await apiClient.post(`/slicer/job/${jobId}/cancel`);
   }
 
-  // Model management
+  // Model management - uses XHR for progress tracking
   async uploadModel(
     file: File,
     onProgress?: (progress: number) => void
@@ -180,7 +117,7 @@ class SlicerService {
     const formData = new FormData();
     formData.append('modelFile', file);
 
-    const baseUrl = this.getBaseUrl();
+    const baseUrl = getApiBaseUrl();
     const uploadUrl = `${baseUrl}/3d-models/upload`;
 
     // XMLHttpRequest is needed for progress tracking with fetch
@@ -224,29 +161,12 @@ class SlicerService {
   }
 
   async listModels(): Promise<SlicedModelSummary[]> {
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/3d-models`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch models: ${response.statusText}`);
-    }
-    return response.json();
+    const response = await apiClient.get<SlicedModelSummary[]>('/3d-models');
+    return response.data;
   }
 
   async deleteModel(modelId: string): Promise<void> {
-    const baseUrl = this.getBaseUrl();
-    const response = await fetch(`${baseUrl}/3d-models/${modelId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to delete model: ${response.statusText}`);
-    }
+    await apiClient.delete(`/3d-models/${modelId}`);
   }
 }
 

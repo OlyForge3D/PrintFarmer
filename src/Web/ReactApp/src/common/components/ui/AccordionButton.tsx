@@ -85,9 +85,9 @@ export const AccordionButton: React.FC<AccordionButtonProps> = ({
       {/* Left side: Chevron + Title + Badge */}
       <div className="flex items-center space-x-3 min-w-0">
         {isExpanded ? (
-          <ChevronDownIcon className={clsx(iconSizes[size], 'text-pf-text-secondary flex-shrink-0')} />
+          <ChevronDownIcon className={clsx(iconSizes[size], 'text-pf-text-secondary shrink-0')} />
         ) : (
-          <ChevronRightIcon className={clsx(iconSizes[size], 'text-pf-text-secondary flex-shrink-0')} />
+          <ChevronRightIcon className={clsx(iconSizes[size], 'text-pf-text-secondary shrink-0')} />
         )}
         <span className="font-medium text-pf-text-primary truncate">
           {title}
@@ -96,7 +96,7 @@ export const AccordionButton: React.FC<AccordionButtonProps> = ({
       </div>
 
       {/* Right side: Summary + Actions */}
-      <div className="flex items-center space-x-4 text-sm text-pf-text-secondary flex-shrink-0">
+      <div className="flex items-center space-x-4 text-sm text-pf-text-secondary shrink-0">
         {summary}
         {actions && (
           <div

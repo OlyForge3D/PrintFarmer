@@ -162,13 +162,13 @@ module.exports = {
     'border-gray-200', 'border-gray-300', 'border-gray-600', 'border-blue-500',
     
     // Shadow utilities
-    'shadow-sm', 'shadow', 'shadow-md', 'shadow-lg', 'shadow-xl',
+    'shadow-xs', 'shadow-sm', 'shadow-md', 'shadow-lg', 'shadow-xl',
     
     // Focus states
-    'focus:ring-2', 'focus:ring-blue-500', 'focus:outline-none',
+    'focus:ring-2', 'focus:ring-blue-500', 'focus:outline-hidden',
     
     // Rounded corners
-    'rounded', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-full',
+    'rounded-sm', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-full',
     
     // Padding and margins
     'p-1', 'p-2', 'p-3', 'p-4', 'p-6', 'p-8',
@@ -182,7 +182,7 @@ module.exports = {
     // Flexbox and grid
     'flex', 'inline-flex', 'grid', 'flex-col', 'items-center', 'justify-center',
     'justify-between', 'gap-2', 'gap-3', 'gap-4', 'gap-6',
-    'min-w-0', 'min-h-0', 'overflow-hidden', 'flex-1', 'flex-shrink-0',
+    'min-w-0', 'min-h-0', 'overflow-hidden', 'flex-1', 'shrink-0',
     
     // Responsive grid columns
     'md:grid-cols-2', 'md:grid-cols-3', 'lg:grid-cols-3', 'lg:grid-cols-4', 'lg:grid-cols-5',
@@ -190,7 +190,7 @@ module.exports = {
     
     // Text truncation and ellipsis
     'truncate', 'line-clamp-1', 'line-clamp-2', 'line-clamp-3',
-    'whitespace-nowrap', 'break-words',
+    'whitespace-nowrap', 'wrap-break-word',
     
     // Custom utilities
     'card-container', 'text-ellipsis', 'no-shrink-content',

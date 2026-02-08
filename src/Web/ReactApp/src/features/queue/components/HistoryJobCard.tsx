@@ -85,7 +85,7 @@ export default function HistoryJobCard({
           <h3 className="font-medium text-pf-text-primary truncate">{job.name}</h3>
           <p className="text-sm text-pf-text-secondary">{job.printerName}</p>
         </div>
-        <span className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${getStatusColor()}`}>
+        <span className={`px-2 py-1 rounded-sm text-xs font-medium whitespace-nowrap ${getStatusColor()}`}>
           {getStatusLabel()}
         </span>
       </div>
@@ -130,7 +130,7 @@ export default function HistoryJobCard({
 
       {/* Failure Reason (if failed) */}
       {job.status === "failed" && job.failureReason && (
-        <div className="mb-4 p-3 bg-pf-error-bg border border-pf-error rounded text-sm text-pf-text-primary">
+        <div className="mb-4 p-3 bg-pf-error-bg border border-pf-error rounded-sm text-sm text-pf-text-primary">
           <div className="font-medium text-pf-error mb-1">Failure Reason:</div>
           <div className="text-pf-text-secondary">{job.failureReason}</div>
         </div>
@@ -141,7 +141,7 @@ export default function HistoryJobCard({
         {job.status === "completed" && (
           <Button
             onClick={onRerun}
-            className="flex-1 px-3 py-2 rounded text-sm font-medium"
+            className="flex-1 px-3 py-2 rounded-sm text-sm font-medium"
             variant="secondary"
           >
             ↻ Rerun
@@ -150,7 +150,7 @@ export default function HistoryJobCard({
         {onViewDetails && (
           <Button
             onClick={() => onViewDetails(job.id)}
-            className="flex-1 px-3 py-2 rounded text-sm font-medium"
+            className="flex-1 px-3 py-2 rounded-sm text-sm font-medium"
             variant="secondary"
           >
             View Details →

@@ -201,6 +201,16 @@ public interface IMoonrakerClient : IBackendClient
     #region Print Job Control
 
     /// <summary>
+    /// Cancels the current print job using the CANCEL_PRINT macro.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the cancel command was successfully sent</returns>
+    Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default);
+
+    Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default);
+
+    /// <summary>
     /// Pauses the current print job.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>

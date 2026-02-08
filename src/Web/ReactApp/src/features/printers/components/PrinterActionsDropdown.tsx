@@ -29,7 +29,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
         variant="subtle"
         size="sm"
         onClick={toggleDropdown}
-        className="!p-2 !h-auto flex-shrink-0"
+        className="!p-2 !h-auto shrink-0"
         aria-label="Printer actions"
         iconCenter={<MoreVerticalIcon className="w-5 h-5" />}
       >

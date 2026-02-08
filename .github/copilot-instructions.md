@@ -13,6 +13,7 @@
 
 **Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.**
 
+You have access to microsoft.docs.mcp – use this tool to search Microsoft’s latest official documentation when handling questions about Microsoft technologies like C#, Azure, ASP.NET Core, or Entity Framework
 
 ⚠️ **CRITICAL STATUS UPDATE** ⚠️
 **Current Build Status (Validated 2025-12-21):**
@@ -91,22 +92,29 @@ npm run build
 
 **5. Run tests:**
 ```powershell
-# .NET API tests
+# .NET API tests - ALWAYS log output to file for review (avoid re-running long tests!)
 cd ./src
-dotnet test ./farm-web.sln -c Debug --logger "trx;LogFileName=test-results.trx" > test-run.log 2>&1
+dotnet test ./farm-web.sln -c Debug 2>&1 | tee /tmp/test-results.log
+# Review results: tail -30 /tmp/test-results.log
 
 # React tests (use test:run for non-interactive mode - exits after tests complete)
 cd ./src/Web/ReactApp
-npm run test:run
+npm run test:run 2>&1 | tee /tmp/react-test-results.log
 ```
+⚠️ **CRITICAL: ALWAYS LOG TEST OUTPUT TO FILE!**
+- .NET tests take **3+ minutes** - NEVER run them multiple times without reviewing output
+- Use `tee` to capture output while displaying: `dotnet test ... 2>&1 | tee /tmp/test-results.log`
+- Review results from log file: `tail -50 /tmp/test-results.log` or `grep -E "Failed|Passed|Error" /tmp/test-results.log`
+- Only re-run tests after fixing issues identified in the log file
+
 ✅ **ALL TESTS PASSING - CLEAN BUILD!**
-- **API Tests**: 1572/1572 PASS (4 skipped, 0 failures) - ✅ ALL PASSING
+- **API Tests**: 1709/1709 PASS (0 failures) - ✅ ALL PASSING
   - Complete coverage including discovery probe validation tests
   - Discovery probes migrated to backend plugins (all tests updated and passing)
 - **React Tests**: 365/365 PASS (all tests passing) - ✅ ALL PASSING
   - Use `npm run test:run` for non-interactive mode (exits after tests complete)
   - Use `npm test` for interactive watch mode (requires 'q' or 'h' input to exit)
-*Note: .NET tests take ~2m 39s. React tests take ~12 seconds. Set timeout to 180+ seconds for full test suite.*
+*Note: .NET tests take ~3m 30s. React tests take ~12 seconds. Set timeout to 240+ seconds for full test suite.*
 
 ```
 
@@ -569,15 +577,46 @@ npm run lint 2>&1 | head -20
 - When implementing features: search for existing related documentation first, then update it with new information
 - Reduces documentation debt and prevents duplication
 
-**Entity Framework:**
-- **⚠️ CRITICAL: DO NOT CREATE MIGRATIONS** - The project uses `EnsureCreated()` for development
-- Database schema is initialized automatically via `EnsureCreated()` on startup
-- Database safety checks handle missing columns gracefully
+**Entity Framework & Migrations:**
+- **⚠️ CRITICAL: CREATE MIGRATIONS FOR ALL SCHEMA CHANGES** - Production deployments use EF Core migrations
 - Multi-provider support: SQLite (default), SQL Server, PostgreSQL, MySQL
 - Provider selection via `DB_PROVIDER` environment variable
 - Connection strings configured in appsettings.json or via environment variables
-- **Schema changes**: Modify domain models directly; `EnsureCreated()` will rebuild schema on fresh DB
-- **Migration strategy**: Deferred until production readiness; development uses drop/recreate workflow
+- **Creating Migrations** (MUST create for BOTH providers when schema changes):
+  ```bash
+  # ALWAYS run from /home/pi/pfarm/src directory
+  cd /home/pi/pfarm/src
+  
+  # 1. PostgreSQL migration (primary production database)
+  DB_PROVIDER=postgres dotnet ef migrations add <MigrationName> \
+    --project ./migrations/Farm.Migrations.PostgreSQL \
+    --startup-project ./api \
+    --context AppDbContext
+  
+  # 2. SQL Server migration (enterprise deployments)
+  DB_PROVIDER=sqlserver dotnet ef migrations add <MigrationName> \
+    --project ./migrations/Farm.Migrations.SqlServer \
+    --startup-project ./api \
+    --context AppDbContext
+  ```
+- **Migration Naming Convention**: Use descriptive PascalCase names (e.g., `AddPrinterDigestAuthCredentials`, `AddSliceJobPriorityColumn`)
+- **Applying Migrations**:
+  - **Production**: Migrations auto-apply on startup via `Database.Migrate()` in Program.cs
+  - **Existing Container**: Apply manually via psql:
+    ```bash
+    # Find container and credentials
+    docker ps | grep postgres
+    docker exec <container> env | grep POSTGRES
+    
+    # Apply SQL directly (example)
+    docker exec <container> psql -U postgres -d printfarmer -c "ALTER TABLE \"TableName\" ADD COLUMN IF NOT EXISTS \"ColumnName\" text;"
+    
+    # Record migration in history (prevents reapplication)
+    docker exec <container> psql -U postgres -d printfarmer -c "INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('<MigrationId>', '10.0.0') ON CONFLICT DO NOTHING;"
+    ```
+- **Development**: SQLite uses `EnsureCreated()` for simplicity; delete `farm.db` for schema changes
+- **Database safety checks**: Handle missing columns gracefully for backward compatibility
+- **Verification**: After creating migrations, verify files exist in `src/migrations/Farm.Migrations.{Provider}/Migrations/`
 
 **Tag Management (Model3DTag):**
 - **Normalization**: All tag names are normalized to PascalCase at service layer (TagService.cs)
@@ -641,6 +680,26 @@ npm run lint 2>&1 | head -20
 - Database provider testing scripts: `test-providers.sh`, `test-providers-simple.sh`
 - Docker Compose with database services for testing
 - ⚠️ **Note**: Main Dockerfile may need updates to reference "api" directory instead of "server"
+
+**PostgreSQL Container Access** ⚠️ **QUICK REFERENCE**:
+- **Container name**: `printfarmer-database-postgres`
+- **Database name**: `printfarmer`
+- **Username**: `postgres` (check with `docker exec printfarmer-database-postgres env | grep POSTGRES_USER`)
+- **Password**: Check with `docker exec printfarmer-database-postgres env | grep POSTGRES_PASSWORD`
+- **Quick psql access**:
+  ```bash
+  # Interactive psql shell
+  docker exec -it printfarmer-database-postgres psql -U postgres -d printfarmer
+  
+  # Run single query
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "SELECT * FROM \"Printers\";"
+  
+  # Describe table schema
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "\d \"Printers\""
+  
+  # List all tables
+  docker exec printfarmer-database-postgres psql -U postgres -d printfarmer -c "\dt"
+  ```
 
 **Docker Deployment** ⚠️ **CRITICAL USAGE NOTES**:
 - **Location**: Deploy script is at `/home/pi/pfarm/scripts/deploy-docker.sh`
@@ -767,7 +826,7 @@ These instructions have been thoroughly tested and validated with .NET 10.0.101 
 | `dotnet build ./farm-web.sln -c Debug` | ~82 seconds | 150 seconds | Includes compilation warnings (VERIFIED) |
 | `npm run build` (React production build) | ~10 seconds | 30 seconds | Successful build, 0 errors (VERIFIED 2026-01-11) |
 | `npm run dev` (React dev server) | ~5 seconds | 30 seconds | Development mode works fine (VERIFIED) |
-| `dotnet test ./farm-web.sln -c Release` | ~2m 39s | 180 seconds | 1572/1572 PASS (4 skipped, 0 failures) - ALL PASSING |
+| `dotnet test ./farm-web.sln -c Release` | ~3m 30s | 240 seconds | 1709/1709 PASS (0 failures) - ALL PASSING |
 | `npm run test:run` (React tests) | ~12 seconds | 30 seconds | 365/365 PASS - ✅ ALL TESTS PASSING (use for automated testing) |
 | `npm test` (React tests) | ~12 seconds | N/A | Interactive watch mode (requires 'q' to exit) |
 | `dotnet format ./farm-web.sln` | ~104 seconds | 180 seconds | Longer than expected (VERIFIED) |
@@ -777,7 +836,7 @@ These instructions have been thoroughly tested and validated with .NET 10.0.101 
 
 **CRITICAL WARNINGS:**
 - **NEVER CANCEL** builds or long-running commands. Always set appropriate timeouts
-- **ALL API TESTS PASS** - 1572/1572 (0 failures) ✅ Complete test coverage
+- **ALL API TESTS PASS** - 1709/1709 (0 failures) ✅ Complete test coverage
 - **ALL REACT TESTS PASS** - 365/365 (0 failures) ✅ Use `npm run test:run` for non-interactive testing
 - **ESLint passes** - 0 errors, 0 warnings ✅ (resolved 2026-01-11)
 - **Production build succeeds** - 0 TypeScript errors ✅ (resolved 2026-01-11)

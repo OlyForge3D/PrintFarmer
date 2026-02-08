@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router';
 
 interface SubMenuItem {
   name: string;
@@ -27,14 +27,14 @@ export function SubMenuLayout({ title, items, children }: SubMenuLayoutProps) {
               key={item.href}
               to={item.href}
               className={({ isActive }: { isActive: boolean }) =>
-                `flex items-center px-4 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent ${
+                `flex items-center px-4 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${
                   isActive
                     ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
                     : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
                 }`
               }
             >
-              {item.icon && <item.icon className="mr-2 h-4 w-4 flex-shrink-0" />}
+              {item.icon && <item.icon className="mr-2 h-4 w-4 shrink-0" />}
               <span>{item.name}</span>
             </NavLink>
           ))}

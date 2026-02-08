@@ -85,7 +85,7 @@ export default function HistoryStatisticsPanel({
               <div key={reason} className="flex items-center justify-between text-sm">
                 <span className="text-pf-text-secondary">{reason}</span>
                 <span className="inline-flex items-center gap-1">
-                  <span className="bg-pf-error-bg text-pf-error px-2 py-1 rounded text-xs font-medium">
+                  <span className="bg-pf-error-bg text-pf-error px-2 py-1 rounded-sm text-xs font-medium">
                     {count}
                   </span>
                 </span>

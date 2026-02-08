@@ -1,6 +1,4 @@
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
-
-const base = `${getApiBaseUrl()}/job-queue`;
+import { apiClient } from './api';
 
 export interface EnqueuePrintJobRequest {
   gcodeFileId: string; // UUID string
@@ -8,6 +6,8 @@ export interface EnqueuePrintJobRequest {
   priority?: 'Low' | 'Normal' | 'High' | 'Urgent';
   requiredNozzleDiameter?: number;
   requiredMaterialType?: string;
+  /** Required printer model for auto-assign filtering (e.g., "QIDI X-Plus 4", "COREONEL") */
+  requiredPrinterModel?: string;
 }
 
 export interface PrintJobDto {
@@ -23,26 +23,9 @@ export interface PrintJobDto {
   createdAt: string;
 }
 
-async function handle<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json() as Promise<T>;
-}
-
 export const printJobQueueService = {
   async enqueue(req: EnqueuePrintJobRequest): Promise<PrintJobDto> {
-    const res = await fetch(base, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-      },
-      body: JSON.stringify(req)
-    });
-    return handle<PrintJobDto>(res);
+    const response = await apiClient.post<PrintJobDto>('/job-queue', req);
+    return response.data;
   }
 };
-
-export default printJobQueueService;

@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}" && pwd)"
 DOCKERFILE_PRUSA="${PROJECT_ROOT}/Dockerfile.prusaslicer"
-COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.microservices.yml"
+COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
 IMAGE_NAME="printfarmer/prusaslicer-worker:test"
 CONTAINER_NAME="prusaslicer-worker-test"
 
@@ -81,7 +81,7 @@ verify_prerequisites() {
     fi
     
     if [[ ! -f "${COMPOSE_FILE}" ]]; then
-        log_error "docker-compose.microservices.yml not found at ${COMPOSE_FILE}"
+        log_error "docker-compose.yml not found at ${COMPOSE_FILE}"
         exit 1
     fi
     

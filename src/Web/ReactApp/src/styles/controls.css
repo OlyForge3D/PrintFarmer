@@ -1,3 +1,1239 @@
+@utility input-base {
+  /* =============================================================================
+   INPUT CONTROLS - Text Inputs, Selects, Textareas
+   ============================================================================= */
+
+  /**
+   * Base Input Styles
+   * Used for: Input, Textarea
+   * Variants: .input-sm, .input-lg, .input-invalid, .input-disabled
+   */
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--pf-border);
+  background-color: var(--pf-bg-0);
+  color: var(--pf-text-primary);
+  transition: all 0.2s ease-in-out;
+
+  &:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px var(--pf-focus-ring);
+    border-color: var(--pf-accent);
+  }
+
+  &::placeholder {
+    color: var(--pf-text-tertiary);
+  }
+}
+
+@utility input-sm {
+  /* Size Variants */
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+@utility input-lg {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+}
+
+@utility input-invalid {
+  /* State Variants */
+  border-color: var(--pf-error);
+
+  &:focus {
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.5);
+    border-color: var(--pf-error);
+  }
+}
+
+@utility input-disabled {
+  background-color: rgba(156, 163, 175, 0.2);
+  border-color: var(--pf-border-light);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@utility input-readonly {
+  background-color: var(--pf-bg-1);
+  border-color: var(--pf-border-light);
+  cursor: default;
+}
+
+@utility btn-base {
+  /* =============================================================================
+   BUTTONS & ACTION CONTROLS
+   ============================================================================= */
+
+  /**
+   * Base Button Styles
+   * Used for: Button, Link buttons, form controls
+   * Variants: .btn-primary, .btn-secondary, .btn-danger, .btn-success, .btn-subtle
+   * Sizes: .btn-sm, .btn-md, .btn-lg
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px var(--pf-focus-ring);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@utility btn-sm {
+  /* Size Variants */
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+
+  &.btn-icon {
+    padding: 0.25rem;
+  }
+}
+
+@utility btn-md {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+@utility btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+
+  &.btn-icon {
+    padding: 0.75rem;
+  }
+}
+
+@utility btn-primary {
+  /* Color Variants */
+  background: linear-gradient(
+    to bottom,
+    var(--pf-gradient-primary-start),
+    var(--pf-gradient-primary-end)
+  );
+  color: var(--pf-text-primary);
+  border-color: var(--pf-border-light);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(
+      to bottom,
+      var(--pf-gradient-secondary-start),
+      var(--pf-gradient-secondary-end)
+    );
+    border-color: var(--pf-accent-2);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+}
+
+@utility btn-secondary {
+  background: linear-gradient(
+    to bottom,
+    var(--pf-gradient-gray-start),
+    var(--pf-gradient-gray-end)
+  );
+  color: white;
+  border-color: var(--pf-border-medium);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(
+      to bottom,
+      var(--pf-gradient-gray-dark-start),
+      var(--pf-gradient-gray-dark-end)
+    );
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+}
+
+@utility btn-success {
+  background: linear-gradient(
+    to bottom,
+    var(--pf-gradient-success-start),
+    var(--pf-gradient-success-end)
+  );
+  color: white;
+  border-color: var(--pf-success);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  &:hover:not(:disabled) {
+    background: var(--pf-success-hover);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+}
+
+@utility btn-danger {
+  background-color: var(--pf-error);
+  color: white;
+  border-color: var(--pf-error-border);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.1);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+}
+
+@utility btn-subtle {
+  background-color: transparent;
+  color: var(--pf-text-secondary);
+  border-color: transparent;
+
+  &:hover:not(:disabled) {
+    background-color: var(--pf-bg-1);
+    color: var(--pf-text-primary);
+    border-color: var(--pf-border);
+  }
+}
+
+@utility btn-ghost {
+  background-color: transparent;
+  color: var(--pf-text-primary);
+  border-color: transparent;
+
+  &:hover:not(:disabled) {
+    background-color: var(--pf-hover-overlay);
+    color: var(--pf-text-primary);
+  }
+}
+
+@utility btn-icon {
+  /* Icon Button - Smaller, square-ish */
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+
+  &.btn-sm {
+    padding: 0.25rem;
+  }
+
+  &.btn-lg {
+    padding: 0.75rem;
+  }
+}
+
+@utility btn-link {
+  /* Link Button - Minimal styling */
+  background-color: transparent;
+  color: var(--pf-link);
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  text-decoration: underline;
+
+  &:hover:not(:disabled) {
+    color: var(--pf-accent);
+    text-decoration: none;
+  }
+}
+
+@utility form-label {
+  /* =============================================================================
+   FORM ELEMENTS - Labels, Helpers, Errors
+   ============================================================================= */
+
+  /**
+   * Form Field Label
+   * Used for: <label> elements
+   */
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--pf-text-primary);
+  transition: color 0.2s ease-in-out;
+
+  &.required::after {
+    content: '*';
+    color: var(--pf-error);
+    margin-left: 0.25rem;
+    font-weight: bold;
+  }
+
+  @media (min-width: 768px) {
+    .form-group.inline & {
+      min-width: 12rem;
+    }
+  }
+}
+
+@utility required {
+  &.form-label::after {
+    content: '*';
+    color: var(--pf-error);
+    margin-left: 0.25rem;
+    font-weight: bold;
+  }
+}
+
+@utility form-helper {
+  /**
+   * Form Helper Text
+   * Used for: Descriptive text below input
+   */
+  font-size: 0.75rem;
+  color: var(--pf-text-muted);
+  line-height: 1.5;
+}
+
+@utility form-error {
+  /**
+   * Form Error Message
+   * Used for: Validation error text
+   */
+  font-size: 0.75rem;
+  color: var(--pf-error-text);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+@utility form-group {
+  /**
+   * Form Group Container
+   * Used for: Wrapping label + input + helper/error
+   */
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  &.inline {
+    gap: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    &.inline {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    &.inline .form-label {
+      min-width: 12rem;
+    }
+
+    &.inline .form-control {
+      flex: 1;
+    }
+  }
+}
+
+@utility inline {
+  &.form-group {
+    gap: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    &.form-group {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    &.form-group .form-label {
+      min-width: 12rem;
+    }
+
+    &.form-group .form-control {
+      flex: 1;
+    }
+  }
+}
+
+@utility form-control {
+  @media (min-width: 768px) {
+    .form-group.inline & {
+      flex: 1;
+    }
+  }
+
+  /**
+   * Form Control Container
+   * Used for: Wrapping input element (allows for additional styling layer)
+   */
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+@utility alert-base {
+  /* =============================================================================
+   ALERTS & FEEDBACK
+   ============================================================================= */
+
+  /**
+   * Alert Container
+   * Used for: Alert, notification, message displays
+   * Variants: .alert-success, .alert-error, .alert-warning, .alert-info
+   */
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid;
+  padding: 1rem;
+  font-size: 0.875rem;
+  transition: all 0.2s ease-in-out;
+}
+
+@utility alert-success {
+  background-color: var(--pf-success-bg);
+  border-color: var(--pf-success);
+  color: var(--pf-text-primary);
+}
+
+@utility alert-error {
+  background-color: var(--pf-error-bg);
+  border-color: var(--pf-error-border);
+  color: var(--pf-error-text);
+}
+
+@utility alert-warning {
+  background-color: var(--pf-warning);
+  border-color: var(--pf-warning);
+  color: var(--pf-warning-text);
+}
+
+@utility alert-info {
+  background-color: var(--pf-accent-bg);
+  border-color: var(--pf-accent);
+  color: var(--pf-text-primary);
+}
+
+@utility alert-title {
+  /**
+   * Alert Title
+   */
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+@utility alert-close {
+  /**
+   * Alert Close Button
+   */
+  margin-left: auto;
+  font-size: 1.125rem;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 0.7;
+  }
+}
+
+@utility alert-inline {
+  /**
+   * Inline Alert (small, compact)
+   */
+  padding: 0.5rem;
+  font-size: 0.75rem;
+}
+
+@utility alert-toast {
+  /**
+   * Toast/Notification (used for temporary messages)
+   */
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 50;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  max-width: 28rem;
+  animation: slideInUp 0.3s ease-out;
+}
+
+@utility tooltip {
+  /**
+   * Tooltip (small floating label)
+   */
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background-color: var(--pf-bg-2);
+  color: var(--pf-text-primary);
+  border-radius: 0.25rem;
+  border: 1px solid var(--pf-border);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+  white-space: nowrap;
+  z-index: 1000;
+
+  &.visible {
+    opacity: 1;
+  }
+}
+
+@utility visible {
+  &.tooltip {
+    opacity: 1;
+  }
+}
+
+@utility progress-bar-base {
+  /* =============================================================================
+   PROGRESS & STATUS INDICATORS
+   ============================================================================= */
+
+  /**
+   * Progress Bar Container
+   */
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: var(--pf-bg-1);
+  overflow: hidden;
+  border: 1px solid var(--pf-border-light);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  /* Size Variants */
+  &.xs {
+    height: 0.25rem;
+  }
+
+  &.sm {
+    height: 0.5rem;
+  }
+
+  &.md {
+    height: 0.75rem;
+  }
+
+  &.lg {
+    height: 1rem;
+  }
+}
+
+@utility progress-bar-fill {
+  /**
+   * Progress Bar Fill (the animated part)
+   */
+  height: 100%;
+  background-color: var(--pf-accent);
+  transition: width 0.3s ease-in-out;
+
+  /* Color Variants */
+  &.success {
+    background-color: var(--pf-success);
+  }
+
+  &.danger {
+    background-color: var(--pf-error);
+  }
+
+  &.warning {
+    background-color: var(--pf-warning);
+  }
+
+  &.info {
+    background-color: var(--pf-accent);
+  }
+
+  /**
+   * Animated Progress Bar (striped + shimmer)
+   */
+  &.animated {
+    animation: pf-progress-shimmer 1.2s ease-in-out infinite;
+  }
+}
+
+@utility success {
+  /* Color Variants */
+  &.progress-bar-fill {
+    background-color: var(--pf-success);
+  }
+
+  &.status-badge {
+    background-color: var(--pf-success-bg);
+    color: var(--pf-status-online-text);
+    border-color: var(--pf-success);
+  }
+}
+
+@utility danger {
+  &.progress-bar-fill {
+    background-color: var(--pf-error);
+  }
+}
+
+@utility warning {
+  &.progress-bar-fill {
+    background-color: var(--pf-warning);
+  }
+}
+
+@utility info {
+  &.progress-bar-fill {
+    background-color: var(--pf-accent);
+  }
+}
+
+@utility xs {
+  /* Size Variants */
+  &.progress-bar-base {
+    height: 0.25rem;
+  }
+}
+
+@utility sm {
+  &.progress-bar-base {
+    height: 0.5rem;
+  }
+
+  &.spinner {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-width: 1px;
+  }
+}
+
+@utility md {
+  &.progress-bar-base {
+    height: 0.75rem;
+  }
+
+  &.spinner {
+    width: 1rem;
+    height: 1rem;
+    border-width: 2px;
+  }
+}
+
+@utility lg {
+  &.progress-bar-base {
+    height: 1rem;
+  }
+
+  &.spinner {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-width: 2px;
+  }
+}
+
+@utility animated {
+  /**
+   * Animated Progress Bar (striped + shimmer)
+   */
+  &.progress-bar-fill {
+    animation: pf-progress-shimmer 1.2s ease-in-out infinite;
+  }
+}
+
+@utility status-badge {
+  /**
+   * Status Badge
+   */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid;
+  transition: all 0.2s ease-in-out;
+
+  &.online {
+    background-color: var(--pf-status-online-bg);
+    color: var(--pf-status-online-text);
+    border-color: var(--pf-status-online-border);
+  }
+
+  &.offline {
+    background-color: var(--pf-status-offline-bg);
+    color: var(--pf-status-offline-text);
+    border-color: var(--pf-status-offline-border);
+  }
+
+  &.loading {
+    background-color: rgba(147, 197, 253, 0.1);
+    color: var(--pf-loading);
+    border-color: var(--pf-loading-border);
+  }
+
+  &.success {
+    background-color: var(--pf-success-bg);
+    color: var(--pf-status-online-text);
+    border-color: var(--pf-success);
+  }
+
+  &.error {
+    background-color: var(--pf-error-bg);
+    color: var(--pf-error-text);
+    border-color: var(--pf-error-border);
+  }
+}
+
+@utility online {
+  &.status-badge {
+    background-color: var(--pf-status-online-bg);
+    color: var(--pf-status-online-text);
+    border-color: var(--pf-status-online-border);
+  }
+}
+
+@utility offline {
+  &.status-badge {
+    background-color: var(--pf-status-offline-bg);
+    color: var(--pf-status-offline-text);
+    border-color: var(--pf-status-offline-border);
+  }
+}
+
+@utility loading {
+  &.status-badge {
+    background-color: rgba(147, 197, 253, 0.1);
+    color: var(--pf-loading);
+    border-color: var(--pf-loading-border);
+  }
+}
+
+@utility error {
+  &.status-badge {
+    background-color: var(--pf-error-bg);
+    color: var(--pf-error-text);
+    border-color: var(--pf-error-border);
+  }
+}
+
+@utility spinner {
+  /**
+   * Spinner / Loading Indicator
+   */
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--pf-border);
+  border-radius: 50%;
+  animation: pf-spin 0.8s linear infinite;
+  border-top-color: var(--pf-accent);
+  border-right-color: var(--pf-accent);
+
+  &.sm {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-width: 1px;
+  }
+
+  &.md {
+    width: 1rem;
+    height: 1rem;
+    border-width: 2px;
+  }
+
+  &.lg {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-width: 2px;
+  }
+}
+
+@utility card {
+  /* =============================================================================
+   CARDS & CONTAINERS
+   ============================================================================= */
+
+  /**
+   * Card Container
+   * Used for: Main content cards, panels, sections
+   */
+  border-radius: 0.75rem;
+  border: 1px solid var(--pf-border);
+  padding: 1rem;
+  background: linear-gradient(to bottom, var(--pf-bg-1), var(--pf-bg-0));
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    border-color: var(--pf-border-medium);
+  }
+
+  &.elevated {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+
+  &.flat {
+    box-shadow: none;
+    border-color: var(--pf-border-light);
+  }
+}
+
+@utility elevated {
+  &.card {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+}
+
+@utility flat {
+  &.card {
+    box-shadow: none;
+    border-color: var(--pf-border-light);
+  }
+}
+
+@utility card-header {
+  /**
+   * Card Header
+   */
+  border-bottom: 1px solid var(--pf-border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+@utility card-header-title {
+  font-size: 1.125rem;
+  font-weight: bold;
+  color: var(--pf-text-primary);
+}
+
+@utility card-body {
+  /**
+   * Card Body
+   */
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@utility card-footer {
+  /**
+   * Card Footer
+   */
+  border-top: 1px solid var(--pf-border);
+  padding-top: 1rem;
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@utility panel {
+  /**
+   * Panel Container (lighter card style)
+   */
+  border-radius: 0.5rem;
+  border: 1px solid var(--pf-border-light);
+  padding: 0.75rem;
+  background-color: var(--pf-bg-1);
+
+  &.compact {
+    padding: 0.5rem;
+  }
+
+  &.spacious {
+    padding: 1.5rem;
+  }
+}
+
+@utility compact {
+  &.panel {
+    padding: 0.5rem;
+  }
+}
+
+@utility spacious {
+  &.panel {
+    padding: 1.5rem;
+  }
+}
+
+@utility list-item {
+  /**
+   * List Item
+   */
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--pf-border-light);
+  background-color: var(--pf-bg-1);
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    border-color: var(--pf-border);
+    background-color: var(--pf-hover-overlay);
+  }
+
+  &.active {
+    border-color: var(--pf-accent-2);
+    background-color: rgba(29, 78, 216, 0.1);
+  }
+}
+
+@utility active {
+  &.list-item {
+    border-color: var(--pf-accent-2);
+    background-color: rgba(29, 78, 216, 0.1);
+  }
+}
+
+@utility list-group {
+  /**
+   * List Group
+   */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@utility modal-overlay {
+  /* =============================================================================
+   MODALS & OVERLAYS
+   ============================================================================= */
+
+  /**
+   * Modal Backdrop / Overlay
+   */
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+@utility modal {
+  /**
+   * Modal Container
+   */
+  background-color: var(--pf-bg-0);
+  border-radius: 0.75rem;
+  border: 1px solid var(--pf-border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  max-height: 90vh;
+  overflow: auto;
+  max-width: 90vw;
+  z-index: 50;
+}
+
+@utility modal-header {
+  /**
+   * Modal Header
+   */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--pf-border);
+  padding: 1.5rem;
+  background: linear-gradient(to right, var(--pf-bg-1), var(--pf-bg-0));
+}
+
+@utility modal-header-title {
+  font-size: 1.125rem;
+  font-weight: bold;
+  color: var(--pf-text-primary);
+}
+
+@utility modal-body {
+  /**
+   * Modal Body
+   */
+  padding: 1.5rem;
+}
+
+@utility modal-footer {
+  /**
+   * Modal Footer
+   */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid var(--pf-border);
+  padding: 1.5rem;
+  background: linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1));
+}
+
+@utility skeleton-text {
+  /* =============================================================================
+   LOADING STATES & SKELETONS
+   ============================================================================= */
+
+  /**
+   * Skeleton Loading State
+   * Note: Base skeleton classes already defined in index.css
+   * These add variations
+   */
+  height: 1rem;
+  width: 100%;
+  background: var(--pf-skeleton-bg);
+  border-radius: 0.375rem;
+  animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
+}
+
+@utility skeleton-title {
+  height: 1.5rem;
+  width: 75%;
+  background: var(--pf-skeleton-bg);
+  border-radius: 0.375rem;
+  animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
+}
+
+@utility skeleton-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: var(--pf-skeleton-bg);
+  border-radius: 50%;
+  animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
+}
+
+@utility skeleton-button {
+  height: 2.5rem;
+  width: 6rem;
+  background: var(--pf-skeleton-bg);
+  border-radius: 0.25rem;
+  animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
+}
+
+@utility loading-overlay {
+  /**
+   * Loading Overlay (covers content while loading)
+   */
+  position: absolute;
+  inset: 0;
+  background-color: rgba(11, 16, 32, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@utility pulse {
+  /**
+   * Pulse animation (more subtle than skeleton)
+   */
+  animation: pf-skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@utility shimmer {
+  /**
+   * Shimmer animation (for image placeholders, etc.)
+   */
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.08) 50%,
+      transparent 100%
+    );
+    animation: pf-progress-shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@utility sr-only {
+  /* =============================================================================
+   UTILITY / HELPER CLASSES
+   ============================================================================= */
+
+  /**
+   * Accessibility - Hide but keep in DOM for screen readers
+   */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  border: 0;
+  white-space: nowrap;
+  clip-path: inset(100%);
+}
+
+@utility focus-ring {
+  /**
+   * Focus visible (for keyboard navigation)
+   */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+
+  &:focus-visible {
+    box-shadow: 0 0 0 3px var(--pf-focus-ring);
+  }
+}
+
+@utility disabled-state {
+  /**
+   * Disabled State
+   */
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+@utility truncate-1 {
+  /**
+   * Truncate text
+   */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@utility truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+@utility truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+@utility divider {
+  /**
+   * Divider / Separator
+   */
+  border-bottom: 1px solid var(--pf-border);
+
+  &.horizontal {
+    width: 100%;
+    border-bottom: 1px solid var(--pf-border);
+  }
+
+  &.vertical {
+    height: 100%;
+    border-right: 1px solid var(--pf-border);
+  }
+}
+
+@utility horizontal {
+  &.divider {
+    width: 100%;
+    border-bottom: 1px solid var(--pf-border);
+  }
+}
+
+@utility vertical {
+  &.divider {
+    height: 100%;
+    border-right: 1px solid var(--pf-border);
+  }
+}
+
+@utility gap-xs {
+  /**
+   * Spacing Utilities (gaps, padding presets)
+   */
+  gap: 0.25rem;
+}
+
+@utility gap-sm {
+  gap: 0.5rem;
+}
+
+@utility gap-md {
+  gap: 1rem;
+}
+
+@utility gap-lg {
+  gap: 1.5rem;
+}
+
+@utility gap-xl {
+  gap: 2rem;
+}
+
+@utility flex-row {
+  /**
+   * Flexbox Utilities
+   */
+  display: flex;
+  flex-direction: row;
+}
+
+@utility flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+@utility flex-wrap {
+  flex-wrap: wrap;
+}
+
+@utility progress-width {
+  /**
+   * Utility for dynamic width (typically for progress bars)
+   */
+  width: 100%;
+}
+
+@utility clickable {
+  /**
+   * Interaction States
+   */
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    background-color: var(--pf-hover-overlay);
+  }
+
+  &:active {
+    background-color: var(--pf-active-overlay);
+  }
+}
+
+@utility text-align-center {
+  /**
+   * Text alignment helpers (when Tailwind flex isn't appropriate)
+   */
+  text-align: center;
+}
+
+@utility text-align-right {
+  text-align: right;
+}
+
 /* =============================================================================
    PrintFarmer Explicit Controls Stylesheet
    ============================================================================= 
@@ -38,70 +1274,6 @@
    ============================================================================= */
 
 @layer components {
-
-/* =============================================================================
-   INPUT CONTROLS - Text Inputs, Selects, Textareas
-   ============================================================================= */
-
-  /**
-   * Base Input Styles
-   * Used for: Input, Textarea
-   * Variants: .input-sm, .input-lg, .input-invalid, .input-disabled
-   */
-  .input-base {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--pf-border);
-    background-color: var(--pf-bg-0);
-    color: var(--pf-text-primary);
-    transition: all 0.2s ease-in-out;
-  }
-
-  .input-base:focus {
-    outline: 2px solid transparent;
-    outline-offset: 2px;
-    box-shadow: 0 0 0 3px var(--pf-focus-ring);
-    border-color: var(--pf-accent);
-  }
-
-  .input-base::placeholder {
-    color: var(--pf-text-tertiary);
-  }
-
-  /* Size Variants */
-  .input-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-  }
-
-  .input-lg {
-    padding: 0.75rem 1rem;
-    font-size: 1rem;
-  }
-
-  /* State Variants */
-  .input-invalid {
-    border-color: var(--pf-error);
-  }
-
-  .input-invalid:focus {
-    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.5);
-    border-color: var(--pf-error);
-  }
-
-  .input-disabled {
-    background-color: rgba(156, 163, 175, 0.2);
-    border-color: var(--pf-border-light);
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  .input-readonly {
-    background-color: var(--pf-bg-1);
-    border-color: var(--pf-border-light);
-    cursor: default;
-  }
 
   /**
    * Text Input Control
@@ -390,144 +1562,6 @@
     cursor: not-allowed;
   }
 
-/* =============================================================================
-   BUTTONS & ACTION CONTROLS
-   ============================================================================= */
-
-  /**
-   * Base Button Styles
-   * Used for: Button, Link buttons, form controls
-   * Variants: .btn-primary, .btn-secondary, .btn-danger, .btn-success, .btn-subtle
-   * Sizes: .btn-sm, .btn-md, .btn-lg
-   */
-  .btn-base {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
-    transition: all 0.2s ease-in-out;
-    border: 1px solid transparent;
-    cursor: pointer;
-  }
-
-  .btn-base:focus-visible {
-    outline: 2px solid transparent;
-    outline-offset: 2px;
-    box-shadow: 0 0 0 3px var(--pf-focus-ring);
-  }
-
-  .btn-base:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Size Variants */
-  .btn-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-  }
-
-  .btn-md {
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-  }
-
-  .btn-lg {
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
-  }
-
-  /* Color Variants */
-  .btn-primary {
-    background: linear-gradient(to bottom, var(--pf-gradient-primary-start), var(--pf-gradient-primary-end));
-    color: var(--pf-text-primary);
-    border-color: var(--pf-border-light);
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: linear-gradient(to bottom, var(--pf-gradient-secondary-start), var(--pf-gradient-secondary-end));
-    border-color: var(--pf-accent-2);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-primary:active {
-    transform: translateY(1px);
-  }
-
-  .btn-secondary {
-    background: linear-gradient(to bottom, var(--pf-gradient-gray-start), var(--pf-gradient-gray-end));
-    color: white;
-    border-color: var(--pf-border-medium);
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: linear-gradient(to bottom, var(--pf-gradient-gray-dark-start), var(--pf-gradient-gray-dark-end));
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-secondary:active {
-    transform: translateY(1px);
-  }
-
-  .btn-success {
-    background: linear-gradient(to bottom, var(--pf-gradient-success-start), var(--pf-gradient-success-end));
-    color: white;
-    border-color: var(--pf-success);
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  }
-
-  .btn-success:hover:not(:disabled) {
-    background: var(--pf-success-hover);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-success:active {
-    transform: translateY(1px);
-  }
-
-  .btn-danger {
-    background-color: var(--pf-error);
-    color: white;
-    border-color: var(--pf-error-border);
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  }
-
-  .btn-danger:hover:not(:disabled) {
-    filter: brightness(1.1);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  }
-
-  .btn-danger:active {
-    transform: translateY(1px);
-  }
-
-  .btn-subtle {
-    background-color: transparent;
-    color: var(--pf-text-secondary);
-    border-color: transparent;
-  }
-
-  .btn-subtle:hover:not(:disabled) {
-    background-color: var(--pf-bg-1);
-    color: var(--pf-text-primary);
-    border-color: var(--pf-border);
-  }
-
-  .btn-ghost {
-    background-color: transparent;
-    color: var(--pf-text-primary);
-    border-color: transparent;
-  }
-
-  .btn-ghost:hover:not(:disabled) {
-    background-color: var(--pf-hover-overlay);
-    color: var(--pf-text-primary);
-  }
-
   /* Direct button element styling */
   button {
     display: inline-flex;
@@ -567,117 +1601,6 @@
     cursor: not-allowed;
   }
 
-  /* Icon Button - Smaller, square-ish */
-  .btn-icon {
-    padding: 0.5rem;
-    border-radius: 0.5rem;
-  }
-
-  .btn-icon.btn-sm {
-    padding: 0.25rem;
-  }
-
-  .btn-icon.btn-lg {
-    padding: 0.75rem;
-  }
-
-  /* Link Button - Minimal styling */
-  .btn-link {
-    background-color: transparent;
-    color: var(--pf-link);
-    border: none;
-    box-shadow: none;
-    padding: 0;
-    text-decoration: underline;
-  }
-
-  .btn-link:hover:not(:disabled) {
-    color: var(--pf-accent);
-    text-decoration: none;
-  }
-
-/* =============================================================================
-   FORM ELEMENTS - Labels, Helpers, Errors
-   ============================================================================= */
-
-  /**
-   * Form Field Label
-   * Used for: <label> elements
-   */
-  .form-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--pf-text-primary);
-    transition: color 0.2s ease-in-out;
-  }
-
-  .form-label.required::after {
-    content: "*";
-    color: var(--pf-error);
-    margin-left: 0.25rem;
-    font-weight: bold;
-  }
-
-  /**
-   * Form Helper Text
-   * Used for: Descriptive text below input
-   */
-  .form-helper {
-    font-size: 0.75rem;
-    color: var(--pf-text-muted);
-    line-height: 1.5;
-  }
-
-  /**
-   * Form Error Message
-   * Used for: Validation error text
-   */
-  .form-error {
-    font-size: 0.75rem;
-    color: var(--pf-error-text);
-    font-weight: 500;
-    line-height: 1.5;
-  }
-
-  /**
-   * Form Group Container
-   * Used for: Wrapping label + input + helper/error
-   */
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .form-group.inline {
-    gap: 1rem;
-  }
-
-  @media (min-width: 768px) {
-    .form-group.inline {
-      flex-direction: row;
-      align-items: center;
-    }
-
-    .form-group.inline .form-label {
-      min-width: 12rem;
-    }
-
-    .form-group.inline .form-control {
-      flex: 1;
-    }
-  }
-
-  /**
-   * Form Control Container
-   * Used for: Wrapping input element (allows for additional styling layer)
-   */
-  .form-control {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
   /**
    * Fieldset - Group of related form fields
    */
@@ -695,95 +1618,6 @@
     padding: 0 0.5rem;
   }
 
-/* =============================================================================
-   ALERTS & FEEDBACK
-   ============================================================================= */
-
-  /**
-   * Alert Container
-   * Used for: Alert, notification, message displays
-   * Variants: .alert-success, .alert-error, .alert-warning, .alert-info
-   */
-  .alert-base {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    border-radius: 0.5rem;
-    border: 1px solid;
-    padding: 1rem;
-    font-size: 0.875rem;
-    transition: all 0.2s ease-in-out;
-  }
-
-  .alert-success {
-    background-color: var(--pf-success-bg);
-    border-color: var(--pf-success);
-    color: var(--pf-text-primary);
-  }
-
-  .alert-error {
-    background-color: var(--pf-error-bg);
-    border-color: var(--pf-error-border);
-    color: var(--pf-error-text);
-  }
-
-  .alert-warning {
-    background-color: var(--pf-warning);
-    border-color: var(--pf-warning);
-    color: var(--pf-warning-text);
-  }
-
-  .alert-info {
-    background-color: var(--pf-accent-bg);
-    border-color: var(--pf-accent);
-    color: var(--pf-text-primary);
-  }
-
-  /**
-   * Alert Title
-   */
-  .alert-title {
-    font-weight: 600;
-    margin-bottom: 0.25rem;
-  }
-
-  /**
-   * Alert Close Button
-   */
-  .alert-close {
-    margin-left: auto;
-    font-size: 1.125rem;
-    font-weight: bold;
-    line-height: 1;
-    cursor: pointer;
-    transition: opacity 0.2s;
-  }
-
-  .alert-close:hover {
-    opacity: 0.7;
-  }
-
-  /**
-   * Inline Alert (small, compact)
-   */
-  .alert-inline {
-    padding: 0.5rem;
-    font-size: 0.75rem;
-  }
-
-  /**
-   * Toast/Notification (used for temporary messages)
-   */
-  .alert-toast {
-    position: fixed;
-    bottom: 1rem;
-    right: 1rem;
-    z-index: 50;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-    max-width: 28rem;
-    animation: slideInUp 0.3s ease-out;
-  }
-
   @keyframes slideInUp {
     from {
       transform: translateY(100%);
@@ -793,263 +1627,6 @@
       transform: translateY(0);
       opacity: 1;
     }
-  }
-
-  /**
-   * Tooltip (small floating label)
-   */
-  .tooltip {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-bottom: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    background-color: var(--pf-bg-2);
-    color: var(--pf-text-primary);
-    border-radius: 0.25rem;
-    border: 1px solid var(--pf-border);
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.2s ease-in-out;
-    white-space: nowrap;
-    z-index: 1000;
-  }
-
-  .tooltip.visible {
-    opacity: 1;
-  }
-
-/* =============================================================================
-   PROGRESS & STATUS INDICATORS
-   ============================================================================= */
-
-  /**
-   * Progress Bar Container
-   */
-  .progress-bar-base {
-    width: 100%;
-    height: 0.5rem;
-    border-radius: 9999px;
-    background-color: var(--pf-bg-1);
-    overflow: hidden;
-    border: 1px solid var(--pf-border-light);
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  }
-
-  /**
-   * Progress Bar Fill (the animated part)
-   */
-  .progress-bar-fill {
-    height: 100%;
-    background-color: var(--pf-accent);
-    transition: width 0.3s ease-in-out;
-  }
-
-  /* Color Variants */
-  .progress-bar-fill.success {
-    background-color: var(--pf-success);
-  }
-
-  .progress-bar-fill.danger {
-    background-color: var(--pf-error);
-  }
-
-  .progress-bar-fill.warning {
-    background-color: var(--pf-warning);
-  }
-
-  .progress-bar-fill.info {
-    background-color: var(--pf-accent);
-  }
-
-  /* Size Variants */
-  .progress-bar-base.xs {
-    height: 0.25rem;
-  }
-
-  .progress-bar-base.sm {
-    height: 0.5rem;
-  }
-
-  .progress-bar-base.md {
-    height: 0.75rem;
-  }
-
-  .progress-bar-base.lg {
-    height: 1rem;
-  }
-
-  /**
-   * Animated Progress Bar (striped + shimmer)
-   */
-  .progress-bar-fill.animated {
-    animation: pf-progress-shimmer 1.2s ease-in-out infinite;
-  }
-
-  /**
-   * Status Badge
-   */
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border: 1px solid;
-    transition: all 0.2s ease-in-out;
-  }
-
-  .status-badge.online {
-    background-color: var(--pf-status-online-bg);
-    color: var(--pf-status-online-text);
-    border-color: var(--pf-status-online-border);
-  }
-
-  .status-badge.offline {
-    background-color: var(--pf-status-offline-bg);
-    color: var(--pf-status-offline-text);
-    border-color: var(--pf-status-offline-border);
-  }
-
-  .status-badge.loading {
-    background-color: rgba(147, 197, 253, 0.1);
-    color: var(--pf-loading);
-    border-color: var(--pf-loading-border);
-  }
-
-  .status-badge.success {
-    background-color: var(--pf-success-bg);
-    color: var(--pf-status-online-text);
-    border-color: var(--pf-success);
-  }
-
-  .status-badge.error {
-    background-color: var(--pf-error-bg);
-    color: var(--pf-error-text);
-    border-color: var(--pf-error-border);
-  }
-
-  /**
-   * Spinner / Loading Indicator
-   */
-  .spinner {
-    display: inline-block;
-    width: 1rem;
-    height: 1rem;
-    border: 2px solid var(--pf-border);
-    border-radius: 50%;
-    animation: pf-spin 0.8s linear infinite;
-    border-top-color: var(--pf-accent);
-    border-right-color: var(--pf-accent);
-  }
-
-  .spinner.sm {
-    width: 0.75rem;
-    height: 0.75rem;
-    border-width: 1px;
-  }
-
-  .spinner.md {
-    width: 1rem;
-    height: 1rem;
-    border-width: 2px;
-  }
-
-  .spinner.lg {
-    width: 1.5rem;
-    height: 1.5rem;
-    border-width: 2px;
-  }
-
-/* =============================================================================
-   CARDS & CONTAINERS
-   ============================================================================= */
-
-  /**
-   * Card Container
-   * Used for: Main content cards, panels, sections
-   */
-  .card {
-    border-radius: 0.75rem;
-    border: 1px solid var(--pf-border);
-    padding: 1rem;
-    background: linear-gradient(to bottom, var(--pf-bg-1), var(--pf-bg-0));
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease-in-out;
-  }
-
-  .card:hover {
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-    border-color: var(--pf-border-medium);
-  }
-
-  .card.elevated {
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-  }
-
-  .card.flat {
-    box-shadow: none;
-    border-color: var(--pf-border-light);
-  }
-
-  /**
-   * Card Header
-   */
-  .card-header {
-    border-bottom: 1px solid var(--pf-border);
-    padding-bottom: 0.75rem;
-    margin-bottom: 1rem;
-  }
-
-  .card-header-title {
-    font-size: 1.125rem;
-    font-weight: bold;
-    color: var(--pf-text-primary);
-  }
-
-  /**
-   * Card Body
-   */
-  .card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  /**
-   * Card Footer
-   */
-  .card-footer {
-    border-top: 1px solid var(--pf-border);
-    padding-top: 1rem;
-    margin-top: 1rem;
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-  }
-
-  /**
-   * Panel Container (lighter card style)
-   */
-  .panel {
-    border-radius: 0.5rem;
-    border: 1px solid var(--pf-border-light);
-    padding: 0.75rem;
-    background-color: var(--pf-bg-1);
-  }
-
-  .panel.compact {
-    padding: 0.5rem;
-  }
-
-  .panel.spacious {
-    padding: 1.5rem;
   }
 
 /* =============================================================================
@@ -1096,341 +1673,6 @@
 
   table tbody tr:last-child {
     border-bottom: none;
-  }
-
-  /**
-   * List Item
-   */
-  .list-item {
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--pf-border-light);
-    background-color: var(--pf-bg-1);
-    transition: all 0.2s ease-in-out;
-  }
-
-  .list-item:hover {
-    border-color: var(--pf-border);
-    background-color: var(--pf-hover-overlay);
-  }
-
-  .list-item.active {
-    border-color: var(--pf-accent-2);
-    background-color: rgba(29, 78, 216, 0.1);
-  }
-
-  /**
-   * List Group
-   */
-  .list-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-/* =============================================================================
-   MODALS & OVERLAYS
-   ============================================================================= */
-
-  /**
-   * Modal Backdrop / Overlay
-   */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 40;
-  }
-
-  /**
-   * Modal Container
-   */
-  .modal {
-    background-color: var(--pf-bg-0);
-    border-radius: 0.75rem;
-    border: 1px solid var(--pf-border);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    max-height: 90vh;
-    overflow: auto;
-    max-width: 90vw;
-    z-index: 50;
-  }
-
-  /**
-   * Modal Header
-   */
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--pf-border);
-    padding: 1.5rem;
-    background: linear-gradient(to right, var(--pf-bg-1), var(--pf-bg-0));
-  }
-
-  .modal-header-title {
-    font-size: 1.125rem;
-    font-weight: bold;
-    color: var(--pf-text-primary);
-  }
-
-  /**
-   * Modal Body
-   */
-  .modal-body {
-    padding: 1.5rem;
-  }
-
-  /**
-   * Modal Footer
-   */
-  .modal-footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    border-top: 1px solid var(--pf-border);
-    padding: 1.5rem;
-    background: linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1));
-  }
-
-/* =============================================================================
-   LOADING STATES & SKELETONS
-   ============================================================================= */
-
-  /**
-   * Skeleton Loading State
-   * Note: Base skeleton classes already defined in index.css
-   * These add variations
-   */
-  .skeleton-text {
-    height: 1rem;
-    width: 100%;
-    background: var(--pf-skeleton-bg);
-    border-radius: 0.375rem;
-    animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
-  }
-
-  .skeleton-title {
-    height: 1.5rem;
-    width: 75%;
-    background: var(--pf-skeleton-bg);
-    border-radius: 0.375rem;
-    animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
-  }
-
-  .skeleton-avatar {
-    width: 2.5rem;
-    height: 2.5rem;
-    background: var(--pf-skeleton-bg);
-    border-radius: 50%;
-    animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
-  }
-
-  .skeleton-button {
-    height: 2.5rem;
-    width: 6rem;
-    background: var(--pf-skeleton-bg);
-    border-radius: 0.25rem;
-    animation: pf-skeleton-pulse 1.1s ease-in-out infinite;
-  }
-
-  /**
-   * Loading Overlay (covers content while loading)
-   */
-  .loading-overlay {
-    position: absolute;
-    inset: 0;
-    background-color: rgba(11, 16, 32, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 0.5rem;
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-  }
-
-  /**
-   * Pulse animation (more subtle than skeleton)
-   */
-  .pulse {
-    animation: pf-skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  /**
-   * Shimmer animation (for image placeholders, etc.)
-   */
-  .shimmer {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .shimmer::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
-    animation: pf-progress-shimmer 1.4s ease-in-out infinite;
-  }
-
-/* =============================================================================
-   UTILITY / HELPER CLASSES
-   ============================================================================= */
-
-  /**
-   * Accessibility - Hide but keep in DOM for screen readers
-   */
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    border: 0;
-    white-space: nowrap;
-    clip-path: inset(100%);
-  }
-
-  /**
-   * Focus visible (for keyboard navigation)
-   */
-  .focus-ring {
-    outline: 2px solid transparent;
-    outline-offset: 2px;
-  }
-
-  .focus-ring:focus-visible {
-    box-shadow: 0 0 0 3px var(--pf-focus-ring);
-  }
-
-  /**
-   * Disabled State
-   */
-  .disabled-state {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-
-  /**
-   * Truncate text
-   */
-  .truncate-1 {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .truncate-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    line-clamp: 2;
-    overflow: hidden;
-  }
-
-  .truncate-3 {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    line-clamp: 3;
-    overflow: hidden;
-  }
-
-  /**
-   * Divider / Separator
-   */
-  .divider {
-    border-bottom: 1px solid var(--pf-border);
-  }
-
-  .divider.horizontal {
-    width: 100%;
-    border-bottom: 1px solid var(--pf-border);
-  }
-
-  .divider.vertical {
-    height: 100%;
-    border-right: 1px solid var(--pf-border);
-  }
-
-  /**
-   * Spacing Utilities (gaps, padding presets)
-   */
-  .gap-xs {
-    gap: 0.25rem;
-  }
-
-  .gap-sm {
-    gap: 0.5rem;
-  }
-
-  .gap-md {
-    gap: 1rem;
-  }
-
-  .gap-lg {
-    gap: 1.5rem;
-  }
-
-  .gap-xl {
-    gap: 2rem;
-  }
-
-  /**
-   * Flexbox Utilities
-   */
-  .flex-row {
-    display: flex;
-    flex-direction: row;
-  }
-
-  .flex-col {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .flex-wrap {
-    flex-wrap: wrap;
-  }
-
-  /**
-   * Utility for dynamic width (typically for progress bars)
-   */
-  .progress-width {
-    width: 100%;
-  }
-
-  /**
-   * Interaction States
-   */
-  .clickable {
-    cursor: pointer;
-    transition: all 0.2s ease-in-out;
-  }
-
-  .clickable:hover {
-    background-color: var(--pf-hover-overlay);
-  }
-
-  .clickable:active {
-    background-color: var(--pf-active-overlay);
-  }
-
-  /**
-   * Text alignment helpers (when Tailwind flex isn't appropriate)
-   */
-  .text-align-center {
-    text-align: center;
-  }
-
-  .text-align-right {
-    text-align: right;
   }
 
 }

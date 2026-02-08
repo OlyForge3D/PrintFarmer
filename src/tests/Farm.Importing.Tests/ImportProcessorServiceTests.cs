@@ -5,7 +5,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Importing.Services.Import;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using FluentValidation.Results;
@@ -22,7 +22,7 @@ public class ImportProcessorServiceTests
     }
 
     // Minimal validator used by tests
-    private class DummyCreatePrinterDtoValidator : AbstractValidator<CreatePrinterDto>
+    private class DummyCreatePrinterDtoValidator : AbstractValidator<CreatePrinterFromDiscoveryDto>
     {
         public DummyCreatePrinterDtoValidator() => RuleFor(x => x.Name).NotNull();
     }
@@ -40,7 +40,7 @@ public class ImportProcessorServiceTests
         using var unitOfWork = new AppUnitOfWork(db);
         var processor = new ImportProcessorService(unitOfWork, null!, new DummyCreatePrinterDtoValidator());
 
-        var dtos = new[] { new CreatePrinterDto { Name = "P1", ServerUrl = "http://p1" } };
+        var dtos = new[] { new CreatePrinterFromDiscoveryDto { Name = "P1", ServerUrl = "http://p1" } };
         var results = await processor.ProcessAsync(dtos, "skip", default);
         Assert.Single(results);
         Assert.Equal("Skipped", results[0].Status);
@@ -59,7 +59,7 @@ public class ImportProcessorServiceTests
         // Wrap DbContext in UnitOfWork for service dependency
         using var unitOfWork = new AppUnitOfWork(db);
         var processor = new ImportProcessorService(unitOfWork, null!, new DummyCreatePrinterDtoValidator());
-        var dtos = new[] { new CreatePrinterDto { Name = "P1", ServerUrl = "http://p1", Notes = "new" } };
+        var dtos = new[] { new CreatePrinterFromDiscoveryDto { Name = "P1", ServerUrl = "http://p1", Notes = "new" } };
         var results = await processor.ProcessAsync(dtos, "update", default);
         Assert.Single(results);
         Assert.Equal("Imported", results[0].Status);

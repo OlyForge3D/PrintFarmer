@@ -15,13 +15,27 @@ public class DataExportService : IDataExportService
 {
     private readonly AppDbContext _context;
     private readonly IUnifiedLoggingService _logger;
+    private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
 
     public DataExportService(
         AppDbContext context,
-        IUnifiedLoggingService logger)
+        IUnifiedLoggingService logger,
+        Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector)
     {
         _context = context;
         _logger = logger;
+        _sensitiveDataProtector = sensitiveDataProtector;
+    }
+
+    private string? DecryptIfNeeded(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // If decryption fails (e.g., plaintext legacy values), return original.
+        return _sensitiveDataProtector.Unprotect(value) ?? value;
     }
 
     public async Task<CatalogExportDto> ExportCatalogAsync(CancellationToken ct = default)
@@ -76,7 +90,10 @@ public class DataExportService : IDataExportService
                 ModelName = p.Model?.Name,
                 LocationName = p.Location?.Name,
                 Backend = p.Backend,
-                IsAvailable = p.IsAvailable
+                IsAvailable = p.IsAvailable,
+                ApiKey = DecryptIfNeeded(p.ApiKey),
+                Username = p.Username,
+                Password = DecryptIfNeeded(p.Password)
             }).ToList();
 
             _logger.LogInformation($"[DataExport] Printers export complete: {exportData.Count} printers");

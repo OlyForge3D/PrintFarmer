@@ -41,17 +41,20 @@ public static class DatabaseInitializationExtensions
 
             try
             {
-                // For local development and testing we prefer EnsureCreated to avoid relying on migrations
-                // which may not be embedded in test assemblies. Production scenarios should use migrations.
-                if (app.Environment.IsDevelopment() || string.Equals(app.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+                // Production: Use migrations for proper schema versioning and updates
+                // Development: Use EnsureCreated for rapid iteration (no migration files needed)
+                bool isDevelopment = app.Environment.IsDevelopment();
+                if (isDevelopment)
                 {
+                    // EnsureCreated is fast but won't update existing schema
                     _ = await db.Database.EnsureCreatedAsync(startupCts.Token);
-                    logger.LogInformation("[Startup]   ✓ Schema ensured (EnsureCreated)");
+                    logger.LogInformation("[Startup]   ✓ Schema ensured (Development mode)");
                 }
                 else
                 {
-                    await db.Database.MigrateAsync(startupCts.Token);
-                    logger.LogInformation("[Startup]   ✓ Migrations applied");
+                    // Production mode: Use migrations, but handle the case where DB was
+                    // previously created with EnsureCreated (no __EFMigrationsHistory table)
+                    await ApplyMigrationsWithFallbackAsync(db, logger, startupCts.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -228,5 +231,193 @@ public static class DatabaseInitializationExtensions
             await Console.Error.WriteAsync($"[Startup] FATAL: Database initialization failed: {ex.Message}\n{ex.StackTrace}");
             throw; // Fail fast for container restart
         }
+    }
+
+    /// <summary>
+    /// Applies migrations with fallback handling for databases created with EnsureCreated().
+    /// When a database was initially created with EnsureCreated(), it has no __EFMigrationsHistory
+    /// table. Applying migrations will fail because the schema already exists. This method
+    /// detects that scenario and either:
+    /// 1. Creates the history table and marks existing migrations as applied, OR
+    /// 2. Falls back to no-op if the schema already matches the model
+    /// </summary>
+    private static async Task ApplyMigrationsWithFallbackAsync(
+        AppDbContext db,
+        IUnifiedLoggingService logger,
+        CancellationToken cancellationToken)
+    {
+        var pendingMigrations = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+
+        if (pendingMigrations.Count == 0)
+        {
+            logger.LogInformation("[Startup]   ✓ No pending migrations - schema is up to date");
+            return;
+        }
+
+        logger.LogInformation(
+            "[Startup]   Found {Count} pending migration(s): {Migrations}",
+            pendingMigrations.Count.ToString(), string.Join(", ", pendingMigrations));
+
+        // Check if the database was created with EnsureCreated (tables exist but no migration history)
+        bool tablesExist = await CheckIfSchemaTablesExistAsync(db, cancellationToken);
+
+        if (tablesExist)
+        {
+            // Database has tables but no migration history - this is an EnsureCreated database
+            // We need to "baseline" the migrations by marking InitialCreate as applied without running it
+            logger.LogWarning("[Startup]   ⚠ Database tables exist without migration history (created with EnsureCreated)");
+            logger.LogInformation("[Startup]   Baselining migrations - marking InitialCreate as applied...");
+
+            try
+            {
+                // Find the InitialCreate migration (should be the first one)
+                var initialMigration = pendingMigrations.FirstOrDefault(m => m.Contains("InitialCreate"));
+                if (initialMigration != null)
+                {
+                    // Insert a record into __EFMigrationsHistory to mark InitialCreate as applied
+                    // This allows future migrations to work correctly
+                    string historyTable = "__EFMigrationsHistory";
+                    string productVersion = GetEfCoreProductVersion();
+
+                    // Ensure history table exists
+                    await EnsureMigrationHistoryTableExistsAsync(db, logger, cancellationToken);
+
+                    // Insert the baseline migration record
+                    string insertSql = $"INSERT INTO \"{historyTable}\" (\"MigrationId\", \"ProductVersion\") VALUES ('{initialMigration}', '{productVersion}')";
+                    await db.Database.ExecuteSqlRawAsync(insertSql, cancellationToken);
+
+                    logger.LogInformation("[Startup]   ✓ Baselined migration: {Migration}", initialMigration);
+
+                    // Now apply any remaining migrations
+                    var remainingMigrations = pendingMigrations.Where(m => m != initialMigration).ToList();
+                    if (remainingMigrations.Count > 0)
+                    {
+                        logger.LogInformation("[Startup]   Applying {Count} remaining migration(s)...", remainingMigrations.Count.ToString());
+                        await db.Database.MigrateAsync(cancellationToken);
+                        logger.LogInformation("[Startup]   ✓ Remaining migrations applied");
+                    }
+                    else
+                    {
+                        logger.LogInformation("[Startup]   ✓ No additional migrations to apply");
+                    }
+                }
+                else
+                {
+                    // No InitialCreate migration - schema was created manually or differently
+                    logger.LogWarning("[Startup]   ⚠ No InitialCreate migration found - skipping migration (schema already exists)");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[Startup]   Failed to baseline migrations: {Message}", ex.Message);
+                throw;
+            }
+        }
+        else
+        {
+            // Fresh database - apply migrations normally
+            logger.LogInformation("[Startup]   Applying migrations to new database...");
+            await db.Database.MigrateAsync(cancellationToken);
+            logger.LogInformation("[Startup]   ✓ Migrations applied (Production mode)");
+        }
+    }
+
+    /// <summary>
+    /// Checks if key schema tables exist (indicating EnsureCreated was used previously)
+    /// </summary>
+    private static async Task<bool> CheckIfSchemaTablesExistAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        try
+        {
+            string providerName = db.Database.ProviderName ?? string.Empty;
+            string sql;
+
+            if (providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+            {
+                // PostgreSQL
+                sql = "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Printers')";
+            }
+            else if (providerName.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                // SQL Server
+                sql = "SELECT CASE WHEN EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Printers') THEN 1 ELSE 0 END";
+            }
+            else
+            {
+                // SQLite or other - check sqlite_master
+                sql = "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='Printers')";
+            }
+
+            using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            await db.Database.OpenConnectionAsync(cancellationToken);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToBoolean(result);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Ensures the EF Core migration history table exists
+    /// </summary>
+    private static async Task EnsureMigrationHistoryTableExistsAsync(
+        AppDbContext db,
+        IUnifiedLoggingService logger,
+        CancellationToken cancellationToken)
+    {
+        string providerName = db.Database.ProviderName ?? string.Empty;
+        string createTableSql;
+
+        if (providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            createTableSql = @"
+                CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
+                    ""MigrationId"" character varying(150) NOT NULL,
+                    ""ProductVersion"" character varying(32) NOT NULL,
+                    CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
+                )";
+        }
+        else if (providerName.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+        {
+            createTableSql = @"
+                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='__EFMigrationsHistory' AND xtype='U')
+                CREATE TABLE [__EFMigrationsHistory] (
+                    [MigrationId] nvarchar(150) NOT NULL,
+                    [ProductVersion] nvarchar(32) NOT NULL,
+                    CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY ([MigrationId])
+                )";
+        }
+        else
+        {
+            // SQLite
+            createTableSql = @"
+                CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
+                    ""MigrationId"" TEXT NOT NULL CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY,
+                    ""ProductVersion"" TEXT NOT NULL
+                )";
+        }
+
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(createTableSql, cancellationToken);
+            logger.LogInformation("[Startup]   ✓ Migration history table ensured");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("[Startup]   Migration history table may already exist: {Message}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Gets the EF Core product version for migration history records
+    /// </summary>
+    private static string GetEfCoreProductVersion()
+    {
+        var efCoreAssembly = typeof(DbContext).Assembly;
+        var version = efCoreAssembly.GetName().Version;
+        return version?.ToString() ?? "9.0.0";
     }
 }

@@ -8,6 +8,7 @@ import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfir
 import type { Printer } from '@/types/api';
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { Button, Alert } from '@/common/components/ui';
+import { PrinterMaintenanceActionsModal } from '@/features/maintenance/components/PrinterMaintenanceActionsModal';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
@@ -17,6 +18,7 @@ export function PrinterTableViewPage() {
   const [printersToDelete, setPrintersToDelete] = useState<Printer[]>([]);
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [maintenancePrinter, setMaintenancePrinter] = useState<Printer | null>(null);
 
   // Handler functions
   const handleEditPrinter = (printer: Printer) => {
@@ -60,20 +62,24 @@ export function PrinterTableViewPage() {
     }
   };
 
+  const handleOpenMaintenance = (printer: Printer) => {
+    setMaintenancePrinter(printer);
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div className="space-y-2">
-            <div className="h-8 w-32 bg-gray-200 rounded animate-pulse"></div>
-            <div className="h-4 w-64 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-8 w-32 bg-gray-200 rounded-sm animate-pulse"></div>
+            <div className="h-4 w-64 bg-gray-200 rounded-sm animate-pulse"></div>
           </div>
-          <div className="h-10 w-32 bg-gray-200 rounded animate-pulse"></div>
+          <div className="h-10 w-32 bg-gray-200 rounded-sm animate-pulse"></div>
         </div>
-        <div className="bg-white shadow rounded-lg p-6">
+        <div className="bg-white shadow-sm rounded-lg p-6">
           <div className="animate-pulse space-y-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              <div key={i} className="h-16 bg-gray-200 rounded-sm"></div>
             ))}
           </div>
         </div>
@@ -121,6 +127,7 @@ export function PrinterTableViewPage() {
           onEdit={handleEditPrinter}
           onDelete={handleDeletePrinters}
           onBulkSetMaintenance={handleBulkSetMaintenance}
+          onOpenMaintenance={handleOpenMaintenance}
         />
       ) : (
         <div className="text-center py-12">
@@ -166,6 +173,14 @@ export function PrinterTableViewPage() {
           refetch();
         }}
       />
+
+      {maintenancePrinter && (
+        <PrinterMaintenanceActionsModal
+          isOpen={true}
+          printer={maintenancePrinter}
+          onClose={() => setMaintenancePrinter(null)}
+        />
+      )}
     </div>
   );
 }

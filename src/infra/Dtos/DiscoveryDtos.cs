@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 

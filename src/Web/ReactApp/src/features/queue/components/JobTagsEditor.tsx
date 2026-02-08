@@ -125,18 +125,23 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
 
   if (isEditing) {
     return (
-      <div className="tags-editor editing">
-        <div className="tags-input-wrapper">
-          <div className="tags-list">
+      <div className="space-y-2">
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5">
             {localTags.map((tag) => (
-              <div key={tag} className="tag-chip" role="status" aria-label={`Tag: ${tag}`}>
-                <span className="tag-text">{tag}</span>
+              <div 
+                key={tag} 
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full" 
+                role="status" 
+                aria-label={`Tag: ${tag}`}
+              >
+                <span>{tag}</span>
                 <Button
-                  className="tag-remove-button"
+                  className="p-0 h-4 w-4 min-w-0 hover:text-pf-error"
                   onClick={() => removeTag(tag)}
                   aria-label={`Remove tag ${tag}`}
                   title={`Remove tag ${tag}`}
-                  variant="subtle"
+                  variant="ghost"
                   size="sm"
                 >
                   ✕
@@ -145,7 +150,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
             ))}
           </div>
 
-          <div className="tag-input-container">
+          <div className="relative">
             <input
               ref={inputRef}
               type="text"
@@ -156,6 +161,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               placeholder="Add tags (press Enter)"
               maxLength={MAX_TAG_LENGTH}
+              className="w-full px-3 py-1.5 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               aria-label="Add tags"
               aria-autocomplete="list"
               aria-controls="tag-suggestions"
@@ -163,49 +169,49 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
               aria-invalid={!!error}
               aria-describedby={error ? 'tags-error' : 'tags-help'}
             />
+
+            {showSuggestions && suggestions.length > 0 && (
+              <ul
+                id="tag-suggestions"
+                className="absolute z-10 mt-1 w-full bg-pf-bg-1 border border-pf-border rounded-md shadow-lg max-h-40 overflow-auto"
+                ref={suggestionsRef}
+                role="listbox"
+              >
+                {suggestions.map((suggestion) => (
+                  <li
+                    key={suggestion}
+                    className="px-3 py-1.5 text-sm text-pf-text-primary hover:bg-pf-bg-2 cursor-pointer"
+                    role="option"
+                    onClick={() => handleSuggestionClick(suggestion)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSuggestionClick(suggestion);
+                      }
+                    }}
+                  >
+                    {suggestion}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
 
-        {showSuggestions && suggestions.length > 0 && (
-          <ul
-            id="tag-suggestions"
-            className="tag-suggestions"
-            ref={suggestionsRef}
-            role="listbox"
-          >
-            {suggestions.map((suggestion) => (
-              <li
-                key={suggestion}
-                className="suggestion-item"
-                role="option"
-                onClick={() => handleSuggestionClick(suggestion)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSuggestionClick(suggestion);
-                  }
-                }}
-              >
-                {suggestion}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="tags-metadata">
-          <div className="tag-count">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-pf-text-muted">
             {localTags.length} / {MAX_TAGS} tags
-          </div>
+          </span>
 
           {error && (
-            <div id="tags-error" className="error-message" role="alert">
+            <span id="tags-error" className="text-pf-error" role="alert">
               {error}
-            </div>
+            </span>
           )}
 
           {!error && (
-            <div id="tags-help" className="help-text">
+            <span id="tags-help" className="text-pf-text-muted italic">
               Suggested: {COMMON_TAGS.filter((t) => !localTags.includes(t)).slice(0, 3).join(', ')}
-            </div>
+            </span>
           )}
         </div>
       </div>
@@ -213,17 +219,20 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
   }
 
   return (
-    <div className="tags-editor view-only">
+    <div className="min-h-[40px]">
       {localTags.length > 0 ? (
-        <div className="tags-list">
+        <div className="flex flex-wrap gap-1.5">
           {localTags.map((tag) => (
-            <span key={tag} className="tag-chip view-only">
+            <span 
+              key={tag} 
+              className="inline-flex px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full"
+            >
               {tag}
             </span>
           ))}
         </div>
       ) : (
-        <p className="empty-message">No tags added</p>
+        <p className="text-sm text-pf-text-muted italic">No tags added</p>
       )}
     </div>
   );

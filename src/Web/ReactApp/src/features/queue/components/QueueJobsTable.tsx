@@ -2,9 +2,23 @@ import { Button, Checkbox, Select } from "@/common/components/ui";
 import { useState } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 
+/**
+ * Formats a duration in seconds to a human-readable string (e.g., "2h 30m" or "45m")
+ */
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
 export interface QueueJobsTableProps {
   jobs: QueuedPrintJobWithFileMetaDto[];
   isLoading?: boolean;
+  dispatchingJobId?: string | null;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -16,6 +30,7 @@ export interface QueueJobsTableProps {
 export function QueueJobsTable({
   jobs,
   isLoading = false,
+  dispatchingJobId = null,
   onPause,
   onResume,
   onCancel,
@@ -39,7 +54,7 @@ export function QueueJobsTable({
     if (selectedJobs.size === jobs.length) {
       setSelectedJobs(new Set());
     } else {
-      setSelectedJobs(new Set(jobs.map((job) => job.id)));
+      setSelectedJobs(new Set(jobs.map((job) => job.job.id)));
     }
   };
 
@@ -113,6 +128,8 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Printer</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Model</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Material</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Est. Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Filament</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Status</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Priority</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Actions</th>
@@ -128,6 +145,18 @@ export function QueueJobsTable({
             const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "-";
             const status = job.status || "Unknown";
             const priority = job.priority || 0;
+            
+            // Get estimated time from job or gcode file metadata
+            const estimatedTimeSeconds = job.estimatedPrintTimeSeconds || jobWrapper.gcodeFile?.estimatedPrintTimeSeconds;
+            const estimatedTimeDisplay = estimatedTimeSeconds 
+              ? formatDuration(estimatedTimeSeconds)
+              : "-";
+            
+            // Get filament usage from job or gcode file metadata (convert grams to display)
+            const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
+            const filamentDisplay = filamentGrams 
+              ? `${filamentGrams.toFixed(1)}g`
+              : "-";
 
             return (
               <tr
@@ -155,6 +184,8 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary">{printerName}</td>
                 <td className="px-4 py-3 text-pf-text-secondary">{model}</td>
                 <td className="px-4 py-3 text-pf-text-secondary">{material}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{estimatedTimeDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{filamentDisplay}</td>
                 <td className="px-4 py-3">
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
@@ -188,8 +219,19 @@ export function QueueJobsTable({
                         }}
                         variant="primary"
                         size="sm"
+                        disabled={dispatchingJobId === jobId}
                       >
-                        Start Print
+                        {dispatchingJobId === jobId ? (
+                          <span className="flex items-center gap-1">
+                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Starting...
+                          </span>
+                        ) : (
+                          "Start Print"
+                        )}
                       </Button>
                     )}
                     {status === "Printing" && (

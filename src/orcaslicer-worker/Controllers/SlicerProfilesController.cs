@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,6 +16,7 @@ namespace Farm.OrcaSlicer.Worker.Controllers;
 public class ProfilesController(ISlicerProfilesService profileService, IUnifiedLoggingService logger) : ControllerBase
 {
     private readonly ISlicerProfilesService _profileService = profileService;
+    private readonly CachedOrcaProfilesService? _cachedService = profileService as CachedOrcaProfilesService;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
@@ -25,57 +27,69 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
     /// Filament and process profiles are associated with machine profiles via the compatible_printers array.
     /// Compatible printers are resolved from both explicit compatible_printers arrays and compatible_printers_condition expressions.
     /// </remarks>
+    /// <param name="manufacturer">Optional manufacturer name to filter by</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>All available profiles organized by manufacturer and model</returns>
     [HttpGet]
     [ProducesResponseType(typeof(AllProfilesResponseDto), 200)]
-    public async Task<ActionResult<AllProfilesResponseDto>> GetAllProfilesAsync(CancellationToken ct)
+    public async Task<ActionResult<AllProfilesResponseDto>> GetAllProfilesAsync([FromQuery] string? manufacturer, CancellationToken ct)
     {
         try
         {
-            _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy");
+            _logger.LogInformation($"Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy{(string.IsNullOrEmpty(manufacturer) ? string.Empty : $" for manufacturer '{manufacturer}'")}");
 
+            // Load machine model profiles (base templates from machine_model_list)
+            IList<MachineModelProfileDto> machineModelProfiles = await _profileService.ListAvailableMachineModelProfilesAsync(ct);
+
+            // Load machine profiles (nozzle variants from machine_list)
             IList<MachineProfileDto> machineProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
             IList<FilamentProfileDto> filamentProfiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
             IList<ProcessProfileDto> processProfiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
 
+            // Filter by manufacturer if specified
+            if (!string.IsNullOrEmpty(manufacturer))
+            {
+                machineModelProfiles = machineModelProfiles
+                    .Where(p => (p.Manufacturer ?? "Unknown").Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                machineProfiles = machineProfiles
+                    .Where(p => (p.Manufacturer ?? "Unknown").Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Note: Filament/Process profiles may not have Manufacturer set or may be from "OrcaFilamentLibrary" / Generic
+                // So we don't filter them strictly by manufacturer property yet,
+                // we filter them by compatibility with the filtered machines in the loop below.
+            }
+
             // Build the hierarchy organized by manufacturer and model
-            Dictionary<string, ManufacturerProfilesDto> byHierarchy = new Dictionary<string, ManufacturerProfilesDto>();
+            Dictionary<string, ManufacturerProfilesDto> byHierarchy = new();
 
             // Group machine profiles by manufacturer
             Dictionary<string, List<MachineProfileDto>> machinesByManufacturer = machineProfiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            foreach ((string? manufacturer, List<MachineProfileDto>? machines) in machinesByManufacturer)
+            foreach ((string mfgName, List<MachineProfileDto> machines) in machinesByManufacturer)
             {
-                ManufacturerProfilesDto manufacturerProfiles = new ManufacturerProfilesDto { Name = manufacturer };
-                Dictionary<string, PrinterModelProfilesDto> models = new Dictionary<string, PrinterModelProfilesDto>();
+                ManufacturerProfilesDto manufacturerProfiles = new()
+                { Name = mfgName };
+                Dictionary<string, PrinterModelProfilesDto> models = new();
 
-                // Group machine profiles by model using name matching
-                // Machine profile names are like "Prusa CORE One 0.4 nozzle"
-                // Model identifiers can be extracted from these names
-                Dictionary<string, List<MachineProfileDto>> machinesByModelName = new Dictionary<string, List<MachineProfileDto>>();
-                foreach (MachineProfileDto machine in machines)
-                {
-                    string modelName = ExtractModelName(machine.Name ?? string.Empty);
-                    if (!machinesByModelName.TryGetValue(modelName, out List<MachineProfileDto>? machineList))
-                    {
-                        machineList = new List<MachineProfileDto>();
-                        machinesByModelName[modelName] = machineList;
-                    }
-
-                    machineList.Add(machine);
-                }
+                // Group machine profiles by printer_model field (already parsed from JSON)
+                // e.g., "Elegoo Centauri Carbon" groups all nozzle variants together
+                Dictionary<string, List<MachineProfileDto>> machinesByModelName = machines
+                    .GroupBy(m => m.PrinterModel ?? m.Name ?? "Unknown")
+                    .ToDictionary(g => g.Key, g => g.ToList());
 
                 // For each model, collect its machine, filament, and process profiles
-                foreach ((string? modelName, List<MachineProfileDto>? modelMachines) in machinesByModelName)
+                foreach ((string modelName, List<MachineProfileDto> modelMachines) in machinesByModelName)
                 {
-                    string modelId = GenerateModelId(manufacturer, modelName);
-                    PrinterModelProfilesDto modelProfiles = new PrinterModelProfilesDto
+                    // modelName IS the printer_model (OrcaSlicer alias) - use it directly
+                    PrinterModelProfilesDto modelProfiles = new()
                     {
                         Name = modelName,
-                        ModelId = modelId
+                        ModelId = modelName
                     };
 
                     // Add all machine profiles for this model
@@ -114,17 +128,21 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
                             p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
                         .ToList();
 
-                    models[modelId] = modelProfiles;
+                    models[modelName] = modelProfiles;
                 }
 
                 manufacturerProfiles.Models = models;
-                byHierarchy[manufacturer] = manufacturerProfiles;
+                byHierarchy[mfgName] = manufacturerProfiles;
             }
 
             // Also provide legacy flat structure for backward compatibility
-            AllProfilesResponseDto response = new AllProfilesResponseDto
+            AllProfilesResponseDto response = new()
             {
                 ByHierarchy = byHierarchy,
+
+                MachineModelProfiles = machineModelProfiles
+                    .GroupBy(p => p.Manufacturer ?? "Unknown")
+                    .ToDictionary(g => g.Key, g => (IList<MachineModelProfileDto>)g.ToList()),
 
                 MachineProfiles = machineProfiles
                     .GroupBy(p => p.Manufacturer ?? "Unknown")
@@ -139,7 +157,7 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
                     .ToDictionary(g => g.Key, g => (IList<ProcessProfileDto>)g.ToList())
             };
 
-            _logger.LogInformation($"Returning {machineProfiles.Count} machine, {filamentProfiles.Count} filament, {processProfiles.Count} process profiles in {byHierarchy.Count} manufacturers");
+            _logger.LogInformation($"Returning {machineModelProfiles.Count} machine model, {machineProfiles.Count} machine, {filamentProfiles.Count} filament, {processProfiles.Count} process profiles in {byHierarchy.Count} manufacturers");
             return Ok(response);
         }
         catch (Exception ex)
@@ -261,24 +279,457 @@ public class ProfilesController(ISlicerProfilesService profileService, IUnifiedL
     }
 
     /// <summary>
-    /// Extract the base model name from a machine profile name.
-    /// e.g., "Prusa CORE One 0.4 nozzle" -> "Prusa CORE One"
+    /// Get distinct printer models for a manufacturer (for UI dropdowns).
     /// </summary>
-    private static string ExtractModelName(string machineName)
+    /// <param name="manufacturer">Manufacturer name (e.g., "Elegoo", "Prusa")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of printer model names</returns>
+    [HttpGet("models/{manufacturer}")]
+    [ProducesResponseType(typeof(List<string>), 200)]
+    public async Task<ActionResult<List<string>>> GetPrinterModelsAsync(string manufacturer, CancellationToken ct)
     {
-        // Machine profile names follow pattern: "{Model} {Variant}" where variant is like "0.4 nozzle"
-        // We need to remove nozzle size suffixes
-        string[] parts = machineName.Split([" 0."], StringSplitOptions.None);
-        return parts.Length > 1 ? parts[0].Trim() : machineName;
+        try
+        {
+            _logger.LogInformation($"Fetching printer models for manufacturer '{manufacturer}'");
+
+            List<string> models;
+            if (_cachedService != null)
+            {
+                // Direct indexed query on printer_model column
+                models = await _cachedService.GetPrinterModelsAsync(manufacturer, ct);
+            }
+            else
+            {
+                // Fallback: filter in memory and get distinct printer_model values
+                models = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+                    .Where(p => (p.Manufacturer ?? "Unknown").Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
+                    .Select(p => p.PrinterModel)
+                    .Where(m => !string.IsNullOrEmpty(m))
+                    .Distinct()
+                    .OrderBy(m => m)
+                    .ToList()!;
+            }
+
+            _logger.LogInformation($"Returning {models.Count} models for manufacturer '{manufacturer}'");
+            return Ok(models);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching models for manufacturer '{manufacturer}': {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch printer models", message = ex.Message });
+        }
     }
 
     /// <summary>
-    /// Generate a model identifier from manufacturer and model name.
-    /// e.g., "Prusa", "CORE One" -> "Prusa_CORE_One"
+    /// Get machine profiles by printer_model (OrcaSlicer alias).
+    /// Pass the exact printer_model value from OrcaSlicer (e.g., "Thinker X400", "RatRig V-Core 4 HYBRID 400").
     /// </summary>
-    private static string GenerateModelId(string manufacturer, string modelName)
+    /// <param name="printerModel">The exact printer_model value (OrcaSlicer alias)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Machine profiles matching the printer_model</returns>
+    [HttpGet("machine/{printerModel}")]
+    [ProducesResponseType(typeof(List<MachineProfileDto>), 200)]
+    public async Task<ActionResult<List<MachineProfileDto>>> GetMachineProfilesAsync(
+        string printerModel,
+        CancellationToken ct)
     {
-        string modelIdentifier = modelName.Replace(" ", "_", StringComparison.Ordinal);
-        return $"{manufacturer}_{modelIdentifier}";
+        try
+        {
+            // Normalize underscores to spaces (URL encoding)
+            string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
+
+            _logger.LogInformation($"Fetching machine profiles for printer_model='{normalizedModel}'");
+
+            List<MachineProfileDto> result;
+            if (_cachedService != null)
+            {
+                result = await _cachedService.GetMachineProfilesByPrinterModelAsync(normalizedModel, ct);
+            }
+            else
+            {
+                // Fallback: filter in memory
+                result = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+                    .Where(p => (p.PrinterModel ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            _logger.LogInformation($"Returning {result.Count} machine profiles for '{normalizedModel}'");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching machine profiles for '{printerModel}': {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
+        }
     }
+
+    /// <summary>
+    /// Get process profiles compatible with a specific printer_model (OrcaSlicer alias).
+    /// </summary>
+    /// <param name="printerModel">The printer_model value (OrcaSlicer alias)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Process profiles compatible with machines matching the printer_model</returns>
+    [HttpGet("process/{printerModel}")]
+    [ProducesResponseType(typeof(List<ProcessProfileDto>), 200)]
+    public async Task<ActionResult<List<ProcessProfileDto>>> GetProcessProfilesAsync(
+        string printerModel,
+        CancellationToken ct)
+    {
+        try
+        {
+            string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
+            _logger.LogInformation($"Fetching process profiles for printer_model='{normalizedModel}'");
+
+            // Get machine profiles matching the printer_model
+            List<MachineProfileDto> machineProfiles;
+            if (_cachedService != null)
+            {
+                machineProfiles = await _cachedService.GetMachineProfilesByPrinterModelAsync(normalizedModel, ct);
+            }
+            else
+            {
+                machineProfiles = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+                    .Where(p => (p.PrinterModel ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            HashSet<string> machineNames = machineProfiles
+                .Select(p => p.Name ?? string.Empty)
+                .ToHashSet();
+
+            if (machineNames.Count == 0)
+            {
+                return Ok(new List<ProcessProfileDto>()); // No matching machines
+            }
+
+            // Get all process profiles and filter by compatibility
+            IList<ProcessProfileDto> allProcesses = await _profileService.ListAvailableProcessProfilesAsync(ct);
+
+            List<ProcessProfileDto> result = allProcesses
+                .Where(p =>
+
+                    // Compatible with a machine in this model
+                    (p.CompatiblePrinters != null && p.CompatiblePrinters.Any(cp => machineNames.Contains(cp))) ||
+
+                    // Or universal (no specific compatibility)
+                    p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} process profiles for '{normalizedModel}'");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching process profiles for '{printerModel}': {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch process profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get filament profiles compatible with a specific printer_model (OrcaSlicer alias).
+    /// </summary>
+    /// <param name="printerModel">The printer_model value (OrcaSlicer alias)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Filament profiles compatible with machines matching the printer_model</returns>
+    [HttpGet("filament/{printerModel}")]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), 200)]
+    public async Task<ActionResult<List<FilamentProfileDto>>> GetFilamentProfilesAsync(
+        string printerModel,
+        CancellationToken ct)
+    {
+        try
+        {
+            string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
+            _logger.LogInformation($"Fetching filament profiles for printer_model='{normalizedModel}'");
+
+            // Get machine profiles matching the printer_model
+            List<MachineProfileDto> machineProfiles;
+            if (_cachedService != null)
+            {
+                machineProfiles = await _cachedService.GetMachineProfilesByPrinterModelAsync(normalizedModel, ct);
+            }
+            else
+            {
+                machineProfiles = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+                    .Where(p => (p.PrinterModel ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            HashSet<string> machineNames = machineProfiles
+                .Select(p => p.Name ?? string.Empty)
+                .ToHashSet();
+
+            if (machineNames.Count == 0)
+            {
+                return Ok(new List<FilamentProfileDto>()); // No matching machines
+            }
+
+            // Get all filament profiles and filter by compatibility
+            IList<FilamentProfileDto> allFilaments = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+
+            List<FilamentProfileDto> result = allFilaments
+                .Where(f =>
+
+                    // Explicitly compatible with a machine in this model
+                    (f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineNames.Contains(cp))) ||
+
+                    // From OrcaFilamentLibrary (universal)
+                    (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+
+                    // No specific compatibility (universally available)
+                    f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} filament profiles for '{normalizedModel}'");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament profiles for '{printerModel}': {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch filament profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get all profiles (machine, filament, process) for a specific printer_model (OrcaSlicer alias).
+    /// This is the recommended single-call endpoint for the profile import wizard.
+    /// </summary>
+    /// <param name="printerModel">The printer_model value (OrcaSlicer alias)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>All profiles for the specified printer_model</returns>
+    [HttpGet("for-model/{printerModel}")]
+    [ProducesResponseType(typeof(ModelProfilesResponseDto), 200)]
+    public async Task<ActionResult<ModelProfilesResponseDto>> GetAllProfilesForModelAsync(
+        string printerModel,
+        CancellationToken ct)
+    {
+        try
+        {
+            string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
+            _logger.LogInformation($"Fetching all profiles for printer_model='{normalizedModel}'");
+
+            // Get machine profiles matching the printer_model
+            List<MachineProfileDto> machineProfiles;
+            if (_cachedService != null)
+            {
+                machineProfiles = await _cachedService.GetMachineProfilesByPrinterModelAsync(normalizedModel, ct);
+            }
+            else
+            {
+                machineProfiles = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+                    .Where(p => (p.PrinterModel ?? string.Empty).Equals(normalizedModel, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            HashSet<string> machineNames = machineProfiles.Select(p => p.Name ?? string.Empty).ToHashSet();
+
+            // Get compatible process and filament profiles
+            IList<ProcessProfileDto> allProcesses = await _profileService.ListAvailableProcessProfilesAsync(ct);
+            IList<FilamentProfileDto> allFilaments = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+
+            List<ProcessProfileDto> compatibleProcesses = allProcesses
+                .Where(p =>
+                    (p.CompatiblePrinters != null && p.CompatiblePrinters.Any(cp => machineNames.Contains(cp))) ||
+                    p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
+                .ToList();
+
+            List<FilamentProfileDto> compatibleFilaments = allFilaments
+                .Where(f =>
+                    (f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineNames.Contains(cp))) ||
+                    (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+                    f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
+                .ToList();
+
+            // Extract manufacturer from first machine profile (they all share the same printer_model)
+            string manufacturer = machineProfiles.FirstOrDefault()?.Manufacturer ?? "Unknown";
+
+            ModelProfilesResponseDto result = new()
+            {
+                Manufacturer = manufacturer,
+                Model = normalizedModel,
+                MachineProfiles = machineProfiles,
+                ProcessProfiles = compatibleProcesses,
+                FilamentProfiles = compatibleFilaments
+            };
+
+            _logger.LogInformation(
+                $"Returning profiles for '{normalizedModel}': {machineProfiles.Count} machines, " +
+                $"{compatibleProcesses.Count} processes, {compatibleFilaments.Count} filaments");
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching all profiles for '{printerModel}': {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get a list of all available manufacturers.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of manufacturer names</returns>
+    [HttpGet("manufacturers")]
+    [ProducesResponseType(typeof(List<string>), 200)]
+    public async Task<ActionResult<List<string>>> GetManufacturersAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (_cachedService != null)
+            {
+                List<string> manufacturers = await _cachedService.GetManufacturersAsync(ct);
+                return Ok(manufacturers);
+            }
+
+            // Fallback: get from all profiles
+            IList<MachineProfileDto> machines = await _profileService.ListAvailableMachineProfilesAsync(ct);
+            List<string> result = machines
+                .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
+                .Select(m => m.Manufacturer!)
+                .Distinct()
+                .OrderBy(m => m)
+                .ToList();
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching manufacturers: {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch manufacturers", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get process profiles compatible with specific machine profile names.
+    /// This is the recommended endpoint after user selects machine profiles in the wizard.
+    /// </summary>
+    /// <param name="request">Request containing machine profile names</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Process profiles compatible with the specified machines</returns>
+    [HttpPost("process/for-machines")]
+    [ProducesResponseType(typeof(List<ProcessProfileDto>), 200)]
+    public async Task<ActionResult<List<ProcessProfileDto>>> GetProcessProfilesForMachinesAsync(
+        [FromBody] MachineNamesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request.MachineNames == null || request.MachineNames.Count == 0)
+            {
+                return BadRequest(new { error = "At least one machine name is required" });
+            }
+
+            _logger.LogInformation($"Fetching process profiles for {request.MachineNames.Count} machine(s)");
+
+            HashSet<string> machineNames = request.MachineNames.ToHashSet();
+
+            IList<ProcessProfileDto> allProcesses = await _profileService.ListAvailableProcessProfilesAsync(ct);
+
+            // ONLY return profiles that explicitly list one of the selected machines
+            // Do NOT include universal profiles (those with empty compatible_printers)
+            List<ProcessProfileDto> result = allProcesses
+                .Where(p => p.CompatiblePrinters != null &&
+                            p.CompatiblePrinters.Count > 0 &&
+                            p.CompatiblePrinters.Any(cp => machineNames.Contains(cp)))
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} process profiles for machines: {string.Join(", ", request.MachineNames)}");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching process profiles for machines: {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch process profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get filament profiles compatible with specific machine profile names.
+    /// This is the recommended endpoint after user selects machine profiles in the wizard.
+    /// </summary>
+    /// <param name="request">Request containing machine profile names</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Filament profiles compatible with the specified machines or universal</returns>
+    [HttpPost("filament/for-machines")]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), 200)]
+    public async Task<ActionResult<List<FilamentProfileDto>>> GetFilamentProfilesForMachinesAsync(
+        [FromBody] MachineNamesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request.MachineNames == null || request.MachineNames.Count == 0)
+            {
+                return BadRequest(new { error = "At least one machine name is required" });
+            }
+
+            _logger.LogInformation($"Fetching filament profiles for {request.MachineNames.Count} machine(s)");
+
+            HashSet<string> machineNames = request.MachineNames.ToHashSet();
+
+            IList<FilamentProfileDto> allFilaments = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+
+            // Return profiles that:
+            // 1. Explicitly list one of the selected machines, OR
+            // 2. Are from OrcaFilamentLibrary (universal), OR
+            // 3. Have no compatible_printers (universal)
+            List<FilamentProfileDto> result = allFilaments
+                .Where(f =>
+                    (f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineNames.Contains(cp))) ||
+                    (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+                    f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} filament profiles for machines: {string.Join(", ", request.MachineNames)}");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament profiles for machines: {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch filament profiles", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get template filament profiles from the OrcaFilamentLibrary.
+    /// These are universal profiles not tied to specific printers.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Universal filament profiles from OrcaFilamentLibrary</returns>
+    [HttpGet("filament/templates")]
+    [ProducesResponseType(typeof(List<FilamentProfileDto>), 200)]
+    public async Task<ActionResult<List<FilamentProfileDto>>> GetFilamentTemplatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation("Fetching OrcaFilamentLibrary template profiles");
+
+            IList<FilamentProfileDto> allFilaments = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+
+            // Return only OrcaFilamentLibrary profiles
+            List<FilamentProfileDto> result = allFilaments
+                .Where(f => (f.Manufacturer ?? string.Empty).Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            _logger.LogInformation($"Returning {result.Count} OrcaFilamentLibrary template profiles");
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching filament templates: {ex.Message}");
+            return StatusCode(500, new { error = "Failed to fetch filament templates", message = ex.Message });
+        }
+    }
+}
+
+/// <summary>
+/// Request DTO for fetching profiles by machine names.
+/// </summary>
+public class MachineNamesRequest
+{
+    /// <summary>
+    /// List of machine profile names (e.g., "Elegoo Centauri Carbon 0.4 nozzle")
+    /// </summary>
+    public List<string> MachineNames { get; set; } = [];
 }

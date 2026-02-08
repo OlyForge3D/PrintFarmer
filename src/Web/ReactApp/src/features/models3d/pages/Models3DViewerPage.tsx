@@ -143,7 +143,7 @@ export const Models3DViewerPage: React.FC = () => {
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDragAndDrop}
-            className="border-2 border-dashed border-pf-border rounded-lg p-8 text-center hover:border-pf-accent transition-colors cursor-pointer bg-pf-bg-0 bg-opacity-50"
+            className="border-2 border-dashed border-pf-border rounded-lg p-8 text-center hover:border-pf-accent transition-colors cursor-pointer bg-pf-bg-0/50"
           >
             <UploadIcon className="w-12 h-12 mx-auto mb-3 text-pf-text-muted" />
             <p className="text-pf-text font-medium mb-2">Drag and drop your STL file here</p>
@@ -199,7 +199,7 @@ export const Models3DViewerPage: React.FC = () => {
                   className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
                 >
                   {/* Model Icon/Thumbnail */}
-                  <div className="bg-gradient-to-br from-pf-accent to-blue-700 rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
+                  <div className="bg-linear-to-br from-pf-accent to-blue-700 rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
                     <CubeIcon className="w-12 h-12 text-white opacity-75" />
                   </div>
 

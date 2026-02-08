@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 // No MdiIcons used in this component
 import { ChevronsRightIcon, ChevronsLeftIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
@@ -18,48 +18,34 @@ export function FilamentTypeSelector({
   className
 }: FilamentTypeSelectorProps) {
   const [showSelector, setShowSelector] = useState(false);
-  const [available, setAvailable] = useState<FilamentTypeDto[]>([]);
-  const [selected, setSelected] = useState<FilamentTypeDto[]>([]);
 
-  // Update internal state when props change
-  useEffect(() => {
-    if (!availableFilamentTypes.length) return;
-
+  // Derive available and selected lists from props (no internal state needed)
+  const { available, selected } = useMemo(() => {
+    if (!availableFilamentTypes.length) {
+      return { available: [], selected: [] };
+    }
     const selectedSet = new Set(selectedFilamentTypes);
     const selectedTypes = availableFilamentTypes.filter(ft => selectedSet.has(ft.name));
     const availableTypes = availableFilamentTypes.filter(ft => !selectedSet.has(ft.name));
-
-    setSelected(selectedTypes);
-    setAvailable(availableTypes);
+    return { available: availableTypes, selected: selectedTypes };
   }, [availableFilamentTypes, selectedFilamentTypes]);
 
   const handleMoveToSelected = (filamentType: FilamentTypeDto) => {
-    setAvailable(prev => prev.filter(ft => ft.id !== filamentType.id));
-    setSelected(prev => [...prev, filamentType]);
-    
     const newSelection = [...selectedFilamentTypes, filamentType.name];
     onSelectionChange(newSelection);
   };
 
   const handleMoveToAvailable = (filamentType: FilamentTypeDto) => {
-    setSelected(prev => prev.filter(ft => ft.id !== filamentType.id));
-    setAvailable(prev => [...prev, filamentType].sort((a, b) => a.name.localeCompare(b.name)));
-    
     const newSelection = selectedFilamentTypes.filter(name => name !== filamentType.name);
     onSelectionChange(newSelection);
   };
 
   const handleMoveAllToSelected = () => {
-    const allSelected = [...selected, ...available].sort((a, b) => a.name.localeCompare(b.name));
-    setSelected(allSelected);
-    setAvailable([]);
-    onSelectionChange(allSelected.map(ft => ft.name));
+    const allNames = availableFilamentTypes.map(ft => ft.name);
+    onSelectionChange(allNames);
   };
 
   const handleMoveAllToAvailable = () => {
-    const allAvailable = [...available, ...selected].sort((a, b) => a.name.localeCompare(b.name));
-    setAvailable(allAvailable);
-    setSelected([]);
     onSelectionChange([]);
   };
 

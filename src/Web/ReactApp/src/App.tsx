@@ -9,6 +9,7 @@ import { SetupWizard } from '@/features/auth/components/SetupWizard';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
+import { SlicerProvider } from '@/contexts/SlicerContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
 // Hooks & Utils
@@ -30,15 +31,13 @@ import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { SystemDashboardPage } from '@/features/admin/pages/SystemDashboardPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
-import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
-import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
-import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
 import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
+import { ProfileImportWizardPage } from '@/features/tasks';
 // Admin pages may be missing in some branches; use inline placeholders in routes below.
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
@@ -46,15 +45,61 @@ import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { MaintenanceDashboardPage } from '@/features/maintenance/pages/MaintenanceDashboardPage';
 import { PrinterMaintenancePage } from '@/features/maintenance/pages/PrinterMaintenancePage';
+import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
+import { useSlicer } from '@/hooks/useSlicer';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { useEffect, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
 import { Toaster } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
+
+const LazyWorkerManagementPage = lazy(() =>
+  import('@/features/slicer/pages/WorkerManagementPage').then(mod => ({ default: mod.WorkerManagementPage }))
+);
+const LazySlicerProfilesPage = lazy(() =>
+  import('@/features/slicer/pages/SlicerProfilesPage').then(mod => ({ default: mod.SlicerProfilesPage }))
+);
+const LazyNewSliceJobPage = lazy(() =>
+  import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
+);
+const LazyOrcaSlicerPage = lazy(() => import('@/features/slicer/pages/OrcaSlicerPage'));
+
+function RouteLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading">
+      <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
+    </div>
+  );
+}
+
+function RouteSuspense({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<RouteLoader />}>{children}</Suspense>;
+}
+
+function SlicerUnavailableMessage() {
+  return (
+    <div className="p-6 max-w-3xl">
+      <h1 className="text-xl font-semibold text-pf-text-primary">Slicer is not available</h1>
+      <p className="mt-2 text-pf-text-secondary">
+        The 3D slicer workspace loads only when a slicer worker is enabled and registered.
+      </p>
+      <p className="mt-2 text-sm text-pf-text-tertiary">
+        If you expect slicing to work here, enable the worker and/or register at least one slicer service.
+      </p>
+    </div>
+  );
+}
+
+function SlicerGate({ children }: { children: React.ReactNode }) {
+  const { isLoading, isSlicerAvailable } = useSlicer();
+  if (isLoading) return <RouteLoader />;
+  if (!isSlicerAvailable) return <SlicerUnavailableMessage />;
+  return children;
+}
 
 // Create a query client for React Query
 const queryClient = new QueryClient({
@@ -119,6 +164,7 @@ function AuthenticatedAppRoutes() {
         <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
+        <Route path="cameras" element={<CamerasPage />} />
         <Route path="maintenance" element={<MaintenanceDashboardPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
@@ -128,14 +174,26 @@ function AuthenticatedAppRoutes() {
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
           <Route path="printers" element={<PrintersPage />} />
-          <Route path="workers" element={<WorkerManagementPage />} />
+          <Route path="workers" element={<RouteSuspense><LazyWorkerManagementPage /></RouteSuspense>} />
           <Route path="file-health" element={<FileHealthDashboard />} />
-          <Route path="slicer-profiles" element={<SlicerProfilesPage />} />
+          <Route path="slicer-profiles" element={<RouteSuspense><LazySlicerProfilesPage /></RouteSuspense>} />
           <Route path="tags" element={<TagAdminPage />} />
           <Route path="data" element={<DataManagementPage />} />
           <Route path="system" element={<SystemDashboardPage />} />
+          <Route path="cameras" element={<Navigate to="/cameras?tab=manage" replace />} />
         </Route>
-        <Route path="jobs/new" element={<NewSliceJobPage />} />
+        <Route path="jobs/new" element={<RouteSuspense><LazyNewSliceJobPage /></RouteSuspense>} />
+        <Route
+          path="slicer"
+          element={
+            <SlicerGate>
+              <RouteSuspense>
+                <LazyOrcaSlicerPage />
+              </RouteSuspense>
+            </SlicerGate>
+          }
+        />
+        <Route path="profiles/import" element={<ProfileImportWizardPage />} />
       </Route>
     </Routes>
   );
@@ -231,29 +289,13 @@ function App() {
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
             <SlicerUIProvider>
-              {/*
-                Enable react-router future flags to opt into upcoming behavior and silence
-                development warnings about future flags. These are safe opt-ins for our
-                current router version and recommended by react-router maintainers.
-              */}
-              <Router
-                // Future flags documented by react-router to opt into v7 behaviors. See
-                // https://reactrouter.com/en/main/upgrading/v6
-                future={{
-                  // prevents double-slash when basename and paths are combined
-                  v7_preventBasepathDoubleSlash: true,
-                  // use route ids in path generation where applicable
-                  v7_useIdInRoutePaths: true,
-                  // wrap state updates in React.startTransition (opt-in for upcoming v7)
-                  v7_startTransition: true,
-                  // change relative path resolution in splat routes to v7 behavior
-                  v7_relativeSplatPath: true,
-                }}
-              >
-                <AuthenticatedAppRoutes />
-              </Router>
-              <ReactQueryDevtools initialIsOpen={false} />
-              <Toaster position="top-right" richColors />
+              <SlicerProvider>
+                <Router>
+                  <AuthenticatedAppRoutes />
+                </Router>
+                <ReactQueryDevtools initialIsOpen={false} />
+                <Toaster position="top-right" richColors />
+              </SlicerProvider>
             </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>

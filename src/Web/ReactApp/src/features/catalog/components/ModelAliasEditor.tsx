@@ -212,7 +212,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
       </div>
 
       {aliases.length === 0 && (
-        <div className="text-center py-4 text-pf-text-secondary rounded bg-pf-bg-secondary">
+        <div className="text-center py-4 text-pf-text-secondary rounded-sm bg-pf-bg-secondary">
           <p className="text-sm">No aliases configured yet</p>
           <p className="text-xs mt-1">Add aliases to help map slicer-specific model names</p>
         </div>

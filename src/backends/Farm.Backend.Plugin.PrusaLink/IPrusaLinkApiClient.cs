@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -9,94 +10,69 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// Internal abstraction for PrusaLinkApiClient to enable testability.
 /// This interface encapsulates HTTP communication with PrusaLink API,
 /// allowing PrusaLinkClient to be tested with mocked HTTP responses.
+///
+/// Authentication: HTTP Digest Authentication using PrinterCredential.Username and Password.
+/// PrusaLink requires digest auth for all operations.
 /// </summary>
 public interface IPrusaLinkApiClient
 {
+    // ========== PRIMARY METHODS (PrinterCredential?) ==========
+
     /// <summary>Gets API version information.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<VersionInfo> GetVersionAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<VersionInfo> GetVersionAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 
     /// <summary>Gets printer information.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<PrinterInfo> GetInfoAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<PrinterInfo> GetInfoAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 
     /// <summary>Gets the current printer status information.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<StatusInfo> GetStatusAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<StatusInfo> GetStatusAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 
     /// <summary>Gets the current job/print status.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<Job?> GetJobAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<Job?> GetJobAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 
-    /// <summary>Stops the current job.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="jobId">The ID of the job to stop.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<bool> StopJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default);
+    /// <summary>Stops the current job (requires digest auth for write access).</summary>
+    Task<bool> StopJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
 
-    /// <summary>Pauses the current job.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="jobId">The ID of the job to pause.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<bool> PauseJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default);
+    /// <summary>Pauses the current job (requires digest auth for write access).</summary>
+    Task<bool> PauseJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
 
-    /// <summary>Resumes the current job.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="jobId">The ID of the job to resume.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<bool> ResumeJobAsync(string baseUrl, int jobId, string? apiKey = null, CancellationToken ct = default);
+    /// <summary>Resumes the current job (requires digest auth for write access).</summary>
+    Task<bool> ResumeJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
 
     /// <summary>Gets storage information for the printer.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="acceptLanguage">Optional Accept-Language header value.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<StorageListResponse> GetStorageAsync(string baseUrl, string? apiKey = null, string? acceptLanguage = null, CancellationToken ct = default);
+    Task<StorageListResponse> GetStorageAsync(string baseUrl, PrinterCredential? credentials = null, string? acceptLanguage = null, CancellationToken ct = default);
 
     /// <summary>Gets information about a specific file.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="storagePath">The storage path (e.g., "local" or "usb").</param>
-    /// <param name="filePath">The path to the file within storage.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="acceptLanguage">Optional Accept-Language header value.</param>
-    /// <param name="accept">Optional Accept header value.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
+    Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default);
 
     /// <summary>Gets a list of files from the specified location (legacy endpoint).</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<System.Collections.Generic.List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<System.Collections.Generic.List<FileChild>> GetFilesLegacyAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 
-    /// <summary>Uploads a G-code file to the printer.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="storagePath">The storage path (e.g., "local" or "usb").</param>
-    /// <param name="filePath">The destination file path within storage.</param>
-    /// <param name="fileStream">The stream containing the file data to upload.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="printAfterUpload">Whether to start printing after upload.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, System.IO.Stream fileStream, string? apiKey = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default);
+    /// <summary>Uploads a G-code file to the printer (requires digest auth for write access).</summary>
+    Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, System.IO.Stream fileStream, PrinterCredential? credentials = null, bool printAfterUpload = false, bool overwrite = false, CancellationToken ct = default);
 
-    /// <summary>Starts a print from an uploaded file.</summary>
-    /// <param name="baseUrl">The base URL of the PrusaLink API.</param>
-    /// <param name="storagePath">The storage path (e.g., "local" or "usb").</param>
-    /// <param name="filePath">The path to the file to print.</param>
-    /// <param name="apiKey">Optional API key for authentication.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
+    /// <summary>Starts a print from an uploaded file (requires digest auth for write access).</summary>
+    Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null, CancellationToken ct = default);
+
+    // ========== LEGACY ENDPOINTS (OctoPrint-compatible, require HTTP Digest Auth) ==========
+    // These endpoints provide pause/resume, temperature control, and movement capabilities
+
+    /// <summary>Pauses the current print job via legacy /api/job endpoint (requires digest auth).</summary>
+    Task<bool> PausePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default);
+
+    /// <summary>Resumes the current print job via legacy /api/job endpoint (requires digest auth).</summary>
+    Task<bool> ResumePrintLegacyAsync(string baseUrl, PrinterCredential? credentials, CancellationToken ct = default);
+
+    /// <summary>Sets hotend (tool) temperature via legacy /api/printer/tool endpoint (requires digest auth).</summary>
+    Task<bool> SetToolTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, int toolIndex = 0, CancellationToken ct = default);
+
+    /// <summary>Sets bed temperature via legacy /api/printer/bed endpoint (requires digest auth).</summary>
+    Task<bool> SetBedTemperatureLegacyAsync(string baseUrl, double temperature, PrinterCredential? credentials, CancellationToken ct = default);
+
+    /// <summary>Jogs the print head by relative distances via legacy /api/printer/printhead endpoint (requires digest auth).</summary>
+    Task<bool> JogPrintHeadLegacyAsync(string baseUrl, double? x, double? y, double? z, double? feedRate, PrinterCredential? credentials, CancellationToken ct = default);
+
+    /// <summary>Homes specified axes via legacy /api/printer/printhead endpoint (requires digest auth).</summary>
+    Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrinterCredential? credentials, CancellationToken ct = default);
 }

@@ -348,7 +348,7 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
         //
         // PrusaSlicer embeds multiple thumbnails at different sizes in this order:
         // 1. Three QOI-format thumbnails (thumbnail_QOI begin/end blocks) at different resolutions
-        // 2. One PNG-format thumbnail (thumbnail begin/end block) - typically appears around line 1300+
+        // 2. Multiple PNG-format thumbnails (thumbnail begin/end block) at various resolutions
         //
         // OrcaSlicer embeds QOI format thumbnails early in the file
         //
@@ -360,6 +360,8 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
         // ;thumbnail begin 380x285
         // ;base64 PNG data...
         // ;thumbnail end
+        //
+        // We select the LARGEST PNG thumbnail for best quality previews.
         try
         {
             _logger.LogInformation("ExtractThumbnail: Starting thumbnail extraction from {LineCount} lines", allLines.Length.ToString());
@@ -367,10 +369,12 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
             // Convert to list for easier processing
             var lines = new List<string>(allLines);
 
-            // Store all found thumbnails with their format
-            Dictionary<string, (string Format, List<string> Data)> thumbnailBlocks = new Dictionary<string, (string, List<string>)>();
+            // Store all found thumbnails with their format, dimensions, and data
+            List<(string Format, int Width, int Height, List<string> Data)> thumbnailBlocks = new();
             List<string> currentThumbnailLines = new List<string>();
             string? currentThumbnailFormat = null;
+            int currentWidth = 0;
+            int currentHeight = 0;
             bool inThumbnail = false;
 
             foreach (string line in lines)
@@ -381,15 +385,26 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
                     string trimmedAfterSemicolon = line.Substring(1).TrimStart();
                     if (trimmedAfterSemicolon.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase))
                     {
-                        _logger.LogInformation("ExtractThumbnail: Found thumbnail line: {Line}", line.Substring(0, Math.Min(50, line.Length)));
+                        _logger.LogDebug("ExtractThumbnail: Found thumbnail line: {Line}", line.Substring(0, Math.Min(80, line.Length)));
 
                         if (line.Contains("begin", StringComparison.OrdinalIgnoreCase))
                         {
                             // Detect format: QOI or PNG
                             currentThumbnailFormat = line.Contains("_QOI", StringComparison.OrdinalIgnoreCase) ? "QOI" : "PNG";
+
+                            // Parse dimensions from line like ";thumbnail begin 380x285" or ";thumbnail_QOI begin 200x200 Q0/10"
+                            currentWidth = 0;
+                            currentHeight = 0;
+                            Match dimensionMatch = Regex.Match(line, @"(\d+)x(\d+)", RegexOptions.IgnoreCase);
+                            if (dimensionMatch.Success)
+                            {
+                                _ = int.TryParse(dimensionMatch.Groups[1].Value, out currentWidth);
+                                _ = int.TryParse(dimensionMatch.Groups[2].Value, out currentHeight);
+                            }
+
                             inThumbnail = true;
                             currentThumbnailLines = new List<string>();
-                            _logger.LogInformation("ExtractThumbnail: {Format} thumbnail block started", currentThumbnailFormat);
+                            _logger.LogDebug($"ExtractThumbnail: {currentThumbnailFormat} thumbnail block started ({currentWidth}x{currentHeight})");
                             continue;
                         }
 
@@ -397,12 +412,13 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
                         {
                             if (inThumbnail)
                             {
-                                // Store this thumbnail block
-                                string key = currentThumbnailFormat!;
-                                thumbnailBlocks[key] = (currentThumbnailFormat!, new List<string>(currentThumbnailLines));
-                                _logger.LogInformation("ExtractThumbnail: {Format} thumbnail block ended, collected {DataLines} lines", currentThumbnailFormat, currentThumbnailLines.Count.ToString());
+                                // Store this thumbnail block with all its metadata
+                                thumbnailBlocks.Add((currentThumbnailFormat!, currentWidth, currentHeight, new List<string>(currentThumbnailLines)));
+                                _logger.LogDebug($"ExtractThumbnail: {currentThumbnailFormat} thumbnail block ended ({currentWidth}x{currentHeight}), collected {currentThumbnailLines.Count} lines");
                                 inThumbnail = false;
                                 currentThumbnailFormat = null;
+                                currentWidth = 0;
+                                currentHeight = 0;
                             }
                         }
                     }
@@ -419,31 +435,43 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
                 }
             }
 
-            // Prioritize PNG over QOI (PNG is typically higher quality)
-            // If both exist, use PNG; otherwise use whatever we found
-            (string? Format, List<string>? Lines) selectedThumbnail = default;
+            _logger.LogInformation("ExtractThumbnail: Found {Count} thumbnail blocks total", thumbnailBlocks.Count.ToString());
 
-            if (thumbnailBlocks.TryGetValue("PNG", out (string Format, List<string> Data) pngThumbnail))
+            // Select the LARGEST PNG thumbnail (by pixel count = width * height)
+            // If no PNG found, fall back to largest QOI
+            (string? Format, int Width, int Height, List<string>? Lines) selectedThumbnail = default;
+
+            // Get all PNG thumbnails and select the largest
+            var pngThumbnails = thumbnailBlocks.Where(t => t.Format == "PNG").ToList();
+            if (pngThumbnails.Count > 0)
             {
-                selectedThumbnail = pngThumbnail;
-                _logger.LogInformation("ExtractThumbnail: Selected PNG thumbnail (preferred over QOI)");
+                var largest = pngThumbnails.OrderByDescending(t => t.Width * t.Height).First();
+                selectedThumbnail = largest;
+                _logger.LogInformation($"ExtractThumbnail: Selected largest PNG thumbnail ({largest.Width}x{largest.Height}) from {pngThumbnails.Count} PNG options");
             }
-            else if (thumbnailBlocks.TryGetValue("QOI", out (string Format, List<string> Data) qoiThumbnail))
+            else
             {
-                selectedThumbnail = qoiThumbnail;
-                _logger.LogInformation("ExtractThumbnail: Selected QOI thumbnail (PNG not found)");
-            }
-            else if (thumbnailBlocks.Count > 0)
-            {
-                // Fallback: use first available thumbnail
-                selectedThumbnail = thumbnailBlocks.Values.First();
-                _logger.LogInformation("ExtractThumbnail: Selected {Format} thumbnail (first available)", selectedThumbnail.Format);
+                // Fall back to largest QOI if no PNG available
+                var qoiThumbnails = thumbnailBlocks.Where(t => t.Format == "QOI").ToList();
+                if (qoiThumbnails.Count > 0)
+                {
+                    var largest = qoiThumbnails.OrderByDescending(t => t.Width * t.Height).First();
+                    selectedThumbnail = largest;
+                    _logger.LogInformation($"ExtractThumbnail: Selected largest QOI thumbnail ({largest.Width}x{largest.Height}) from {qoiThumbnails.Count} QOI options (no PNG found)");
+                }
+                else if (thumbnailBlocks.Count > 0)
+                {
+                    // Fallback: use largest available thumbnail of any format
+                    var largest = thumbnailBlocks.OrderByDescending(t => t.Width * t.Height).First();
+                    selectedThumbnail = largest;
+                    _logger.LogInformation($"ExtractThumbnail: Selected largest {largest.Format} thumbnail ({largest.Width}x{largest.Height}) as fallback");
+                }
             }
 
             if (selectedThumbnail.Lines != null && selectedThumbnail.Lines.Count > 0)
             {
                 string base64Data = string.Concat(selectedThumbnail.Lines);
-                _logger.LogInformation("ExtractThumbnail: Attempting to decode thumbnail with {ByteCount} bytes", base64Data.Length.ToString());
+                _logger.LogInformation($"ExtractThumbnail: Attempting to decode {selectedThumbnail.Format ?? "Unknown"} thumbnail ({selectedThumbnail.Width}x{selectedThumbnail.Height}) with {base64Data.Length} base64 chars");
 
                 // Log first and last lines for debugging
                 if (selectedThumbnail.Lines.Count > 0)
@@ -468,7 +496,7 @@ public class GcodeMetadataExtractorService(IUnifiedLoggingService logger) : IGco
                     if (IsValidBase64(base64Data))
                     {
                         metadata.ThumbnailData = Convert.FromBase64String(base64Data);
-                        _logger.LogInformation("ExtractThumbnail: Successfully decoded {ThumbnailBytes} bytes of {Format} thumbnail data", metadata.ThumbnailData.Length.ToString(), selectedThumbnail.Format ?? "Unknown");
+                        _logger.LogInformation($"ExtractThumbnail: Successfully decoded {metadata.ThumbnailData.Length} bytes of {selectedThumbnail.Format ?? "Unknown"} thumbnail data ({selectedThumbnail.Width}x{selectedThumbnail.Height})");
                     }
                     else
                     {

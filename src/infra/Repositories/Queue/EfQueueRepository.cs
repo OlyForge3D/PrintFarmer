@@ -97,6 +97,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
     }
@@ -114,11 +115,12 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
         // Normalize the search term for comparison
         string normalizedSearch = NormalizeModelName(modelNameOrAlias);
 
-        // Get all available printers with their models and aliases
+        // Get all available printers with their models, aliases, and toolhead details (including nozzle)
         List<Printer> allPrinters = await _db.Printers
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
 
@@ -218,10 +220,13 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     /// </summary>
     /// <param name="id">The unique identifier of the gcode file</param>
     /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>The gcode file if found; otherwise null</returns>
+    /// <returns>The gcode file with PrinterModel loaded if found; otherwise null</returns>
     public async Task<GcodeFile?> GetGcodeFileAsync(Guid id, CancellationToken ct)
     {
-        return await _db.GcodeFiles.FindAsync(new object[] { id }, ct).AsTask();
+        // Include PrinterModel so we can use it for auto-assign when queueing jobs
+        return await _db.GcodeFiles
+            .Include(f => f.PrinterModel)
+            .FirstOrDefaultAsync(f => f.Id == id, ct);
     }
 
     /// <summary>

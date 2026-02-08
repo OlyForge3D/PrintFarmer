@@ -11,6 +11,13 @@ public class Printer
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Optimistic concurrency token for EF Core.
+    /// Automatically updated on each modification to detect concurrent edits.
+    /// </summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
@@ -113,13 +120,31 @@ public class Printer
         }
     }
 
-    public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
-
     public string? Notes { get; set; }
 
     public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
 
     public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
+
+    /// <summary>
+    /// Username for HTTP Digest Authentication (used by PrusaLink for privileged API access).
+    /// Combined with Password, enables access to additional endpoints not available with API key alone.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Password for HTTP Digest Authentication (used by PrusaLink for privileged API access).
+    /// Stored encrypted in the database. Combined with Username for full API access.
+    /// </summary>
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// Transient (non-persisted) credential container for backend API access.
+    /// Populated by PrintersService after loading the printer from the database.
+    /// Contains ApiKey, Username, and Password - backend clients use whatever they need.
+    /// </summary>
+    [NotMapped]
+    public PrinterCredential? Credential { get; set; }
 
     public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
 
@@ -198,4 +223,11 @@ public class Printer
     public bool InMaintenance { get; set; } = false;
 
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
+
+    /// <summary>
+    /// Timestamp of the most recent history job seeded from this printer.
+    /// Used for incremental seeding - only jobs newer than this are fetched on subsequent runs.
+    /// Null indicates no history has been seeded yet (triggers full initial seed).
+    /// </summary>
+    public DateTime? LastHistorySeedUtc { get; set; }
 }

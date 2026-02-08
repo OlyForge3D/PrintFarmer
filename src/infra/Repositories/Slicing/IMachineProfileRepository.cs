@@ -44,4 +44,10 @@ public interface IMachineProfileRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Number of profiles deleted.</returns>
     Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks if any machine profiles exist for the given printer model.
+    /// Used to determine if profiles have been imported for a printer model.
+    /// </summary>
+    Task<bool> HasAnyForPrinterModelAsync(Guid printerModelId, CancellationToken ct = default);
 }

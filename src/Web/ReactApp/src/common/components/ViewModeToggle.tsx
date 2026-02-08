@@ -3,27 +3,26 @@ import {
   mdiViewList, 
   mdiViewGrid, 
   mdiViewComfy, 
-  mdiViewQuilt,
-  mdiBlur,
-  mdiViewSequential,
-  mdiLightbulbOn,
-  mdiGauge,
-  mdiFlipToBack,
-  mdiArrowExpandDown,
+  // mdiViewQuilt,
+  // mdiBlur,
+  // mdiViewSequential,
+  // mdiLightbulbOn,
+  // mdiGauge,
+  // mdiFlipToBack,
+  // mdiArrowExpandDown,
 } from '@mdi/js';
 import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
 
 export type ViewMode = 
-  | 'compact' 
   | 'collapsed' 
   | 'expandable' 
-  | 'table' 
-  | 'glass' 
-  | 'segmented' 
-  | 'statusGlow' 
-  | 'dashboard' 
-  | 'flip' 
-  | 'drawer';
+  | 'table';
+  // | 'glass' 
+  // | 'segmented' 
+  // | 'statusGlow' 
+  // | 'dashboard' 
+  // | 'flip' 
+  // | 'drawer';
 
 interface ViewModeToggleProps {
   viewMode: ViewMode;
@@ -34,23 +33,22 @@ interface ViewModeToggleProps {
  * Core view mode options for Printers page
  */
 const coreViewModes: ViewModeOption<ViewMode>[] = [
-  { mode: 'compact', icon: mdiViewGrid, title: 'Compact Cards' },
   { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
   { mode: 'expandable', icon: mdiViewComfy, title: 'Expandable Cards' },
-  { mode: 'table', icon: mdiViewQuilt, title: 'Table View' },
+  { mode: 'table', icon: mdiViewGrid, title: 'Table View' },
 ];
 
 /**
  * Experimental view mode options for Printers page
  */
-const experimentalViewModes: ViewModeOption<ViewMode>[] = [
-  { mode: 'glass', icon: mdiBlur, title: '✨ Glassmorphism' },
-  { mode: 'segmented', icon: mdiViewSequential, title: '📂 Segmented Sections' },
-  { mode: 'statusGlow', icon: mdiLightbulbOn, title: '🔆 Status Glow' },
-  { mode: 'dashboard', icon: mdiGauge, title: '📊 Dashboard Gauges' },
-  { mode: 'flip', icon: mdiFlipToBack, title: '🔄 Flip Card' },
-  { mode: 'drawer', icon: mdiArrowExpandDown, title: '📥 Expandable Drawer' },
-];
+// const experimentalViewModes: ViewModeOption<ViewMode>[] = [
+//   { mode: 'glass', icon: mdiBlur, title: '✨ Glassmorphism' },
+//   { mode: 'segmented', icon: mdiViewSequential, title: '📂 Segmented Sections' },
+//   { mode: 'statusGlow', icon: mdiLightbulbOn, title: '🔆 Status Glow' },
+//   { mode: 'dashboard', icon: mdiGauge, title: '📊 Dashboard Gauges' },
+//   { mode: 'flip', icon: mdiFlipToBack, title: '🔄 Flip Card' },
+//   { mode: 'drawer', icon: mdiArrowExpandDown, title: '📥 Expandable Drawer' },
+// ];
 
 /**
  * ViewModeToggle - Printers page view mode selector
@@ -60,6 +58,8 @@ const experimentalViewModes: ViewModeOption<ViewMode>[] = [
  * - Experimental modes (glass, segmented, statusGlow, dashboard, flip, drawer)
  */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
+  const experimentalOptions: ViewModeOption<ViewMode>[] = [];
+
   return (
     <div className="flex flex-col gap-1">
       {/* Core view modes */}
@@ -73,14 +73,16 @@ export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
       />
       
       {/* Experimental view modes */}
-      <ViewToggle
-        value={viewMode}
-        onChange={onChange}
-        options={experimentalViewModes}
-        size="sm"
-        className="p-1"
-        ariaLabel="Experimental view modes"
-      />
+      {experimentalOptions.length > 0 && (
+        <ViewToggle
+          value={viewMode}
+          onChange={onChange}
+          options={experimentalOptions}
+          size="sm"
+          className="p-1"
+          ariaLabel="Experimental view modes"
+        />
+      )}
     </div>
   );
 }

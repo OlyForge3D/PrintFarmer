@@ -27,11 +27,25 @@ public class QueuedPrintJobDto
 
     public string Name { get; set; } = string.Empty;
 
-    public string GcodeFileId { get; set; } = string.Empty;
+    /// <summary>
+    /// G-code file ID. Nullable for history-seeded jobs where the original
+    /// file may not exist in PrintFarmer's library.
+    /// </summary>
+    public string? GcodeFileId { get; set; }
 
     public string? FileName { get; set; } // Original G-code filename for display
 
     public string? AssignedPrinterId { get; set; }
+
+    /// <summary>
+    /// Name of the assigned printer (denormalized for display)
+    /// </summary>
+    public string? PrinterName { get; set; }
+
+    /// <summary>
+    /// Model name of the assigned printer (denormalized for display)
+    /// </summary>
+    public string? PrinterModel { get; set; }
 
     public string Status { get; set; } = string.Empty;
 
@@ -47,7 +61,7 @@ public class QueuedPrintJobDto
 
     public int? EstimatedPrintTimeSeconds { get; set; }
 
-    public int? EstimatedFilamentUsageGrams { get; set; }
+    public double? EstimatedFilamentUsageGrams { get; set; }
 
     public DateTime? ActualStartTimeUtc { get; set; }
 
@@ -55,7 +69,7 @@ public class QueuedPrintJobDto
 
     public int? ActualPrintTimeSeconds { get; set; }
 
-    public int? ActualFilamentUsageGrams { get; set; }
+    public double? ActualFilamentUsageGrams { get; set; }
 
     public string? FailureReason { get; set; }
 
@@ -64,6 +78,16 @@ public class QueuedPrintJobDto
     public DateTime UpdatedAtUtc { get; set; }
 
     public DateTime QueuedAtUtc { get; set; }
+
+    /// <summary>
+    /// Notes/comments about this print job
+    /// </summary>
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Tags assigned to this job for organization
+    /// </summary>
+    public string[]? Tags { get; set; }
 }
 
 /// <summary>
@@ -173,13 +197,16 @@ public class QueueJobReorderMove
 }
 
 /// <summary>
-/// Request to seed history from printer APIs
+/// Request to seed history from printer APIs.
+/// Fetches all available history - no date filtering since the backend
+/// ISupportsHistory interface doesn't support it. Deduplication prevents duplicates.
 /// </summary>
 public class SeedQueueHistoryRequest
 {
+    /// <summary>
+    /// Optional list of printer IDs to seed from. If null/empty, seeds from all enabled printers.
+    /// </summary>
     public List<string>? PrinterIds { get; set; }
-
-    public int DaysBack { get; set; } = 30;
 }
 
 // ============= RESPONSE DTOs =============
@@ -258,6 +285,29 @@ public class QueueHistoryPageDto
     public int CurrentPage { get; set; }
 
     public int PageSize { get; set; }
+
+    /// <summary>
+    /// Statistics for the entire filtered result set (not just current page)
+    /// </summary>
+    public QueueHistoryStatsDto Stats { get; set; } = new();
+}
+
+/// <summary>
+/// Statistics for filtered history results
+/// </summary>
+public class QueueHistoryStatsDto
+{
+    public int TotalCompleted { get; set; }
+
+    public int TotalFailed { get; set; }
+
+    public int TotalCancelled { get; set; }
+
+    public int SuccessRate { get; set; }
+
+    public int AverageDurationMinutes { get; set; }
+
+    public long TotalPrintTimeMinutes { get; set; }
 }
 
 /// <summary>

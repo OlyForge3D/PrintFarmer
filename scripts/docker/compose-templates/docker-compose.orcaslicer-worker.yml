@@ -5,7 +5,7 @@
 # Anchor definitions (these are typically injected from docker-compose.common.yml by compose-generator.sh)
 x-orcaslicer-build: &orcaslicer-build
   context: .
-  dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
+  dockerfile: Dockerfile.multistage
   target: orcaslicer-worker
   args:
     SDK_TAG: ${SDK_TAG}

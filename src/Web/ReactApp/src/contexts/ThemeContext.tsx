@@ -34,51 +34,64 @@ export function ThemeProvider({
     return (stored as Theme) || defaultTheme;
   });
 
-  const [computedTheme, setComputedTheme] = useState<Exclude<Theme, 'system'>>('github-dark');
-  const [accessibility, setAccessibility] = useState({
-    prefersReducedMotion: false,
-    prefersHighContrast: false,
+  // Track system preference for 'system' theme
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() => 
+    typeof window !== 'undefined' 
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches 
+      : false
+  );
+
+  // Derive computed theme from theme setting and system preference
+  const computedTheme: Exclude<Theme, 'system'> = theme === 'system' 
+    ? (systemPrefersDark ? 'github-dark' : 'light')
+    : (theme as Exclude<Theme, 'system'>);
+
+  const [accessibility, setAccessibility] = useState(() => {
+    // Initialize accessibility preferences from matchMedia on first render
+    if (typeof window === 'undefined') {
+      return { prefersReducedMotion: false, prefersHighContrast: false };
+    }
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const highContrast = window.matchMedia('(prefers-contrast: more)');
+    return {
+      prefersReducedMotion: reducedMotion?.matches ?? false,
+      prefersHighContrast: highContrast?.matches ?? false,
+    };
   });
 
-  // Compute the actual theme to apply based on system preference if needed
+  // Subscribe to system preference changes
   useEffect(() => {
-    if (theme === 'system') {
-      // Check system preference for dark mode
-      const darkModePreference = window.matchMedia('(prefers-color-scheme: dark)');
-      setComputedTheme(darkModePreference.matches ? 'github-dark' : 'light');
+    const darkModePreference = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    const handleChange = (e: MediaQueryListEvent) => {
+      setSystemPrefersDark(e.matches);
+    };
 
-      // Listen for changes to system preference
-      const handleChange = (e: MediaQueryListEvent) => {
-        setComputedTheme(e.matches ? 'github-dark' : 'light');
-      };
+    darkModePreference.addEventListener('change', handleChange);
+    return () => darkModePreference.removeEventListener('change', handleChange);
+  }, []);
 
-      darkModePreference.addEventListener('change', handleChange);
-      return () => darkModePreference.removeEventListener('change', handleChange);
-    } else {
-      setComputedTheme(theme as Exclude<Theme, 'system'>);
-    }
-  }, [theme]);
-
-  // Check accessibility preferences
+  // Subscribe to accessibility preference changes
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const highContrast = window.matchMedia('(prefers-contrast: more)');
 
-    const updateAccessibility = () => {
-      setAccessibility({
-        prefersReducedMotion: reducedMotion.matches,
-        prefersHighContrast: highContrast.matches,
-      });
+    // Only proceed if matchMedia returned valid objects
+    if (!reducedMotion || !highContrast) return;
+
+    const handleReducedMotionChange = (e: MediaQueryListEvent) => {
+      setAccessibility(prev => ({ ...prev, prefersReducedMotion: e.matches }));
+    };
+    const handleHighContrastChange = (e: MediaQueryListEvent) => {
+      setAccessibility(prev => ({ ...prev, prefersHighContrast: e.matches }));
     };
 
-    updateAccessibility();
-
-    reducedMotion.addEventListener('change', updateAccessibility);
-    highContrast.addEventListener('change', updateAccessibility);
+    reducedMotion.addEventListener('change', handleReducedMotionChange);
+    highContrast.addEventListener('change', handleHighContrastChange);
 
     return () => {
-      reducedMotion.removeEventListener('change', updateAccessibility);
-      highContrast.removeEventListener('change', updateAccessibility);
+      reducedMotion.removeEventListener('change', handleReducedMotionChange);
+      highContrast.removeEventListener('change', handleHighContrastChange);
     };
   }, []);
 

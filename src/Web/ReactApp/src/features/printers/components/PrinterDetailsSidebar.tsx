@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-// No MdiIcons used in this component
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
+import { maintenanceService } from '@/services/maintenanceService';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
 import type { TempTargets, MoveRequest } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
@@ -26,6 +27,7 @@ import {
   FileIcon,
   RefreshIcon,
   HistoryIcon,
+  ChevronDownIcon,
   CloseIcon,
   MinusIcon,
   SnowflakeIcon,
@@ -33,8 +35,9 @@ import {
 } from '@/common/components/icons/MdiIcons';
 
 // Animation styles
+// Use unique keyframe/class names to avoid collisions with other injected styles.
 const sidebarAnimationStyles = `
-  @keyframes slideInRight {
+  @keyframes pfPrinterSidebarSlideInFromRight {
     from {
       transform: translateX(100%);
       opacity: 0;
@@ -45,7 +48,7 @@ const sidebarAnimationStyles = `
     }
   }
 
-  @keyframes slideOutRight {
+  @keyframes pfPrinterSidebarSlideOutToRight {
     from {
       transform: translateX(0);
       opacity: 1;
@@ -56,33 +59,84 @@ const sidebarAnimationStyles = `
     }
   }
 
-  .sidebar-enter {
-    animation: slideInRight 0.3s ease-out;
+  .pf-printer-sidebar-enter {
+    animation: pfPrinterSidebarSlideInFromRight 0.3s ease-out;
   }
 
-  .sidebar-exit {
-    animation: slideOutRight 0.3s ease-in;
+  .pf-printer-sidebar-exit {
+    animation: pfPrinterSidebarSlideOutToRight 0.3s ease-in;
   }
 `;
 
-// Inject animation styles
+// Inject animation styles (once)
 if (typeof document !== 'undefined') {
-  const style = document.createElement('style');
-  style.textContent = sidebarAnimationStyles;
-  document.head.appendChild(style);
+  const styleId = 'pf-printer-sidebar-animations';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = sidebarAnimationStyles;
+    document.head.appendChild(style);
+  }
 }
 
 interface PrinterDetailsSidebarProps {
   printerId: string | null;
+  /** Optional printer object - if provided, skips API fetch (useful when parent already has data) */
+  printer?: Printer;
   onClose: () => void;
+  /** Layout mode: traditional right-side panel, or full-width content takeover */
+  layout?: 'panel' | 'content';
 }
 
-export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
-  // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
-  const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
-  // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay((apiPrinter || {}) as Printer);
+  // Only fetch if printer prop is not provided
+  const shouldFetch = !printerProp && !!printerId;
+  const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+
+  const [isClosing, setIsClosing] = useState(false);
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  const handleClose = useCallback(() => {
+    if (isClosing) return;
+    setIsClosing(true);
+    // Match the CSS animation duration (0.3s)
+    closeTimeoutRef.current = window.setTimeout(() => {
+      onClose();
+    }, 300);
+  }, [isClosing, onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current !== null) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
+
+  const printerStatisticsQuery = useQuery({
+    queryKey: ['printerStatistics', printerId],
+    queryFn: () => maintenanceService.getPrinterStatistics(printerId!),
+    enabled: !!printerId && isStatisticsExpanded,
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const printerVersionQuery = useQuery({
+    queryKey: ['printerVersion', printerId],
+    queryFn: () => apiClient.getPrinterVersionInfo(printerId!),
+    enabled: !!printerId,
+    staleTime: 10 * 60_000,
+    gcTime: 60 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  // Use provided printer or fall back to API data, merged with realtime SignalR updates
+  const basePrinter = printerProp || apiPrinter;
+  const printer = usePrinterDisplay((basePrinter || {}) as Printer);
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -93,12 +147,14 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [step, setStep] = useState(10);
 
-  // Use refs instead of state for caching display values - this avoids setState during render
-  const lastKnownHotendTempRef = useRef<number | null>(null);
-  const lastKnownBedTempRef = useRef<number | null>(null);
-  const lastKnownXRef = useRef<number | null>(null);
-  const lastKnownYRef = useRef<number | null>(null);
-  const lastKnownZRef = useRef<number | null>(null);
+  // Track last known values for display fallback - use state not refs for render access
+  const [lastKnownValues, setLastKnownValues] = useState({
+    hotendTemp: null as number | null,
+    bedTemp: null as number | null,
+    x: null as number | null,
+    y: null as number | null,
+    z: null as number | null,
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
@@ -116,6 +172,22 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     return () => clearInterval(pollInterval);
   }, [printer, refetch, printerId]);
 
+  // Update last known values when printer data changes
+  useEffect(() => {
+    if (printer) {
+      // Defer state update to satisfy React Compiler rules
+      queueMicrotask(() => {
+        setLastKnownValues(prev => ({
+          hotendTemp: printer.hotendTemp !== undefined ? printer.hotendTemp : prev.hotendTemp,
+          bedTemp: printer.bedTemp !== undefined ? printer.bedTemp : prev.bedTemp,
+          x: printer.x !== undefined ? printer.x : prev.x,
+          y: printer.y !== undefined ? printer.y : prev.y,
+          z: printer.z !== undefined ? printer.z : prev.z,
+        }));
+      });
+    }
+  }, [printer]);
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -124,19 +196,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
 
-  // Update refs when display printer changes - refs don't trigger re-renders
-  if (displayPrinter) {
-    if (displayPrinter.hotendTemp !== undefined) lastKnownHotendTempRef.current = displayPrinter.hotendTemp;
-    if (displayPrinter.bedTemp !== undefined) lastKnownBedTempRef.current = displayPrinter.bedTemp;
-    if (displayPrinter.x !== undefined) lastKnownXRef.current = displayPrinter.x;
-    if (displayPrinter.y !== undefined) lastKnownYRef.current = displayPrinter.y;
-    if (displayPrinter.z !== undefined) lastKnownZRef.current = displayPrinter.z;
-  }
-
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center flex-shrink-0">
+      <div className="w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center shrink-0">
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -150,6 +213,24 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
 
+  // Use state values to track last known values for display (fallback when data is undefined)
+  const lastKnownHotendTemp = lastKnownValues.hotendTemp;
+  const lastKnownBedTemp = lastKnownValues.bedTemp;
+  const lastKnownX = lastKnownValues.x;
+  const lastKnownY = lastKnownValues.y;
+  const lastKnownZ = lastKnownValues.z;
+
+  const formatHours = (hours: number): string => {
+    if (!Number.isFinite(hours)) return '—';
+    return `${hours.toFixed(1)}h`;
+  };
+
+  const formatFilament = (grams: number): string => {
+    if (!Number.isFinite(grams)) return '—';
+    if (grams >= 1000) return `${(grams / 1000).toFixed(2)}kg`;
+    return `${Math.round(grams)}g`;
+  };
+
   // Format temperature with target
   const formatTempWithTarget = (current?: number, target?: number, lastKnown?: number | null): string => {
     const displayCurrent = current ?? lastKnown ?? 0;
@@ -161,7 +242,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   // Check if axes are homed based on homedAxes string from Moonraker
   // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
-  const homedAxes = (displayPrinter?.homedAxes ?? '').toLowerCase();
+  const homedAxesRaw = displayPrinter?.homedAxes;
+  const isHomedStateKnown = typeof homedAxesRaw === 'string';
+  const homedAxes = (homedAxesRaw ?? '').toLowerCase();
 
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
@@ -177,20 +260,25 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   }
 
   // Determine if each axis is homed
-  const isXHomed = homedAxes.includes('x');
-  const isYHomed = homedAxes.includes('y');
-  const isZHomed = homedAxes.includes('z');
+  const isXHomed = isHomedStateKnown && homedAxes.includes('x');
+  const isYHomed = isHomedStateKnown && homedAxes.includes('y');
+  const isZHomed = isHomedStateKnown && homedAxes.includes('z');
+  const isXYHomed = isXHomed && isYHomed;
 
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
     console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
   }
 
   // Printer is fully homed if all axes are homed
-  const isAllHomed = isXHomed && isYHomed && isZHomed;
+  const isAllHomed = isXYHomed && isZHomed;
 
 
   // Get button class based on homed state
-  const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
+  const getHomeButtonStyle = (homingStateKnown: boolean, isHomed: boolean): { className?: string; style?: React.CSSProperties } => {
+    if (!homingStateKnown) {
+      return {};
+    }
+
     if (isHomed) {
       return {
         className: '!text-white',
@@ -209,9 +297,13 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     };
   };
 
-  const handleHome = async () => {
+  const handleHome = async (axes?: 'all' | 'xy' | 'z') => {
     try {
-      const result = await apiClient.homePrinter(printer.id);
+      const result = await (axes === 'xy'
+        ? apiClient.homeXY(printer.id)
+        : axes === 'z'
+          ? apiClient.homeZ(printer.id)
+          : apiClient.homePrinter(printer.id));
       if (!result.success) {
         console.error('Failed to home:', result.error);
       }
@@ -342,13 +434,19 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   };
 
   return (
-    <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter flex-shrink-0">
+    <div
+      className={
+        layout === 'content'
+          ? `w-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+          : `w-96 h-full bg-linear-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`
+      }
+    >
       {/* Header */}
-      <div className="flex justify-between items-start p-4 border-b border-pf-border flex-shrink-0 gap-3">
+      <div className="flex justify-between items-start p-4 border-b border-pf-border shrink-0 gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h2 className="text-lg font-bold text-pf-text-primary truncate">{printer.name}</h2>
-            <div className={`flex-shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={isOnline ? 'Online' : 'Offline'} />
+            <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} title={isOnline ? 'Online' : 'Offline'} />
           </div>
           <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
           <p className="text-xs text-pf-text-secondary mt-1">{state}</p>
@@ -357,8 +455,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           type="button"
           variant="subtle"
           size="sm"
-          onClick={onClose}
-          className="!p-1 !h-auto flex-shrink-0"
+          onClick={handleClose}
+          className="!p-1 !h-auto shrink-0"
           title="Close sidebar"
           iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
@@ -366,6 +464,130 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
       {/* Scrollable Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Statistics */}
+        <section aria-labelledby="printer-statistics-heading" className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 id="printer-statistics-heading" className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsStatisticsExpanded(v => !v)}
+                aria-expanded={isStatisticsExpanded}
+                aria-controls="printer-statistics-panel"
+                className="!px-0 !py-0 !h-auto text-pf-text-secondary hover:text-pf-text-primary"
+                iconLeft={
+                  <ChevronDownIcon
+                    className={`h-4 w-4 transition-transform ${isStatisticsExpanded ? 'rotate-180' : ''}`}
+                    ariaLabel={isStatisticsExpanded ? 'Collapse statistics' : 'Expand statistics'}
+                  />
+                }
+              >
+                Statistics
+              </Button>
+            </h3>
+
+            {isStatisticsExpanded && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void printerStatisticsQuery.refetch()}
+                className="!p-1 !h-auto"
+                title="Refresh statistics"
+                aria-label="Refresh statistics"
+                iconCenter={<RefreshIcon className="h-4 w-4" />}
+              ></Button>
+            )}
+          </div>
+
+          {isStatisticsExpanded && (
+            <div id="printer-statistics-panel">
+              {printerStatisticsQuery.isLoading ? (
+                <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
+              ) : printerStatisticsQuery.data ? (
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                  <div>
+                    <dt className="text-xs text-pf-text-secondary">Print time</dt>
+                    <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-pf-text-secondary">Filament</dt>
+                    <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-pf-text-secondary">Completed</dt>
+                    <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-pf-text-secondary">Failed</dt>
+                    <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-xs text-pf-text-secondary">Last sync</dt>
+                    <dd className="text-pf-text-primary">
+                      {printerStatisticsQuery.data.lastSyncTime ? new Date(printerStatisticsQuery.data.lastSyncTime).toLocaleString() : '—'}
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Version */}
+        <section aria-labelledby="printer-version-heading" className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 id="printer-version-heading" className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+              Version
+            </h3>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void printerVersionQuery.refetch()}
+              className="!p-1 !h-auto"
+              title="Refresh version info"
+              aria-label="Refresh version info"
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+            ></Button>
+          </div>
+
+          {printerVersionQuery.isLoading ? (
+            <div className="text-sm text-pf-text-secondary">Loading version…</div>
+          ) : printerVersionQuery.data ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Firmware</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Backend</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.backendVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">API</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.apiVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Supported</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.supported ? 'Yes' : 'No'}</dd>
+              </div>
+              {printerVersionQuery.data.message ? (
+                <div className="col-span-2">
+                  <dt className="text-xs text-pf-text-secondary">Message</dt>
+                  <dd className="text-pf-text-primary break-words">{printerVersionQuery.data.message}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
+          )}
+        </section>
+
         {/* Control Section - MOVED TO TOP */}
         <div className="flex flex-col gap-2">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
@@ -447,10 +669,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome()}
+                onClick={() => handleHome('all')}
                 title="Home all axes"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
-                style={getHomeButtonStyle(isAllHomed).style}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -488,10 +710,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome()}
-                title="Home X"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
-                style={getHomeButtonStyle(isXHomed).style}
+                onClick={() => handleHome('xy')}
+                title="Home X/Y"
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -535,10 +757,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome()}
+                onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
-                style={getHomeButtonStyle(isZHomed).style}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
+                style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
                 iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
@@ -592,13 +814,13 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           <div className="grid grid-cols-3 gap-2 h-20">
             {/* Row 1: Current Position Labels */}
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownXRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownX ?? 0).toFixed(1)} ]</span>
             </div>
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownYRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownY ?? 0).toFixed(1)} ]</span>
             </div>
             <div className="flex items-center justify-center">
-              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZRef.current ?? 0).toFixed(1)} ]</span>
+              <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZ ?? 0).toFixed(1)} ]</span>
             </div>
 
             {/* Row 2: Input Fields */}
@@ -638,7 +860,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleApplyPreset('cooldown')}
                 title="Cooldown"
-                className="flex-shrink-0 px-2"
+                className="shrink-0 px-2"
                 iconCenter={<SnowflakeIcon className="h-4 w-4" />}
               ></Button>
               <Select
@@ -664,13 +886,13 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
           {/* Hotend Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
+            <NozzleIcon className="w-4 h-4 text-red-500 shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Hotend</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
                 displayPrinter?.hotendTemp,
                 displayPrinter?.hotendTarget,
-                lastKnownHotendTempRef.current
+                lastKnownHotendTemp
               )}
             </span>
             <TemperatureInput
@@ -683,13 +905,13 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
           {/* Bed Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
+            <BedIcon className="w-4 h-4 text-blue-500 shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Bed</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
                 displayPrinter?.bedTemp,
                 displayPrinter?.bedTarget,
-                lastKnownBedTempRef.current
+                lastKnownBedTemp
               )}
             </span>
             <TemperatureInput
@@ -723,7 +945,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                   <span className="text-pf-text-secondary">Color:</span>
                   <div className="flex items-center gap-2">
                     <div
-                      className="w-3 h-3 rounded border border-pf-border"
+                      className="w-3 h-3 rounded-sm border border-pf-border"
                       style={{ backgroundColor: displayPrinter.spoolInfo.colorHex }}
                       title={displayPrinter.spoolInfo.colorHex}
                     />
@@ -747,8 +969,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           </div>
         )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
-          <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
-            {renderUnknown({ status, lastKnownHotendTemp: lastKnownHotendTempRef.current, lastKnownBedTemp: lastKnownBedTempRef.current, lastKnownX: lastKnownXRef.current, lastKnownY: lastKnownYRef.current, lastKnownZ: lastKnownZRef.current })}
+          <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
+            {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
           </div>
         )}
       </div>

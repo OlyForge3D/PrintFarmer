@@ -47,7 +47,7 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-1 ml-2 flex-shrink-0">
+          <div className="flex gap-1 ml-2 shrink-0">
             <Button
               variant="subtle"
               size="sm"

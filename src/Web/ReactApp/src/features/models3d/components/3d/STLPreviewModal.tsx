@@ -77,7 +77,8 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
       getFileInfo();
     } else if (fileUrl && fileName) {
       // For URL-based files, estimate info from file name
-      setIsLoading(true);
+      // Defer setIsLoading to satisfy React Compiler rules
+      queueMicrotask(() => setIsLoading(true));
       fetch(fileUrl, { signal: controller.signal })
         .then(res => res.blob())
         .then(blob => {
@@ -113,7 +114,7 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onClose();
@@ -192,7 +193,7 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
                 <div className="border-t border-pf-border my-2"></div>
 
                 {/* Controls Info */}
-                <div className="bg-pf-bg-2 rounded p-3 border border-pf-border">
+                <div className="bg-pf-bg-2 rounded-sm p-3 border border-pf-border">
                   <h4 className="text-sm font-semibold text-pf-text-primary mb-2">Controls</h4>
                   <div className="text-xs text-pf-text-secondary space-y-1">
                     <p><span className="text-pf-accent">Left Click + Drag</span> - Rotate</p>

@@ -17,13 +17,26 @@ public class DataImportService : IDataImportService
 {
     private readonly AppDbContext _context;
     private readonly IUnifiedLoggingService _logger;
+    private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
 
     public DataImportService(
         AppDbContext context,
-        IUnifiedLoggingService logger)
+        IUnifiedLoggingService logger,
+        Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector)
     {
         _context = context;
         _logger = logger;
+        _sensitiveDataProtector = sensitiveDataProtector;
+    }
+
+    private string? ProtectIfNeeded(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return _sensitiveDataProtector.Protect(value);
     }
 
     public async Task<ImportResponseDto> ImportCatalogAsync(CatalogExportDto catalog, ImportMode mode = ImportMode.Merge, CancellationToken ct = default)
@@ -619,6 +632,23 @@ public class DataImportService : IDataImportService
                 Printer? existing = await _context.Printers
                     .FirstOrDefaultAsync(p => p.Name == dto.Name, ct);
 
+                string? apiKey = dto.ApiKey;
+                string? username = dto.Username;
+                string? password = dto.Password;
+
+                // Backward compatibility: some legacy exports stored PrusaLink password in ApiKey.
+                if (dto.Backend == (int)PrinterBackend.PrusaLink && string.IsNullOrWhiteSpace(password) && !string.IsNullOrWhiteSpace(apiKey))
+                {
+                    password = apiKey;
+                    apiKey = null;
+                }
+
+                // Default username for PrusaLink digest auth if password is present.
+                if (dto.Backend == (int)PrinterBackend.PrusaLink && !string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(username))
+                {
+                    username = "maker";
+                }
+
                 if (existing == null)
                 {
                     Guid manufacturerId = model?.ManufacturerId ?? Guid.Empty;
@@ -636,7 +666,10 @@ public class DataImportService : IDataImportService
                         ModelId = modelId,
                         LocationId = location?.Id,
                         Backend = dto.Backend,
-                        IsAvailable = false // Always set to unavailable on import for safety
+                        IsAvailable = false, // Always set to unavailable on import for safety
+                        ApiKey = ProtectIfNeeded(apiKey),
+                        Username = username,
+                        Password = ProtectIfNeeded(password)
                     });
                     imported++;
                 }
@@ -655,6 +688,9 @@ public class DataImportService : IDataImportService
                     existing.LocationId = location?.Id;
                     existing.Backend = dto.Backend;
                     existing.IsAvailable = false; // Always set to unavailable on import for safety
+                    existing.ApiKey = ProtectIfNeeded(apiKey);
+                    existing.Username = username;
+                    existing.Password = ProtectIfNeeded(password);
                     imported++;
                 }
             }

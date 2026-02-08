@@ -44,7 +44,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             mockMoonrakerClient.As<ISupportsFileList>()
                 .Setup(c => c.GetFileListAsync(
                     It.IsAny<string>(),
-                    It.IsAny<string>(),
+                    It.IsAny<PrinterCredential?>(),
                     It.IsAny<System.Threading.CancellationToken>()))
                 .ReturnsAsync(new List<PrinterFileInfo>
                 {

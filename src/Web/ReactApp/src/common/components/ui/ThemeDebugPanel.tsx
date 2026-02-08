@@ -18,13 +18,13 @@ export function ThemeDebugPanel() {
         <div>
           <p className="text-sm text-pf-text-secondary mb-2">Backgrounds:</p>
           <div className="space-y-2">
-            <div className="bg-pf-bg-0 border border-pf-border p-2 rounded">
+            <div className="bg-pf-bg-0 border border-pf-border p-2 rounded-sm">
               <code className="text-xs text-pf-text-primary">bg-0</code>
             </div>
-            <div className="bg-pf-bg-1 border border-pf-border p-2 rounded">
+            <div className="bg-pf-bg-1 border border-pf-border p-2 rounded-sm">
               <code className="text-xs text-pf-text-primary">bg-1</code>
             </div>
-            <div className="bg-pf-bg-2 border border-pf-border p-2 rounded">
+            <div className="bg-pf-bg-2 border border-pf-border p-2 rounded-sm">
               <code className="text-xs text-pf-text-primary">bg-2</code>
             </div>
           </div>
@@ -35,19 +35,19 @@ export function ThemeDebugPanel() {
           <p className="text-sm text-pf-text-secondary mb-2">Accent:</p>
           <div className="space-y-2">
             <div 
-              className="border border-pf-border p-2 rounded"
+              className="border border-pf-border p-2 rounded-sm"
               style={{ backgroundColor: 'var(--pf-accent)' }}
             >
               <code className="text-xs text-white">accent</code>
             </div>
             <div 
-              className="border border-pf-border p-2 rounded"
+              className="border border-pf-border p-2 rounded-sm"
               style={{ backgroundColor: 'var(--pf-success)' }}
             >
               <code className="text-xs text-white">success</code>
             </div>
             <div 
-              className="border border-pf-border p-2 rounded"
+              className="border border-pf-border p-2 rounded-sm"
               style={{ backgroundColor: 'var(--pf-error)' }}
             >
               <code className="text-xs text-white">error</code>
@@ -58,7 +58,7 @@ export function ThemeDebugPanel() {
         {/* Text Colors */}
         <div>
           <p className="text-sm text-pf-text-secondary mb-2">Text:</p>
-          <div className="bg-pf-bg-2 p-3 rounded border border-pf-border">
+          <div className="bg-pf-bg-2 p-3 rounded-sm border border-pf-border">
             <p className="text-pf-text-primary text-sm mb-1">Primary</p>
             <p className="text-pf-text-secondary text-sm mb-1">Secondary</p>
             <p className="text-pf-text-tertiary text-sm">Tertiary</p>
@@ -67,7 +67,7 @@ export function ThemeDebugPanel() {
       </div>
       
       {/* CSS Variable Values */}
-      <div className="mt-4 p-3 bg-pf-bg-2 rounded border border-pf-border">
+      <div className="mt-4 p-3 bg-pf-bg-2 rounded-sm border border-pf-border">
         <p className="text-xs font-mono text-pf-text-secondary">
           Computed CSS values:
         </p>

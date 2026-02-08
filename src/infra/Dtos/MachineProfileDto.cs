@@ -29,6 +29,13 @@ public class MachineProfileDto
     public double? NozzleDiameter { get; set; }
 
     /// <summary>
+    /// Gets or sets the base printer model name from the profile (e.g., "Voron 2.4 350").
+    /// This is the model name used for alias lookup to link profiles to catalog PrinterModels.
+    /// </summary>
+    [JsonPropertyName("printer_model")]
+    public string? PrinterModel { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether this profile can be instantiated (used) in the slicer.
     /// true = user-selectable, false = base/template profile for inheritance only.
     /// </summary>

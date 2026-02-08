@@ -238,7 +238,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                   <h4 className="text-sm font-medium text-pf-text-secondary mb-3">Additional Metrics</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {totalsData.auxiliaryTotals.map((aux, index) => (
-                      <div key={`${aux.provider}-${aux.name}-${index}`} className="bg-pf-bg-2 border border-pf-border rounded p-3">
+                      <div key={`${aux.provider}-${aux.name}-${index}`} className="bg-pf-bg-2 border border-pf-border rounded-sm p-3">
                         <div className="text-xs text-pf-text-tertiary mb-1">
                           {aux.provider} - {aux.description || aux.name}
                         </div>
@@ -265,7 +265,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
               {historyData.jobs.map((job: HistoryJob) => (
                 <div
                   key={job.jobId}
-                  className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:shadow-sm transition-shadow"
+                  className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:shadow-xs transition-shadow"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
@@ -333,11 +333,11 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
 
                     {/* Thumbnail */}
                     {job.thumbnailUrl && (
-                      <div className="ml-4 flex-shrink-0">
+                      <div className="ml-4 shrink-0">
                         <img
                           src={job.thumbnailUrl}
                           alt={`${job.filename} thumbnail`}
-                          className="w-16 h-16 object-cover rounded border border-pf-border"
+                          className="w-16 h-16 object-cover rounded-sm border border-pf-border"
                           onError={(e) => {
                             // Hide broken images
                             e.currentTarget.style.display = 'none';

@@ -271,18 +271,29 @@ public class HarvestCompletionServiceTests
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
-        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        var logErrorSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _loggerMock
+            .Setup(l => l.LogError(
+                It.IsAny<Exception>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()))
+            .Callback(() => logErrorSeen.TrySetResult());
 
         // Act
-        await _service.StartAsync(cts.Token);
-        await Task.Delay(150);
-        cts.Cancel();
+        await _service.StartAsync(CancellationToken.None);
+
+        Task completed = await Task.WhenAny(
+            logErrorSeen.Task,
+            Task.Delay(TimeSpan.FromSeconds(2)));
 
         try
         {
-            await _service.StopAsync(cts.Token);
+            await _service.StopAsync(CancellationToken.None);
         }
         catch (OperationCanceledException) { }
+
+        Assert.Same(logErrorSeen.Task, completed);
 
         // Assert
         _loggerMock.Verify(l => l.LogError(

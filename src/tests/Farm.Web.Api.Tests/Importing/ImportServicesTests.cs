@@ -5,8 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Importing.Services.Import;
-using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using FluentAssertions;
 using FluentValidation;
@@ -24,7 +24,7 @@ public class ImportParserServiceTests
         var service = new ImportParserService();
 
         using var ms = new MemoryStream(Encoding.UTF8.GetBytes(csv));
-        (CreatePrinterDto[]? dtos, List<string>? errors) = await service.ParseCsvAsync(ms, CancellationToken.None);
+        (CreatePrinterFromDiscoveryDto[]? dtos, List<string>? errors) = await service.ParseCsvAsync(ms, CancellationToken.None);
 
         errors.Should().BeEmpty();
         dtos.Should().ContainSingle();
@@ -38,7 +38,7 @@ public class ImportParserServiceTests
         var service = new ImportParserService();
         using var ms = new MemoryStream(Encoding.UTF8.GetBytes("not-json"));
 
-        (CreatePrinterDto[]? dtos, List<string>? errors) = await service.ParseJsonAsync(ms, CancellationToken.None);
+        (CreatePrinterFromDiscoveryDto[]? dtos, List<string>? errors) = await service.ParseJsonAsync(ms, CancellationToken.None);
 
         dtos.Should().BeEmpty();
         errors.Should().ContainSingle();

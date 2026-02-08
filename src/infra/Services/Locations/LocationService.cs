@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
@@ -320,7 +321,7 @@ public class LocationService : ILocationService
             List<Printer> printers = await GetPrintersInLocationAsync(id, ct);
 
             LocationDetailsDto detailsDto = _mapper.Map<LocationDetailsDto>(location);
-            detailsDto.Printers = _mapper.Map<PrinterInfoDto[]>(printers);
+            detailsDto.Printers = _mapper.Map<DiscoveryPrinterInfoDto[]>(printers);
 
             return detailsDto;
         }

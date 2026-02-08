@@ -16,6 +16,10 @@ public abstract class StoredFile
 {
     public Guid Id { get; set; }
 
+    /// <summary>Concurrency token for optimistic locking during metadata updates from multiple sources.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty; // Original filename for display
 
     public string FileName { get; set; } = string.Empty; // GUID-based filename on disk

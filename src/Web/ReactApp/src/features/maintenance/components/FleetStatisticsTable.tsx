@@ -7,9 +7,10 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { maintenanceService } from '@/services/maintenanceService';
 import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
 import type { FleetPrinterStatistics } from '@/types/maintenance';
 
 export interface FleetStatisticsTableProps {
@@ -166,16 +167,16 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
               <td className="py-3 px-4 text-center">
                 <div className="flex items-center justify-center gap-2">
                   {printer.inMaintenance ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning/20 text-pf-warning">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-warning/20 text-pf-warning">
                       <WrenchIcon className="w-3 h-3 mr-1" />
                       Maintenance
                     </span>
                   ) : printer.isOnline ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-success/20 text-pf-success">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-success/20 text-pf-success">
                       Online
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-border-medium text-pf-text-tertiary">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-pf-border-medium text-pf-text-tertiary">
                       Offline
                     </span>
                   )}
@@ -208,12 +209,13 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
       
       {maxRows && stats && stats.length > maxRows && (
         <div className="text-center py-3 border-t border-pf-border">
-          <button 
+          <Button 
+            variant="link"
             className="text-sm text-pf-primary hover:text-pf-primary-hover"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
             View all {stats.length} printers →
-          </button>
+          </Button>
         </div>
       )}
     </div>

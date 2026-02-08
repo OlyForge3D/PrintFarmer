@@ -38,7 +38,13 @@ public class OrcaProfilesService : ISlicerProfilesService
     private Dictionary<string, List<MachineProfileDto>>? _machinesByManufacturerCache;
     private readonly Lock _machineCacheLock = new();
 
+    // Cache for profile name → full path lookups, built from manufacturer manifests
+    // Key: manufacturer name, Value: dictionary of profile name → full file path
+    private readonly Dictionary<string, Dictionary<string, string>> _profilePathLookupCache = new();
+    private readonly Lock _pathLookupCacheLock = new();
+
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
+    private List<MachineModelProfileDto>? _allMachineModelProfilesCache;
     private List<MachineProfileDto>? _allMachineProfilesCache;
     private List<FilamentProfileDto>? _allFilamentProfilesCache;
     private List<ProcessProfileDto>? _allProcessProfilesCache;
@@ -83,6 +89,122 @@ public class OrcaProfilesService : ISlicerProfilesService
     }
 
 #pragma warning disable CS1998
+    /// <summary>
+    /// Lists machine model profiles from machine_model_list entries.
+    /// These are base printer model templates like "Sovol SV08" that are NOT directly instantiatable.
+    /// </summary>
+    public async Task<IList<MachineModelProfileDto>> ListAvailableMachineModelProfilesAsync(CancellationToken ct = default)
+    {
+        // Return from cache if available
+        lock (_profilesCacheLock)
+        {
+            if (_allMachineModelProfilesCache != null)
+            {
+                _logger.LogInformation($"Returning {_allMachineModelProfilesCache.Count} machine model profiles from cache");
+                return _allMachineModelProfilesCache;
+            }
+        }
+
+        List<MachineModelProfileDto> profiles = [];
+
+        try
+        {
+            _logger.LogInformation($"Loading OrcaSlicer machine MODEL profiles (base templates) from bundles in: {_orcaProfilesPath}");
+
+            if (!Directory.Exists(_orcaProfilesPath))
+            {
+                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                return profiles;
+            }
+
+            // Find all manufacturer bundle JSON files (e.g., Prusa.json, Voron.json, etc.)
+            List<string> bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
+                .ToList();
+
+            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files for machine model profiles");
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            foreach (string? bundleFile in bundleFiles)
+            {
+                try
+                {
+                    ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
+                    if (bundle != null)
+                    {
+                        // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                        // NOT bundle.Name which may differ in case or be completely different
+                        // (e.g., Eryone.json has name="Thinker X400" but manufacturer should be "Eryone")
+                        string folderName = Path.GetFileNameWithoutExtension(bundleFile);
+                        string manufacturerName = folderName;
+
+                        // ONLY load from machine_model_list - these are base printer models
+                        if (bundle.MachineModelList != null)
+                        {
+                            foreach (ManufacturerBundleProfileEntry entry in bundle.MachineModelList)
+                            {
+                                try
+                                {
+                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                    if (!File.Exists(profilePath))
+                                    {
+                                        _logger.LogWarning($"Machine model profile referenced in bundle not found: {profilePath}");
+                                        failureCount++;
+                                        continue;
+                                    }
+
+                                    MachineModelProfileDto? profile = LoadProfileFromFile<MachineModelProfileDto>(profilePath);
+                                    if (profile != null)
+                                    {
+                                        // Ensure manufacturer name is set from bundle
+                                        profile.Manufacturer = manufacturerName;
+                                        profiles.Add(profile);
+                                        successCount++;
+                                    }
+                                    else
+                                    {
+                                        failureCount++;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning($"Failed to load machine model profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                    failureCount++;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    failureCount++;
+                }
+            }
+
+            _logger.LogInformation($"Loaded {successCount} machine MODEL profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+
+            // Cache the results
+            lock (_profilesCacheLock)
+            {
+                _allMachineModelProfilesCache = profiles;
+            }
+
+            return profiles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error loading machine model profiles: {ex.Message}");
+            return profiles;
+        }
+    }
+
+    /// <summary>
+    /// Lists machine profiles from machine_list entries.
+    /// These are the actual selectable profiles with nozzle sizes like "Sovol SV08 0.4 nozzle".
+    /// </summary>
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
         // Return from cache if available
@@ -99,7 +221,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         try
         {
-            _logger.LogInformation($"Loading OrcaSlicer machine profiles from bundles in: {_orcaProfilesPath}");
+            _logger.LogInformation($"Loading OrcaSlicer machine profiles (nozzle variants) from bundles in: {_orcaProfilesPath}");
 
             if (!Directory.Exists(_orcaProfilesPath))
             {
@@ -124,49 +246,45 @@ public class OrcaProfilesService : ISlicerProfilesService
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle != null)
                     {
-                        string manufacturerName = bundle.Name; // Extract from bundle
+                        // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                        // NOT bundle.Name which may differ in case or be completely different
+                        // (e.g., Eryone.json has name="Thinker X400" but manufacturer should be "Eryone")
+                        string folderName = Path.GetFileNameWithoutExtension(bundleFile);
+                        string manufacturerName = folderName;
 
-                        // Load from both machine_model_list and machine_list
-                        List<ManufacturerBundleProfileEntry> allMachineEntries = [];
-                        if (bundle.MachineModelList != null)
-                        {
-                            allMachineEntries.AddRange(bundle.MachineModelList);
-                        }
-
+                        // ONLY load from machine_list - these are actual selectable profiles with nozzle sizes
                         if (bundle.MachineList != null)
                         {
-                            allMachineEntries.AddRange(bundle.MachineList);
-                        }
-
-                        foreach (ManufacturerBundleProfileEntry entry in allMachineEntries)
-                        {
-                            try
+                            foreach (ManufacturerBundleProfileEntry entry in bundle.MachineList)
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
-                                if (!File.Exists(profilePath))
+                                try
                                 {
-                                    _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
-                                    failureCount++;
-                                    continue;
-                                }
+                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                    if (!File.Exists(profilePath))
+                                    {
+                                        _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
+                                        failureCount++;
+                                        continue;
+                                    }
 
-                                MachineProfileDto? profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
-                                if (profile != null)
-                                {
-                                    // Ensure manufacturer name is set from bundle
-                                    profile.Manufacturer = manufacturerName;
-                                    profiles.Add(profile);
-                                    successCount++;
+                                    MachineProfileDto? profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
+                                    if (profile != null)
+                                    {
+                                        // Ensure manufacturer name is set from bundle
+                                        profile.Manufacturer = manufacturerName;
+                                        profiles.Add(profile);
+                                        successCount++;
+                                    }
+                                    else
+                                    {
+                                        failureCount++;
+                                    }
                                 }
-                                else
+                                catch (Exception ex)
                                 {
+                                    _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
                                     failureCount++;
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
-                                failureCount++;
                             }
                         }
                     }
@@ -236,17 +354,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 try
                 {
+                    // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                    // NOT bundle.Name which may differ in case or be completely different
+                    string folderName = Path.GetFileNameWithoutExtension(bundleFile);
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.FilamentList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        // Use folderName for consistency - bundle.Name may differ (e.g., Eryone.json has name="Thinker X400")
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(folderName);
 
                         foreach (ManufacturerBundleProfileEntry entry in bundle.FilamentList)
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Filament profile referenced in bundle not found: {profilePath}");
@@ -257,7 +379,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 FilamentProfileDto? profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
-                                    profile.Manufacturer = bundle.Name;
+                                    profile.Manufacturer = folderName;
 
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
@@ -353,17 +475,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             {
                 try
                 {
+                    // Use folder name from JSON filename (e.g., "Ratrig" from "Ratrig.json")
+                    // NOT bundle.Name which may differ in case or be completely different
+                    string folderName = Path.GetFileNameWithoutExtension(bundleFile);
                     ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.ProcessList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        // Use folderName for consistency - bundle.Name may differ (e.g., Eryone.json has name="Thinker X400")
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(folderName);
 
                         foreach (ManufacturerBundleProfileEntry entry in bundle.ProcessList)
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Process profile referenced in bundle not found: {profilePath}");
@@ -547,12 +673,14 @@ public class OrcaProfilesService : ISlicerProfilesService
                 string? inheritedProfileName = inheritsElem.GetString();
                 if (!string.IsNullOrWhiteSpace(inheritedProfileName))
                 {
-                    // Find the parent profile in the same directory
-                    string? profileDir = Path.GetDirectoryName(filePath);
-                    string parentProfilePath = Path.Combine(profileDir ?? string.Empty, $"{inheritedProfileName}.json");
+                    // Search for parent profile - OrcaSlicer stores profiles in nested subdirectories
+                    // (e.g., filament/P1P/child.json) but base profiles are in parent folder (filament/base.json)
+                    string? parentProfilePath = FindParentProfile(filePath, inheritedProfileName);
 
-                    if (File.Exists(parentProfilePath))
+                    if (parentProfilePath != null && File.Exists(parentProfilePath))
                     {
+                        _logger.LogInformation($"Resolving inheritance: '{inheritedProfileName}' → '{parentProfilePath}'");
+
                         // Recursively load parent chain first (so parents are added before children)
                         if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
                         {
@@ -560,6 +688,10 @@ public class OrcaProfilesService : ISlicerProfilesService
 
                             // Don't fail - continue with what we have
                         }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Parent profile '{inheritedProfileName}' not found for '{filePath}' (resolved to: {parentProfilePath ?? "null"})");
                     }
                 }
             }
@@ -687,6 +819,134 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
+    /// <summary>
+    /// Find a parent profile by looking up its name in the manufacturer's manifest file.
+    /// The {Manufacturer}.json file contains name → sub_path mappings for all profiles.
+    /// </summary>
+    private string? FindParentProfile(string childFilePath, string parentProfileName)
+    {
+        // Extract manufacturer from path: /profiles/{Manufacturer}/filament/child.json → {Manufacturer}
+        string? manufacturerDir = GetManufacturerDirectory(childFilePath);
+        if (manufacturerDir == null)
+        {
+            _logger.LogDebug($"Could not determine manufacturer directory for '{childFilePath}'");
+            return null;
+        }
+
+        string manufacturerName = Path.GetFileName(manufacturerDir);
+
+        // Build or retrieve the profile path lookup for this manufacturer
+        Dictionary<string, string>? lookup = GetOrBuildProfilePathLookup(manufacturerName, manufacturerDir);
+        if (lookup == null)
+        {
+            _logger.LogDebug($"No manifest found for manufacturer '{manufacturerName}'");
+            return null;
+        }
+
+        // Look up the parent profile name in the manifest
+        if (lookup.TryGetValue(parentProfileName, out string? parentPath))
+        {
+            return parentPath;
+        }
+
+        // Not found in manifest - this is expected for some base profiles that may be shared
+        _logger.LogDebug($"Parent profile '{parentProfileName}' not found in {manufacturerName} manifest");
+        return null;
+    }
+
+    /// <summary>
+    /// Extract the manufacturer directory from a profile file path.
+    /// Example: /profiles/BBL/filament/P1P/child.json → /profiles/BBL
+    /// </summary>
+    private string? GetManufacturerDirectory(string filePath)
+    {
+        // Walk up from the file to find the manufacturer directory (direct child of _orcaProfilesPath)
+        string? currentDir = Path.GetDirectoryName(filePath);
+
+        while (!string.IsNullOrEmpty(currentDir))
+        {
+            string? parentDir = Path.GetDirectoryName(currentDir);
+            if (parentDir != null && Path.GetFullPath(parentDir) == Path.GetFullPath(_orcaProfilesPath))
+            {
+                // currentDir is a direct child of profiles root - this is the manufacturer directory
+                return currentDir;
+            }
+
+            if (parentDir == currentDir)
+            {
+                break; // Reached root
+            }
+
+            currentDir = parentDir;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Build or retrieve the profile name → full path lookup dictionary for a manufacturer.
+    /// Parses the {Manufacturer}.json manifest and builds mappings from all profile lists.
+    /// </summary>
+    private Dictionary<string, string>? GetOrBuildProfilePathLookup(string manufacturerName, string manufacturerDir)
+    {
+        lock (_pathLookupCacheLock)
+        {
+            if (_profilePathLookupCache.TryGetValue(manufacturerName, out Dictionary<string, string>? cached))
+            {
+                return cached;
+            }
+        }
+
+        // Build the lookup from the manifest file
+        string manifestPath = Path.Combine(_orcaProfilesPath, $"{manufacturerName}.json");
+        if (!File.Exists(manifestPath))
+        {
+            _logger.LogDebug($"Manifest file not found: {manifestPath}");
+            return null;
+        }
+
+        ManufacturerBundleDto? bundle = ParseManufacturerBundle(manifestPath);
+        if (bundle == null)
+        {
+            return null;
+        }
+
+        Dictionary<string, string> lookup = new(StringComparer.Ordinal);
+
+        // Add all profile types to the lookup
+        AddProfileEntriesToLookup(bundle.MachineModelList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.MachineList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.FilamentList, manufacturerDir, lookup);
+        AddProfileEntriesToLookup(bundle.ProcessList, manufacturerDir, lookup);
+
+        lock (_pathLookupCacheLock)
+        {
+            _profilePathLookupCache[manufacturerName] = lookup;
+        }
+
+        _logger.LogDebug($"Built profile path lookup for {manufacturerName}: {lookup.Count} entries");
+        return lookup;
+    }
+
+    /// <summary>
+    /// Add profile entries from a manifest list to the lookup dictionary.
+    /// </summary>
+    private static void AddProfileEntriesToLookup(
+        IList<ManufacturerBundleProfileEntry> entries,
+        string manufacturerDir,
+        Dictionary<string, string> lookup)
+    {
+        foreach (ManufacturerBundleProfileEntry entry in entries)
+        {
+            if (!string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(entry.SubPath))
+            {
+                // sub_path is relative to the manufacturer directory
+                string fullPath = Path.Combine(manufacturerDir, entry.SubPath);
+                lookup[entry.Name] = fullPath;
+            }
+        }
+    }
+
     private static string EscapeJsonKey(string key)
     {
         return key.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
@@ -704,6 +964,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("manufacturer", out JsonElement mfgElem))
         {
             profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+        }
+
+        // Extract printer_model - base model name used for catalog alias lookup
+        if (root.TryGetProperty("printer_model", out JsonElement printerModelElem))
+        {
+            profile.PrinterModel = printerModelElem.GetString();
         }
 
         // Extract nozzle diameter from settings - REQUIRED property
@@ -742,13 +1008,29 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
+        // Extract material type from multiple sources:
+        // 1. filament_type property (direct)
+        // 2. material property (direct)
+        // 3. inherits field (e.g., "fdm_filament_abs" -> "ABS")
+        // 4. Profile name parsing (e.g., "Generic ABS @System" -> "ABS")
         if (root.TryGetProperty("filament_type", out JsonElement typeElem))
         {
-            profile.Material = typeElem.GetString() ?? "PLA";
+            profile.Material = ParseStringValue(typeElem) ?? "PLA";
         }
         else if (root.TryGetProperty("material", out JsonElement matElem))
         {
-            profile.Material = matElem.GetString() ?? "PLA";
+            profile.Material = ParseStringValue(matElem) ?? "PLA";
+        }
+        else if (root.TryGetProperty("inherits", out JsonElement inheritsElem))
+        {
+            // Parse material from inherits like "fdm_filament_abs", "fdm_filament_petg", etc.
+            string? inherits = ParseStringValue(inheritsElem);
+            profile.Material = ExtractMaterialFromInherits(inherits) ?? ExtractMaterialFromName(profile.Name) ?? "Other";
+        }
+        else
+        {
+            // Try to extract from profile name
+            profile.Material = ExtractMaterialFromName(profile.Name) ?? "Other";
         }
 
         if (root.TryGetProperty("nozzle_temperature", out JsonElement nozzleElem))
@@ -756,7 +1038,12 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.NozzleTemperature = ParseIntValue(nozzleElem) ?? 210;
         }
 
-        if (root.TryGetProperty("bed_temperature", out JsonElement bedElem))
+        // OrcaSlicer uses hot_plate_temp for bed temperature, fall back to bed_temperature
+        if (root.TryGetProperty("hot_plate_temp", out JsonElement hotPlateElem))
+        {
+            profile.BedTemperature = ParseIntValue(hotPlateElem) ?? 60;
+        }
+        else if (root.TryGetProperty("bed_temperature", out JsonElement bedElem))
         {
             profile.BedTemperature = ParseIntValue(bedElem) ?? 60;
         }
@@ -775,7 +1062,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            string? condition = conditionElem.GetString();
+            string? condition = ParseStringValue(conditionElem);
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -828,7 +1115,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            string? condition = conditionElem.GetString();
+            string? condition = ParseStringValue(conditionElem);
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -866,6 +1153,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             return int.TryParse(elem.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int val) ? val : null;
         }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            // OrcaSlicer stores many values as single-element arrays like ["260"]
+            JsonElement firstElem = elem[0];
+            return ParseIntValue(firstElem);
+        }
 
         return null;
     }
@@ -879,6 +1172,31 @@ public class OrcaProfilesService : ISlicerProfilesService
         else if (elem.ValueKind == JsonValueKind.String)
         {
             return double.TryParse(elem.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val) ? val : null;
+        }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            // OrcaSlicer stores many values as single-element arrays like ["0.2"]
+            JsonElement firstElem = elem[0];
+            return ParseDoubleValue(firstElem);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Safely parse a string value from a JsonElement that could be a string or array.
+    /// OrcaSlicer stores many values as single-element arrays like ["PLA"].
+    /// </summary>
+    private static string? ParseStringValue(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.String)
+        {
+            return elem.GetString();
+        }
+        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
+        {
+            JsonElement firstElem = elem[0];
+            return ParseStringValue(firstElem);
         }
 
         return null;
@@ -1003,6 +1321,114 @@ public class OrcaProfilesService : ISlicerProfilesService
             if (_machinesByManufacturerCache?.TryGetValue(manufacturerName, out List<MachineProfileDto>? machines) == true)
             {
                 return machines;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts material type from inherits field like "fdm_filament_abs" -> "ABS".
+    /// </summary>
+    private static string? ExtractMaterialFromInherits(string? inherits)
+    {
+        if (string.IsNullOrWhiteSpace(inherits))
+        {
+            return null;
+        }
+
+        // Common patterns: fdm_filament_abs, fdm_filament_petg, filament_pla, etc.
+        string lower = inherits.ToLowerInvariant();
+
+        // Map of known suffixes to material names
+        Dictionary<string, string> materialMap = new()
+        {
+            { "abs", "ABS" },
+            { "asa", "ASA" },
+            { "pla", "PLA" },
+            { "petg", "PETG" },
+            { "pet", "PET" },
+            { "tpu", "TPU" },
+            { "tpe", "TPE" },
+            { "flex", "FLEX" },
+            { "pa", "PA" },
+            { "nylon", "PA" },
+            { "pc", "PC" },
+            { "pctg", "PCTG" },
+            { "pva", "PVA" },
+            { "bvoh", "BVOH" },
+            { "hips", "HIPS" },
+            { "pp", "PP" },
+            { "cpe", "CPE" },
+            { "peba", "PEBA" },
+            { "pvb", "PVB" },
+            { "pha", "PHA" },
+            { "cf", "CF" },  // Carbon Fiber
+            { "gf", "GF" },  // Glass Fiber
+            { "wood", "Wood" },
+            { "metal", "Metal" },
+            { "silk", "Silk" },
+            { "marble", "Marble" },
+            { "eva", "EVA" },
+        };
+
+        foreach (KeyValuePair<string, string> kvp in materialMap)
+        {
+            // Check if the inherits field ends with or contains the material
+            if (lower.EndsWith("_" + kvp.Key) || lower.EndsWith(kvp.Key) || lower.Contains("_" + kvp.Key + "_"))
+            {
+                return kvp.Value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts material type from profile name like "Generic ABS @System" -> "ABS".
+    /// </summary>
+    private static string? ExtractMaterialFromName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        // Common material names to look for in the profile name
+        // Ordered by specificity - composite materials first, then base materials
+        string[] materials = [
+
+            // Composite materials (check these first - they contain base material names)
+            "ABS-GF", "ABS-CF", "ASA-GF", "ASA-CF", "ASA-Aero",
+            "PA12-CF", "PA6-CF", "PA6-GF", "PA-CF", "PA-GF",
+            "PAHT-CF", "PAHT-GF", "PPA-CF", "PPA-GF",
+            "PETG-CF", "PETG-GF", "PET-CF",
+            "PC-CF", "PC-GF", "PC-ABS",
+            "PE-CF", "PP-CF", "PP-GF",
+            "PPS-CF", "PPS-GF", "PPS",
+
+            // Base materials
+            "ABS", "ASA", "PLA", "PETG", "PET", "TPU", "TPE", "FLEX",
+            "PA", "Nylon", "PC", "PCTG", "PVA", "BVOH", "HIPS", "PP", "CPE", "PEBA",
+            "PVB", "PHA", "Wood", "Metal", "Silk", "Marble", "EVA"
+        ];
+
+        string upper = name.ToUpperInvariant();
+
+        foreach (string material in materials)
+        {
+            string upperMat = material.ToUpperInvariant();
+
+            // Check for word boundary matches
+            if (upper.Contains(" " + upperMat + " ") ||
+                upper.Contains(" " + upperMat + "@") ||
+                upper.Contains(" " + upperMat + "-") ||
+                upper.StartsWith(upperMat + " ") ||
+                upper.StartsWith("GENERIC " + upperMat) ||
+                upper.Contains("/" + upperMat) ||
+                upper.Contains(upperMat + "/"))
+            {
+                return material;
             }
         }
 

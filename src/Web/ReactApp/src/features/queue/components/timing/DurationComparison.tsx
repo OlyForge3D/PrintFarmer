@@ -109,7 +109,7 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
         </div>
 
         {analytics.overallVariancePercent !== undefined && (
-          <div className="bg-pf-bg-2 border border-pf-border rounded p-4">
+          <div className="bg-pf-bg-2 border border-pf-border rounded-sm p-4">
             <p className="text-sm text-pf-text-secondary mb-2">Average Variance</p>
             <p className={`text-3xl font-bold ${analytics.overallVariancePercent > 10 ? 'text-pf-warning' : 'text-pf-success'}`}>
               {analytics.overallVariancePercent > 0 ? '+' : ''}{analytics.overallVariancePercent.toFixed(1)}%
@@ -140,7 +140,7 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
 
           <div className="space-y-2 sm:space-y-3">
             {analytics.topPerformers.map((printer) => (
-              <div key={printer.printerId} className="flex items-center justify-between bg-pf-bg-2 border border-pf-border rounded p-4">
+              <div key={printer.printerId} className="flex items-center justify-between bg-pf-bg-2 border border-pf-border rounded-sm p-4">
                 <div>
                   <p className="font-medium text-pf-text-primary">{printer.printerName}</p>
                   <p className="text-sm text-pf-text-secondary">{printer.totalJobs} jobs completed</p>

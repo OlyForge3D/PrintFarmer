@@ -129,6 +129,10 @@ public class GcodeHarvestOperation
     /// <summary>Unique identifier for this harvest operation.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>Concurrency token for optimistic locking during concurrent harvest operations.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     /// <summary>ID of the printer being harvested from.</summary>
     public Guid PrinterId { get; set; }
 
@@ -213,6 +217,10 @@ public class GcodeHarvestQueueItem
 {
     /// <summary>Unique identifier for this queue item.</summary>
     public Guid Id { get; set; }
+
+    /// <summary>Concurrency token for optimistic locking during queue processing.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
 
     /// <summary>ID of the printer to harvest from.</summary>
     public Guid PrinterId { get; set; }

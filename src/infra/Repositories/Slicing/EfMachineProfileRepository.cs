@@ -62,4 +62,7 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
         _ = await _db.SaveChangesAsync(ct);
         return profiles.Count;
     }
+
+    public async Task<bool> HasAnyForPrinterModelAsync(Guid printerModelId, CancellationToken ct = default) =>
+        await _db.MachineProfiles.AsNoTracking().AnyAsync(p => p.PrinterModelId == printerModelId, ct);
 }

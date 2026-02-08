@@ -7,7 +7,7 @@ const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
   useEffect(() => {
     if (ref.current) ref.current.style.width = `${Math.min(percent, 100)}%`;
   }, [percent]);
-  return <div ref={ref} className="bg-blue-600 h-2 rounded transition-all duration-300" />;
+  return <div ref={ref} className="bg-blue-600 h-2 rounded-sm transition-all duration-300" />;
 };
 
 export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) => void }) {
@@ -71,7 +71,7 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         {progress !== null && (
           <div className="mt-4">
             <div className="text-sm">Uploading: {progress}%</div>
-            <div className="w-full bg-gray-200 h-2 rounded mt-1">
+            <div className="w-full bg-gray-200 h-2 rounded-sm mt-1">
               <ProgressBar percent={progress} />
             </div>
           </div>

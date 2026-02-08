@@ -138,7 +138,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
       `}
     >
       {/* Priority indicator */}
-      <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${priorityConfig.bgColor.replace('/20', '')}`} />
+      <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${priorityConfig.bgColor.replace('/20', '')}`} />
 
       {/* Task info */}
       <div className="flex-1 min-w-0">
@@ -156,7 +156,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
           </div>
           <Badge 
             variant="outline" 
-            className={`text-xs flex-shrink-0 ${priorityConfig.color}`}
+            className={`text-xs shrink-0 ${priorityConfig.color}`}
           >
             {priorityConfig.label}
           </Badge>
@@ -242,7 +242,7 @@ export function MaintenanceTimeline({
       <div className={`space-y-4 ${className}`}>
         {Array.from({ length: 3 }).map((_, groupIdx) => (
           <div key={groupIdx}>
-            <div className="h-5 w-24 bg-pf-border rounded animate-pulse mb-2" />
+            <div className="h-5 w-24 bg-pf-border rounded-sm animate-pulse mb-2" />
             <div className="space-y-2">
               {Array.from({ length: 2 }).map((_, taskIdx) => (
                 <div key={taskIdx} className="h-20 bg-pf-border/50 rounded-lg animate-pulse" />

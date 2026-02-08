@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { GcodeFileBrowser } from '@/features/gcode/components/GcodeFileBrowser';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';

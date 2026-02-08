@@ -283,5 +283,3 @@ export const loggerExtensions = {
     unifiedLogger[level](message, { formName, success, validationErrors, ...(details as Record<string, unknown>) }, 'FormSubmission');
   },
 };
-
-export default unifiedLogger;

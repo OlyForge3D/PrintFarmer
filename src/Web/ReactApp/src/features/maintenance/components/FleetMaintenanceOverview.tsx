@@ -112,8 +112,8 @@ export function FleetMaintenanceOverview({
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pf-border rounded-lg" />
                 <div className="flex-1">
-                  <div className="h-4 bg-pf-border rounded w-24 mb-2" />
-                  <div className="h-6 bg-pf-border rounded w-16" />
+                  <div className="h-4 bg-pf-border rounded-sm w-24 mb-2" />
+                  <div className="h-6 bg-pf-border rounded-sm w-16" />
                 </div>
               </div>
             </div>

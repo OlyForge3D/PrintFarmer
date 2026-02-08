@@ -80,7 +80,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
       {isVisible && content && (
         <div
           className={clsx(
-            'absolute z-50 px-2 py-1 text-xs font-medium rounded shadow-lg',
+            'absolute z-50 px-2 py-1 text-xs font-medium rounded-sm shadow-lg',
             'bg-pf-bg-3 text-pf-text-primary border border-pf-border',
             'whitespace-nowrap pointer-events-none',
             'animate-in fade-in-0 zoom-in-95 duration-150',

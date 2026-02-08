@@ -54,7 +54,7 @@ export const FileBrowserToolbar = ({
           aria-label="Sort files"
           value={sortBy}
           onChange={(e) => onSortChange(e.target.value)}
-          className="min-w-[7rem]"
+          className="min-w-28"
         >
           {sortOptions.map((option) => (
             <option key={option.value} value={option.value}>

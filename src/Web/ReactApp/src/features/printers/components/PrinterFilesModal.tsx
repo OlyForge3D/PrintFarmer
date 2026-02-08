@@ -256,7 +256,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const modalContent = (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs" />
 
         <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
@@ -343,7 +343,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           <div className="flex items-center flex-1 min-w-0 gap-3">
                             {file.thumbnailUrl ? (
                               <div
-                                className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                                className="relative h-12 w-12 shrink-0 rounded-sm bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
                                 onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
                               >
                                 <img
@@ -356,12 +356,12 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                                 />
                               </div>
                             ) : (
-                              <div className="h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border flex items-center justify-center">
+                              <div className="h-12 w-12 shrink-0 rounded-sm bg-pf-bg-2 border border-pf-border flex items-center justify-center">
                                 <ImageIcon className="h-6 w-6 text-pf-text-tertiary" />
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="text-pf-text-primary break-words font-medium">{file.fileName}</p>
+                              <p className="text-pf-text-primary wrap-break-word font-medium">{file.fileName}</p>
                               <div className="flex gap-4 text-xs text-pf-text-tertiary mt-1">
                                 <span>G-code file</span>
                                 {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
@@ -370,7 +370,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 flex-shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-2 shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button
                               type="button"
                               variant="subtle"
@@ -452,7 +452,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                             </div>
                             <div className="w-full h-2 bg-pf-bg-2 rounded-full overflow-hidden border border-pf-border">
                               <div
-                                className="h-full bg-gradient-to-r from-pf-accent to-cyan-400 transition-all duration-300 ease-out rounded-full"
+                                className="h-full bg-linear-to-r from-pf-accent to-cyan-400 transition-all duration-300 ease-out rounded-full"
                                 style={{ width: `${isHarvesting.percentComplete}%` }}
                               />
                             </div>
@@ -516,7 +516,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               />
             </div>
           )}
-          <div className="bg-pf-bg-2 rounded p-3 space-y-2 text-sm">
+          <div className="bg-pf-bg-2 rounded-sm p-3 space-y-2 text-sm">
             <div>
               <p className="text-pf-text-secondary">File:</p>
               <p className="text-pf-text-primary font-medium break-all">{printConfirmDialog.file.fileName}</p>
@@ -549,7 +549,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           onConfirm={() => confirmDeleteFile(deleteConfirmDialog.file.fileName)}
           onCancel={() => setConfirmDialog(null)}
         >
-          <div className="bg-pf-bg-2 rounded p-3 space-y-2 text-sm">
+          <div className="bg-pf-bg-2 rounded-sm p-3 space-y-2 text-sm">
             <div>
               <p className="text-pf-text-secondary">File:</p>
               <p className="text-pf-text-primary font-medium break-all">{deleteConfirmDialog.file.fileName}</p>

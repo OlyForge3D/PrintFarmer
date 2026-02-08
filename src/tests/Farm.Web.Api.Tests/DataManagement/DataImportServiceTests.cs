@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Models.Admin;
 using Farm.Web.Api.Services;
@@ -13,6 +14,7 @@ public class DataImportServiceTests
 {
     private readonly AppDbContext _context;
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ISensitiveDataProtector> _sensitiveDataProtectorMock;
     private readonly DataImportService _importService;
 
     public DataImportServiceTests()
@@ -23,7 +25,12 @@ public class DataImportServiceTests
         _context = new AppDbContext(options);
 
         _loggerMock = new Mock<IUnifiedLoggingService>();
-        _importService = new DataImportService(_context, _loggerMock.Object);
+        _sensitiveDataProtectorMock = new Mock<ISensitiveDataProtector>();
+        _sensitiveDataProtectorMock
+            .Setup(x => x.Protect(It.IsAny<string?>()))
+            .Returns<string?>(s => string.IsNullOrEmpty(s) ? null : $"prot:{s}");
+
+        _importService = new DataImportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object);
     }
 
     [Fact]

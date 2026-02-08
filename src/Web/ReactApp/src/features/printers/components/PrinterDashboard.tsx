@@ -1,11 +1,30 @@
+/**
+ * PrinterDashboard Component
+ * 
+ * Main dashboard page showing printer farm overview with stats,
+ * alerts, jobs, and system health widgets.
+ */
+
 import React from 'react';
-import { usePrinters, useJobQueue, usePrinterHistory } from '@/common/hooks/useApi';
+import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
-import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircleIcon, AlertCircleIcon, DashboardIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
+import { 
+  SettingsIcon, 
+  PlayIcon, 
+  PauseIcon, 
+  PrinterIcon, 
+  WrenchIcon, 
+  CheckCircleIcon, 
+  DashboardIcon 
+} from '@/common/components/icons/MdiIcons';
 import { DetailedSystemHealth } from '@/features/printers/components/SystemHealth';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
 import { BackgroundServicesWidget } from '@/features/admin/components';
+import { TasksWidget } from '@/features/tasks';
+import { AlertsWidget } from './AlertsWidget';
+import { ActiveJobsWidget } from './ActiveJobsWidget';
+import { RecentPrintsWidget } from './RecentPrintsWidget';
 
 interface StatsCardProps {
   title: string;
@@ -26,7 +45,7 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
     <div className="bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg">
       <div className="p-5">
         <div className="flex items-center">
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <div className={`p-3 rounded-md ${colorClasses[color]}`}>
               <Icon className="h-6 w-6" />
             </div>
@@ -45,19 +64,7 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrinters();
-  
-  // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
-  
-  // Fetch global job queue for active jobs
-  const { data: globalQueue } = useJobQueue(undefined);
-  
-  // Fetch history for the first printer (or any printer) to show recent prints
-  const firstPrinterId = printers?.[0]?.id;
-  const { data: recentHistory } = usePrinterHistory(
-    firstPrinterId || '',
-    { limit: 5, order: 'desc' }
-  );
 
   const stats = React.useMemo(() => {
     const userPrinters = displayPrinters ?? [];
@@ -76,149 +83,74 @@ export const PrinterDashboard: React.FC = () => {
       subtitle="Overview of your 3D printer farm status"
       icon={DashboardIcon}
     >
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
-          <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
-          <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
-          <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
-          <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
-          {stats.maintenance > 0 && (
-            <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={WrenchIcon} />
-          )}
-        </div>
-
-        {isLoading ? (
-          <div role="status" aria-label="Printers loading">
-            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-48" />
-            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-56" />
-            <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded mb-2 w-40" />
-          </div>
-        ) : error ? (
-          <div className="p-4 bg-pf-bg-1 rounded-lg shadow">
-            <h2 className="text-lg font-semibold">Error Loading Printers</h2>
-            {(() => {
-              const e: unknown = error;
-              if (e instanceof Error) return <p className="text-sm text-pf-error-text">{e.message}</p>;
-              if (typeof e === 'string') return <p className="text-sm text-pf-error-text">{e}</p>;
-              if (e && typeof e === 'object' && 'message' in (e as Record<string, unknown>)) {
-                const msg = (e as Record<string, unknown>).message;
-                if (typeof msg === 'string') return <p className="text-sm text-pf-error-text">{msg}</p>;
-              }
-              return <p className="text-sm text-pf-error-text">Unknown error</p>;
-            })()}
-          </div>
-        ) : printers && printers.length === 0 ? (
-          <div className="p-8 text-center">
-            <h2 className="text-xl font-semibold">No Printers Found</h2>
-            <p className="text-sm mt-2">Get started by adding your first 3D printer.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Alerts Panel */}
-            {stats.offline > 0 || stats.maintenance > 0 ? (
-              <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
-                <div className="flex items-center gap-2 mb-4">
-                  <AlertCircleIcon className="h-5 w-5 text-pf-error-text" />
-                  <h2 className="text-lg font-semibold text-pf-text-primary">Alerts</h2>
-                </div>
-                <div className="space-y-3">
-                  {stats.offline > 0 && (
-                    <div className="flex items-start gap-2 p-3 bg-pf-error-bg rounded border border-pf-error-border">
-                      <AlertCircleIcon className="h-4 w-4 text-pf-error-text flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-pf-error-text">{stats.offline} Printer{stats.offline > 1 ? 's' : ''} Offline</p>
-                        <p className="text-xs text-pf-error-text opacity-80">Check network connection and printer status</p>
-                      </div>
-                    </div>
-                  )}
-                  {stats.maintenance > 0 && (
-                    <div className="flex items-start gap-2 p-3 bg-pf-warning-bg rounded border border-pf-warning-border">
-                      <WrenchIcon className="h-4 w-4 text-pf-warning-text flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-pf-warning-text">{stats.maintenance} Printer{stats.maintenance > 1 ? 's' : ''} in Maintenance</p>
-                        <p className="text-xs text-pf-warning-text opacity-80">These printers are not available for printing</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {/* Active Jobs Widget */}
-            {globalQueue && globalQueue.length > 0 ? (
-              <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
-                <div className="flex items-center gap-2 mb-4">
-                  <PlayIcon className="h-5 w-5 text-pf-loading" />
-                  <h2 className="text-lg font-semibold text-pf-text-primary">Active & Queued Jobs</h2>
-                </div>
-                <div className="space-y-3 max-h-64 overflow-y-auto">
-                  {globalQueue.slice(0, 5).map((job, idx) => (
-                    <div key={job.id} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-pf-text-primary truncate">{job.gcodeFileName}</p>
-                        <p className="text-xs text-pf-text-tertiary">Queue Position: {idx + 1}</p>
-                      </div>
-                      <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-pf-loading text-pf-text-primary whitespace-nowrap">
-                        Queued
-                      </span>
-                    </div>
-                  ))}
-                  {globalQueue.length > 5 && (
-                    <p className="text-xs text-pf-text-tertiary text-center py-2">+{globalQueue.length - 5} more in queue</p>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {/* Recent Print History Widget */}
-            {recentHistory && recentHistory.jobs && recentHistory.jobs.length > 0 ? (
-              <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
-                <div className="flex items-center gap-2 mb-4">
-                  <TrendingUpIcon className="h-5 w-5 text-pf-status-online-text" />
-                  <h2 className="text-lg font-semibold text-pf-text-primary">Recent Prints</h2>
-                </div>
-                <div className="space-y-3 max-h-64 overflow-y-auto">
-                  {recentHistory.jobs.slice(0, 5).map((job) => (
-                    <div key={job.jobId} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-pf-text-primary truncate">{job.filename}</p>
-                        <p className="text-xs text-pf-text-tertiary">
-                          {job.status === 'Success' ? '✓ Completed' : job.status === 'Failed' ? '✗ Failed' : job.status}
-                        </p>
-                      </div>
-                      <div className="ml-2 text-right">
-                        <p className="text-xs font-medium text-pf-text-secondary">
-                          {job.printDuration ? Math.floor((job.printDuration ?? 0) / 60) : 0}m
-                        </p>
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                          job.status === 'Success' 
-                            ? 'bg-pf-status-online-bg text-pf-status-online-text' 
-                            : job.status === 'Failed' 
-                            ? 'bg-pf-error-bg text-pf-error-text'
-                            : 'bg-pf-border-medium text-pf-text-secondary'
-                        }`}>
-                          {job.status}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {/* Maintenance Widgets */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <MaintenanceAlertsWidget maxAlerts={3} />
-              <MaintenanceOverviewWidget maxUpcoming={3} />
-            </div>
-
-            {/* System Health and Services */}
-            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <BackgroundServicesWidget maxServices={5} />
-              <DetailedSystemHealth />
-            </div>
-          </div>
+        <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
+        <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
+        <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
+        <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
+        <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
+        {stats.maintenance > 0 && (
+          <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={WrenchIcon} />
         )}
+      </div>
+
+      {/* Loading State */}
+      {isLoading ? (
+        <div role="status" aria-label="Printers loading">
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-48" />
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-56" />
+          <div aria-label="Loading printer" className="h-6 bg-pf-loading rounded-sm mb-2 w-40" />
+        </div>
+      ) : error ? (
+        /* Error State */
+        <div className="p-4 bg-pf-bg-1 rounded-lg shadow-sm">
+          <h2 className="text-lg font-semibold">Error Loading Printers</h2>
+          {(() => {
+            const e: unknown = error;
+            if (e instanceof Error) return <p className="text-sm text-pf-error-text">{e.message}</p>;
+            if (typeof e === 'string') return <p className="text-sm text-pf-error-text">{e}</p>;
+            if (e && typeof e === 'object' && 'message' in (e as Record<string, unknown>)) {
+              const msg = (e as Record<string, unknown>).message;
+              if (typeof msg === 'string') return <p className="text-sm text-pf-error-text">{msg}</p>;
+            }
+            return <p className="text-sm text-pf-error-text">Unknown error</p>;
+          })()}
+        </div>
+      ) : printers && printers.length === 0 ? (
+        /* Empty State */
+        <div className="p-8 text-center">
+          <h2 className="text-xl font-semibold">No Printers Found</h2>
+          <p className="text-sm mt-2">Get started by adding your first 3D printer.</p>
+        </div>
+      ) : (
+        /* Main Dashboard Content */
+        <div className="space-y-6">
+          {/* Row 1: Alerts and Pending Tasks */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <AlertsWidget />
+            <TasksWidget />
+          </div>
+
+          {/* Row 2: Active Jobs and Recent Prints */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ActiveJobsWidget />
+            <RecentPrintsWidget />
+          </div>
+
+          {/* Row 3: Maintenance Widgets */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <MaintenanceAlertsWidget maxAlerts={3} />
+            <MaintenanceOverviewWidget />
+          </div>
+
+          {/* Row 4: System Health and Services */}
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <BackgroundServicesWidget maxServices={5} />
+            <DetailedSystemHealth />
+          </div>
+        </div>
+      )}
     </PageTemplate>
   );
 };

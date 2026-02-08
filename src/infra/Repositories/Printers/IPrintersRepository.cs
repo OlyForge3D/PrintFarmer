@@ -103,7 +103,7 @@ public interface IPrintersRepository
     /// <param name="serverUrl">The server URL to search for.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The printer if found, otherwise null.</returns>
-    Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
+    Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct);
 
     /// <summary>
     /// Detaches all tracked entities to prevent concurrent operation errors.
@@ -122,4 +122,11 @@ public interface IPrintersRepository
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">The cancellation token.</param>
     Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Encrypts sensitive fields (ApiKey, Password) on all tracked Printer entities
+    /// that are being added or modified. Call this before SaveChangesAsync.
+    /// This is the encryption counterpart to PopulateCredential/DecryptIfNeeded.
+    /// </summary>
+    void EncryptSensitiveFieldsOnTrackedEntities();
 }

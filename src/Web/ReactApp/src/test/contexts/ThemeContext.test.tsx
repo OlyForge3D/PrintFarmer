@@ -296,22 +296,22 @@ describe('ThemeContext', () => {
 
   describe('accessibility preferences', () => {
     it('detects reduced motion preference', () => {
-      const mockMatchMedia = vi.fn()
-        .mockImplementationOnce(() => ({ // prefers-color-scheme
-          matches: true,
+      // Use query-based mock to handle multiple matchMedia calls in any order
+      const mockMatchMedia = vi.fn().mockImplementation((query) => {
+        const results: Record<string, boolean> = {
+          '(prefers-color-scheme: dark)': true,
+          '(prefers-reduced-motion: reduce)': true,
+          '(prefers-contrast: more)': false,
+        };
+        const matches = results[query] ?? false;
+        return {
+          matches,
+          media: query,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({ // prefers-reduced-motion
-          matches: true,
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({ // prefers-contrast
-          matches: false,
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }));
+          dispatchEvent: vi.fn(),
+        };
+      });
       
       window.matchMedia = mockMatchMedia;
       
@@ -371,22 +371,22 @@ describe('ThemeContext', () => {
     });
 
     it('applies reduced motion CSS variable', () => {
-      const mockMatchMedia = vi.fn()
-        .mockImplementationOnce(() => ({
-          matches: true,
+      // Use query-based mock to handle multiple matchMedia calls in any order
+      const mockMatchMedia = vi.fn().mockImplementation((query) => {
+        const results: Record<string, boolean> = {
+          '(prefers-color-scheme: dark)': true,
+          '(prefers-reduced-motion: reduce)': true,
+          '(prefers-contrast: more)': false,
+        };
+        const matches = results[query] ?? false;
+        return {
+          matches,
+          media: query,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({
-          matches: true, // prefers-reduced-motion: reduce
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({
-          matches: false,
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }));
+          dispatchEvent: vi.fn(),
+        };
+      });
       
       window.matchMedia = mockMatchMedia;
       
@@ -444,22 +444,22 @@ describe('ThemeContext', () => {
     });
 
     it('useAccessibilityPreferences returns preferences', () => {
-      const mockMatchMedia = vi.fn()
-        .mockImplementationOnce(() => ({
-          matches: true,
+      // Use query-based mock to handle multiple matchMedia calls in any order
+      const mockMatchMedia = vi.fn().mockImplementation((query) => {
+        const results: Record<string, boolean> = {
+          '(prefers-color-scheme: dark)': true,
+          '(prefers-reduced-motion: reduce)': true,
+          '(prefers-contrast: more)': true,
+        };
+        const matches = results[query] ?? false;
+        return {
+          matches,
+          media: query,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({
-          matches: true, // reduced motion
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }))
-        .mockImplementationOnce(() => ({
-          matches: true, // high contrast
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-        }));
+          dispatchEvent: vi.fn(),
+        };
+      });
       
       window.matchMedia = mockMatchMedia;
       

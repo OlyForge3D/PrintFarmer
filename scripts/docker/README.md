@@ -8,15 +8,14 @@ This directory contains all Docker-related files for PrintFarmer, organized for 
 scripts/docker/
 ├── README.md                 # This file
 ├── dockerfiles/             # All Dockerfile definitions  
-│   ├── Dockerfile           # Main monolithic application
-│   ├── Dockerfile.api       # API service (microservices)
+│   ├── Dockerfile           # Main application
+│   ├── Dockerfile.api       # API service
 │   ├── Dockerfile.frontend* # Frontend variants
 │   ├── Dockerfile.orca*     # OrcaSlicer worker variants
 │   ├── Dockerfile.prusa*    # (PrusaSlicer worker variants removed)
 │   └── Dockerfile.slicer-base # Base slicer image
 ├── compose-templates/       # Docker Compose template files
 │   ├── docker-compose.yml                # Main template
-│   ├── docker-compose.microservices.yml  # Microservices architecture
 │   ├── docker-compose.override.yml       # Development overrides
 │   ├── docker-compose.databases.yml      # Database services
 │   ├── docker-compose.monitoring.yml     # Monitoring stack
@@ -34,36 +33,30 @@ scripts/docker/
 
 The deployment script (`../deploy-docker.sh`) now:
 
-1. **Analyzes** the target deployment architecture (monolithic, microservices)
+1. **Analyzes** the target deployment architecture
 2. **Copies** the appropriate Dockerfiles to the repository root
-3. **Generates** a single `docker-compose.yml` tailored to the architecture
+3. **Generates** a single `docker-compose.yml` tailored to the configuration
 4. **Copies** required configuration files to the root
 5. **Deploys** using the generated configuration
 6. **Cleans up** by removing generated files after deployment
 
-## Architecture-Specific Files
+## Architecture Overview
 
-### Monolithic Architecture
-- Uses `Dockerfile` (single container with all services)
-- Generates minimal `docker-compose.yml` with database and main app
-
-### Microservices Architecture  
+### Standard Deployment
 - Uses `Dockerfile.api`, `Dockerfile.frontend`, worker Dockerfiles
 - Combines multiple compose templates into comprehensive configuration
 - Supports optional services (monitoring, telemetry, etc.)
 
-### Host Network Mode
-- Uses microservices Dockerfiles with host networking
-- Special frontend configuration for host network access
-- Direct host network access for printer discovery
-
 ## Configuration Management
 
 The deployment script intelligently selects and combines:
-- **Base services**: API, frontend, database, Redis
-- **Optional services**: Workers, monitoring, telemetry, security
+- **Base services**: API, frontend, nginx-proxy
+- **Database**: PostgreSQL (default) or SQL Server - always a separate container
+- **Observability**: Prometheus + Grafana (monitoring), OpenTelemetry + Jaeger (telemetry) - enabled by default
+- **Optional services**: Workers, security, registry, discovery
 - **Environment-specific**: Development overrides, production optimizations
-- **Database providers**: PostgreSQL, SQL Server, MySQL, SQLite
+
+**Note**: SQLite is NOT supported for Docker deployments. All Docker deployments require a proper database container (PostgreSQL or SQL Server) for production reliability.
 
 ## Benefits of This Structure
 

@@ -69,7 +69,7 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
       </div>
 
       {/* Prediction Recommendations */}
-      <section className="bg-pf-info bg-opacity-10 border border-pf-info border-opacity-30 rounded-lg p-4 sm:p-5">
+      <section className="bg-pf-info/10 border border-pf-info/30 rounded-lg p-4 sm:p-5">
         <h3 className="font-semibold text-pf-text-primary mb-3 flex items-center gap-2">
           <span className="text-lg">💡</span> Prediction Tips
         </h3>
@@ -107,7 +107,7 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
             {Object.values(analytics.byPrinter)
               .sort((a, b) => (b.accuracyPercent || 0) - (a.accuracyPercent || 0))
               .map((printer) => (
-                <div key={printer.printerId} className="bg-pf-bg-2 border border-pf-border rounded p-3">
+                <div key={printer.printerId} className="bg-pf-bg-2 border border-pf-border rounded-sm p-3">
                   <p className="font-medium text-pf-text-primary">{printer.printerName}</p>
                   <p className="text-xs text-pf-text-secondary mb-2">{printer.totalJobs} past jobs</p>
 

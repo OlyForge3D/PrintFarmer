@@ -45,7 +45,7 @@ export function TemperatureInput({
           onKeyDown={onKeyDown}
           disabled={disabled}
           placeholder="Temp"
-          className={`w-[7.75rem] h-9 ${label ? 'pl-10' : 'pl-2'} pr-8 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
+          className={`w-31 h-9 ${label ? 'pl-10' : 'pl-2'} pr-8 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
           {...props}
         />
         <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none text-sm">

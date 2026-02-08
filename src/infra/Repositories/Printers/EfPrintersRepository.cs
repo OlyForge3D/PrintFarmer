@@ -4,36 +4,83 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 
-public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
+public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensitiveDataProtector) : IPrintersRepository
 {
     private readonly AppDbContext _db = db;
+    private readonly ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector;
 
-    public async Task<List<Printer>> GetAllAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().ToListAsync(ct);
+    public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
+    {
+        List<Printer> printers = await _db.Printers.AsNoTracking().ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
 
-    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct) => await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
+    public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
+    {
+        List<Printer> printers = await _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Location).AsSplitQuery().ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
 
-    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct) =>
-        await _db.Printers.Include(p => p.Toolheads).ToListAsync(ct);  // With tracking for updates
+    public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
+    {
+        List<Printer> printers = await _db.Printers.Include(p => p.Toolheads).ToListAsync(ct);  // With tracking for updates
+        foreach (Printer p in printers)
+        {
+            PopulateCredential(p);
+        }
 
-    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct) =>
-        await _db.Printers.Include(p => p.Toolheads).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
+        return printers;
+    }
 
-    public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
+    public async Task<Printer?> FindByIdForTemplateUpdateAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _db.Printers.Include(p => p.Toolheads).FirstOrDefaultAsync(p => p.Id == id, ct);  // With tracking for updates
+        if (printer != null)
+        {
+            PopulateCredential(printer);
+        }
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers
-        .Include(p => p.Manufacturer)
-        .Include(p => p.Model)
-        .Include(p => p.Toolheads).ThenInclude(t => t.HotendModel)
-        .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
-        .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
-        .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
-        .AsSplitQuery()
-        .FirstOrDefaultAsync(p => p.Id == id, ct);
+        return printer;
+    }
+
+    public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _db.Printers.FindAsync(new object?[] { id }, ct);
+        if (printer != null)
+        {
+            PopulateCredential(printer);
+        }
+
+        return printer;
+    }
+
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _db.Printers
+            .Include(p => p.Manufacturer)
+            .Include(p => p.Model)
+            .Include(p => p.Toolheads).ThenInclude(t => t.HotendModel)
+            .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
+            .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
+            .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+
+        if (printer != null)
+        {
+            PopulateCredential(printer);
+        }
+
+        return printer;
+    }
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
@@ -101,7 +148,9 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
             q = q.Where(p => ids.Contains(p.Id));
         }
 
-        return await q.ToListAsync(ct);
+        List<Printer> printers = await q.ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
     }
 
     public async Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct)
@@ -116,29 +165,41 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
 
     public async Task<List<Printer>> GetByBackendAsync(PrinterBackend backend, CancellationToken ct)
     {
-        return await _db.Printers
+        List<Printer> printers = await _db.Printers
             .AsNoTracking()
             .Where(p => p.Backend == (int)backend)
             .ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
     }
 
     /// <summary>
-    /// Finds a printer by its IP address efficiently using a direct database query.
-    /// Extracts the IP from the ServerUrl and matches against the stored IpAddress field.
+    /// Finds a printer by its ServerUrl efficiently using a direct database query.
     /// This is much more efficient than loading all printers into memory.
     /// </summary>
-    /// <param name="serverUrl">The server URL containing the IP address to search for.</param>
+    /// <param name="serverUrl">The server URL to search for.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
-    public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+    public async Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct)
     {
-        // Extract IP address from ServerUrl (format: http://ip or http://hostname)
-        // Strip http/https and port (if any) to get just the host
-        string inputHost = serverUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).Split(':')[0];
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return null;
+        }
 
-        // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
-        return await _db.Printers
+        // Normalize the URL for comparison (strip trailing slashes)
+        string normalizedUrl = serverUrl.TrimEnd('/');
+
+        // Query directly by ServerUrl - much more efficient than GetAllAsync + FirstOrDefault
+        Printer? printer = await _db.Printers
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.IpAddress == inputHost, ct);
+            .FirstOrDefaultAsync(p => p.ServerUrl == normalizedUrl || p.ServerUrl == serverUrl, ct);
+
+        if (printer != null)
+        {
+            PopulateCredential(printer);
+        }
+
+        return printer;
     }
 
     /// <summary>
@@ -152,5 +213,94 @@ public class EfPrintersRepository(AppDbContext db) : IPrintersRepository
         {
             entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
         }
+    }
+
+    /// <summary>
+    /// Populates the transient Credential property on a printer entity.
+    /// Creates a PrinterCredential with ApiKey, Username, and Password as applicable.
+    /// Backend clients can then use whatever properties they need for authentication.
+    /// Also decrypts Password and ApiKey fields on the entity for editing scenarios.
+    /// </summary>
+    private void PopulateCredential(Printer p)
+    {
+        // Decrypt sensitive fields directly on the entity for editing/display
+        p.Password = DecryptIfNeeded(p.Password);
+        p.ApiKey = DecryptIfNeeded(p.ApiKey);
+
+        // Build the PrinterCredential with all available auth properties
+        p.Credential = PrinterCredential.FromAll(p.ApiKey, p.Username, p.Password);
+    }
+
+    /// <summary>
+    /// Decrypts a potentially encrypted value. Returns the original value if decryption fails
+    /// (e.g., if the data is already in plaintext for backward compatibility).
+    /// </summary>
+    private string? DecryptIfNeeded(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // Try to decrypt - if it fails, the data might be plaintext (migration scenario)
+        string? decrypted = _sensitiveDataProtector.Unprotect(value);
+
+        // If decryption returned null, assume the data is plaintext
+        return decrypted ?? value;
+    }
+
+    /// <summary>
+    /// Encrypts sensitive fields (ApiKey, Password) on all tracked Printer entities
+    /// that are being added or modified. Call this before SaveChangesAsync.
+    /// This is the encryption counterpart to PopulateCredential/DecryptIfNeeded.
+    /// </summary>
+    public void EncryptSensitiveFieldsOnTrackedEntities()
+    {
+        // Find all tracked Printer entities that have been Added or Modified
+        var trackedPrinters = _db.ChangeTracker.Entries<Printer>()
+            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
+            .Select(e => e.Entity)
+            .ToList();
+
+        foreach (Printer printer in trackedPrinters)
+        {
+            // Encrypt ApiKey if present and not already encrypted
+            printer.ApiKey = EncryptIfNeeded(printer.ApiKey);
+
+            // Encrypt Password if present and not already encrypted
+            printer.Password = EncryptIfNeeded(printer.Password);
+        }
+    }
+
+    /// <summary>
+    /// Encrypts a value if it's not null/empty and not already encrypted.
+    /// This is the encryption counterpart to DecryptIfNeeded.
+    /// </summary>
+    private string? EncryptIfNeeded(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        // Check if already encrypted - Data Protection API base64 values start with "CfDJ" and are typically long
+        if (IsLikelyEncrypted(value))
+        {
+            return value;
+        }
+
+        // Encrypt the plaintext value
+        return _sensitiveDataProtector.Protect(value);
+    }
+
+    /// <summary>
+    /// Heuristically determines if a value is already encrypted.
+    /// Data Protection API encrypted values are base64 strings that start with "CfDJ" and are typically 100+ chars.
+    /// </summary>
+    private static bool IsLikelyEncrypted(string value)
+    {
+        // Data Protection API encrypted strings are base64 encoded and start with "CfDJ"
+        // They are typically 100+ characters long
+        return value.Length > 100 && value.StartsWith("CfDJ", StringComparison.Ordinal);
     }
 }

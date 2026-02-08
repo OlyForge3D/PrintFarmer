@@ -10,7 +10,7 @@ import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/common/components/ui';
 import { PlayIcon, PauseIcon, StopIcon, GearIcon } from '@/common/components/icons/MdiIcons';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
 import { renderUnknown } from '@/common/utils/renderUnknown';
@@ -35,15 +35,12 @@ export function PrinterCard({
   // Merge with realtime SignalR updates
   const printer = usePrinterDisplay(printerProp);
 
-  // State for printer cover image
-  const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(undefined);
-
-  // Load printer cover image on mount
-  useEffect(() => {
+  // Derive printer cover image URL from printer data (no effect needed)
+  const coverImageUrl = useMemo(() => {
     if (printer.manufacturerName && printer.modelName) {
-      const url = assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName);
-      setCoverImageUrl(url);
+      return assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName);
     }
+    return undefined;
   }, [printer.manufacturerName, printer.modelName]);
 
   // If debug info exists on window, we may log it — avoid runtime exceptions
@@ -104,14 +101,16 @@ export function PrinterCard({
   useEffect(() => {
     let ignore = false;
     if (printer.backend === PrinterBackend.Moonraker) {
-      apiClient.getPrintJobStatus(printer.id).then(res => {
+      void (async () => {
+        const res = await apiClient.getPrintJobStatus(printer.id);
         if (!ignore) setPrintJobStatus(res);
-      });
-    } else {
-      setPrintJobStatus(null);
+      })();
+    } else if (printJobStatus !== null) {
+      // Only update if different to avoid unnecessary renders
+      queueMicrotask(() => setPrintJobStatus(null));
     }
     return () => { ignore = true; };
-  }, [printer.id, printer.backend]);
+  }, [printer.id, printer.backend, printJobStatus]);
 
   // Prefer print job status for Moonraker, fallback to printer data
   const currentStatus = (() => {
@@ -209,7 +208,7 @@ export function PrinterCard({
         <div className="flex items-center justify-between">
           {/* Left: Basic Info */}
           <div className="flex items-center space-x-4 min-w-0 flex-1">
-            <div className="flex-shrink-0">
+            <div className="shrink-0">
               <span className="text-2xl">{getBackendIcon(printer.backend)}</span>
             </div>
 
@@ -218,7 +217,7 @@ export function PrinterCard({
                 <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                   {printer.name}
                 </h3>
-                <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+                <span className={`inline-flex items-center px-3 py-1 rounded-sm text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
                   {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
                 </span>
               </div>
@@ -229,7 +228,7 @@ export function PrinterCard({
           </div>
 
           {/* Center: Status Info */}
-          <div className="hidden md:flex items-center space-x-6 flex-shrink-0">
+          <div className="hidden md:flex items-center space-x-6 shrink-0">
             {/* Progress */}
             {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
               <div className="text-center">
@@ -265,7 +264,7 @@ export function PrinterCard({
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center space-x-2 flex-shrink-0">
+          <div className="flex items-center space-x-2 shrink-0">
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
@@ -354,7 +353,7 @@ export function PrinterCard({
         {renderDebugBadge()}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center min-w-0 flex-1">
-            <span className="text-2xl mr-3 flex-shrink-0">{getBackendIcon(printer.backend)}</span>
+            <span className="text-2xl mr-3 shrink-0">{getBackendIcon(printer.backend)}</span>
             <div className="min-w-0 flex-1">
               <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
                 {printer.name}
@@ -376,7 +375,7 @@ export function PrinterCard({
 
         {/* Status Badge */}
         <div className="mb-3">
-          <span className={`inline-flex items-center px-3 py-1 rounded text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
+          <span className={`inline-flex items-center px-3 py-1 rounded-sm text-xs font-bold uppercase tracking-wide border ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
             {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
           </span>
         </div>
@@ -387,7 +386,7 @@ export function PrinterCard({
             <img
               src={coverImageUrl}
               alt={`${printer.name} cover`}
-              className="w-full h-32 object-cover rounded border border-pf-border"
+              className="w-full h-32 object-cover rounded-sm border border-pf-border"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}
@@ -457,7 +456,7 @@ export function PrinterCard({
             <img
               src={printer.cameraSnapshotUrl || printer.cameraStreamUrl}
               alt={`${printer.name} camera`}
-              className="w-full h-24 object-cover rounded border"
+              className="w-full h-24 object-cover rounded-sm border"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}

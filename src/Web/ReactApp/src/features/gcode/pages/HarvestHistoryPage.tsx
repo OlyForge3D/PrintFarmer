@@ -3,7 +3,7 @@ import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { HarvestOperationDetails } from '@/features/gcode/components/harvest/HarvestOperationDetails';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { HistoryIcon } from '@/common/components/icons/MdiIcons';
 import { Select, Alert, Button, FormField } from '@/common/components/ui';

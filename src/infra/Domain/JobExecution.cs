@@ -14,6 +14,10 @@ public class JobExecution
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    /// <summary>Concurrency token for optimistic locking during scheduler/worker updates.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     /// <summary>
     /// Foreign key to JobSchedule
     /// </summary>

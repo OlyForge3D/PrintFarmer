@@ -2,15 +2,11 @@
  * Register Slicer UI
  *
  * Initializes and registers all slicer UI libraries with the SlicerUIRegistry.
- * This module dynamically imports slicer UI exports from npm workspace packages
- * and registers them so they can be discovered and used by the React app.
- * 
- * Slicer packages are managed as npm workspaces, allowing them to be versioned
- * and developed independently while being included in the build.
+ * Slicer UI components are now integrated directly into the ReactApp.
  */
 
 /* eslint-disable local/pf-no-unguarded-console */
-import { OrcaImportWizard, orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
+import { OrcaImportWizard, orcaProfilesService } from '@/features/slicer/orca';
 import type { ISlicerUIRegistry, SlicerUIExports } from './SlicerUIRegistry';
 
 /**

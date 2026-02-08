@@ -1,7 +1,8 @@
 import { useBasicHealth, useHealthStatus } from '@/common/hooks/useApi';
 import { isDetailedHealthStatus } from '@/types/api';
-import { AlertCircleIcon, CheckCircleIcon, XCircleIcon } from '@/common/components/icons/MdiIcons';
+import { AlertCircleIcon, CheckCircleIcon, XCircleIcon, ActivityIcon } from '@/common/components/icons/MdiIcons';
 import { SystemHealthSkeleton } from '@/common/components/skeletons/SystemHealthSkeleton';
+import { DashboardWidget } from '@/common/components/DashboardWidget';
 
 
 export function SystemHealth() {
@@ -42,23 +43,6 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
   const { data: health, isLoading, error } = useHealthStatus();
   const detailedHealth = isDetailedHealthStatus(health) ? health : undefined;
 
-  if (isLoading) return <SystemHealthSkeleton className={className ?? ''} />;
-
-  if (error || !detailedHealth) {
-    return (
-      <div className={`bg-pf-bg-1 rounded-lg shadow p-4 ${className ?? ''}`}>
-        <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
-        <div className="flex items-center space-x-3 p-4 bg-pf-error-bg rounded-lg">
-          <XCircleIcon className="h-6 w-6 text-pf-error" />
-          <div>
-            <p className="text-sm font-medium text-pf-error-text">Unable to check system health</p>
-            <p className="text-xs text-pf-error-text">API server may be offline</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Convert numeric health status enum to string
   // Backend returns: 0 = Unhealthy, 1 = Degraded, 2 = Healthy
   const normalizeHealthStatus = (status: string | number): string => {
@@ -73,16 +57,20 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
     return status;
   };
 
+  const overallStatus = detailedHealth ? normalizeHealthStatus(detailedHealth.status ?? 'Unknown') : 'Unknown';
+  const isHealthy = overallStatus === 'Healthy';
+  const isWarning = overallStatus === 'Degraded' || overallStatus === 'Warning';
+
   const renderHealthStatus = (status: string | number, title: string) => {
     const normalizedStatus = normalizeHealthStatus(status);
-    const isHealthy = normalizedStatus === 'Healthy';
-    const isWarning = normalizedStatus === 'Degraded' || normalizedStatus === 'Warning';
+    const healthy = normalizedStatus === 'Healthy';
+    const warning = normalizedStatus === 'Degraded' || normalizedStatus === 'Warning';
 
     let icon, colorClass;
-    if (isHealthy) {
+    if (healthy) {
       icon = <CheckCircleIcon className="h-5 w-5 text-white" />;
       colorClass = 'text-white bg-pf-success-bg';
-    } else if (isWarning) {
+    } else if (warning) {
       icon = <AlertCircleIcon className="h-5 w-5 text-white" />;
       colorClass = 'text-white bg-pf-warning';
     } else {
@@ -101,22 +89,42 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
     );
   };
 
-  return (
-    <div className={`bg-pf-bg-1 rounded-lg shadow p-6 ${className}`}>
-      <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
+  const emptyState = (
+    <div className="flex items-center space-x-3 p-4 bg-pf-error-bg rounded-lg">
+      <XCircleIcon className="h-6 w-6 text-pf-error" />
+      <div>
+        <p className="text-sm font-medium text-pf-error-text">Unable to check system health</p>
+        <p className="text-xs text-pf-error-text">API server may be offline</p>
+      </div>
+    </div>
+  );
 
+  return (
+    <DashboardWidget
+      title="System Health"
+      icon={ActivityIcon}
+      iconColorClass={isHealthy ? 'text-pf-success' : isWarning ? 'text-pf-warning' : 'text-pf-error-text'}
+      iconBgClass={isHealthy ? 'bg-pf-success-bg' : isWarning ? 'bg-pf-warning-bg' : 'bg-pf-error-bg'}
+      collapsible
+      storageKey="system-health-widget"
+      hasContent={!!detailedHealth}
+      emptyState={emptyState}
+      isLoading={isLoading}
+      error={error ? 'Unable to check system health' : undefined}
+      className={className}
+    >
       <div className="space-y-3">
         {/* Overall Status */}
-        {renderHealthStatus(detailedHealth.status ?? 'Unknown', 'Overall System')}
+        {detailedHealth && renderHealthStatus(detailedHealth.status ?? 'Unknown', 'Overall System')}
 
         {/* Database Status */}
-        {detailedHealth.results?.Database && renderHealthStatus(detailedHealth.results.Database.status ?? 'Unknown', 'Database')}
+        {detailedHealth?.results?.Database && renderHealthStatus(detailedHealth.results.Database.status ?? 'Unknown', 'Database')}
 
         {/* SignalR Status */}
-        {detailedHealth.results?.SignalRHub && renderHealthStatus(detailedHealth.results.SignalRHub.status ?? 'Unknown', 'SignalR Hub')}
+        {detailedHealth?.results?.SignalRHub && renderHealthStatus(detailedHealth.results.SignalRHub.status ?? 'Unknown', 'SignalR Hub')}
 
         {/* Additional health checks */}
-        {detailedHealth.results && Object.entries(detailedHealth.results)
+        {detailedHealth?.results && Object.entries(detailedHealth.results)
           .filter(([key]) => !['Database', 'SignalRHub'].includes(key))
           .map(([key, value]) => (
             <div key={key}>
@@ -131,6 +139,6 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
           Last updated: {new Date().toLocaleTimeString()}
         </p>
       </div>
-    </div>
+    </DashboardWidget>
   );
 }

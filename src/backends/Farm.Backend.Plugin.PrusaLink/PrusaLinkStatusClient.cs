@@ -44,7 +44,7 @@ namespace Farm.Backend.Plugin.PrusaLink
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{printer.Id}");
 
                 PrusaCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.ApiKey, ct),
+                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                     ct);
 
                 return new PrinterStatusDto(
@@ -55,7 +55,14 @@ namespace Farm.Backend.Plugin.PrusaLink
                     JobName: status.JobName,
                     ThumbnailUrl: status.ThumbnailUrl,
                     CameraStreamUrl: status.CameraStreamUrl,
-                    CameraSnapshotUrl: status.CameraSnapshotUrl);
+                    CameraSnapshotUrl: status.CameraSnapshotUrl,
+                    X: status.AxisX,
+                    Y: status.AxisY,
+                    Z: status.AxisZ,
+                    HotendTemp: status.HotendTemp,
+                    BedTemp: status.BedTemp,
+                    HotendTarget: status.HotendTarget,
+                    BedTarget: status.BedTarget);
             }
             catch (OperationCanceledException)
             {
@@ -78,7 +85,7 @@ namespace Farm.Backend.Plugin.PrusaLink
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{printer.Id}");
 
                 PrusaCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.ApiKey, ct),
+                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                     ct);
 
                 return status == null

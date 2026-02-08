@@ -63,7 +63,7 @@ const JobNotesEditor: React.FC<JobNotesEditorProps> = ({
 
   if (isEditing) {
     return (
-      <div className="notes-editor editing">
+      <div className="space-y-2">
         <Textarea
           value={localNotes}
           onChange={handleNotesChange}
@@ -74,28 +74,29 @@ const JobNotesEditor: React.FC<JobNotesEditorProps> = ({
           aria-label="Job notes"
           aria-invalid={!!error}
           aria-describedby={error ? 'notes-error' : 'notes-help'}
+          className="w-full"
         />
 
-        <div className="notes-metadata">
-          <div className={`character-count ${isNearLimit ? 'warning' : ''}`}>
+        <div className="flex items-center justify-between text-xs">
+          <span className={`${isNearLimit ? 'text-pf-warning' : 'text-pf-text-muted'}`}>
             {localNotes.length} / {MAX_NOTES_LENGTH}
             {isNearLimit && charactersRemaining >= 0 && (
-              <span className="remaining-text">
-                ({charactersRemaining} characters remaining)
+              <span className="ml-1">
+                ({charactersRemaining} remaining)
               </span>
             )}
-          </div>
+          </span>
 
           {error && (
-            <div id="notes-error" className="error-message" role="alert">
+            <span id="notes-error" className="text-pf-error" role="alert">
               {error}
-            </div>
+            </span>
           )}
 
           {!error && (
-            <div id="notes-help" className="help-text">
-              Notes are auto-saved as you type
-            </div>
+            <span id="notes-help" className="text-pf-text-muted italic">
+              Auto-saved as you type
+            </span>
           )}
         </div>
       </div>
@@ -103,13 +104,11 @@ const JobNotesEditor: React.FC<JobNotesEditorProps> = ({
   }
 
   return (
-    <div className="notes-editor view-only">
+    <div className="min-h-[60px]">
       {localNotes ? (
-        <div className="notes-content">
-          <p>{localNotes}</p>
-        </div>
+        <p className="text-sm text-pf-text-primary whitespace-pre-wrap">{localNotes}</p>
       ) : (
-        <p className="empty-message">No notes added</p>
+        <p className="text-sm text-pf-text-muted italic">No notes added</p>
       )}
     </div>
   );

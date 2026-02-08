@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
-import slicerProfilesService, {
+import {
+  slicerProfilesService,
   SlicerProfileListItem,
   HierarchicalProfilesResponse,
   PrinterModelProfilesDto,
@@ -12,12 +14,18 @@ import slicerProfilesService, {
   MachineProfileListItem,
   ImportSlicerProfileRequest,
   SlicerProfileExtended,
-  SlicerProfileExportDto
+  SlicerProfileExportDto,
+  BulkDeleteResultDto,
+  CloneSingleProfileRequest,
+  CloneSingleProfileResponse,
+  UploadProfileRequest,
+  CustomProfile,
+  CustomProfilesListResponse,
+  UpdateCustomProfileRequest
 } from '@/services/slicerProfilesService';
-import { officialProfilesService } from '@/services/officialProfilesService';
-import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
+import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
-import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon } from '@/common/components/icons/MdiIcons';
+import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
@@ -30,6 +38,7 @@ import { Modal } from '@/common/components/modals/Modal';
 
 export const SlicerProfilesPage: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   // Form state
   const [rawJson, setRawJson] = useState('');
@@ -42,8 +51,22 @@ export const SlicerProfilesPage: React.FC = () => {
   // import form visibility handled via modal state `isImportModalOpen`
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  // Tab state - 'machines', 'filaments', 'processes'
-  const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes'>('machines');
+  // Upload custom profile modal state
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadRawJson, setUploadRawJson] = useState('');
+  const [uploadName, setUploadName] = useState('');
+  const [uploadProfileType, setUploadProfileType] = useState<'machine' | 'filament' | 'process'>('process');
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Edit custom profile modal state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<CustomProfile | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Tab state - 'machines', 'filaments', 'processes', 'custom'
+  const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes' | 'custom'>('machines');
 
   // Filtering and search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,10 +87,12 @@ export const SlicerProfilesPage: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [isReseedingProfiles] = useState(false);
   const [reseedModalOpen, setReseedModalOpen] = useState(false);
   const [reseedStatus, setReseedStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [reseedMessage, setReseedMessage] = useState<string>('Loading system profiles...');
+
+  // Selection state for bulk delete
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
 
   // Fetch available slicers
   const { data: availableSlicers = [] } = useQuery({
@@ -92,43 +117,92 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   }, [slicerNames, slicerType]);
 
+  // Main hierarchy query - loads all profiles for browsing
   const { data: profilesData, isLoading, error } = useQuery<HierarchicalProfilesResponse, Error>({
     queryKey: ['slicerProfilesHierarchy'],
     queryFn: async () => slicerProfilesService.listHierarchical(),
     staleTime: 10_000
   });
 
+  // Filtered query - loads profiles filtered by selected machine (for CompatiblePrinters filtering)
+  const { data: filteredProfilesData } = useQuery<HierarchicalProfilesResponse, Error>({
+    queryKey: ['slicerProfilesHierarchyFiltered', selectedMachineProfileId],
+    queryFn: async () => slicerProfilesService.listHierarchical(selectedMachineProfileId),
+    enabled: !!selectedMachineProfileId,
+    staleTime: 10_000
+  });
+
+  // Custom profiles query - loads user-owned custom profiles
+  const { data: customProfilesData, isLoading: customProfilesLoading } = useQuery<CustomProfilesListResponse, Error>({
+    queryKey: ['customProfiles'],
+    queryFn: async () => slicerProfilesService.listCustomProfiles(),
+    staleTime: 10_000
+  });
+
   const allMachineProfiles = useMemo<MachineProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: MachineProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.machineProfiles ?? []));
+    // Try hierarchical data first, fallback to flat machineProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: MachineProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.machineProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat machineProfiles grouped by manufacturer
+    if (profilesData?.machineProfiles) {
+      const out: MachineProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.machineProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   const allFilamentProfiles = useMemo<FilamentProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: FilamentProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.filamentProfiles ?? []));
+    // Try hierarchical data first, fallback to flat filamentProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: FilamentProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.filamentProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat filamentProfiles grouped by key
+    if (profilesData?.filamentProfiles) {
+      const out: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.filamentProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   const allProcessProfiles = useMemo<ProcessProfileListItem[]>(() => {
-    if (!profilesData?.byHierarchy) return [];
-    const out: ProcessProfileListItem[] = [];
-    for (const mfgData of Object.values(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
-        out.push(...(modelData.processProfiles ?? []));
+    // Try hierarchical data first, fallback to flat processProfiles
+    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
+      const out: ProcessProfileListItem[] = [];
+      for (const mfgData of Object.values(profilesData.byHierarchy)) {
+        for (const modelData of Object.values(mfgData.models)) {
+          out.push(...(modelData.processProfiles ?? []));
+        }
       }
+      return out;
     }
-    return out;
+    // Fallback: use flat processProfiles grouped by key
+    if (profilesData?.processProfiles) {
+      const out: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(profilesData.processProfiles)) {
+        out.push(...profiles);
+      }
+      return out;
+    }
+    return [];
   }, [profilesData]);
 
   type MachineProfileContext = {
@@ -187,6 +261,118 @@ export const SlicerProfilesPage: React.FC = () => {
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
   });
+
+  const bulkDeleteMutation = useMutation<BulkDeleteResultDto, Error, string[]>({
+    mutationFn: async (ids) => slicerProfilesService.bulkDelete(ids),
+    onSuccess: (result) => {
+      setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
+      setSelectedProfileIds(new Set());
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
+  });
+
+  // Clone profile mutation - creates a custom copy of a system profile
+  const cloneProfileMutation = useMutation<CloneSingleProfileResponse, Error, CloneSingleProfileRequest>({
+    mutationFn: async (request) => slicerProfilesService.cloneProfile(request),
+    onSuccess: (result) => {
+      setMessage(`Created custom profile: ${result.name}`);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
+  });
+
+  // Upload custom profile mutation - creates a new custom profile from raw JSON
+  const uploadProfileMutation = useMutation<CustomProfile, Error, UploadProfileRequest>({
+    mutationFn: async (request) => slicerProfilesService.uploadProfile(request),
+    onSuccess: (result) => {
+      setMessage(`Created custom profile: ${result.name}`);
+      setUploadRawJson('');
+      setUploadName('');
+      setUploadError(null);
+      setIsUploadModalOpen(false);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setUploadError(err.message)
+  });
+
+  // Update custom profile mutation
+  const updateProfileMutation = useMutation<CustomProfile, Error, { id: string; request: UpdateCustomProfileRequest }>({
+    mutationFn: async ({ id, request }) => slicerProfilesService.updateCustomProfile(id, request),
+    onSuccess: (result) => {
+      setMessage(`Updated profile: ${result.name}`);
+      setIsEditModalOpen(false);
+      setEditingProfile(null);
+      setEditError(null);
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setEditError(err.message)
+  });
+
+  // Delete single custom profile mutation
+  const deleteProfileMutation = useMutation<void, Error, string>({
+    mutationFn: async (id) => slicerProfilesService.deleteCustomProfile(id),
+    onSuccess: () => {
+      setMessage('Profile deleted');
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+    },
+    onError: (err) => setMessage(`Failed to delete profile: ${err.message}`)
+  });
+
+  // Helper to open edit modal for a custom profile
+  const openEditModal = (profile: CustomProfile) => {
+    setEditingProfile(profile);
+    setEditName(profile.name);
+    setEditDescription(profile.description || '');
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const onEditProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProfile) return;
+    if (!editName.trim()) {
+      setEditError('Name is required');
+      return;
+    }
+    updateProfileMutation.mutate({
+      id: editingProfile.id,
+      request: {
+        name: editName,
+        description: editDescription || undefined
+      }
+    });
+  };
+
+  const onUploadCustomProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadRawJson.trim()) {
+      setUploadError('Raw JSON is required');
+      return;
+    }
+    uploadProfileMutation.mutate({
+      rawJson: uploadRawJson,
+      profileType: uploadProfileType,
+      name: uploadName || undefined
+    });
+  };
+
+  const handleToggleSelection = (id: string) => {
+    setSelectedProfileIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const exportProfile = async (id: string) => {
     setExportingId(id);
@@ -271,9 +457,24 @@ export const SlicerProfilesPage: React.FC = () => {
   ]);
 
   // Filament/process profiles are shown only after selecting a machine profile
+  // Use filteredProfilesData when available (contains CompatiblePrinters-filtered results)
   const filteredFilamentProfiles = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.filamentProfiles ?? []).filter((p) => {
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
+    if (filteredProfilesData?.filamentProfiles) {
+      // Flatten filtered profiles from all manufacturers
+      const filtered: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         if (!p.name.toLowerCase().includes(query) && !p.material.toLowerCase().includes(query)) {
@@ -292,11 +493,25 @@ export const SlicerProfilesPage: React.FC = () => {
       }
       return true;
     });
-  }, [filterEngine, filterSource, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
+  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
 
   const filteredProcessProfiles = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.processProfiles ?? []).filter((p) => {
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
+    if (filteredProfilesData?.processProfiles) {
+      // Flatten filtered profiles from all manufacturers
+      const filtered: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         if (!p.name.toLowerCase().includes(query) && !p.quality.toLowerCase().includes(query)) {
@@ -315,7 +530,22 @@ export const SlicerProfilesPage: React.FC = () => {
       }
       return true;
     });
-  }, [filterEngine, filterSource, searchQuery, selectedMachineContext, selectedProcessProfileId]);
+  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedMachineContext, selectedProcessProfileId]);
+
+  // Filtered custom profiles for "My Profiles" tab
+  const filteredCustomProfiles = useMemo<CustomProfile[]>(() => {
+    if (!customProfilesData?.profiles) return [];
+    
+    return customProfilesData.profiles.filter((p) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [customProfilesData, searchQuery]);
 
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -335,7 +565,15 @@ export const SlicerProfilesPage: React.FC = () => {
   };
 
   const renderProfileRow = (p: SlicerProfileListItem) => (
-    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={false}>
+    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={selectedProfileIds.has(p.id)}>
+      <td className="p-2">
+        <Checkbox
+          checked={selectedProfileIds.has(p.id)}
+          onChange={() => handleToggleSelection(p.id)}
+          label=""
+          aria-label={`Select ${p.name}`}
+        />
+      </td>
       <td className="p-2 font-medium">{p.name}</td>
       <td className="p-2">{p.slicerType}</td>
       <td className="p-2">{p.profileType === 'filament' ? (p as FilamentProfileListItem).material : p.profileType === 'machine' ? (p as MachineProfileListItem).manufacturer : '-'}</td>
@@ -344,9 +582,9 @@ export const SlicerProfilesPage: React.FC = () => {
       <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).infillPercentage + '%' : '-'}</td>
       <td className="p-2">
         <div className="flex flex-col text-xs gap-1">
-          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded">Default</span>}
-          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded">System</span>}
-          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded">Public</span>}
+          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded-sm">Default</span>}
+          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded-sm">System</span>}
+          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded-sm">Public</span>}
         </div>
       </td>
       <td className="p-2">
@@ -363,19 +601,73 @@ export const SlicerProfilesPage: React.FC = () => {
             size="sm"
             variant="secondary"
           >{exportingId === p.id ? 'Exporting...' : 'Export'}</Button>
+          <Button
+            onClick={() => cloneProfileMutation.mutate({
+              sourceProfileId: p.id,
+              profileType: p.profileType
+            })}
+            loading={cloneProfileMutation.isPending}
+            size="sm"
+            variant="secondary"
+            title="Clone to My Profiles"
+          >
+            <CopyIcon className="w-4 h-4" />
+          </Button>
         </div>
       </td>
     </SelectableRow>
   );
 
+  // Render a custom profile row for the "My Profiles" tab
+  const renderCustomProfileRow = (p: CustomProfile) => (
+    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={selectedProfileIds.has(p.id)}>
+      <td className="p-2">
+        <Checkbox
+          checked={selectedProfileIds.has(p.id)}
+          onChange={() => handleToggleSelection(p.id)}
+          label=""
+          aria-label={`Select ${p.name}`}
+        />
+      </td>
+      <td className="p-2 font-medium">{p.name}</td>
+      <td className="p-2 capitalize">{p.profileType}</td>
+      <td className="p-2">{p.description || '-'}</td>
+      <td className="p-2">
+        {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}
+      </td>
+      <td className="p-2">
+        {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : '-'}
+      </td>
+      <td className="p-2">
+        <div className="flex gap-2">
+          <Button
+            onClick={() => openEditModal(p)}
+            size="sm"
+            variant="secondary"
+          >Edit</Button>
+          <Button
+            onClick={() => {
+              if (window.confirm(`Delete profile "${p.name}"?`)) {
+                deleteProfileMutation.mutate(p.id);
+              }
+            }}
+            loading={deleteProfileMutation.isPending}
+            size="sm"
+            variant="danger"
+          >Delete</Button>
+        </div>
+      </td>
+    </SelectableRow>
+  );
   const getTotalCount = () => {
-    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length;
+    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length + (customProfilesData?.profiles?.length ?? 0);
   };
 
   const getFilteredCount = () => {
     if (activeTab === 'machines') return filteredMachineProfiles.length;
     if (activeTab === 'filaments') return filteredFilamentProfiles.length;
     if (activeTab === 'processes') return filteredProcessProfiles.length;
+    if (activeTab === 'custom') return filteredCustomProfiles.length;
     return 0;
   };
 
@@ -390,24 +682,52 @@ export const SlicerProfilesPage: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [filterManufacturer, filteredMachineProfiles]);
 
+  // Dropdown options use CompatiblePrinters-filtered data when available
   const filamentOptions = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.filamentProfiles ?? [])
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
+    if (filteredProfilesData?.filamentProfiles) {
+      const filtered: FilamentProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles
       .slice()
       .sort((a, b) => (a.material + a.name).localeCompare(b.material + b.name));
-  }, [selectedMachineContext]);
+  }, [filteredProfilesData, selectedMachineContext]);
 
   const processOptions = useMemo(() => {
     if (!selectedMachineContext) return [];
-    return (selectedMachineContext.modelData.processProfiles ?? [])
+    
+    // Use filtered data from API when available (CompatiblePrinters filtering)
+    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
+    if (filteredProfilesData?.processProfiles) {
+      const filtered: ProcessProfileListItem[] = [];
+      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
+        filtered.push(...profiles);
+      }
+      if (filtered.length > 0) {
+        sourceProfiles = filtered;
+      }
+    }
+    
+    return sourceProfiles
       .slice()
       .sort((a, b) => (a.quality + a.name).localeCompare(b.quality + b.name));
-  }, [selectedMachineContext]);
+  }, [filteredProfilesData, selectedMachineContext]);
 
   const visibleProfiles = useMemo<SlicerProfileListItem[]>(() => {
     if (activeTab === 'machines') return filteredMachineProfiles;
     if (activeTab === 'filaments') return filteredFilamentProfiles;
     if (activeTab === 'processes') return filteredProcessProfiles;
+    // 'custom' tab handles its own rendering
     return [];
   }, [activeTab, filteredFilamentProfiles, filteredMachineProfiles, filteredProcessProfiles]);
 
@@ -421,6 +741,28 @@ export const SlicerProfilesPage: React.FC = () => {
     const start = (safePageNumber - 1) * pageSize;
     return visibleProfiles.slice(start, start + pageSize);
   }, [pageSize, safePageNumber, visibleProfiles]);
+
+  // Bulk selection handlers (must be after pagedProfiles is defined)
+  const handleSelectAll = () => {
+    if (selectedProfileIds.size === pagedProfiles.length && pagedProfiles.every(p => selectedProfileIds.has(p.id))) {
+      // Deselect all on current page
+      setSelectedProfileIds(new Set());
+    } else {
+      // Select all on current page
+      setSelectedProfileIds(new Set(pagedProfiles.map(p => p.id)));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedProfileIds.size === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedProfileIds.size} profile(s)?`)) return;
+    bulkDeleteMutation.mutate(Array.from(selectedProfileIds));
+  };
+
+  // Clear selection when switching tabs or filtering
+  React.useEffect(() => {
+    setSelectedProfileIds(new Set());
+  }, [activeTab, filterEngine, filterManufacturer, filterSource, searchQuery]);
 
   React.useEffect(() => {
     setPageNumber(1);
@@ -460,7 +802,7 @@ export const SlicerProfilesPage: React.FC = () => {
       }
 
       const hubConnection = builder
-        .withUrl(getHubUrl('/hubs/slicer'))
+        .withUrl(getHubUrl('/hubs/slicer-registry'))
         .withAutomaticReconnect()
         .build();
 
@@ -518,43 +860,11 @@ export const SlicerProfilesPage: React.FC = () => {
       <div className="flex flex-wrap gap-3 mb-4">
         <Button
           variant="secondary"
-          onClick={async () => {
-            setReseedModalOpen(true);
-            setReseedStatus('loading');
-            setReseedMessage('Loading system profiles...');
-            try {
-              const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
-              if (window.PrintFarmerDebug?.slicing) {
-                console.log('Force reseed result:', result);
-              }
-
-              if (result.imported === 0) {
-                let details = result.message || 'No profiles available from worker';
-                if (result.orcaslicerVersion) {
-                  details += ` (OrcaSlicer version: ${result.orcaslicerVersion})`;
-                }
-                setReseedStatus('error');
-                setReseedMessage(`⚠️ ${details}`);
-                setMessage(`⚠️ ${details}`);
-              } else {
-                setReseedStatus('success');
-                setReseedMessage(`✅ Successfully loaded ${result.imported} profile(s) from OrcaSlicer${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}`);
-                setMessage(`✅ System profiles loaded: ${result.imported} profile(s) from OrcaSlicer${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}.`);
-                qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-              }
-            } catch (error) {
-              const errorMsg = error instanceof Error ? error.message : 'Failed to load system profiles';
-              console.error('Force reseed error:', error);
-              setReseedStatus('error');
-              setReseedMessage(`❌ ${errorMsg}`);
-              setMessage(`❌ ${errorMsg}`);
-            }
-          }}
-          loading={isReseedingProfiles}
+          onClick={() => navigate('/profiles/import')}
           className="flex items-center gap-2"
           iconLeft={<UploadIcon className="w-4 h-4" />}
         >
-          Load System Profiles
+          Import Profiles...
         </Button>
         <Button
           variant="secondary"
@@ -573,11 +883,19 @@ export const SlicerProfilesPage: React.FC = () => {
         >
           Export Orca Bundle
         </Button>
+        <Button
+          variant="primary"
+          onClick={() => setIsUploadModalOpen(true)}
+          className="flex items-center gap-2"
+          iconLeft={<UploadIcon className="w-4 h-4" />}
+        >
+          Upload Custom Profile
+        </Button>
       </div>
 
       <div className="space-y-4">
         {message && <Alert type="success">{message}</Alert>}
-        <div className="bg-pf-panel rounded shadow">
+        <div className="bg-pf-panel rounded-sm shadow-sm">
           {/* Header with Search and Filters */}
           <div className="p-4 border-b border-pf-border">
             <div className="flex items-center gap-4 mb-4">
@@ -602,7 +920,7 @@ export const SlicerProfilesPage: React.FC = () => {
               </Button>
             </div>
 
-            {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Filament/Process */}
+            {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Process/Filament */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-background rounded-lg">
               <div>
                 <label className="block text-sm font-medium mb-1">Manufacturer</label>
@@ -632,20 +950,6 @@ export const SlicerProfilesPage: React.FC = () => {
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Filament</label>
-                <Select
-                  value={selectedFilamentProfileId}
-                  onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
-                  aria-label="Select filament profile"
-                  disabled={!selectedMachineProfileId}
-                >
-                  <option value="">Select a filament profile</option>
-                  {filamentOptions.map(f => (
-                    <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Process</label>
                 <Select
                   value={selectedProcessProfileId}
@@ -656,6 +960,20 @@ export const SlicerProfilesPage: React.FC = () => {
                   <option value="">Select a process profile</option>
                   {processOptions.map(p => (
                     <option key={p.id} value={p.id}>{p.quality}  {p.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Filament</label>
+                <Select
+                  value={selectedFilamentProfileId}
+                  onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
+                  aria-label="Select filament profile"
+                  disabled={!selectedMachineProfileId}
+                >
+                  <option value="">Select a filament profile</option>
+                  {filamentOptions.map(f => (
+                    <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
                   ))}
                 </Select>
               </div>
@@ -746,6 +1064,15 @@ export const SlicerProfilesPage: React.FC = () => {
               </Button>
               <Button
                 type="button"
+                onClick={() => setActiveTab('processes')}
+                variant="tab"
+                size="sm"
+                className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
+              >
+                Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+              </Button>
+              <Button
+                type="button"
                 onClick={() => setActiveTab('filaments')}
                 variant="tab"
                 size="sm"
@@ -755,12 +1082,12 @@ export const SlicerProfilesPage: React.FC = () => {
               </Button>
               <Button
                 type="button"
-                onClick={() => setActiveTab('processes')}
+                onClick={() => setActiveTab('custom')}
                 variant="tab"
                 size="sm"
-                className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
+                className={activeTab === 'custom' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
               >
-                Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+                My Profiles ({filteredCustomProfiles.length})
               </Button>
             </div>
           </div>
@@ -776,11 +1103,99 @@ export const SlicerProfilesPage: React.FC = () => {
             {!isLoading && (activeTab === 'filaments' || activeTab === 'processes') && !selectedMachineProfileId && (
               <div className="text-pf-text-muted text-sm">Select a machine model to view filament and process profiles.</div>
             )}
+            
+            {/* Custom Profiles Tab Content */}
+            {activeTab === 'custom' && (
+              <>
+                {customProfilesLoading && <div>Loading custom profiles...</div>}
+                {!customProfilesLoading && filteredCustomProfiles.length === 0 && (
+                  <div className="text-center py-8">
+                    <p className="text-pf-text-muted mb-4">No custom profiles yet.</p>
+                    <p className="text-sm text-pf-text-secondary mb-4">
+                      Create custom profiles by cloning system profiles or uploading your own.
+                    </p>
+                    <Button
+                      variant="primary"
+                      onClick={() => setIsUploadModalOpen(true)}
+                      iconLeft={<UploadIcon className="w-4 h-4" />}
+                    >
+                      Upload Custom Profile
+                    </Button>
+                  </div>
+                )}
+                {!customProfilesLoading && filteredCustomProfiles.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="bg-pf-bg-1 text-left">
+                          <th className="p-2 w-10">
+                            <Checkbox
+                              checked={filteredCustomProfiles.length > 0 && filteredCustomProfiles.every(p => selectedProfileIds.has(p.id))}
+                              onChange={() => {
+                                if (selectedProfileIds.size === filteredCustomProfiles.length && filteredCustomProfiles.every(p => selectedProfileIds.has(p.id))) {
+                                  setSelectedProfileIds(new Set());
+                                } else {
+                                  setSelectedProfileIds(new Set(filteredCustomProfiles.map(p => p.id)));
+                                }
+                              }}
+                              label=""
+                              aria-label="Select all custom profiles"
+                            />
+                          </th>
+                          <th className="p-2">Name</th>
+                          <th className="p-2">Type</th>
+                          <th className="p-2">Description</th>
+                          <th className="p-2">Created</th>
+                          <th className="p-2">Updated</th>
+                          <th className="p-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCustomProfiles.map(p => renderCustomProfileRow(p))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Regular Profiles Tabs Content (Machines, Filaments, Processes) */}
+            {activeTab !== 'custom' && (
+              <>
+            {/* Bulk actions bar */}
+            {selectedProfileIds.size > 0 && (
+              <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded-sm">
+                <span className="text-sm text-pf-text-secondary">{selectedProfileIds.size} profile(s) selected</span>
+                <Button
+                  onClick={handleDeleteSelected}
+                  loading={bulkDeleteMutation.isPending}
+                  size="sm"
+                  variant="danger"
+                >
+                  Delete Selected
+                </Button>
+                <Button
+                  onClick={() => setSelectedProfileIds(new Set())}
+                  size="sm"
+                  variant="subtle"
+                >
+                  Clear Selection
+                </Button>
+              </div>
+            )}
             {!isLoading && getFilteredCount() > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-pf-bg-1 text-left">
+                      <th className="p-2 w-10">
+                        <Checkbox
+                          checked={pagedProfiles.length > 0 && pagedProfiles.every(p => selectedProfileIds.has(p.id))}
+                          onChange={handleSelectAll}
+                          label=""
+                          aria-label="Select all profiles on this page"
+                        />
+                      </th>
                       <th className="p-2">Name</th>
                       <th className="p-2">Engine</th>
                       <th className="p-2">Material/Manufacturer</th>
@@ -821,6 +1236,8 @@ export const SlicerProfilesPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>
@@ -908,6 +1325,74 @@ export const SlicerProfilesPage: React.FC = () => {
         </form>
       </Modal>
 
+      {/* Upload Custom Profile Modal */}
+      <Modal
+        isOpen={isUploadModalOpen}
+        onClose={() => {
+          setIsUploadModalOpen(false);
+          setUploadError(null);
+        }}
+        title="Upload Custom Profile"
+        isDisabled={uploadProfileMutation.isPending}
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button
+              variant="secondary"
+              onClick={() => setIsUploadModalOpen(false)}
+              disabled={uploadProfileMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              form="upload-profile-form"
+              type="submit"
+              loading={uploadProfileMutation.isPending}
+              variant="primary"
+            >
+              Upload Profile
+            </Button>
+          </div>
+        }
+      >
+        <form id="upload-profile-form" onSubmit={onUploadCustomProfile} className="space-y-4">
+          <p className="text-sm text-pf-text-secondary mb-4">
+            Upload a custom profile from raw JSON. This creates a user-owned profile that you can edit or delete.
+          </p>
+
+          <FormField label="Profile Type" required>
+            <Select
+              aria-label="Profile type"
+              value={uploadProfileType}
+              onChange={e => setUploadProfileType(e.target.value as 'machine' | 'filament' | 'process')}
+            >
+              <option value="process">Process (Quality/Speed)</option>
+              <option value="filament">Filament (Material)</option>
+              <option value="machine">Machine (Printer)</option>
+            </Select>
+          </FormField>
+
+          <FormField label="Raw Profile JSON" required helper="Paste OrcaSlicer profile JSON.">
+            <Textarea
+              placeholder={'{\n  "layer_height": 0.2,\n  "infill_density": "15%",\n  ...\n}'}
+              value={uploadRawJson}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setUploadRawJson(e.target.value)}
+              rows={10}
+            />
+          </FormField>
+
+          <FormField label="Name" helper="Optional; derived automatically from JSON if left blank.">
+            <Input
+              type="text"
+              placeholder="Custom profile name"
+              value={uploadName}
+              onChange={e => setUploadName(e.target.value)}
+            />
+          </FormField>
+
+          {uploadError && <Alert type="error">{uploadError}</Alert>}
+        </form>
+      </Modal>
+
       {/* Profile Reseed Status Modal */}
       <Modal
         isOpen={reseedModalOpen}
@@ -952,6 +1437,67 @@ export const SlicerProfilesPage: React.FC = () => {
             {reseedMessage}
           </p>
         </div>
+      </Modal>
+
+      {/* Edit Custom Profile Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingProfile(null);
+          setEditError(null);
+        }}
+        title="Edit Custom Profile"
+        isDisabled={updateProfileMutation.isPending}
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button
+              variant="secondary"
+              onClick={() => setIsEditModalOpen(false)}
+              disabled={updateProfileMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              form="edit-profile-form"
+              type="submit"
+              loading={updateProfileMutation.isPending}
+              variant="primary"
+            >
+              Save Changes
+            </Button>
+          </div>
+        }
+      >
+        <form id="edit-profile-form" onSubmit={onEditProfile} className="space-y-4">
+          {editingProfile && (
+            <>
+              <p className="text-sm text-pf-text-secondary">
+                Editing <span className="font-medium">{editingProfile.profileType}</span> profile
+              </p>
+
+              <FormField label="Name" required>
+                <Input
+                  type="text"
+                  placeholder="Profile name"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+              </FormField>
+
+              <FormField label="Description">
+                <Textarea
+                  placeholder="Optional description"
+                  value={editDescription}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditDescription(e.target.value)}
+                  rows={3}
+                />
+              </FormField>
+
+              {editError && <Alert type="error">{editError}</Alert>}
+            </>
+          )}
+        </form>
       </Modal>
     </PageTemplate>
   );

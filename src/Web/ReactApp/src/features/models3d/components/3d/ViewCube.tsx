@@ -20,7 +20,7 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
         <div className="w-6 h-6" />
         <button
           onClick={() => onViewChange('top')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Top View"
         >
           T
@@ -33,21 +33,21 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
       <div className="grid grid-cols-3 gap-1 mb-1">
         <button
           onClick={() => onViewChange('left')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Left View"
         >
           L
         </button>
         <button
           onClick={() => onViewChange('iso')}
-          className="w-6 h-6 bg-pf-accent/60 hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent/60 hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Isometric View"
         >
           I
         </button>
         <button
           onClick={() => onViewChange('right')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Right View"
         >
           R
@@ -60,7 +60,7 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
         <div className="w-6 h-6" />
         <button
           onClick={() => onViewChange('bottom')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Bottom View"
         >
           B
@@ -75,14 +75,14 @@ export const ViewCube: React.FC<ViewCubeProps> = ({ onViewChange }) => {
         <div className="w-6 h-6" />
         <button
           onClick={() => onViewChange('front')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Front View"
         >
           F
         </button>
         <button
           onClick={() => onViewChange('back')}
-          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded flex items-center justify-center transition-colors cursor-pointer"
+          className="w-6 h-6 bg-pf-accent hover:bg-pf-accent/80 text-white text-xs font-bold rounded-sm flex items-center justify-center transition-colors cursor-pointer"
           title="Back View"
         >
           K

@@ -20,7 +20,7 @@ export function renderUnknown(value: unknown): React.ReactNode {
   if (t === 'object') {
     try {
       return (
-        <pre className="mt-1 text-xs text-pf-text-secondary bg-pf-bg-1 p-2 rounded border border-pf-border overflow-x-auto">
+        <pre className="mt-1 text-xs text-pf-text-secondary bg-pf-bg-1 p-2 rounded-sm border border-pf-border overflow-x-auto">
           {JSON.stringify(value, null, 2)}
         </pre>
       );

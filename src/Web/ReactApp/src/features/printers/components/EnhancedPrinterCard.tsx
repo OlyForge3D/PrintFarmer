@@ -229,7 +229,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
             <img
               src={`${currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl}?t=${Date.now()}`}
               alt="Camera snapshot"
-              className="w-full h-32 object-cover rounded border"
+              className="w-full h-32 object-cover rounded-sm border"
               onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
             />
             {/* For OctoPrint, optionally show a note if only stream is available */}

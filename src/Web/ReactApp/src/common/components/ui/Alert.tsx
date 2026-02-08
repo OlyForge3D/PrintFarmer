@@ -29,7 +29,7 @@ export const Alert: React.FC<AlertProps> = ({
   return (
     <div
       {...(type === 'error' ? { role: 'alert' } : {})}
-      className={clsx('border rounded p-3 text-sm flex items-start gap-3', alertStyles[type], className)}
+      className={clsx('border rounded-sm p-3 text-sm flex items-start gap-3', alertStyles[type], className)}
     >
       <div className="flex-1">
         {title && <div className="font-semibold mb-0.5">{title}</div>}
@@ -38,7 +38,7 @@ export const Alert: React.FC<AlertProps> = ({
       {onClose && (
         <button
           onClick={onClose}
-          className="text-xs px-2 py-1 rounded bg-pf-bg-0 bg-opacity-40 hover:bg-pf-bg-1 hover:bg-opacity-70 transition"
+          className="text-xs px-2 py-1 rounded-sm bg-pf-bg-0/40 hover:bg-pf-bg-1/70 transition"
           aria-label="Dismiss message"
         >
           ×

@@ -67,11 +67,32 @@ namespace Farm.Web.Api.Tests
                     services.Remove(dbContextDescriptor);
                 }
 
+                // Also remove DbContextFactory and its singleton options since it was registered with the original options
+                ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
+                if (dbContextFactoryDescriptor != null)
+                {
+                    services.Remove(dbContextFactoryDescriptor);
+                }
+
+                // Remove singleton options that were registered for the factory
+                ServiceDescriptor? singletonOptionsDescriptor = services.FirstOrDefault(d =>
+                    d.ServiceType == typeof(DbContextOptions<AppDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
+                if (singletonOptionsDescriptor != null)
+                {
+                    services.Remove(singletonOptionsDescriptor);
+                }
+
                 // Register in-memory SQLite database
                 services.AddDbContext<AppDbContext>(options =>
                 {
                     options.UseSqlite(_connectionString);
                 });
+
+                // Re-register DbContextFactory with the test SQLite connection (same pattern as production)
+                DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+                optionsBuilder.UseSqlite(_connectionString);
+                services.AddSingleton(optionsBuilder.Options);
+                services.AddDbContextFactory<AppDbContext>();
 
                 // Ensure database is created after all services are registered
                 ServiceProvider sp = services.BuildServiceProvider();

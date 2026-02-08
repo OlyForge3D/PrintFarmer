@@ -451,7 +451,7 @@ export function SpoolsPage() {
       icon={PackageIcon}
     >
       {health && (!health.configured || !health.success) && (
-        <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded">
+        <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded-sm">
           {!health.configured ? (
             <span>Spoolman is not configured yet. Set a base URL in Settings to enable spool tracking.</span>
           ) : (
@@ -462,7 +462,7 @@ export function SpoolsPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
   <div className="flex gap-2 items-center">
-          <div className="flex rounded overflow-hidden border border-pf-border">
+          <div className="flex rounded-sm overflow-hidden border border-pf-border">
             <Button
               variant={viewMode === 'cards' ? 'primary' : 'secondary'}
               size="sm"
@@ -499,7 +499,7 @@ export function SpoolsPage() {
               <GearIcon className="h-4 w-4" />
             </Button>
             {showColumnConfig && viewMode === 'table' && (
-              <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
+              <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded-sm shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
                 <div className="flex justify-between items-center mb-1">
                   <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
                   <Button
@@ -514,7 +514,7 @@ export function SpoolsPage() {
                   {tableColumns.map((c, i) => (
                     <li
                       key={c.id}
-                      className={`flex items-center gap-2 group rounded ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                      className={`flex items-center gap-2 group rounded-sm ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
                       draggable
                       onDragStart={(e) => onDragStart(e, c.id)}
                       onDragOver={onDragOver}
@@ -571,7 +571,7 @@ export function SpoolsPage() {
               href={spoolmanBaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
               aria-label="Open Spoolman"
               title="Open Spoolman"
             >
@@ -582,8 +582,8 @@ export function SpoolsPage() {
       </div>
 
       {spoolmanError && (
-        <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded flex items-center gap-3">
-          <PackageIcon className="h-5 w-5 flex-shrink-0" />
+        <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded-sm flex items-center gap-3">
+          <PackageIcon className="h-5 w-5 shrink-0" />
           <div>
             <div className="font-medium">Spoolman Connection Error</div>
             <div className="text-sm">{spoolmanError}</div>
@@ -738,7 +738,7 @@ export function SpoolsPage() {
 
           {viewMode === 'cards' && (
             <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">
-              <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
+              <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded-sm bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
               <div>Usage shows Used % / Remaining % (hover for weight details)</div>
             </div>
           )}
@@ -762,7 +762,7 @@ export function SpoolsPage() {
                     </div>
                   </div>
                   {spool.archived && (
-                    <span className="ml-2 inline-block px-2 py-0.5 text-[10px] rounded bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span>
+                    <span className="ml-2 inline-block px-2 py-0.5 text-[10px] rounded-sm bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span>
                   )}
                 </div>
 
