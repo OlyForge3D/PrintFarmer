@@ -67,39 +67,47 @@ function groupTasksByDate(tasks: UpcomingMaintenanceTask[]): TaskGroup[] {
   const groups: TaskGroup[] = [];
   const today = startOfDay(new Date());
 
+  const dateTasks = tasks.filter(t => Boolean(t.dueDate));
+  const runtimeTasks = tasks.filter(t => t.intervalType === 'hours' && !t.isOverdue);
+
   // Group: Overdue
   const overdueTasks = tasks.filter(t => t.isOverdue);
   if (overdueTasks.length > 0) {
     groups.push({ label: 'Overdue', tasks: overdueTasks, isOverdue: true });
   }
 
+  // Group: Runtime-based (hour interval)
+  if (runtimeTasks.length > 0) {
+    groups.push({ label: 'Runtime', tasks: runtimeTasks });
+  }
+
   // Group: Today
-  const todayTasks = tasks.filter(t => !t.isOverdue && isToday(t.dueDate));
+  const todayTasks = dateTasks.filter(t => !t.isOverdue && isToday(t.dueDate!));
   if (todayTasks.length > 0) {
     groups.push({ label: 'Today', tasks: todayTasks });
   }
 
   // Group: Tomorrow
-  const tomorrowTasks = tasks.filter(t => !t.isOverdue && isTomorrow(t.dueDate));
+  const tomorrowTasks = dateTasks.filter(t => !t.isOverdue && isTomorrow(t.dueDate!));
   if (tomorrowTasks.length > 0) {
     groups.push({ label: 'Tomorrow', tasks: tomorrowTasks });
   }
 
   // Group: This Week (not today or tomorrow)
-  const thisWeekTasks = tasks.filter(t => 
+  const thisWeekTasks = dateTasks.filter(t => 
     !t.isOverdue && 
-    !isToday(t.dueDate) && 
-    !isTomorrow(t.dueDate) && 
-    isThisWeek(t.dueDate) &&
-    differenceInDays(t.dueDate, today) <= 7
+    !isToday(t.dueDate!) && 
+    !isTomorrow(t.dueDate!) && 
+    isThisWeek(t.dueDate!) &&
+    differenceInDays(t.dueDate!, today) <= 7
   );
   if (thisWeekTasks.length > 0) {
     groups.push({ label: 'This Week', tasks: thisWeekTasks });
   }
 
   // Group: Next Week
-  const nextWeekTasks = tasks.filter(t => {
-    const diff = differenceInDays(t.dueDate, today);
+  const nextWeekTasks = dateTasks.filter(t => {
+    const diff = differenceInDays(t.dueDate!, today);
     return !t.isOverdue && diff > 7 && diff <= 14;
   });
   if (nextWeekTasks.length > 0) {
@@ -107,8 +115,8 @@ function groupTasksByDate(tasks: UpcomingMaintenanceTask[]): TaskGroup[] {
   }
 
   // Group: Later (more than 2 weeks)
-  const laterTasks = tasks.filter(t => {
-    const diff = differenceInDays(t.dueDate, today);
+  const laterTasks = dateTasks.filter(t => {
+    const diff = differenceInDays(t.dueDate!, today);
     return !t.isOverdue && diff > 14;
   });
   if (laterTasks.length > 0) {
@@ -126,6 +134,16 @@ interface TimelineItemProps {
 
 function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) {
   const priorityConfig = getPriorityConfig(task.priority);
+
+  const runtimeDueText = (() => {
+    if (task.intervalType !== 'hours') return null;
+    if (task.hoursUntilDue == null) return 'Runtime-based';
+    const rounded = Math.ceil(Math.abs(task.hoursUntilDue));
+    if (task.isOverdue) {
+      return `${rounded} hour${rounded !== 1 ? 's' : ''} overdue`;
+    }
+    return `Due in ${rounded} hour${rounded !== 1 ? 's' : ''}`;
+  })();
 
   return (
     <div 
@@ -164,11 +182,18 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
 
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-1.5 text-xs">
-            {task.isOverdue ? (
+            {task.intervalType === 'hours' ? (
+              <>
+                {(task.isOverdue ? <AlertIcon className="h-3.5 w-3.5 text-red-400" /> : <ClockIcon className="h-3.5 w-3.5 text-pf-text-tertiary" />)}
+                <span className={`${task.isOverdue ? 'text-red-400 font-medium' : 'text-pf-text-tertiary'}`}>
+                  {runtimeDueText}
+                </span>
+              </>
+            ) : task.isOverdue ? (
               <>
                 <AlertIcon className="h-3.5 w-3.5 text-red-400" />
                 <span className="text-red-400 font-medium">
-                  {Math.abs(task.daysUntilDue)} day{Math.abs(task.daysUntilDue) !== 1 ? 's' : ''} overdue
+                  {Math.abs(task.daysUntilDue ?? 0)} day{Math.abs(task.daysUntilDue ?? 0) !== 1 ? 's' : ''} overdue
                 </span>
               </>
             ) : task.isDueToday ? (
@@ -180,7 +205,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
               <>
                 <ClockIcon className="h-3.5 w-3.5 text-pf-text-tertiary" />
                 <span className="text-pf-text-tertiary">
-                  {format(task.dueDate, 'MMM d')} ({task.daysUntilDue} day{task.daysUntilDue !== 1 ? 's' : ''})
+                  {task.dueDate ? `${format(task.dueDate, 'MMM d')} (${task.daysUntilDue ?? 0} day${(task.daysUntilDue ?? 0) !== 1 ? 's' : ''})` : 'Scheduled'}
                 </span>
               </>
             )}

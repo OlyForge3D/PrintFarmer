@@ -132,6 +132,7 @@ export function UpcomingMaintenanceCalendar({
   const tasksByDate = useMemo(() => {
     const map = new Map<string, UpcomingMaintenanceTask[]>();
     tasks.forEach(task => {
+      if (!task.dueDate) return;
       const key = format(task.dueDate, 'yyyy-MM-dd');
       const existing = map.get(key) || [];
       map.set(key, [...existing, task]);

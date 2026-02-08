@@ -15,6 +15,7 @@ public class MaintenanceAlertEngine(
     IPrinterStatisticsRepository statsRepo,
     IMaintenanceScheduleRepository scheduleRepo,
     IMaintenanceAlertRepository alertRepo,
+    IMaintenanceLogRepository logRepo,
     IHubContext<MaintenanceHub> hubContext,
     IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
     ILogger<MaintenanceAlertEngine> logger) : IMaintenanceAlertService
@@ -22,6 +23,7 @@ public class MaintenanceAlertEngine(
     private readonly IPrinterStatisticsRepository _statsRepo = statsRepo ?? throw new ArgumentNullException(nameof(statsRepo));
     private readonly IMaintenanceScheduleRepository _scheduleRepo = scheduleRepo ?? throw new ArgumentNullException(nameof(scheduleRepo));
     private readonly IMaintenanceAlertRepository _alertRepo = alertRepo ?? throw new ArgumentNullException(nameof(alertRepo));
+    private readonly IMaintenanceLogRepository _logRepo = logRepo ?? throw new ArgumentNullException(nameof(logRepo));
     private readonly IHubContext<MaintenanceHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly IOptionsMonitor<MaintenanceAlertSettings> _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     private readonly ILogger<MaintenanceAlertEngine> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -53,12 +55,20 @@ public class MaintenanceAlertEngine(
             return 0;
         }
 
+        // Load maintenance logs once so we can compute baselines efficiently.
+        List<MaintenanceLog> logs = await _logRepo.GetByPrinterIdAsync(printerId, cancellationToken);
+        Dictionary<Guid, MaintenanceLog> lastLogByScheduleId = logs
+            .Where(l => l.MaintenanceScheduleId.HasValue)
+            .GroupBy(l => l.MaintenanceScheduleId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.PerformedAt).First());
+
         int alertsGenerated = 0;
 
         // Evaluate each schedule
         foreach (MaintenanceSchedule schedule in schedules)
         {
-            bool shouldAlert = ShouldGenerateAlert(stats, schedule, settings);
+            lastLogByScheduleId.TryGetValue(schedule.Id, out MaintenanceLog? lastLog);
+            bool shouldAlert = ShouldGenerateAlert(stats, schedule, lastLog, settings);
 
             if (shouldAlert)
             {
@@ -70,7 +80,7 @@ public class MaintenanceAlertEngine(
 
                 if (!hasActiveAlert)
                 {
-                    await GenerateAlertAsync(stats, schedule, cancellationToken);
+                    await GenerateAlertAsync(stats, schedule, lastLog, cancellationToken);
                     alertsGenerated++;
                 }
                 else
@@ -98,6 +108,7 @@ public class MaintenanceAlertEngine(
     private bool ShouldGenerateAlert(
         PrinterStatistics stats,
         MaintenanceSchedule schedule,
+        MaintenanceLog? lastLog,
         MaintenanceAlertSettings settings)
     {
         // Check hour-based interval
@@ -105,12 +116,14 @@ public class MaintenanceAlertEngine(
         {
             double thresholdHours = schedule.IntervalHours.Value * (settings.ThresholdPercentage / 100.0);
 
-            if (stats.TotalPrintHours >= thresholdHours)
+            double hoursSinceLast = ComputeHoursSinceLastMaintenance(stats, lastLog);
+
+            if (hoursSinceLast >= thresholdHours)
             {
                 _logger.LogDebug(
                     "Schedule '{TaskName}' triggered: {Hours}h >= {Threshold}h (interval: {Interval}h)",
                     schedule.TaskName,
-                    stats.TotalPrintHours,
+                    hoursSinceLast,
                     thresholdHours,
                     schedule.IntervalHours.Value);
                 return true;
@@ -120,10 +133,7 @@ public class MaintenanceAlertEngine(
         // Check day-based interval
         if (schedule.IntervalDays.HasValue)
         {
-            // For day-based, we need to check against the last maintenance log
-            // For Phase 3, we'll use schedule creation date as baseline
-            // In Phase 4, we'll integrate with MaintenanceLog
-            DateTime baselineDate = schedule.CreatedAt;
+            DateTime baselineDate = lastLog?.PerformedAt ?? schedule.CreatedAt;
             int daysSinceBaseline = (DateTime.UtcNow - baselineDate).Days;
             int thresholdDays = (int)(schedule.IntervalDays.Value * (settings.ThresholdPercentage / 100.0));
 
@@ -145,9 +155,18 @@ public class MaintenanceAlertEngine(
     private async Task GenerateAlertAsync(
         PrinterStatistics stats,
         MaintenanceSchedule schedule,
+        MaintenanceLog? lastLog,
         CancellationToken cancellationToken)
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
+
+        double? hoursSinceLast = schedule.IntervalHours.HasValue
+            ? ComputeHoursSinceLastMaintenance(stats, lastLog)
+            : null;
+
+        int? daysSinceLast = schedule.IntervalDays.HasValue
+            ? (DateTime.UtcNow - (lastLog?.PerformedAt ?? schedule.CreatedAt)).Days
+            : null;
 
         // Create alert
         MaintenanceAlert alert = new()
@@ -156,14 +175,12 @@ public class MaintenanceAlertEngine(
             PrinterId = stats.PrinterId,
             MaintenanceScheduleId = schedule.Id,
             Title = $"Maintenance Due: {schedule.TaskName}",
-            Message = BuildAlertMessage(stats, schedule),
+            Message = BuildAlertMessage(stats, schedule, hoursSinceLast, daysSinceLast),
             Severity = schedule.Priority,
             Status = MaintenanceAlertStatus.Active,
             PrinterHoursAtTrigger = stats.TotalPrintHours,
-            HoursSinceLastMaintenance = schedule.IntervalHours.HasValue ? stats.TotalPrintHours : null,
-            DaysSinceLastMaintenance = schedule.IntervalDays.HasValue
-                ? (DateTime.UtcNow - schedule.CreatedAt).Days
-                : null
+            HoursSinceLastMaintenance = hoursSinceLast,
+            DaysSinceLastMaintenance = daysSinceLast
         };
 
         await _alertRepo.AddAsync(alert, cancellationToken);
@@ -180,26 +197,50 @@ public class MaintenanceAlertEngine(
         }
     }
 
-    private static string BuildAlertMessage(PrinterStatistics stats, MaintenanceSchedule schedule)
+    private static string BuildAlertMessage(
+        PrinterStatistics stats,
+        MaintenanceSchedule schedule,
+        double? hoursSinceLastMaintenance,
+        int? daysSinceLastMaintenance)
     {
-        if (schedule.IntervalHours.HasValue)
+        if (schedule.IntervalHours.HasValue && !schedule.IntervalDays.HasValue)
         {
             return $"{schedule.TaskName} is due for printer. " +
-                   $"Current hours: {stats.TotalPrintHours:F1}h, " +
+                   $"Hours since last maintenance: {hoursSinceLastMaintenance ?? stats.TotalPrintHours:F1}h, " +
                    $"Interval: {schedule.IntervalHours:F1}h. " +
                    $"{schedule.Description ?? "Please perform scheduled maintenance."}";
         }
 
-        if (schedule.IntervalDays.HasValue)
+        if (schedule.IntervalDays.HasValue && !schedule.IntervalHours.HasValue)
         {
-            int daysSince = (DateTime.UtcNow - schedule.CreatedAt).Days;
             return $"{schedule.TaskName} is due for printer. " +
-                   $"Days since last maintenance: {daysSince}, " +
+                   $"Days since last maintenance: {daysSinceLastMaintenance ?? 0}, " +
                    $"Interval: {schedule.IntervalDays} days. " +
                    $"{schedule.Description ?? "Please perform scheduled maintenance."}";
         }
 
+        if (schedule.IntervalHours.HasValue && schedule.IntervalDays.HasValue)
+        {
+            return $"{schedule.TaskName} is due for printer. " +
+                   $"Hours since last maintenance: {hoursSinceLastMaintenance ?? stats.TotalPrintHours:F1}h (interval: {schedule.IntervalHours:F1}h), " +
+                   $"Days since last maintenance: {daysSinceLastMaintenance ?? 0} (interval: {schedule.IntervalDays} days). " +
+                   $"{schedule.Description ?? "Please perform scheduled maintenance."}";
+        }
+
         return $"{schedule.TaskName} is due. {schedule.Description ?? "Please perform scheduled maintenance."}";
+    }
+
+    private static double ComputeHoursSinceLastMaintenance(PrinterStatistics stats, MaintenanceLog? lastLog)
+    {
+        // Preferred baseline is the printer's total hours at the last maintenance log.
+        // If historical logs don't contain printer hours yet, fall back to total hours
+        // (maintains previous behavior until new logs populate PrinterHoursAtMaintenance).
+        if (lastLog?.PrinterHoursAtMaintenance is double baselineHours)
+        {
+            return Math.Max(0, stats.TotalPrintHours - baselineHours);
+        }
+
+        return stats.TotalPrintHours;
     }
 
     private async Task BroadcastAlertCreatedAsync(MaintenanceAlert alert)

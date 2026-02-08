@@ -179,6 +179,13 @@ export interface CreateMaintenanceScheduleRequest {
   isActive?: boolean | null;
 }
 
+export interface BulkScheduleOperationResponse {
+  printersProcessed: number;
+  schedulesCreated: number;
+  schedulesUpdated: number;
+  schedulesSkipped: number;
+}
+
 export interface UpdateMaintenanceScheduleRequest {
   taskName?: string | null;
   description?: string | null;

@@ -17,7 +17,8 @@ import type {
   CreateMaintenanceLogRequest,
   CreateMaintenanceScheduleRequest,
   UpdateMaintenanceScheduleRequest,
-  UpdateMaintenanceModeRequest
+  UpdateMaintenanceModeRequest,
+  BulkScheduleOperationResponse
 } from '@/types/maintenance';
 
 // Analytics response types
@@ -46,6 +47,25 @@ export interface PrinterUptimeEntry {
   uptimePercent: number;
   maintenanceCount: number;
   totalDowntimeMinutes: number;
+}
+
+export interface UpcomingMaintenanceTaskDto {
+  id: string;
+  scheduleId: string;
+  printerId: string;
+  printerName: string;
+  taskName: string;
+  component?: string | null;
+  description?: string | null;
+  priority: number;
+  intervalType: 'hours' | 'days';
+  intervalValue: number;
+  dueDate?: string | null;
+  daysUntilDue?: number | null;
+  hoursUntilDue?: number | null;
+  isOverdue: boolean;
+  isDueToday: boolean;
+  lastPerformedAt?: string | null;
 }
 
 /**
@@ -207,11 +227,49 @@ export class MaintenanceService {
   }
 
   /**
+   * Gets upcoming maintenance tasks computed server-side.
+   * Day-based tasks include real due dates; hour-based tasks include remaining hours and no synthetic dates.
+   */
+  async getUpcomingMaintenance(options?: {
+    lookaheadDays?: number;
+    includeOverdue?: boolean;
+    printerId?: string;
+  }): Promise<UpcomingMaintenanceTaskDto[]> {
+    const params = new URLSearchParams();
+    if (options?.lookaheadDays != null) params.append('lookaheadDays', String(options.lookaheadDays));
+    if (options?.includeOverdue != null) params.append('includeOverdue', String(options.includeOverdue));
+    if (options?.printerId) params.append('printerId', options.printerId);
+
+    const queryString = params.toString();
+    const url = `/maintenance/upcoming${queryString ? `?${queryString}` : ''}`;
+
+    const response = await apiClient.get<UpcomingMaintenanceTaskDto[]>(url);
+    return response.data;
+  }
+
+  /**
    * Gets maintenance schedules for a specific printer (includes both printer-specific and model-wide).
    * @param printerId - The printer ID
    */
   async getPrinterSchedules(printerId: string): Promise<MaintenanceSchedule[]> {
     const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedules`);
+    return response.data;
+  }
+
+  /**
+   * Gets all active schedule templates (defaults not tied to a specific printer).
+   */
+  async getAllScheduleTemplates(): Promise<MaintenanceSchedule[]> {
+    const response = await apiClient.get<MaintenanceSchedule[]>('/maintenance/schedule-templates');
+    return response.data;
+  }
+
+  /**
+   * Gets all active schedule templates applicable to a specific printer.
+   * Includes model-wide, motion-type-wide, manufacturer-wide, and global defaults.
+   */
+  async getPrinterScheduleTemplates(printerId: string): Promise<MaintenanceSchedule[]> {
+    const response = await apiClient.get<MaintenanceSchedule[]>(`/maintenance/printers/${printerId}/schedule-templates`);
     return response.data;
   }
 
@@ -240,6 +298,42 @@ export class MaintenanceService {
    */
   async deleteSchedule(id: string): Promise<void> {
     await apiClient.delete(`/maintenance/schedules/${id}`);
+  }
+
+  /**
+   * Applies recommended (template) schedules to multiple printers by creating printer-specific overrides.
+   */
+  async bulkApplyRecommendedSchedules(options: {
+    printerIds: string[];
+    overwriteExisting?: boolean;
+  }): Promise<BulkScheduleOperationResponse> {
+    const response = await apiClient.post<BulkScheduleOperationResponse>(
+      '/maintenance/bulk-schedules/apply-recommended',
+      {
+        printerIds: options.printerIds,
+        overwriteExisting: options.overwriteExisting ?? false,
+      }
+    );
+    return response.data;
+  }
+
+  /**
+   * Creates the same printer-specific schedule for multiple printers.
+   */
+  async bulkCreateScheduleForPrinters(options: {
+    printerIds: string[];
+    schedule: CreateMaintenanceScheduleRequest;
+    overwriteExisting?: boolean;
+  }): Promise<BulkScheduleOperationResponse> {
+    const response = await apiClient.post<BulkScheduleOperationResponse>(
+      '/maintenance/bulk-schedules/create',
+      {
+        printerIds: options.printerIds,
+        schedule: options.schedule,
+        overwriteExisting: options.overwriteExisting ?? false,
+      }
+    );
+    return response.data;
   }
 
   // ============================================================================

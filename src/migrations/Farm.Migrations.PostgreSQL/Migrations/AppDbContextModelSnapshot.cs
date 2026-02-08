@@ -1594,6 +1594,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("ManufacturerId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("MotionType")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");
 

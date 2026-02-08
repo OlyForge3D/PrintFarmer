@@ -5,9 +5,10 @@
  * Organized with top-level tabs for better navigation of the comprehensive maintenance tools.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { 
   WrenchIcon, 
@@ -19,11 +20,14 @@ import {
   TableIcon
 } from '@/common/components/icons/MdiIcons';
 import { Button, Tabs } from '@/common/components/ui';
+import { usePrintersFast } from '@/common/hooks/useApi';
+import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { FleetMaintenanceOverview } from '../components/FleetMaintenanceOverview';
 import { MaintenanceStatusGrid } from '../components/MaintenanceStatusGrid';
 import { MaintenancePriorityList } from '../components/MaintenancePriorityList';
 import { UpcomingMaintenanceCalendar } from '../components/UpcomingMaintenanceCalendar';
 import { MaintenanceTimeline } from '../components/MaintenanceTimeline';
+import { CreateScheduleModal } from '../components/CreateScheduleModal';
 import { ComponentMaintenanceTracker } from '../components/ComponentMaintenanceTracker';
 import { ComponentReplacementHistory } from '../components/ComponentReplacementHistory';
 import { FleetStatisticsTable } from '../components/FleetStatisticsTable';
@@ -32,6 +36,8 @@ import { useMaintenanceAlerts } from '../hooks/useMaintenanceAlerts';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { useComponentMaintenance } from '../hooks/useComponentMaintenance';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
+import type { CreateMaintenanceScheduleRequest } from '@/types/maintenance';
+import { maintenanceService } from '@/services/maintenanceService';
 
 import {
   MaintenanceTrendsChart,
@@ -48,6 +54,28 @@ export function MaintenanceDashboardPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedDayTasks, setSelectedDayTasks] = useState<UpcomingMaintenanceTask[]>([]);
+
+  const { data: printersFast = [], isLoading: printersLoading } = usePrintersFast(false);
+  const printerItems = useMemo(
+    () =>
+      printersFast.map((p) => ({
+        id: p.id,
+        name: p.name,
+        modelName: p.modelName ?? undefined,
+        manufacturerName: p.manufacturerName ?? undefined,
+        isOnline: p.isOnline,
+        nozzleDiameter: p.nozzleDiameter ?? undefined,
+        motionType: p.motionType ?? undefined,
+      })),
+    [printersFast]
+  );
+
+  const [bulkMode, setBulkMode] = useState<'applyRecommended' | 'createCustom' | null>(null);
+  const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
+  const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const [bulkOverwriteExisting, setBulkOverwriteExisting] = useState(false);
+  const [isBulkCreateOpen, setIsBulkCreateOpen] = useState(false);
+  const [isBulkBusy, setIsBulkBusy] = useState(false);
   
   // Fetch maintenance statistics
   const { stats, isLoading: statsLoading, error: statsError, refetch: refetchStats } = useMaintenanceStats();
@@ -87,6 +115,66 @@ export function MaintenanceDashboardPage() {
     refetchComponents();
   };
 
+  const openBulkApplyRecommended = () => {
+    setBulkMode('applyRecommended');
+    setSelectedPrinterIds([]);
+    setBulkOverwriteExisting(false);
+    setIsPrinterSelectorOpen(true);
+  };
+
+  const openBulkCreateCustom = () => {
+    setBulkMode('createCustom');
+    setSelectedPrinterIds([]);
+    setBulkOverwriteExisting(false);
+    setIsPrinterSelectorOpen(true);
+  };
+
+  const handlePrintersSelected = async (printerIds: string[]) => {
+    setSelectedPrinterIds(printerIds);
+
+    if (bulkMode === 'applyRecommended') {
+      setIsBulkBusy(true);
+      try {
+        const result = await maintenanceService.bulkApplyRecommendedSchedules({
+          printerIds,
+          overwriteExisting: bulkOverwriteExisting,
+        });
+        toast.success(
+          `Applied recommended schedules: ${result.schedulesCreated} created, ${result.schedulesSkipped} skipped`
+        );
+        handleRefresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to apply recommended schedules');
+      } finally {
+        setIsBulkBusy(false);
+      }
+      return;
+    }
+
+    if (bulkMode === 'createCustom') {
+      setIsBulkCreateOpen(true);
+    }
+  };
+
+  const handleBulkCreateSubmit = async (data: CreateMaintenanceScheduleRequest) => {
+    if (selectedPrinterIds.length === 0) {
+      toast.error('Select at least one printer');
+      return;
+    }
+
+    const result = await maintenanceService.bulkCreateScheduleForPrinters({
+      printerIds: selectedPrinterIds,
+      schedule: data,
+      overwriteExisting: bulkOverwriteExisting,
+    });
+
+    toast.success(
+      `Created schedules: ${result.schedulesCreated} created, ${result.schedulesSkipped} skipped`
+    );
+    setIsBulkCreateOpen(false);
+    handleRefresh();
+  };
+
   const handlePrinterClick = (printerId: string) => {
     // Navigate to printer detail or maintenance history
     // For now, navigate to printers page
@@ -106,6 +194,7 @@ export function MaintenanceDashboardPage() {
   const isAnyLoading = statsLoading || alertsLoading || tasksLoading || componentsLoading;
 
   return (
+    <>
     <PageTemplate
       title="Maintenance Dashboard"
       subtitle={`Monitor and manage maintenance across your printer fleet${
@@ -260,19 +349,42 @@ export function MaintenanceDashboardPage() {
             <div className="space-y-6">
               <section aria-labelledby="upcoming-maintenance-heading">
                 <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
-                  <div className="px-5 py-4 border-b border-pf-border">
-                    <h2 
-                      id="upcoming-maintenance-heading" 
-                      className="text-lg font-semibold text-pf-text-primary"
-                    >
-                      Upcoming Maintenance
-                    </h2>
+                  <div className="px-5 py-4 border-b border-pf-border flex items-start justify-between gap-4">
+                    <div>
+                      <h2 
+                        id="upcoming-maintenance-heading" 
+                        className="text-lg font-semibold text-pf-text-primary"
+                      >
+                        Upcoming Maintenance
+                      </h2>
                     <p className="text-sm text-pf-text-tertiary mt-1">
                       {upcomingTasks.length > 0 
                         ? `${upcomingTasks.length} task${upcomingTasks.length !== 1 ? 's' : ''} scheduled`
                         : 'No upcoming maintenance'
                       }
                     </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={openBulkApplyRecommended}
+                        disabled={printersLoading || isBulkBusy}
+                      >
+                        Apply Recommended
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={openBulkCreateCustom}
+                        disabled={printersLoading || isBulkBusy}
+                      >
+                        Create for Printers
+                      </Button>
+                    </div>
                   </div>
                   
                   <Tabs defaultTab="calendar" className="p-0">
@@ -445,5 +557,26 @@ export function MaintenanceDashboardPage() {
         </div>
       )}
     </PageTemplate>
+
+    <PrinterSelectorModal
+        isOpen={isPrinterSelectorOpen}
+        printers={printerItems}
+        multiSelect
+        selectedPrinterIds={selectedPrinterIds}
+        overwriteExisting={bulkOverwriteExisting}
+        onOverwriteExistingChange={setBulkOverwriteExisting}
+        title={bulkMode === 'applyRecommended' ? 'Apply Recommended Schedules' : 'Select Printers'}
+        confirmLabel={bulkMode === 'applyRecommended' ? 'Apply Recommended' : 'Continue'}
+        onSelectMany={handlePrintersSelected}
+        onClose={() => setIsPrinterSelectorOpen(false)}
+      />
+
+    <CreateScheduleModal
+        isOpen={isBulkCreateOpen}
+        printerName={selectedPrinterIds.length > 0 ? `${selectedPrinterIds.length} printers` : undefined}
+        onSubmit={handleBulkCreateSubmit}
+        onClose={() => setIsBulkCreateOpen(false)}
+      />
+    </>
   );
 }
