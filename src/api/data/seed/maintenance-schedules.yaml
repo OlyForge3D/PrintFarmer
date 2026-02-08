@@ -11,6 +11,7 @@
 # - intervalDays: Day-based interval (e.g., 90 days for filter replacement)
 # - estimatedDurationMinutes: How long the task typically takes
 # - isActive: Whether the schedule is enabled
+# - motionType: Optional - if specified, applies to this motion type (Cartesian, CoreXY, Delta, Unknown)
 # - printerModel: Optional - if specified, only applies to this model
 # - manufacturer: Optional - if specified, only applies to this manufacturer
 #
@@ -89,6 +90,7 @@
   intervalDays: null
   estimatedDurationMinutes: 20
   isActive: true
+  motionType: null
   printerModel: null
   manufacturer: null
 
@@ -109,6 +111,32 @@
   intervalDays: 90
   estimatedDurationMinutes: 30
   isActive: true
+  motionType: null
+  printerModel: null
+  manufacturer: null
+
+# Motion-Type Specific Tasks
+# ============================================================================
+
+- taskName: "Gantry Squareness Check"
+  description: "Verify CoreXY gantry is square and belt paths are aligned. Re-square frame/gantry if needed to prevent dimensional skew and ringing artifacts."
+  component: "Motion System"
+  intervalHours: 1000
+  intervalDays: null
+  estimatedDurationMinutes: 30
+  isActive: true
+  motionType: "CoreXY"
+  printerModel: null
+  manufacturer: null
+
+- taskName: "V-Wheel Tension Check"
+  description: "Check and adjust V-wheel/eccentric nut tension on the X/Y/Z carriages. Wheels should roll smoothly with no flat spots and minimal play."
+  component: "Motion System"
+  intervalHours: 500
+  intervalDays: null
+  estimatedDurationMinutes: 20
+  isActive: true
+  motionType: "Cartesian"
   printerModel: null
   manufacturer: null
 

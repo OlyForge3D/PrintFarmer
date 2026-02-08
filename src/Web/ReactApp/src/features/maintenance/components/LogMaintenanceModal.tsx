@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
@@ -6,6 +7,7 @@ import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
 import type { MaintenanceSchedule, CreateMaintenanceLogRequest } from '@/types/maintenance';
+import { maintenanceService } from '@/services/maintenanceService';
 import { WrenchIcon } from '@heroicons/react/24/outline';
 
 interface LogMaintenanceModalProps {
@@ -44,26 +46,30 @@ export function LogMaintenanceModal({
   const [cost, setCost] = useState<string>('');
   const [partsReplaced, setPartsReplaced] = useState('');
 
-  // Common preset maintenance tasks (not tied to schedules)
-  const commonMaintenanceTasks = [
-    { taskName: 'Nozzle Change', component: 'Nozzle' },
-    { taskName: 'Nozzle Cleaning', component: 'Nozzle' },
-    { taskName: 'Belt Tensioning', component: 'Belts' },
-    { taskName: 'Lubrication', component: 'Bearings' },
-    { taskName: 'Bed Leveling', component: 'Bed' },
-    { taskName: 'Bed Cleaning', component: 'Bed' },
-    { taskName: 'PEI Sheet Replacement', component: 'Bed' },
-    { taskName: 'Hotend Cleaning', component: 'Hotend' },
-    { taskName: 'Heatbreak Replacement', component: 'Hotend' },
-    { taskName: 'Fan Replacement', component: 'Fans' },
-    { taskName: 'Extruder Gear Cleaning', component: 'Extruder' },
-    { taskName: 'Firmware Update', component: 'Electronics' },
-    { taskName: 'Z-Axis Calibration', component: 'Z-Axis' },
-    { taskName: 'General Cleaning', component: 'Frame' },
-    { taskName: 'PTFE Tube Replacement', component: 'Extruder' },
-    { taskName: 'Thermistor Replacement', component: 'Hotend' },
-    { taskName: 'Heater Cartridge Replacement', component: 'Hotend' },
-  ];
+  const { data: templates = [] } = useQuery({
+    queryKey: ['maintenanceScheduleTemplates', printerId],
+    enabled: isOpen,
+    queryFn: () => maintenanceService.getPrinterScheduleTemplates(printerId),
+  });
+
+  const commonMaintenanceTasks = useMemo(() => {
+    const byKey = new Map<string, { taskName: string; component: string }>();
+    for (const schedule of templates) {
+      if (!schedule.taskName?.trim()) continue;
+      if (!schedule.component?.trim()) continue;
+
+      const key = `${schedule.taskName}||${schedule.component}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, { taskName: schedule.taskName, component: schedule.component });
+      }
+    }
+
+    return Array.from(byKey.values()).sort((a, b) => {
+      const componentCompare = a.component.localeCompare(b.component);
+      if (componentCompare !== 0) return componentCompare;
+      return a.taskName.localeCompare(b.taskName);
+    });
+  }, [templates]);
 
   // When schedule selection changes, update form fields
   const handleScheduleChange = (value: string) => {
@@ -125,20 +131,16 @@ export function LogMaintenanceModal({
     }
   };
 
-  // Common components for quick selection
-  const commonComponents = [
-    'Hotend',
-    'Nozzle', 
-    'Bed',
-    'Belts',
-    'Bearings',
-    'Fans',
-    'Extruder',
-    'Z-Axis',
-    'Electronics',
-    'Frame',
-    'Other',
-  ];
+  const commonComponents = useMemo(() => {
+    const unique = new Set<string>();
+    for (const schedule of templates) {
+      if (schedule.component?.trim()) unique.add(schedule.component);
+    }
+
+    const result = Array.from(unique).sort((a, b) => a.localeCompare(b));
+    if (!result.includes('Other')) result.push('Other');
+    return result;
+  }, [templates]);
 
   return (
     <Modal
@@ -205,13 +207,15 @@ export function LogMaintenanceModal({
             )}
             
             {/* Common Preset Tasks */}
-            <optgroup label="🔧 Common Tasks">
-              {commonMaintenanceTasks.map((task, index) => (
-                <option key={`preset-${index}`} value={`preset:${index}`}>
-                  {task.taskName} ({task.component})
-                </option>
-              ))}
-            </optgroup>
+            {commonMaintenanceTasks.length > 0 && (
+              <optgroup label="🔧 Common Tasks">
+                {commonMaintenanceTasks.map((task, index) => (
+                  <option key={`preset-${index}`} value={`preset:${index}`}>
+                    {task.taskName} ({task.component})
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </Select>
           <p className="text-xs text-pf-text-tertiary mt-1">
             Select a scheduled task, common preset, or enter custom maintenance

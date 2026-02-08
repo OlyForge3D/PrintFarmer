@@ -224,6 +224,11 @@ public class MaintenanceScheduleSeedDto
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// Optional: Printer motion type this schedule applies to (e.g., "CoreXY", "Cartesian", "Delta").
+    /// </summary>
+    public string? MotionType { get; set; }
+
     public string? PrinterModel { get; set; }
 
     public string? Manufacturer { get; set; }

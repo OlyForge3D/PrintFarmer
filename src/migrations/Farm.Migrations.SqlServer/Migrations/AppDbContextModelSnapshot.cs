@@ -1596,6 +1596,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("ManufacturerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("MotionType")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 

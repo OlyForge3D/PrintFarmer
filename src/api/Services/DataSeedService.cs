@@ -906,13 +906,20 @@ public class DataSeedService : IDataSeedService
                     manufacturerId = mfgId;
                 }
 
+                int? motionType = null;
+                if (!string.IsNullOrWhiteSpace(dto.MotionType) && Enum.TryParse<MotionType>(dto.MotionType, true, out MotionType parsedMotionType))
+                {
+                    motionType = (int)parsedMotionType;
+                }
+
                 // Check if schedule already exists (match on TaskName + optional FKs)
                 bool exists = await _context.MaintenanceSchedules
                     .AnyAsync(ms =>
                         ms.TaskName == dto.TaskName &&
                         ms.PrinterId == printerId &&
                         ms.PrinterModelId == printerModelId &&
-                        ms.ManufacturerId == manufacturerId);
+                        ms.ManufacturerId == manufacturerId &&
+                        ms.MotionType == motionType);
 
                 if (!exists)
                 {
@@ -929,6 +936,7 @@ public class DataSeedService : IDataSeedService
                         PrinterId = printerId,
                         PrinterModelId = printerModelId,
                         ManufacturerId = manufacturerId,
+                        MotionType = motionType,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     });

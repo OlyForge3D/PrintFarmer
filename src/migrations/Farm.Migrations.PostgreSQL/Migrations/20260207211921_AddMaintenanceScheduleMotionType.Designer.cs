@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260207211921_AddMaintenanceScheduleMotionType")]
+    partial class AddMaintenanceScheduleMotionType
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2217,244 +2220,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("PrintJobStatistics");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<DateTime?>("DueDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
-                    b.Property<int>("Status")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("DueDate");
-
-                    b.HasIndex("Priority");
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("PrintProjects");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectFile", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ColorRequirement")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("GcodeFileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("LastPrintJobId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("LastPrintedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("MaterialRequirement")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("PrintCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(1);
-
-                    b.Property<Guid>("PrintProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("PrintedCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
-                    b.Property<int>("SortOrder")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<int>("Status")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ColorRequirement");
-
-                    b.HasIndex("GcodeFileId");
-
-                    b.HasIndex("LastPrintJobId");
-
-                    b.HasIndex("PrintProjectId");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("PrintProjectId", "GcodeFileId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_PrintProjectFiles_ProjectId_GcodeFileId");
-
-                    b.ToTable("PrintProjectFiles");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectTemplate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DefaultNotes")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<int>("DefaultPriority")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<bool>("IsSystemTemplate")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Category");
-
-                    b.HasIndex("Name");
-
-                    b.HasIndex("SortOrder");
-
-                    b.ToTable("PrintProjectTemplates", (string)null);
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectTemplateFile", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ColorRequirement")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("FileNamePattern")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("MaterialRequirement")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("PrintCount")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("PrintProjectTemplateId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PrintProjectTemplateId");
-
-                    b.HasIndex("SortOrder");
-
-                    b.ToTable("PrintProjectTemplateFiles", (string)null);
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4390,43 +4155,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("PrinterModel");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectFile", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
-                        .WithMany()
-                        .HasForeignKey("GcodeFileId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "LastPrintJob")
-                        .WithMany()
-                        .HasForeignKey("LastPrintJobId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Farm.Infrastructure.Domain.PrintProject", "PrintProject")
-                        .WithMany("Files")
-                        .HasForeignKey("PrintProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("GcodeFile");
-
-                    b.Navigation("LastPrintJob");
-
-                    b.Navigation("PrintProject");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectTemplateFile", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.PrintProjectTemplate", "Template")
-                        .WithMany("Files")
-                        .HasForeignKey("PrintProjectTemplateId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Template");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.Location", "Location")
@@ -4831,16 +4559,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("StateHistory");
 
                     b.Navigation("Statistics");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProject", b =>
-                {
-                    b.Navigation("Files");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrintProjectTemplate", b =>
-                {
-                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>

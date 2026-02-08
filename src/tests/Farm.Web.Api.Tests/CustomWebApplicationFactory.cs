@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ namespace Farm.Web.Api.Tests
         private readonly string _connectionString;
         private readonly string _modelStoragePath;
         private readonly string _gcodeStoragePath;
+        private readonly SqliteConnection _keepAliveConnection;
         private static int _databaseCounter = 0;
 
         public CustomWebApplicationFactory()
@@ -33,7 +35,11 @@ namespace Farm.Web.Api.Tests
             // Create a unique in-memory database per factory instance
             // Using auto-increment ID ensures complete isolation between tests
             int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
-            _connectionString = $"Data Source=:memory:?mode=memory&cache=shared";
+            // Use a named shared in-memory database and keep one connection open for the factory lifetime.
+            // This prevents SQLite from treating the string as a file path and avoids intermittent IO errors.
+            _keepAliveConnection = new SqliteConnection($"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared");
+            _keepAliveConnection.Open();
+            _connectionString = _keepAliveConnection.ConnectionString;
 
             // Create temp directories for file storage (isolated per test)
             string tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
@@ -127,6 +133,16 @@ namespace Farm.Web.Api.Tests
             catch
             {
                 // Ignore cleanup errors (files might be locked)
+            }
+
+            try
+            {
+                _keepAliveConnection.Close();
+                _keepAliveConnection.Dispose();
+            }
+            catch
+            {
+                // Ignore connection cleanup errors
             }
 
             await base.DisposeAsync();
