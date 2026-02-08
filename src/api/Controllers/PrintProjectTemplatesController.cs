@@ -152,8 +152,10 @@ public class PrintProjectTemplatesController(IPrintProjectTemplateService templa
                 {
                     return NotFound($"Template {id} not found");
                 }
+
                 return BadRequest("Cannot delete system templates");
             }
+
             return NoContent();
         }
         catch (Exception ex)
