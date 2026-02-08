@@ -3,8 +3,26 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.sln'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'src/Web/ReactApp/package.json'
+      - 'src/Web/ReactApp/package-lock.json'
+      - '.github/workflows/ci.yml'
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.sln'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'src/Web/ReactApp/package.json'
+      - 'src/Web/ReactApp/package-lock.json'
+      - '.github/workflows/ci.yml'
 
 jobs:
   build-and-test:
@@ -21,9 +39,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22.x
+          node-version: 24.x
           cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: src/Web/ReactApp/package-lock.json
 
       - name: Restore .NET
         working-directory: src
@@ -106,7 +124,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: |

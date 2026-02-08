@@ -49,7 +49,7 @@ export function EmailConfirmationBanner() {
               </span>
             </p>
           </div>
-          <div className="order-3 mt-2 flex-shrink-0 w-full sm:order-2 sm:mt-0 sm:w-auto space-x-2 flex items-center">
+          <div className="order-3 mt-2 shrink-0 w-full sm:order-2 sm:mt-0 sm:w-auto space-x-2 flex items-center">
             <Button
               variant="subtle"
               onClick={handleResend}

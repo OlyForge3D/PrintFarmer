@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -15,16 +15,16 @@ public class ImportProcessorService : IImportProcessorService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICatalogRepository _catalogRepo;
-    private readonly FluentValidation.IValidator<CreatePrinterDto> _validator;
+    private readonly FluentValidation.IValidator<CreatePrinterFromDiscoveryDto> _validator;
 
-    public ImportProcessorService(IUnitOfWork unitOfWork, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator)
+    public ImportProcessorService(IUnitOfWork unitOfWork, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterFromDiscoveryDto> validator)
     {
         _unitOfWork = unitOfWork;
         _catalogRepo = catalogRepo;
         _validator = validator;
     }
 
-    public async Task<List<(string Name, string Status, Guid? Id, string? Reason)>> ProcessAsync(CreatePrinterDto[] dtos, string duplicateHandling, CancellationToken ct)
+    public async Task<List<(string Name, string Status, Guid? Id, string? Reason)>> ProcessAsync(CreatePrinterFromDiscoveryDto[] dtos, string duplicateHandling, CancellationToken ct)
     {
         var results = new List<(string Name, string Status, Guid? Id, string? Reason)>();
 
@@ -149,7 +149,7 @@ public class ImportProcessorService : IImportProcessorService
         }
     }
 
-    private async Task<Farm.Infrastructure.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
+    private async Task<Farm.Infrastructure.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
     {
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
         if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -220,7 +220,6 @@ public class ImportProcessorService : IImportProcessorService
             Name = dto.Name,
             ServerUrl = serverUrlWithoutPort,
             OriginalServerUrl = dto.OriginalServerUrl,
-            IpAddress = null,
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
@@ -309,8 +308,9 @@ public class ImportProcessorService : IImportProcessorService
             BedTarget: null,
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
+            Username: p.Username,
+            Password: p.Password,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress,
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,

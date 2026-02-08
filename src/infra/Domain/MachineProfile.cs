@@ -27,6 +27,17 @@ public class MachineProfile
 
     public PrinterModel? PrinterModel { get; set; }
 
+    /// <summary>
+    /// FK to the MachineModelProfile this profile inherits from.
+    /// E.g., "Sovol SV08 0.4 nozzle" inherits from "Sovol SV08".
+    /// </summary>
+    public Guid? MachineModelProfileId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the parent machine model profile.
+    /// </summary>
+    public MachineModelProfile? MachineModelProfile { get; set; }
+
     public string? RawJson { get; set; } // Full profile JSON
 
     public string? SettingsJson { get; set; } // Extracted settings as key-value pairs

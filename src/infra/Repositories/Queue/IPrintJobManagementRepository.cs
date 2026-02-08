@@ -11,14 +11,36 @@ public interface IPrintJobManagementRepository
     // ============= BASIC CRUD OPERATIONS =============
 
     /// <summary>
+    /// Get a print job by ID (simple lookup, no related entities).
+    /// </summary>
+    Task<PrintJob?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Get a print job by ID with all related entities (GcodeFile, AssignedPrinter, Model).
     /// </summary>
     Task<PrintJob?> GetByIdWithRelationsAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
+    /// Get a print job by ID with GcodeFile relation loaded.
+    /// </summary>
+    Task<PrintJob?> GetByIdWithGcodeFileAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Add a new print job to the database.
     /// </summary>
     Task<PrintJob> AddAsync(PrintJob job, CancellationToken ct = default);
+
+    /// <summary>
+    /// Add a print job to the change tracker without saving.
+    /// Call SaveChangesAsync() separately to persist.
+    /// </summary>
+    void Add(PrintJob job);
+
+    /// <summary>
+    /// Remove a print job from the change tracker without saving.
+    /// Call SaveChangesAsync() separately to persist.
+    /// </summary>
+    void Remove(PrintJob job);
 
     /// <summary>
     /// Update an existing print job.
@@ -82,12 +104,23 @@ public interface IPrintJobManagementRepository
     Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Get completed jobs for history with pagination.
+    /// Get completed jobs for history with pagination and filtering.
     /// </summary>
-    Task<(List<PrintJob> jobs, int totalCount)> GetHistoryAsync(
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="offset">Number of jobs to skip for pagination.</param>
+    /// <param name="sortBy">Field to sort by (completedAt, duration, name, status).</param>
+    /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
+    /// <param name="dateStart">Optional start date filter (inclusive).</param>
+    /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Tuple of paginated jobs, total count, and statistics for the full filtered set.</returns>
+    Task<(List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds)> GetHistoryAsync(
         int limit = 50,
         int offset = 0,
         string sortBy = "completedAt",
+        List<string>? statuses = null,
+        DateTime? dateStart = null,
+        DateTime? dateEnd = null,
         CancellationToken ct = default);
 
     // ============= TIMELINE & HISTORY =============
@@ -150,6 +183,50 @@ public interface IPrintJobManagementRepository
     /// Update multiple jobs in a single transaction.
     /// </summary>
     Task UpdateManyAsync(IEnumerable<PrintJob> jobs, CancellationToken ct = default);
+
+    // ============= HISTORY SEEDING OPERATIONS =============
+
+    /// <summary>
+    /// Get all enabled printers (for history seeding).
+    /// </summary>
+    Task<List<Printer>> GetEnabledPrintersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Get external job IDs for a specific printer (for duplicate detection during history seeding).
+    /// </summary>
+    Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a job by external job ID and source printer ID (for history seeding updates).
+    /// </summary>
+    Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds an existing PrintFarmer-managed job that likely corresponds to a printer history entry.
+    /// Used to prevent duplicate history rows when a print is started via PrintFarmer and later
+    /// appears in the printer-provided history sync.
+    /// </summary>
+    Task<PrintJob?> FindExistingJobForHistoryMatchAsync(
+        Guid printerId,
+        string filename,
+        DateTime startTimeUtc,
+        DateTime? endTimeUtc,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Find a GCode file by filename (for history seeding).
+    /// </summary>
+    Task<GcodeFile?> FindGcodeFileByFilenameAsync(string filename, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update a printer's LastHistorySeedUtc timestamp (for incremental history seeding).
+    /// </summary>
+    Task UpdatePrinterLastHistorySeedAsync(Guid printerId, DateTime lastSeedUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get the maximum queue position across all queued/printing jobs.
+    /// </summary>
+    Task<int> GetMaxQueuePositionAsync(CancellationToken ct = default);
 }
 
 /// <summary>

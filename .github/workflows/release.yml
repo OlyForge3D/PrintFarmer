@@ -64,12 +64,12 @@ jobs:
           echo "prev_tag=$PREV" >> $GITHUB_OUTPUT
       - name: Generate changelog (git-cliff)
         id: cliff
-        uses: orhun/git-cliff-action@v2
+        uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
           args: --current-tag ${{ github.event.inputs.version }} ${{ steps.prev.outputs.prev_tag && format('--previous-tag {0}', steps.prev.outputs.prev_tag) || '' }}
       - name: Wait for image build
-        uses: lewagon/wait-on-check-action@v1.3.4
+        uses: lewagon/wait-on-check-action@v1.5.0
         with:
           ref: ${{ github.event.inputs.version }}
           check-name: 'Build & Push Images'

@@ -5,7 +5,7 @@
 #
 # FEATURES:
 #   - Interactive or non-interactive deployment modes
-#   - Multi-architecture support (monolithic, microservices)
+#   - Multi-architecture support (containerized microservices)
 #   - Optional monitoring and telemetry stacks
 #   - Automatic initial admin user setup (skips setup wizard)
 #   - Database provider selection
@@ -66,6 +66,13 @@ ENABLE_PGADMIN=false
 BUILD_VERBOSITY="${BUILD_VERBOSITY:-quiet}"
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
+
+# Registry deployment: pull pre-built images from container registry instead of building locally
+USE_REGISTRY=false
+# Registry host (default: GitHub Container Registry)
+REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io/jpapiez}"
+# Image version tag (default: latest, or specify semver like v1.2.3, branch name, or SHA)
+REGISTRY_IMAGE_TAG="${REGISTRY_IMAGE_TAG:-latest}"
 
 # Validation flag: check storage permissions without deploying
 VALIDATE_STORAGE_ONLY=false
@@ -632,9 +639,11 @@ ensure_database_passwords() {
             update_kv_file "$ENV_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
             update_kv_file "$ENV_FILE" "DB_PASSWORD" "$DB_PASSWORD"
 
-            local conn="Host=postgres;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
+            local conn="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
             update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$conn"
+            update_kv_file "$ENV_FILE" "CONNECTION_STRING" "$conn"
             set_exported_env_var "ConnectionStrings__Default" "$conn"
+            set_exported_env_var "CONNECTION_STRING" "$conn"
 
             if [ -f "$CONFIG_FILE" ]; then
                 update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
@@ -653,13 +662,6 @@ ensure_database_passwords() {
             print_error "SQL Server password is empty. Update SQLSERVER_PASSWORD in $ENV_FILE and rerun."
             exit 3
             ;;
-        mysql)
-            if [ -n "${MYSQL_PASSWORD:-}${MYSQL_ROOT_PASSWORD:-}" ]; then
-                return 0
-            fi
-            print_error "MySQL password is empty. Update MYSQL_PASSWORD in $ENV_FILE and rerun."
-            exit 3
-            ;;
     esac
 }
 
@@ -675,11 +677,6 @@ mask_secret_short() {
 
 ensure_connection_string_password() {
     local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
-    
-    # SQLite doesn't require a password
-    if [ "$provider" = "sqlite" ]; then
-        return 0
-    fi
     
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
@@ -702,12 +699,6 @@ ensure_connection_string_password() {
             fallback_pw=$(get_kv_from_file "$ENV_FILE" "SQLSERVER_PASSWORD" || true)
             if [ -z "$fallback_pw" ]; then
                 fallback_pw=$(get_kv_from_file "$ENV_FILE" "MSSQL_SA_PASSWORD" || true)
-            fi
-            ;;
-        mysql)
-            fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_PASSWORD" || true)
-            if [ -z "$fallback_pw" ]; then
-                fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_ROOT_PASSWORD" || true)
             fi
             ;;
     esac
@@ -806,8 +797,8 @@ generate_jwt_key() {
 
 generate_deployment_config() {
     local architecture="$1"
-    local include_monitoring="${2:-false}"
-    local include_telemetry="${3:-false}"
+    local include_monitoring="${2:-true}"  # Default to true
+    local include_telemetry="${3:-true}"   # Default to true
     local include_security="${4:-false}"
     local include_registry="${5:-false}"
     local include_discovery="${6:-false}"
@@ -819,12 +810,13 @@ generate_deployment_config() {
     local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
     local generator_args=("--architecture" "$architecture")
     
-    # Add optional services based on configuration
-    if [ "$include_monitoring" = "true" ]; then
-        generator_args+=("--include-monitoring")
+    # Monitoring and telemetry: pass exclude flags if disabled, include flags if enabled
+    # Generator defaults to enabled, so we only need to pass exclude when false
+    if [ "$include_monitoring" = "false" ]; then
+        generator_args+=("--exclude-monitoring")
     fi
-    if [ "$include_telemetry" = "true" ]; then
-        generator_args+=("--include-telemetry")
+    if [ "$include_telemetry" = "false" ]; then
+        generator_args+=("--exclude-telemetry")
     fi
     if [ "$include_security" = "true" ]; then
         generator_args+=("--include-security")
@@ -898,16 +890,8 @@ generate_deployment_config() {
             "docker-entrypoint-config.sh"
         )
         
-        # Add Dockerfiles based on architecture - all use multi-stage builds now
-        case "$architecture" in
-            "monolithic")
-                GENERATED_FILES+=("Dockerfile.multistage")
-                ;;
-            "microservices")
-                GENERATED_FILES+=("Dockerfile.multistage")
-                ;;
-            # (no host-network option)
-        esac
+        # Add Dockerfiles - all deployments use multi-stage builds
+        GENERATED_FILES+=("Dockerfile.multistage")
 
         # Ensure Dockerfile.multistage is available in the output directory. Many compose templates
         # expect this file at the compose context root (docker compose build with context: .).
@@ -1040,26 +1024,6 @@ run_api_diagnostics() {
                     dc exec -T database /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$sql_password" -Q "SELECT name FROM sys.databases;" || true
                 else
                     print_warning "SQLSERVER_PASSWORD not found; skipping SQL Server diagnostics."
-                fi
-            fi
-            ;;
-        mysql)
-            if dc --format json ps --services 2>/dev/null | grep -q '^database$'; then
-                local mysql_user mysql_password mysql_db
-                mysql_user=$(get_env_value "MYSQL_USER"); mysql_user=${mysql_user:-root}
-                mysql_password=$(get_env_value "MYSQL_ROOT_PASSWORD")
-                if [ -z "$mysql_password" ]; then
-                    mysql_password=$(get_env_value "MYSQL_PASSWORD")
-                fi
-                mysql_db=$(get_env_value "MYSQL_DB"); mysql_db=${mysql_db:-printfarmer}
-
-                    if [ -n "$mysql_password" ]; then
-                    print_info "MySQL ping (mysqladmin):"
-                    dc exec -T database sh -c "mysqladmin ping -h 127.0.0.1 -u \"$mysql_user\" --password=\"$mysql_password\"" || true
-                    print_info "Sample database tables:"
-                    dc exec -T database sh -c "mysql -u \"$mysql_user\" --password=\"$mysql_password\" $mysql_db -e \"SHOW TABLES;\" | head -n 10" || true
-                else
-                    print_warning "MySQL password not found; skipping MySQL diagnostics."
                 fi
             fi
             ;;
@@ -1992,7 +1956,7 @@ tear_down_deployment() {
     # This helps on systems where compose project names or previous runs left DB containers behind
     print_info "Ensuring PrintFarmer database containers are removed"
     # Look for both generic database containers and provider-specific legacy containers
-    containers=$(docker ps -a --format '{{.Names}}' | grep -E "printfarmer-database|pfarm-(postgres|sqlserver|mysql)" || true)
+    containers=$(docker ps -a --format '{{.Names}}' | grep -E "printfarmer-database|pfarm-(postgres|sqlserver)" || true)
     if [ -n "$containers" ]; then
         print_warning "Found database containers to remove: $containers"
         docker rm -f $containers 2>/dev/null || true
@@ -2039,6 +2003,7 @@ tear_down_deployment() {
     local external_profiles_path=""
     local external_app_data_path=""
     local external_database_path=""
+    local external_dataprotection_path=""
     
     if [ -f ".deploy-config" ]; then
         print_info "Loading external paths from .deploy-config..."
@@ -2048,6 +2013,7 @@ tear_down_deployment() {
         external_profiles_path=$(grep "^EXTERNAL_PROFILES_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         external_app_data_path=$(grep "^EXTERNAL_APP_DATA_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         external_database_path=$(grep "^EXTERNAL_DATABASE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_dataprotection_path=$(grep "^EXTERNAL_DATAPROTECTION_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         # Also load feature flags
         local cfg_pgadmin=$(grep "^ENABLE_PGADMIN=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         if [ -n "$cfg_pgadmin" ]; then
@@ -2071,6 +2037,9 @@ tear_down_deployment() {
     fi
     if [ -n "$external_app_data_path" ]; then
         paths_to_remove+=("$external_app_data_path:App Data")
+    fi
+    if [ -n "$external_dataprotection_path" ]; then
+        paths_to_remove+=("$external_dataprotection_path:Data Protection Keys")
     fi
     # Note: Database is handled separately due to permission issues
     
@@ -2313,14 +2282,37 @@ MANUAL IMAGE MANAGEMENT OPTIONS (Advanced):
     --load-cached-orcaslicer     Show cached OrcaSlicer AppImage info
 
 COMPOSE GENERATOR OPTIONS:
-        --architecture ARCH Architecture to deploy (monolithic|microservices)
-        --include-monitoring Include monitoring stack (Prometheus, Grafana)
-        --include-telemetry Include telemetry/observability (OpenTelemetry)
+        --architecture ARCH Architecture flag (deprecated, standard deployment always used)
+        --exclude-monitoring Disable monitoring stack (Prometheus, Grafana) - enabled by default
+        --exclude-telemetry Disable telemetry/observability (OpenTelemetry, Jaeger) - enabled by default
+        --include-monitoring Legacy flag - monitoring now included by default
+        --include-telemetry Legacy flag - telemetry now included by default
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
-        --include-discovery Include network printer discovery service (microservices only)
+        --include-discovery Include network printer discovery service
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
+
+REGISTRY DEPLOYMENT OPTIONS:
+    Use pre-built images from GitHub Container Registry instead of building locally.
+    Images are built and pushed via GitHub Actions on push to main/release or tags.
+    
+    --use-registry              Pull pre-built images from container registry (skip local builds)
+    --registry-host HOST        Registry host (default: ghcr.io/jpapiez)
+    --registry-tag TAG          Image tag to pull (default: latest)
+    
+    VERSION CONTROL:
+      Tags are automatically created by GitHub Actions:
+        latest          - Latest build from main branch
+        <branch>        - Branch name (e.g., main, release, feat/new-feature)
+        sha-<commit>    - Git commit SHA (e.g., sha-abc1234)
+        v<version>      - Semantic version from git tag (e.g., v1.2.3, v1.2)
+      
+      Examples:
+        --registry-tag latest              # Latest from main branch
+        --registry-tag main                # Explicit main branch
+        --registry-tag v1.2.3              # Specific release version
+        --registry-tag sha-abc1234         # Specific commit
 
 VERIFY / UTILITY OPTIONS:
     --verify-deployment   Run verification steps only against an existing deployment (no generation/start)
@@ -2388,26 +2380,46 @@ EXAMPLES:
     ./scripts/deploy-docker.sh --cache-orcaslicer --images-dir ~/docker-images  # Cache to auto-discoverable path
     
     # Deploy specific architecture with additional services
-    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring
+    ./scripts/deploy-docker.sh --include-monitoring
     
     # Deploy with full observability stack
-    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring --include-telemetry
+    ./scripts/deploy-docker.sh --include-monitoring --include-telemetry
     
-    # Deploy monolithic with security and registry
-    ./scripts/deploy-docker.sh --architecture monolithic --include-security --include-registry
+    # Deploy with discovery, security and registry
+    ./scripts/deploy-docker.sh --include-discovery --include-security --include-registry
     
-    # Deploy microservices with printer discovery service
-    ./scripts/deploy-docker.sh --architecture microservices --include-discovery
+    # Deploy with printer discovery service
+    ./scripts/deploy-docker.sh --include-discovery
     
     # Deploy with monitoring + discovery + auto-admin
-    ./scripts/deploy-docker.sh --architecture microservices --include-monitoring --include-discovery --auto-admin
+    ./scripts/deploy-docker.sh --include-monitoring --include-discovery --auto-admin
     
     # Non-interactive deployment with all options
-    ./scripts/deploy-docker.sh --non-interactive --architecture microservices --include-monitoring --include-telemetry --include-security --include-discovery
+    ./scripts/deploy-docker.sh --non-interactive --include-monitoring --include-telemetry --include-security --include-discovery
 
-DEPLOYMENT MODES:
-    1. Monolithic      - All services in one container (simplest)
-    2. Microservices   - Separate API, frontend, workers (recommended)
+    # === REGISTRY DEPLOYMENT (Pre-built images from GitHub) ===
+    
+    # Deploy using latest pre-built images from GitHub Container Registry
+    ./scripts/deploy-docker.sh --use-registry
+    
+    # Deploy a specific version (git tag)
+    ./scripts/deploy-docker.sh --use-registry --registry-tag v1.2.3
+    
+    # Deploy from a specific branch
+    ./scripts/deploy-docker.sh --use-registry --registry-tag main
+    
+    # Deploy a specific commit (SHA)
+    ./scripts/deploy-docker.sh --use-registry --registry-tag sha-abc1234
+    
+    # Deploy from a custom registry host
+    ./scripts/deploy-docker.sh --use-registry --registry-host my-registry.example.com:5000 --registry-tag latest
+    
+    # Non-interactive registry deployment
+    ./scripts/deploy-docker.sh --non-interactive --use-registry --registry-tag v1.0.0
+
+DEPLOYMENT ARCHITECTURE:
+    PrintFarmer uses a containerized microservices architecture with separate containers
+    for API, frontend, database, and optional worker services.
 
 DATABASE OPTIONS:
     1. PostgreSQL      - Open source, recommended for most users
@@ -2415,7 +2427,6 @@ DATABASE OPTIONS:
                          • Developer: Free, full-featured (dev/test only)
                          • Express: Free, production-ready (10GB limit)
                          • Standard/Enterprise: Requires commercial license
-    3. MySQL           - Popular open source database
     4. External        - Use your own database server
 
 NETWORK MODES:
@@ -2443,10 +2454,9 @@ DATA PERSISTENCE (P0 Requirement):
         export EXTERNAL_PROFILES_PATH=/path/to/profiles
         ./scripts/deploy-docker.sh --non-interactive
 
-PRINTER DISCOVERY (MICROSERVICES ONLY):
+PRINTER DISCOVERY:
     The network printer discovery service automatically scans your local network 
     to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
-    - Enabled by default in microservices deployments
     - Runs on the configured Docker network and can be tuned via discovery ranges
     - Scans configurable IP ranges periodically
     - Supports both automatic push and manual pull discovery modes
@@ -2497,7 +2507,7 @@ load_previous_config() {
         fi
         
         # Display external storage paths if configured
-        if [ -n "${EXTERNAL_MODELS_PATH:-}" ] || [ -n "${EXTERNAL_GCODE_PATH:-}" ] || [ -n "${EXTERNAL_PROFILES_PATH:-}" ] || [ -n "${EXTERNAL_APP_DATA_PATH:-}" ] || [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
+        if [ -n "${EXTERNAL_MODELS_PATH:-}" ] || [ -n "${EXTERNAL_GCODE_PATH:-}" ] || [ -n "${EXTERNAL_PROFILES_PATH:-}" ] || [ -n "${EXTERNAL_APP_DATA_PATH:-}" ] || [ -n "${EXTERNAL_DATABASE_PATH:-}" ] || [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ] || [ -n "${EXTERNAL_PGADMIN_PATH:-}" ]; then
             echo -e "  ${BLUE}External Storage:${NC}"
             if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
                 echo -e "    • Models:    $EXTERNAL_MODELS_PATH"
@@ -2508,11 +2518,17 @@ load_previous_config() {
             if [ -n "${EXTERNAL_PROFILES_PATH:-}" ]; then
                 echo -e "    • Profiles:  $EXTERNAL_PROFILES_PATH"
             fi
+            if [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ]; then
+                echo -e "    • Keys:      $EXTERNAL_DATAPROTECTION_PATH"
+            fi
             if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
                 echo -e "    • App Data:  $EXTERNAL_APP_DATA_PATH"
             fi
             if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
                 echo -e "    • Database:  $EXTERNAL_DATABASE_PATH"
+            fi
+            if [ -n "${EXTERNAL_PGADMIN_PATH:-}" ]; then
+                echo -e "    • pgAdmin:   $EXTERNAL_PGADMIN_PATH"
             fi
         fi
         
@@ -2534,22 +2550,14 @@ save_deployment_config() {
     # database credentials or enabling other DB containers in future runs.
     SAVE_INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
     SAVE_INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
-    SAVE_INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
     case "${DB_PROVIDER:-}" in
         postgres)
             SAVE_INCLUDE_POSTGRES=yes
             SAVE_INCLUDE_SQLSERVER=no
-            SAVE_INCLUDE_MYSQL=no
             ;;
         sqlserver)
             SAVE_INCLUDE_POSTGRES=no
             SAVE_INCLUDE_SQLSERVER=yes
-            SAVE_INCLUDE_MYSQL=no
-            ;;
-        mysql)
-            SAVE_INCLUDE_POSTGRES=no
-            SAVE_INCLUDE_SQLSERVER=no
-            SAVE_INCLUDE_MYSQL=yes
             ;;
         *)
             # Leave provided values as-is for unknown/external providers
@@ -2578,7 +2586,6 @@ DB_PASSWORD=${DB_PASSWORD:-}
 # unrelated DB credentials or enabling unintended DB containers later.
 INCLUDE_POSTGRES=$SAVE_INCLUDE_POSTGRES
 INCLUDE_SQLSERVER=$SAVE_INCLUDE_SQLSERVER
-INCLUDE_MYSQL=$SAVE_INCLUDE_MYSQL
 # Connection string (generic)
 CONNECTION_STRING=$(printf '%q' "$CONNECTION_STRING")
 # Network Configuration
@@ -2615,15 +2622,6 @@ SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
 EOF
             ;;
-        mysql)
-            cat >> "$CONFIG_FILE" << EOF
-
-# MySQL Configuration
-MYSQL_DB=${MYSQL_DB:-printfarmer}
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
-EOF
-            ;;
         *)
             # external or unknown provider: persist the generic connection string and leave provider-specifics out
             ;;
@@ -2641,9 +2639,15 @@ ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
 ENABLE_PGADMIN=$ENABLE_PGADMIN
 
+# Developer Security Options
+# DevMode Auth Bypass - allows GET requests to skip authentication (Development only!)
+DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
+
 # Observability & Monitoring Configuration
-INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
-INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+# Monitoring and telemetry are now ENABLED by default for production deployments
+# Use --exclude-monitoring or --exclude-telemetry to disable
+INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
+INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
 INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
 INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
 INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
@@ -2716,6 +2720,8 @@ EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
 EXTERNAL_APP_DATA_PATH=${EXTERNAL_APP_DATA_PATH:-}
 EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
+EXTERNAL_DATAPROTECTION_PATH=${EXTERNAL_DATAPROTECTION_PATH:-}
+EXTERNAL_PGADMIN_PATH=${EXTERNAL_PGADMIN_PATH:-}
 EOF
 
     cat >> "$CONFIG_FILE" << EOF
@@ -2910,88 +2916,38 @@ install_dotnet_sdk() {
     fi
 }
 
-# Choose deployment architecture
+# Set deployment architecture (simplified - only microservices mode)
 choose_architecture() {
-    # Check if architecture was specified via CLI
+    # Architecture is now always microservices (monolithic was identical and confusing)
+    # The --architecture CLI flag is accepted for backwards compatibility but ignored
     if [ -n "${CLI_ARCHITECTURE:-}" ]; then
-        case "$CLI_ARCHITECTURE" in
-            monolithic|mono)
-                ARCHITECTURE="monolithic"
-                ENV_FILE=".env"
-                COMPOSE_FILE="docker-compose.yml"
-                print_success "Using CLI option: Monolithic deployment"
-                check_dotnet_sdk
-                return 0
-                ;;
-            microservices|micro)
-                ARCHITECTURE="microservices"
-                ENV_FILE=".env"
-                COMPOSE_FILE="docker-compose.yml"
-                print_success "Using CLI option: Microservices deployment"
-                return 0
-                ;;
-            *)
-                print_error "Invalid architecture: $CLI_ARCHITECTURE"
-                print_info "Valid options: monolithic, microservices"
-                exit 1
-                ;;
-        esac
+        # Accept for backwards compatibility, but always use microservices
+        if [ "$CLI_ARCHITECTURE" = "monolithic" ] || [ "$CLI_ARCHITECTURE" = "mono" ]; then
+            print_info "Note: Monolithic mode deprecated - using standard deployment (identical behavior)"
+        fi
     fi
     
-    # In non-interactive mode, use defaults if architecture already loaded from config
-    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ARCHITECTURE:-}" ]; then
-        print_info "Using configured architecture: $ARCHITECTURE"
+    # Always use microservices architecture
+    ARCHITECTURE="microservices"
+    ENV_FILE=".env"
+    COMPOSE_FILE="docker-compose.yml"
+    
+    # In non-interactive mode, just confirm
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        print_info "Using standard deployment architecture"
         return 0
     fi
     
     print_header "🏗️  Deployment Architecture"
     
-    echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
-    echo
-    echo -e "${GREEN}1. Monolithic (Recommended)${NC}"
-    echo "   • Single container with API + Web frontend"
-    echo "   • Simpler configuration and networking"
-    echo "   • Good for most deployments"
-    echo "   • Uses SQLite database by default"
-    echo "   • Built with multi-stage Docker builds for efficiency"
-    echo
-    echo -e "${GREEN}2. Microservices (Advanced)${NC}"
-    echo "   • Separate containers for API, Web, Database"
-    echo "   • Enhanced networking capabilities"
-    echo "   • Better for large-scale deployments"
-    echo "   • Supports PostgreSQL, SQL Server, MySQL"
+    echo -e "${GREEN}Standard Deployment${NC}"
+    echo "   • Separate containers for API, Web, Database, and Workers"
+    echo "   • PostgreSQL or SQL Server database support"
+    echo "   • External storage for data persistence"
     echo "   • Built with multi-stage Docker builds for efficiency"
     echo
     
-    # Use previous architecture as default, or "1" for new deployments
-    local default_choice="1"
-    if [ "${ARCHITECTURE:-}" = "microservices" ]; then
-        default_choice="2"
-    fi
-    
-    prompt_with_default "Choose architecture [1=Monolithic, 2=Microservices]:" "$default_choice" "ARCH_CHOICE"
-    
-    case "$ARCH_CHOICE" in
-        1|monolithic|mono)
-            ARCHITECTURE="monolithic"
-            ENV_FILE=".env"
-            COMPOSE_FILE="docker-compose.yml"
-            print_success "Selected: Monolithic deployment (with multi-stage builds)"
-            
-            # Check .NET SDK for monolithic (optional but recommended for local builds)
-            check_dotnet_sdk
-            ;;
-        2|microservices|micro)
-            ARCHITECTURE="microservices"
-            ENV_FILE=".env"
-            COMPOSE_FILE="docker-compose.yml"
-            print_success "Selected: Microservices deployment (with multi-stage builds)"
-            ;;
-        *)
-            print_error "Invalid choice. Please run the script again."
-            exit 1
-            ;;
-    esac
+    print_success "Using standard deployment architecture"
 }
 
 # Utility: check if a string is a positive integer
@@ -3046,15 +3002,6 @@ validate_configuration() {
         ORCA_WORKER_COUNT=0
     fi
 
-    # Monolithic constraints: single-container mode uses fixed ports for workers
-    if [ "$ARCHITECTURE" = "monolithic" ]; then
-        if [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
-            print_warning "Monolithic mode: Cannot scale OrcaSlicer workers (fixed port 8081). For scaling, use microservices. Forcing count=1."
-            ORCA_WORKER_COUNT=1
-        fi
-
-    fi
-
     # Automatic port suggestion helper
     suggest_port_replacement() {
         local var_name=$1
@@ -3086,25 +3033,15 @@ validate_configuration() {
     if [ -n "${HTTP_PORT:-}" ] && port_in_use "$HTTP_PORT"; then
         suggest_port_replacement HTTP_PORT "$HTTP_PORT" "HTTP"
     fi
-    if [ "$ARCHITECTURE" = "microservices" ] && [ -n "${API_PORT:-}" ] && port_in_use "$API_PORT"; then
+    if [ -n "${API_PORT:-}" ] && port_in_use "$API_PORT"; then
         suggest_port_replacement API_PORT "$API_PORT" "API"
     fi
 
-    # Worker ports in monolithic (8081 / 8082). Only warn if corresponding worker enabled.
     # Worker port handling
     ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-    if [ "$ARCHITECTURE" = "monolithic" ]; then
-        # Only warn; cannot remap easily due to fixed container port mapping
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ] && port_in_use "$ORCA_HOST_PORT"; then
-            print_warning "Monolithic: Orca worker port $ORCA_HOST_PORT in use; startup may fail."
-        fi
-
-    else
-        # Allow remap for microservices (we will rely on variable interpolation in compose file)
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && port_in_use "$ORCA_HOST_PORT"; then
-            suggest_port_replacement ORCA_HOST_PORT "$ORCA_HOST_PORT" "Orca worker"
-        fi
-
+    # Allow remap for workers (we will rely on variable interpolation in compose file)
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && port_in_use "$ORCA_HOST_PORT"; then
+        suggest_port_replacement ORCA_HOST_PORT "$ORCA_HOST_PORT" "Orca worker"
     fi
 
     # Logical consistency: worker enabled but count 0 -> adjust to 1
@@ -3128,197 +3065,118 @@ validate_configuration() {
 configure_database() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
-        # Validate SQLite is only used with monolithic architecture
-        if [ "${DB_PROVIDER:-}" = "sqlite" ] && [ "$ARCHITECTURE" != "monolithic" ]; then
-            print_error "SQLite can only be used with monolithic architecture, not $ARCHITECTURE"
-            print_error "Please use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
-            exit 1
-        fi
         print_info "Using configured database: $DB_PROVIDER"
         return 0
     fi
     
     print_header "💾 Database Configuration"
     
-    if [ "$ARCHITECTURE" = "monolithic" ]; then
-        echo -e "${BLUE}Monolithic deployment supports:${NC}"
-        echo "1. SQLite (recommended) - No additional setup"
-        echo "2. External database - Requires separate setup"
-        echo
-        
-        # Map DB_PROVIDER to menu choice number for default
-        local default_choice="1"
-        case "${DB_PROVIDER:-sqlite}" in
-            sqlite) default_choice="1" ;;
-            postgres|sqlserver|mysql) default_choice="2" ;;
-        esac
-        
-        prompt_with_default "Choose database [1=SQLite, 2=External]:" "$default_choice" "DB_CHOICE"
-        
-        case "$DB_CHOICE" in
-            1|sqlite|SQLite)
-                DB_PROVIDER="sqlite"
-                CONNECTION_STRING="Data Source=/data/farm.db"
-                print_success "Using SQLite - Data will persist in Docker volume"
-                ;;
-            2|external|External|postgres|sqlserver|mysql)
-                # If user selected 2 but we don't have a previous provider, ask which one
-                if [ "$DB_CHOICE" = "2" ] || [ "$DB_CHOICE" = "external" ] || [ "$DB_CHOICE" = "External" ]; then
-                    local prev_external="${DB_PROVIDER:-postgres}"
-                    [ "$prev_external" = "sqlite" ] && prev_external="postgres"
-                    prompt_with_default "External database type [postgres/sqlserver/mysql]:" "$prev_external" "DB_PROVIDER"
-                fi
-                
-                case "$DB_PROVIDER" in
-                    postgres)
-                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                        ;;
-                    sqlserver)
-                        prompt_with_default "SQL Server connection string:" "Server=your-sql-server;Database=printfarmer;User Id=sa;Password=YourStrong!Password;TrustServerCertificate=True;" "CONNECTION_STRING"
-                        ;;
-                    mysql)
-                        prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
-                        ;;
-                    *)
-                        print_warning "Unknown database type, using PostgreSQL as fallback"
-                        DB_PROVIDER="postgres"
-                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                        ;;
-                esac
-                ;;
-            *)
-                print_warning "Unknown choice, using PostgreSQL as fallback"
-                DB_PROVIDER="postgres"
-                prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
-                ;;
-        esac
-    else
-        echo -e "${BLUE}Microservices deployment supports:${NC}"
-        echo "1. PostgreSQL (recommended) - Included container"
-        echo "2. SQL Server - Included container"
-        echo "3. MySQL - Included container"
-        echo "4. External database - Your own database server"
-        echo
-        
-        # Map DB_PROVIDER to menu choice number for default
-        local default_choice="1"
-        case "${DB_PROVIDER:-postgres}" in
-            postgres) default_choice="1" ;;
-            sqlserver) default_choice="2" ;;
-            mysql) default_choice="3" ;;
-            external) default_choice="4" ;;
-        esac
-        
-        prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=MySQL, 4=External]:" "$default_choice" "DB_CHOICE"
-        
-        case "$DB_CHOICE" in
-            1|postgres|PostgreSQL)
-                DB_PROVIDER="postgres"
-                prompt_with_default "PostgreSQL database name:" "${POSTGRES_DB:-printfarmer}" "POSTGRES_DB"
-                prompt_with_default "PostgreSQL username:" "${POSTGRES_USER:-postgres}" "POSTGRES_USER"
-                # If no password provided yet, generate a secure random password so interactive prompt shows it as the default
-                if [ -z "${POSTGRES_PASSWORD:-}" ]; then
-                    POSTGRES_PASSWORD=$(generate_random_password)
-                    # Do not overwrite an explicitly provided DB_PASSWORD variable
-                    DB_PASSWORD=${DB_PASSWORD:-$POSTGRES_PASSWORD}
-                fi
-                prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
-                DB_PASSWORD="$POSTGRES_PASSWORD"
-                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
-                INCLUDE_POSTGRES="yes"
-                ;;
-            2|sqlserver|"SQL Server")
-                DB_PROVIDER="sqlserver"
-                echo
-                echo -e "${BLUE}SQL Server Edition:${NC}"
-                echo "1. Developer - Free, full-featured (recommended for development/testing)"
-                echo "2. Express - Free, limited features (10GB max, production-ready)"
-                echo "3. Standard - Commercial license required"
-                echo "4. Enterprise - Commercial license required"
-                echo
-                prompt_with_default "Choose SQL Server edition [1=Developer, 2=Express, 3=Standard, 4=Enterprise]:" "${SQLSERVER_EDITION:-1}" "SQLSERVER_EDITION_CHOICE"
-                
-                case "$SQLSERVER_EDITION_CHOICE" in
-                    1|developer|Developer)
-                        SQLSERVER_EDITION="Developer"
-                        ;;
-                    2|express|Express)
-                        SQLSERVER_EDITION="Express"
-                        ;;
-                    3|standard|Standard)
-                        SQLSERVER_EDITION="Standard"
-                        print_warning "Standard edition requires a valid SQL Server license"
-                        ;;
-                    4|enterprise|Enterprise)
-                        SQLSERVER_EDITION="Enterprise"
-                        print_warning "Enterprise edition requires a valid SQL Server license"
-                        ;;
-                    *)
-                        SQLSERVER_EDITION="Developer"
-                        print_info "Using Developer edition as default"
-                        ;;
-                esac
-                
-                print_info "Using SQL Server $SQLSERVER_EDITION edition"
-                echo
-                prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
-                # Pre-generate SQL Server SA password if none exists so interactive prompt shows a secure default
-                if [ -z "${SQLSERVER_PASSWORD:-}" ]; then
-                    SQLSERVER_PASSWORD=$(generate_random_password)
-                    DB_PASSWORD=${DB_PASSWORD:-$SQLSERVER_PASSWORD}
-                fi
-                prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
-                prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
-                DB_PASSWORD="$SQLSERVER_PASSWORD"
-                CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
-                INCLUDE_SQLSERVER="yes"
-                ;;
-            3|mysql|MySQL)
-                DB_PROVIDER="mysql"
-                prompt_with_default "MySQL database name:" "${MYSQL_DB:-printfarmer}" "MYSQL_DB"
-                prompt_with_default "MySQL username:" "${MYSQL_USER:-root}" "MYSQL_USER"
-                # Pre-generate MySQL password if none exists so interactive prompt shows a secure default
-                if [ -z "${MYSQL_PASSWORD:-}" ]; then
-                    MYSQL_PASSWORD=$(generate_random_password)
-                    DB_PASSWORD=${DB_PASSWORD:-$MYSQL_PASSWORD}
-                fi
-                prompt_with_default "MySQL password:" "${MYSQL_PASSWORD:-example}" "MYSQL_PASSWORD"
-                DB_PASSWORD="$MYSQL_PASSWORD"
-                CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
-                INCLUDE_MYSQL="yes"
-                ;;
-            4|external|External)
-                prompt_with_default "External database provider [postgres/sqlserver/mysql]:" "postgres" "EXT_DB_TYPE"
-                prompt_with_default "Database host:" "your-host" "EXT_DB_HOST"
-                prompt_with_default "Database name:" "printfarmer" "EXT_DB_NAME"
-                prompt_with_default "Database username:" "user" "EXT_DB_USER"
-                prompt_with_default "Database password:" "password" "EXT_DB_PASSWORD"
-                
-                case "$EXT_DB_TYPE" in
-                    postgres)
-                        CONNECTION_STRING="Host=$EXT_DB_HOST;Database=$EXT_DB_NAME;Username=$EXT_DB_USER;Password=$EXT_DB_PASSWORD"
-                        ;;
-                    sqlserver)
-                        CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User Id=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;TrustServerCertificate=True;"
-                        ;;
-                    mysql)
-                        CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;"
-                        ;;
-                esac
-                DB_PROVIDER="$EXT_DB_TYPE"
-                ;;
-            *)
-                print_warning "Unknown choice, using PostgreSQL as fallback"
-                DB_PROVIDER="postgres"
-                POSTGRES_DB="printfarmer"
-                POSTGRES_USER="postgres"
-                POSTGRES_PASSWORD="postgres"
-                DB_PASSWORD="postgres"
-                CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
-                INCLUDE_POSTGRES="yes"
-                ;;
-        esac
-    fi
+    echo -e "${BLUE}Database options:${NC}"
+    echo "1. PostgreSQL (recommended) - Included container"
+    echo "2. SQL Server - Included container"
+    echo "3. External database - Your own database server"
+    echo
+    
+    # Map DB_PROVIDER to menu choice number for default
+    local default_choice="1"
+    case "${DB_PROVIDER:-postgres}" in
+        postgres) default_choice="1" ;;
+        sqlserver) default_choice="2" ;;
+        external) default_choice="3" ;;
+    esac
+    
+    prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=External]:" "$default_choice" "DB_CHOICE"
+    
+    case "$DB_CHOICE" in
+        1|postgres|PostgreSQL)
+            DB_PROVIDER="postgres"
+            prompt_with_default "PostgreSQL database name:" "${POSTGRES_DB:-printfarmer}" "POSTGRES_DB"
+            prompt_with_default "PostgreSQL username:" "${POSTGRES_USER:-postgres}" "POSTGRES_USER"
+            # If no password provided yet, generate a secure random password so interactive prompt shows it as the default
+            if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+                POSTGRES_PASSWORD=$(generate_random_password)
+                # Do not overwrite an explicitly provided DB_PASSWORD variable
+                DB_PASSWORD=${DB_PASSWORD:-$POSTGRES_PASSWORD}
+            fi
+            prompt_with_default "PostgreSQL password:" "${POSTGRES_PASSWORD:-postgres}" "POSTGRES_PASSWORD"
+            DB_PASSWORD="$POSTGRES_PASSWORD"
+            CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+            INCLUDE_POSTGRES="yes"
+            ;;
+        2|sqlserver|"SQL Server")
+            DB_PROVIDER="sqlserver"
+            echo
+            echo -e "${BLUE}SQL Server Edition:${NC}"
+            echo "1. Developer - Free, full-featured (recommended for development/testing)"
+            echo "2. Express - Free, limited features (10GB max, production-ready)"
+            echo "3. Standard - Commercial license required"
+            echo "4. Enterprise - Commercial license required"
+            echo
+            prompt_with_default "Choose SQL Server edition [1=Developer, 2=Express, 3=Standard, 4=Enterprise]:" "${SQLSERVER_EDITION:-1}" "SQLSERVER_EDITION_CHOICE"
+            
+            case "$SQLSERVER_EDITION_CHOICE" in
+                1|developer|Developer)
+                    SQLSERVER_EDITION="Developer"
+                    ;;
+                2|express|Express)
+                    SQLSERVER_EDITION="Express"
+                    ;;
+                3|standard|Standard)
+                    SQLSERVER_EDITION="Standard"
+                    print_warning "Standard edition requires a valid SQL Server license"
+                    ;;
+                4|enterprise|Enterprise)
+                    SQLSERVER_EDITION="Enterprise"
+                    print_warning "Enterprise edition requires a valid SQL Server license"
+                    ;;
+                *)
+                    SQLSERVER_EDITION="Developer"
+                    print_info "Using Developer edition as default"
+                    ;;
+            esac
+            
+            print_info "Using SQL Server $SQLSERVER_EDITION edition"
+            echo
+            prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
+            # Pre-generate SQL Server SA password if none exists so interactive prompt shows a secure default
+            if [ -z "${SQLSERVER_PASSWORD:-}" ]; then
+                SQLSERVER_PASSWORD=$(generate_random_password)
+                DB_PASSWORD=${DB_PASSWORD:-$SQLSERVER_PASSWORD}
+            fi
+            prompt_with_default "SQL Server SA password:" "${SQLSERVER_PASSWORD:-YourStrong!Password123}" "SQLSERVER_PASSWORD"
+            prompt_with_default "SQL Server host port (1433 is default, use different if port conflict):" "${SQLSERVER_PORT:-1433}" "SQLSERVER_PORT"
+            DB_PASSWORD="$SQLSERVER_PASSWORD"
+            CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+            INCLUDE_SQLSERVER="yes"
+            ;;
+        3|external|External)
+            prompt_with_default "External database provider [postgres/sqlserver]:" "postgres" "EXT_DB_TYPE"
+            prompt_with_default "Database host:" "your-host" "EXT_DB_HOST"
+            prompt_with_default "Database name:" "printfarmer" "EXT_DB_NAME"
+            prompt_with_default "Database username:" "user" "EXT_DB_USER"
+            prompt_with_default "Database password:" "password" "EXT_DB_PASSWORD"
+            
+            case "$EXT_DB_TYPE" in
+                postgres)
+                    CONNECTION_STRING="Host=$EXT_DB_HOST;Database=$EXT_DB_NAME;Username=$EXT_DB_USER;Password=$EXT_DB_PASSWORD"
+                    ;;
+                sqlserver)
+                    CONNECTION_STRING="Server=$EXT_DB_HOST;Database=$EXT_DB_NAME;User Id=$EXT_DB_USER;Password=$EXT_DB_PASSWORD;TrustServerCertificate=True;"
+                    ;;
+            esac
+            DB_PROVIDER="$EXT_DB_TYPE"
+            ;;
+        *)
+            print_warning "Unknown choice, using PostgreSQL as fallback"
+            DB_PROVIDER="postgres"
+            POSTGRES_DB="printfarmer"
+            POSTGRES_USER="postgres"
+            POSTGRES_PASSWORD="postgres"
+            DB_PASSWORD="postgres"
+            CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+            INCLUDE_POSTGRES="yes"
+            ;;
+    esac
 }
 
 # Configure networking
@@ -3331,18 +3189,12 @@ configure_networking() {
     
     print_header "🌐 Network Configuration"
     
-    # For microservices, all services run on the docker bridge network for service discovery by hostname
+    # All services run on the docker bridge network for service discovery by hostname
     # Printer discovery runs on host network to enable local network scanning
-    if [ "$ARCHITECTURE" = "microservices" ]; then
-        print_success "Microservices architecture: all services on bridge network with service discovery"
-        NETWORK_MODE="bridge"
-        print_info "API will be accessible at http://api:5245 within the docker network"
-        print_info "Printer discovery service will scan configured IP ranges for devices"
-    else
-        # Monolithic deployments always use bridge networking. Host-network mode removed.
-        NETWORK_MODE="bridge"
-        print_info "Monolithic deployments use bridge networking"
-    fi
+    print_success "All services on bridge network with service discovery"
+    NETWORK_MODE="bridge"
+    print_info "API will be accessible at http://api:5245 within the docker network"
+    print_info "Printer discovery service will scan configured IP ranges for devices"
     
     echo
     echo -e "${BLUE}Configure external access:${NC}"
@@ -3354,9 +3206,7 @@ configure_networking() {
         print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
     fi
     
-    if [ "$ARCHITECTURE" = "microservices" ]; then
-        prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
-    fi
+    prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
 }
 
 # Adjust connection strings for network mode
@@ -3372,6 +3222,23 @@ configure_external_storage() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${USE_EXTERNAL_STORAGE:-}" ]; then
         print_info "Using configured external storage: $USE_EXTERNAL_STORAGE"
+        
+        # Apply defaults for any missing paths when external storage is enabled
+        if [ "$USE_EXTERNAL_STORAGE" = "yes" ] || [ "$USE_EXTERNAL_STORAGE" = "true" ]; then
+            EXTERNAL_MODELS_PATH="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
+            EXTERNAL_GCODE_PATH="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
+            EXTERNAL_PROFILES_PATH="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
+            EXTERNAL_DATAPROTECTION_PATH="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
+            EXTERNAL_DATABASE_PATH="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
+            EXTERNAL_PGADMIN_PATH="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
+            
+            # Create directories that don't exist
+            for dir in "$EXTERNAL_MODELS_PATH" "$EXTERNAL_GCODE_PATH" "$EXTERNAL_PROFILES_PATH" "$EXTERNAL_DATAPROTECTION_PATH" "$EXTERNAL_DATABASE_PATH" "$EXTERNAL_PGADMIN_PATH"; do
+                if [ -n "$dir" ] && [ ! -d "$dir" ]; then
+                    mkdir -p "$dir" 2>/dev/null && print_success "Created directory: $dir"
+                fi
+            done
+        fi
         return 0
     fi
     
@@ -3433,48 +3300,49 @@ configure_external_storage() {
         fi
         print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
-        # Prompt for appropriate database/app data path based on architecture
-        if [ "$ARCHITECTURE" = "monolithic" ]; then
-            # Application data storage (SQLite database for monolithic)
-            local default_app_data_path="${EXTERNAL_APP_DATA_PATH:-$HOME/.printfarmer/data}"
-            prompt_with_default "Host directory for application data (monolithic SQLite database):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
-            
-            # Ensure directory exists
-            if ! mkdir -p "$EXTERNAL_APP_DATA_PATH" 2>/dev/null; then
-                print_error "Failed to create app data directory: $EXTERNAL_APP_DATA_PATH"
-                print_info "Please ensure the directory path is writable or change the path above"
-                return 1
-            fi
-            print_success "Application data directory ready: $EXTERNAL_APP_DATA_PATH"
-            
-            # Clear database path for monolithic
-            EXTERNAL_DATABASE_PATH=""
-        else
-            # Database storage directory (PostgreSQL/MySQL/SQL Server for microservices)
-            local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
-            prompt_with_default "Host directory for database storage (PostgreSQL/MySQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
-            
-            # Ensure directory exists
-            if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
-                print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
-                print_info "Please ensure the directory path is writable or change the path above"
-                return 1
-            fi
-            print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
-            
-            # Clear app data path for microservices
-            EXTERNAL_APP_DATA_PATH=""
+        # Data Protection keys storage (ASP.NET Core encryption keys - persists across container restarts)
+        local default_dataprotection_path="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
+        prompt_with_default "Host directory for Data Protection keys (encryption keys):" "$default_dataprotection_path" "EXTERNAL_DATAPROTECTION_PATH"
+        
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_DATAPROTECTION_PATH" 2>/dev/null; then
+            print_error "Failed to create Data Protection keys directory: $EXTERNAL_DATAPROTECTION_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
         fi
+        print_success "Data Protection keys directory ready: $EXTERNAL_DATAPROTECTION_PATH"
+        
+        # Database storage directory (PostgreSQL/SQL Server)
+        local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
+        prompt_with_default "Host directory for database storage (PostgreSQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
+        
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
+            print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
+        fi
+        print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
+        
+        # pgAdmin storage directory (pgAdmin configuration and sessions)
+        local default_pgadmin_path="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
+        prompt_with_default "Host directory for pgAdmin data (configuration and sessions):" "$default_pgadmin_path" "EXTERNAL_PGADMIN_PATH"
+        
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_PGADMIN_PATH" 2>/dev/null; then
+            print_error "Failed to create pgAdmin directory: $EXTERNAL_PGADMIN_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
+        fi
+        print_success "pgAdmin directory ready: $EXTERNAL_PGADMIN_PATH"
         
         print_success "External storage directories configured:"
         echo "  • Models:       $EXTERNAL_MODELS_PATH"
         echo "  • G-code:       $EXTERNAL_GCODE_PATH"
         echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
-        if [ "$ARCHITECTURE" = "monolithic" ]; then
-            echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic SQLite)"
-        else
-            echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/MySQL/SQL Server)"
-        fi
+        echo "  • Keys:         $EXTERNAL_DATAPROTECTION_PATH (Encryption keys)"
+        echo "  • Database:     $EXTERNAL_DATABASE_PATH (PostgreSQL/SQL Server)"
+        echo "  • pgAdmin:      $EXTERNAL_PGADMIN_PATH (pgAdmin configuration)"
         echo
         print_info "⚠️  Data Persistence Guarantee:"
         echo "  • Data survives container recreation (docker-compose down/up)"
@@ -3492,6 +3360,8 @@ configure_external_storage() {
         EXTERNAL_PROFILES_PATH=""
         EXTERNAL_APP_DATA_PATH=""
         EXTERNAL_DATABASE_PATH=""
+        EXTERNAL_DATAPROTECTION_PATH=""
+        EXTERNAL_PGADMIN_PATH=""
     fi
 }
 
@@ -3505,8 +3375,9 @@ configure_additional() {
     print_header "⚙️  Additional Configuration"
     
     # Initialize monitoring/observability variables with defaults if not already set
-    INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
-    INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-false}
+    # Monitoring and telemetry are NOW ENABLED BY DEFAULT for production observability
+    INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
+    INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
     INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
     INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
     ENABLE_ELASTIC_STACK=${ENABLE_ELASTIC_STACK:-}
@@ -3521,10 +3392,24 @@ configure_additional() {
         ENABLE_SWAGGER="true"
         ENABLE_DETAILED_LOGGING="true"
         print_info "Development mode: Swagger UI and detailed logging enabled"
+        
+        # Ask about DevMode auth bypass for easier debugging
+        echo
+        echo -e "${YELLOW}Developer Security Option:${NC}"
+        echo "DevMode Auth Bypass allows GET requests to skip authentication for easier debugging."
+        echo "This should NEVER be enabled in production - it bypasses security for read operations."
+        prompt_yes_no "Enable DevMode Auth Bypass (GET requests skip auth)?" "yes" "DEVMODE_BYPASS_AUTH_CHOICE"
+        if [ "$DEVMODE_BYPASS_AUTH_CHOICE" = "yes" ]; then
+            DEVMODE_BYPASS_AUTH="true"
+            print_warning "⚠️  DevMode Auth Bypass ENABLED - GET requests will skip authentication"
+        else
+            DEVMODE_BYPASS_AUTH="false"
+        fi
     else
         ENABLE_SWAGGER="false"
         ENABLE_DETAILED_LOGGING="false"
-        print_info "Production mode: Swagger UI and detailed logging disabled"
+        DEVMODE_BYPASS_AUTH="false"
+        print_info "Production mode: Swagger UI, detailed logging, and auth bypass disabled"
     fi
     
     echo
@@ -3758,13 +3643,11 @@ configure_additional() {
             ORCA_WORKER_COUNT=0
         fi
 
-        # Allow endpoint override (advanced) only if microservices; monolithic uses host networking and localhost
-        if [ "$ARCHITECTURE" = "microservices" ]; then
-            prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
-            if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
-                if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-                    prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
-                fi
+        # Allow endpoint override (advanced)
+        prompt_yes_no "Override default worker service endpoints?" "no" "OVERRIDE_WORKER_ENDPOINTS"
+        if [ "$OVERRIDE_WORKER_ENDPOINTS" = "yes" ]; then
+            if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+                prompt_with_default "OrcaSlicer worker endpoint (API reachable URL):" "http://orcaslicer-worker:8080" "ORCA_WORKER_ENDPOINT"
             fi
         fi
     else
@@ -3915,13 +3798,8 @@ generate_env_file() {
     # Generate dynamic CORS origins based on configured ports
     CORS_ORIGINS="http://localhost:3000"
     
-    if [ "$ARCHITECTURE" = "microservices" ]; then
-        # Microservices: frontend on HTTP_PORT, API on API_PORT
-        CORS_ORIGINS="${CORS_ORIGINS},http://localhost:${HTTP_PORT},http://localhost:${API_PORT}"
-    else
-        # Monolithic: everything on HTTP_PORT
-        CORS_ORIGINS="${CORS_ORIGINS},http://localhost:${HTTP_PORT}"
-    fi
+    # Frontend on HTTP_PORT, API on API_PORT
+    CORS_ORIGINS="${CORS_ORIGINS},http://localhost:${HTTP_PORT},http://localhost:${API_PORT}"
     
     cat > "$ENV_FILE" << EOF
 # PrintFarmer Docker Configuration
@@ -3941,7 +3819,6 @@ EOF
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
     INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
-    INCLUDE_MYSQL=${INCLUDE_MYSQL:-no}
 
     # Emit provider-specific database environment variables and derive canonical connection string
     # NOTE: do not default to 'postgres' here — if DB_PROVIDER is not explicitly set, skip provider-specific secrets
@@ -3960,7 +3837,7 @@ EOF
             echo "POSTGRES_USER=$POSTGRES_USER" >> "$ENV_FILE"
             echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> "$ENV_FILE"
             echo "POSTGRES_PORT=$POSTGRES_PORT" >> "$ENV_FILE"
-            CONNECTION_STRING="Host=postgres;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+            CONNECTION_STRING="Host=database;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
             ;;
         sqlserver)
             SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
@@ -3983,22 +3860,6 @@ EOF
             echo "MSSQL_SA_PASSWORD=$MSSQL_SA_PASSWORD" >> "$ENV_FILE"
             CONNECTION_STRING="Server=sqlserver;Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
             ;;
-        mysql)
-            MYSQL_DB=${MYSQL_DB:-printfarmer}
-            MYSQL_USER=${MYSQL_USER:-root}
-            # Generate a random password if none supplied
-            MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
-            if [ -z "$MYSQL_PASSWORD" ]; then
-                MYSQL_PASSWORD=$(generate_random_password)
-                print_info "Generated random MySQL password (saved to env file)"
-            fi
-            MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-$MYSQL_PASSWORD}
-            echo "MYSQL_DB=$MYSQL_DB" >> "$ENV_FILE"
-            echo "MYSQL_USER=$MYSQL_USER" >> "$ENV_FILE"
-            echo "MYSQL_PASSWORD=$MYSQL_PASSWORD" >> "$ENV_FILE"
-            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$ENV_FILE"
-            CONNECTION_STRING="Server=mysql;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
-            ;;
         external)
             # External DB details were collected during configure_database() into EXT_DB_* variables
             EXT_DB_TYPE=${EXT_DB_TYPE:-postgres}
@@ -4011,9 +3872,6 @@ EOF
             # Use connection string previously built in configure_database()
             CONNECTION_STRING=${CONNECTION_STRING:-}
             ;;
-        sqlite)
-            CONNECTION_STRING=${CONNECTION_STRING:-"Data Source=/data/farm.db"}
-            ;;
         *)
             # Unknown provider: fall back to any pre-derived CONNECTION_STRING
             CONNECTION_STRING=${CONNECTION_STRING:-}
@@ -4022,7 +3880,7 @@ EOF
 
     # Write unified default connection string key consumed by Program.cs
     # If we're deploying in host network mode, rewrite any Docker service hostnames
-    # (e.g., 'database', 'postgres', 'mysql', 'sqlserver') to 'localhost' so the
+    # (e.g., 'database', 'postgres', 'sqlserver') to 'localhost' so the
     # API running in host network mode connects to the host services correctly.
     # Use the configured connection string as-is (bridge networking expected)
     CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
@@ -4031,7 +3889,9 @@ EOF
     # The application reads only ConnectionStrings__Default and determines the provider
     # from the DB_PROVIDER environment variable. Provider-specific keys are not used.
     echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
+    echo "CONNECTION_STRING=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     set_exported_env_var "ConnectionStrings__Default" "$CONNECTION_STRING_TO_WRITE"
+    set_exported_env_var "CONNECTION_STRING" "$CONNECTION_STRING_TO_WRITE"
     
     # Generate monitoring service credentials
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
@@ -4075,6 +3935,12 @@ ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
 
+# Profile Task Check - auto-disable when slicing workers are disabled
+PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" || echo "false")
+
+# Developer Security Options (Development only!)
+DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
+
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
@@ -4092,7 +3958,6 @@ UBUNTU_TAG=$(resolve_image_tag "ubuntu" "${UBUNTU_TAG:-24.04}")
 NGINX_IMAGE=nginx:alpine
 POSTGRES_IMAGE=postgres:16-alpine
 SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
-MYSQL_IMAGE=mysql:8.0
 
 # Spoolman
 SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
@@ -4119,6 +3984,8 @@ EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
 EXTERNAL_APP_DATA_PATH=${EXTERNAL_APP_DATA_PATH:-}
 EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
+EXTERNAL_DATAPROTECTION_PATH=${EXTERNAL_DATAPROTECTION_PATH:-}
+EXTERNAL_PGADMIN_PATH=${EXTERNAL_PGADMIN_PATH:-}
 EOF
 
     # Small summary for generated environment file: show which sensitive values were included
@@ -4153,16 +4020,8 @@ EOF
             echo "  SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}"
             echo "  MSSQL_SA_PASSWORD=$(mask_secret "$MSSQL_SA_PASSWORD")"
             ;;
-        mysql)
-            print_info "MySQL credentials included (masked):"
-            echo "  MYSQL_USER=$(mask_secret "$MYSQL_USER")"
-            echo "  MYSQL_PASSWORD=$(mask_secret "$MYSQL_PASSWORD")"
-            ;;
         external)
             print_info "External DB configuration included (credentials not displayed)."
-            ;;
-        sqlite)
-            print_info "Using SQLite - no DB credentials included."
             ;;
     esac
     
@@ -4195,17 +4054,6 @@ ACCEPT_EULA=Y
 EOF
     fi
     
-    # Emit MySQL entries only if MySQL is selected or explicitly requested
-    if [ "${DB_PROVIDER:-}" = "mysql" ] || [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
-        cat >> "$ENV_FILE" << EOF
-
-# MySQL Configuration
-MYSQL_DB=${MYSQL_DB:-printfarmer}
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-$DB_PASSWORD}
-MYSQL_DATABASE=${MYSQL_DB:-printfarmer}
-EOF
-    fi
     
     # Generate JWT signing key (only if not already set - preserves existing key on redeploy)
     # This prevents user sessions from being invalidated on every deployment
@@ -4262,13 +4110,13 @@ EOF
 # Detect credential divergence between generated env and existing DB container
 # Non-destructive by default: warns and exits in non-interactive mode if mismatch found.
 detect_db_credential_divergence() {
-    # Skip detection during dry-run or when DB provider is external/sqlite
+    # Skip detection during dry-run or when DB provider is external
     if [ "${DRY_RUN:-false}" = "true" ]; then
         return 0
     fi
 
     local provider="${DB_PROVIDER:-postgres}"
-    if [ "$provider" = "external" ] || [ "$provider" = "sqlite" ]; then
+    if [ "$provider" = "external" ]; then
         return 0
     fi
 
@@ -4307,10 +4155,9 @@ detect_db_credential_divergence() {
     }
 
     # Get generated passwords from env file if set
-    local gen_pg_pw gen_sql_pw gen_mysql_pw
+    local gen_pg_pw gen_sql_pw
     gen_pg_pw=$(get_env_value "POSTGRES_PASSWORD" || true)
     gen_sql_pw=$(get_env_value "SQLSERVER_PASSWORD" || get_env_value "MSSQL_SA_PASSWORD" || true)
-    gen_mysql_pw=$(get_env_value "MYSQL_ROOT_PASSWORD" || get_env_value "MYSQL_PASSWORD" || true)
 
     local mismatch_info=""
 
@@ -4333,18 +4180,6 @@ detect_db_credential_divergence() {
                 for pattern in "printfarmer-database-sqlserver" "printfarmer-database" "pfarm-sqlserver"; do
                     local result
                     result=$(compare_container_env "$pattern" "MSSQL_SA_PASSWORD" "$gen_sql_pw" ) || true
-                    if [ -n "$result" ]; then
-                        mismatch_info="$result"
-                        break
-                    fi
-                done
-            fi
-            ;;
-        mysql)
-            if [ -n "$gen_mysql_pw" ]; then
-                for pattern in "printfarmer-database-mysql" "printfarmer-database" "pfarm-mysql"; do
-                    local result
-                    result=$(compare_container_env "$pattern" "MYSQL_ROOT_PASSWORD" "$gen_mysql_pw" ) || true
                     if [ -n "$result" ]; then
                         mismatch_info="$result"
                         break
@@ -4428,7 +4263,7 @@ EOF
 
 # Generate docker-compose override if needed
 generate_compose_override() {
-    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] || [ "${INCLUDE_MYSQL:-no}" = "yes" ]; }; then
+    if [ "$ARCHITECTURE" = "microservices" ] && { [ "${INCLUDE_POSTGRES:-no}" = "yes" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; }; then
         print_info "Creating docker-compose override for database services"
         
         cat > docker-compose.override.yml << EOF
@@ -4479,24 +4314,6 @@ EOF
 EOF
         fi
         
-        if [ "${INCLUDE_MYSQL:-no}" = "yes" ]; then
-            cat >> docker-compose.override.yml << EOF
-  mysql:
-    image: mysql:8.0
-    environment:
-      - MYSQL_ROOT_PASSWORD=\${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=\${MYSQL_DATABASE}
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p\${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-EOF
-        fi
         
         cat >> docker-compose.override.yml << EOF
 
@@ -4505,7 +4322,6 @@ EOF
         
         [ "${INCLUDE_POSTGRES:-no}" = "yes" ] && echo "  postgres_data:" >> docker-compose.override.yml
         [ "${INCLUDE_SQLSERVER:-no}" = "yes" ] && echo "  sqlserver_data:" >> docker-compose.override.yml
-        [ "${INCLUDE_MYSQL:-no}" = "yes" ] && echo "  mysql_data:" >> docker-compose.override.yml
         
         print_success "Docker Compose override file created: docker-compose.override.yml"
         # Ensure no top-level `version:` key remains in generated override
@@ -4545,7 +4361,83 @@ deploy_containers() {
         compose_cmd+=( -f docker-compose.override.yml )
     fi
 
-    if [ "$DRY_RUN" = "true" ]; then
+    # Registry deployment: pull pre-built images instead of building locally
+    if [ "$USE_REGISTRY" = "true" ]; then
+        print_header "📦 Using Pre-built Images from Registry"
+        print_info "Registry: $REGISTRY_HOST"
+        print_info "Tag: $REGISTRY_IMAGE_TAG"
+        
+        # Export registry variables for compose file
+        export REGISTRY_HOST
+        export REGISTRY_IMAGE_TAG
+        
+        # Write these to .env so they persist
+        update_kv_file "$ENV_FILE" "REGISTRY_HOST" "$REGISTRY_HOST"
+        update_kv_file "$ENV_FILE" "REGISTRY_IMAGE_TAG" "$REGISTRY_IMAGE_TAG"
+        
+        # Create registry override file that uses pre-built images
+        local registry_override="docker-compose.registry-override.yml"
+        cat > "$registry_override" << EOF
+# Auto-generated: Pull images from container registry instead of building
+# Registry: ${REGISTRY_HOST}
+# Tag: ${REGISTRY_IMAGE_TAG}
+
+services:
+  api:
+    image: ${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}
+    
+  frontend:
+    image: ${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}
+EOF
+
+        # Add printer-discovery if discovery is enabled
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
+            cat >> "$registry_override" << EOF
+    
+  printer-discovery:
+    image: ${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}
+EOF
+        fi
+
+        print_info "Created registry override: $registry_override"
+        compose_cmd+=( -f "$registry_override" )
+        
+        # Pull images from registry
+        print_info "Pulling images from registry..."
+        local images_to_pull=(
+            "${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}"
+            "${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}"
+        )
+        
+        # Add printer-discovery if enabled
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
+            images_to_pull+=("${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}")
+        fi
+        
+        local pull_failed=false
+        for img in "${images_to_pull[@]}"; do
+            print_info "  Pulling $img..."
+            if ! docker pull "$img"; then
+                print_error "Failed to pull: $img"
+                pull_failed=true
+            else
+                print_success "  ✓ Pulled $img"
+            fi
+        done
+        
+        if [ "$pull_failed" = "true" ]; then
+            print_error "Some images failed to pull from registry"
+            print_info "Make sure you have access to the registry and the images exist"
+            print_info "Available tags: latest, main, release, v1.0.0, sha-<commit>"
+            exit 1
+        fi
+        
+        print_success "All images pulled from registry"
+        
+        # Skip the local build process
+        print_info "Skipping local build (using registry images)"
+        
+    elif [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
     else
         # ----- Prepare optional slicer assets ---------------------------------
@@ -4779,7 +4671,7 @@ EOF
         # If microservices architecture, start the database first to speed up readiness
         if [ "$ARCHITECTURE" = "microservices" ]; then
             print_info "Bringing up database service first to speed readiness"
-            # Attempt to start postgres/mysql/sqlserver only
+            # Attempt to start postgres/sqlserver only
             local seed_cmd=("")
             # Build a minimal compose command for core infra
             local infra_compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
@@ -4882,26 +4774,12 @@ EOF
             if "${final_compose_cmd[@]}" up -d; then
                 print_success "All containers started successfully"
                 
-                # For microservices architecture, nginx-proxy is part of the docker-compose stack
-                # and runs on the docker network in bridge mode. Don't try to start a host-mode proxy.
-                # For monolithic with host mode, we may need a separate host-mode nginx proxy.
-                if [ "$ARCHITECTURE" = "microservices" ]; then
-                    # For microservices, verify the docker-compose nginx-proxy is working
-                    if check_nginx_proxy; then
-                        print_info "nginx proxy verification passed"
-                    else
-                        print_error "nginx proxy verification FAILED - aborting deployment"
-                        exit 2
-                    fi
+                # Verify the docker-compose nginx-proxy is working
+                if check_nginx_proxy; then
+                    print_info "nginx proxy verification passed"
                 else
-                    # For monolithic (bridge networking) verify the nginx proxy
-                    # that is part of the compose stack or host environment is reachable.
-                    if check_nginx_proxy; then
-                        print_info "nginx proxy verification passed"
-                    else
-                        print_error "nginx proxy verification FAILED - aborting deployment"
-                        exit 2
-                    fi
+                    print_error "nginx proxy verification FAILED - aborting deployment"
+                    exit 2
                 fi
             else
                 print_error "Failed to start containers"
@@ -5015,11 +4893,6 @@ wait_for_database() {
                 print_success "SQL Server port ${SQLSERVER_PORT:-1433} reachable on localhost"
                 return 0
             fi
-        elif [ "${DB_PROVIDER:-postgres}" = "mysql" ]; then
-            if nc -z localhost 3306 2>/dev/null; then
-                print_success "MySQL port 3306 reachable on localhost"
-                return 0
-            fi
         fi
 
         if [ $((elapsed % 15)) -eq 0 ]; then
@@ -5068,7 +4941,6 @@ wait_for_database() {
     print_error "3. Check for port conflicts:"
     print_error "   - PostgreSQL: sudo lsof -i :5432"
     print_error "   - SQL Server: sudo lsof -i :1433"
-    print_error "   - MySQL: sudo lsof -i :3306"
     print_error "4. Check Docker logs for the database container:"
     print_error "   docker compose logs database"
     print_error "5. Increase timeout if on slow system:"
@@ -5312,7 +5184,7 @@ check_nginx_proxy() {
         sleep $interval
     done
 
-    print_warning "✗ nginx proxy check failed after ${retries} attempts. Check /deploy/nginx/nginx-microservices.conf and ensure upstream points to api:5245"
+    print_warning "✗ nginx proxy check failed after ${retries} attempts. Check /deploy/nginx/nginx-proxy.conf and ensure upstream points to api:5245"
     print_info "Example checks:"
     print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE ps"
     print_info "  docker compose --env-file $ENV_FILE -f $COMPOSE_FILE logs nginx-proxy --tail 50"
@@ -5416,7 +5288,7 @@ prepare_external_storage_directories() {
         paths_to_create+=("${EXTERNAL_PROFILES_PATH}:Slicer Profiles")
     fi
     if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
-        paths_to_create+=("${EXTERNAL_APP_DATA_PATH}:Application Data (SQLite)")
+        paths_to_create+=("${EXTERNAL_APP_DATA_PATH}:Application Data")
     fi
     if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
         paths_to_create+=("${EXTERNAL_DATABASE_PATH}:Database")
@@ -5859,7 +5731,7 @@ verify_deployment() {
             fi
         fi
         
-        # Fallback: try localhost:port (works when worker port is bound to host in monolithic mode)
+        # Fallback: try localhost:port (works when worker port is bound to host)
         if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8080}/healthz" >/dev/null 2>&1; then
             print_success "✓ OrcaSlicer worker: Healthy"
             orca_checked=true
@@ -6583,14 +6455,15 @@ main() {
     
     deploy_containers
     
-    # Deploy pgAdmin if requested
+    # Run auto-admin setup as soon as API is healthy (doesn't need pgAdmin)
+    # This allows users to start using the application while pgAdmin is still starting
+    setup_initial_admin || true
+    
+    # Deploy pgAdmin if requested (can take longer to become healthy)
     deploy_pgadmin_if_needed || print_warning "pgAdmin deployment encountered issues"
     
     # Configure pgAdmin servers after deployment
     configure_pgadmin_servers || print_warning "pgAdmin server configuration encountered issues"
-    
-    # Run auto-admin setup if requested
-    setup_initial_admin || true
     
     # Run verification and capture result
     local verification_passed=true
@@ -6687,11 +6560,23 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --include-monitoring)
+            # Legacy flag - monitoring now on by default
             CLI_INCLUDE_MONITORING=true
             shift
             ;;
         --include-telemetry)
+            # Legacy flag - telemetry now on by default
             CLI_INCLUDE_TELEMETRY=true
+            shift
+            ;;
+        --exclude-monitoring)
+            # Opt-out of monitoring stack
+            CLI_INCLUDE_MONITORING=false
+            shift
+            ;;
+        --exclude-telemetry)
+            # Opt-out of telemetry stack
+            CLI_INCLUDE_TELEMETRY=false
             shift
             ;;
         --include-security)
@@ -6700,6 +6585,34 @@ while [ $# -gt 0 ]; do
             ;;
         --include-registry)
             CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --use-registry)
+            USE_REGISTRY=true
+            shift
+            ;;
+        --registry-host)
+            if [ -n "${2:-}" ]; then
+                REGISTRY_HOST="$2"
+                shift 2
+            else
+                echo "Missing value for --registry-host" >&2; exit 2
+            fi
+            ;;
+        --registry-host=*)
+            REGISTRY_HOST="${1#--registry-host=}"
+            shift
+            ;;
+        --registry-tag)
+            if [ -n "${2:-}" ]; then
+                REGISTRY_IMAGE_TAG="$2"
+                shift 2
+            else
+                echo "Missing value for --registry-tag" >&2; exit 2
+            fi
+            ;;
+        --registry-tag=*)
+            REGISTRY_IMAGE_TAG="${1#--registry-tag=}"
             shift
             ;;
         --output-dir)
@@ -6909,8 +6822,8 @@ if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
     # Basic compose file defaults when not set by config
     COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
     # Select compose file based on architecture; host-network mode removed
-    if [ "${ARCHITECTURE:-}" = "microservices" ] && [ -f docker-compose.microservices.yml ]; then
-        COMPOSE_FILE="docker-compose.microservices.yml"
+    if [ -f docker-compose.yml ]; then
+        COMPOSE_FILE="docker-compose.yml"
     fi
 
     print_header "🔍 Verify-only mode: running deployment verification"

@@ -77,7 +77,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       className={`
         w-full text-left bg-pf-bg-1 border border-pf-border rounded-xl p-4
         hover:border-pf-accent/50 hover:shadow-md transition-all duration-200
-        focus:outline-none focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg
+        focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg
       `}
       aria-label={`${printer.printerName} - ${status.label}`}
     >
@@ -103,7 +103,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         
         {/* Maintenance mode indicator */}
         {printer.inMaintenance && (
-          <div className="flex-shrink-0" title="In maintenance mode">
+          <div className="shrink-0" title="In maintenance mode">
             <WrenchIcon className="h-4 w-4 text-blue-400" aria-hidden="true" />
           </div>
         )}
@@ -129,22 +129,22 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {hasAlerts && (
           <div className="flex items-center gap-1">
             {printer.criticalAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-red-500/20 text-red-400 rounded">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-red-500/20 text-red-400 rounded-sm">
                 {printer.criticalAlerts}
               </span>
             )}
             {printer.highAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-400 rounded">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-400 rounded-sm">
                 {printer.highAlerts}
               </span>
             )}
             {printer.mediumAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded-sm">
                 {printer.mediumAlerts}
               </span>
             )}
             {printer.lowAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-500/20 text-blue-400 rounded">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-500/20 text-blue-400 rounded-sm">
                 {printer.lowAlerts}
               </span>
             )}
@@ -179,11 +179,11 @@ export function MaintenanceStatusGrid({
             <div className="flex items-start gap-3 mb-3">
               <div className="w-9 h-9 bg-pf-border rounded-lg" />
               <div className="flex-1">
-                <div className="h-4 bg-pf-border rounded w-24 mb-2" />
-                <div className="h-3 bg-pf-border rounded w-16" />
+                <div className="h-4 bg-pf-border rounded-sm w-24 mb-2" />
+                <div className="h-3 bg-pf-border rounded-sm w-16" />
               </div>
             </div>
-            <div className="h-4 bg-pf-border rounded w-20" />
+            <div className="h-4 bg-pf-border rounded-sm w-20" />
           </div>
         ))}
       </div>

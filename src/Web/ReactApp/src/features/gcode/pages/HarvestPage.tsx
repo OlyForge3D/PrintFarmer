@@ -92,7 +92,8 @@ export const HarvestPage: React.FC = () => {
       // Clean up joined ops using local copy
       opsToClean.forEach(opId => signalRService.leaveHarvestGroup(opId));
     };
-  }, [harvestOperations, handleHarvestFileProgress, handleHarvestOperationProgress, handleHarvestUpdate]);
+   
+  }, [harvestOperations]);
 
   // Update selectedOperation when harvestOperations changes
   useEffect(() => {
@@ -263,7 +264,7 @@ export const HarvestPage: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2 flex-shrink-0 ml-4">
+                  <div className="flex gap-2 shrink-0 ml-4">
                     <Button
                       type="button"
                       variant="secondary"

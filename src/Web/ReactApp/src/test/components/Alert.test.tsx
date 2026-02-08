@@ -24,14 +24,14 @@ describe('Alert', () => {
       render(<Alert>Info message</Alert>);
 
       // Get the outermost alert container with border classes
-      const alert = screen.getByText('Info message').closest('.border.rounded.p-3');
+      const alert = screen.getByText('Info message').closest('[class*="border"][class*="rounded"]');
       expect(alert).toHaveClass('bg-pf-accent-bg');
     });
 
     it('should render success alert', () => {
       render(<Alert type="success">Success message</Alert>);
 
-      const alert = screen.getByText('Success message').closest('.border.rounded.p-3');
+      const alert = screen.getByText('Success message').closest('[class*="border"][class*="rounded"]');
       expect(alert).toHaveClass('bg-pf-success-bg');
     });
 
@@ -45,7 +45,7 @@ describe('Alert', () => {
     it('should render warning alert', () => {
       render(<Alert type="warning">Warning message</Alert>);
 
-      const alert = screen.getByText('Warning message').closest('.border.rounded.p-3');
+      const alert = screen.getByText('Warning message').closest('[class*="border"][class*="rounded"]');
       expect(alert).toHaveClass('bg-pf-warning');
     });
   });
@@ -78,7 +78,7 @@ describe('Alert', () => {
       render(<Alert className="custom-class">Styled alert</Alert>);
 
       // Custom className is applied to the outermost div with border
-      const alert = screen.getByText('Styled alert').closest('.border.rounded.p-3');
+      const alert = screen.getByText('Styled alert').closest('[class*="border"][class*="rounded"]');
       expect(alert).toHaveClass('custom-class');
     });
 
@@ -86,9 +86,9 @@ describe('Alert', () => {
       render(<Alert>Styled alert</Alert>);
 
       // Get the outer alert container
-      const alert = screen.getByText('Styled alert').closest('.border.rounded.p-3');
+      const alert = screen.getByText('Styled alert').closest('[class*="border"][class*="rounded"]');
       expect(alert).toHaveClass('border');
-      expect(alert).toHaveClass('rounded');
+      expect(alert).toHaveClass('rounded-sm');
       expect(alert).toHaveClass('p-3');
     });
   });

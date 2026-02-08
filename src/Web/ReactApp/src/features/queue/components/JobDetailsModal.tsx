@@ -1,4 +1,4 @@
-import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition } from 'react';
+import React, { useCallback, use, Suspense, useState, useOptimistic, useTransition, useMemo } from 'react';
 import { Button } from '@/common/components/ui/Button';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -180,7 +180,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
       <Modal
         isOpen={isOpen}
         onClose={handleClose}
-        title={displayDetails ? `${displayDetails.name}` : 'Job Details'}
+        title="Job Details"
         size="lg"
         footer={footerContent}
         closeOnBackdrop={false}
@@ -190,12 +190,12 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         {displayDetails && (
           <div className="mb-4">
             <span 
-              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                displayDetails.status.toLowerCase() === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                displayDetails.status.toLowerCase() === 'printing' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
-                displayDetails.status.toLowerCase() === 'queued' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
-                displayDetails.status.toLowerCase() === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
-                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+              className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+                displayDetails.status.toLowerCase() === 'completed' ? 'bg-pf-success/20 text-pf-success' :
+                displayDetails.status.toLowerCase() === 'printing' ? 'bg-pf-accent/20 text-pf-accent' :
+                displayDetails.status.toLowerCase() === 'queued' ? 'bg-pf-warning/20 text-pf-warning' :
+                displayDetails.status.toLowerCase() === 'failed' ? 'bg-pf-error/20 text-pf-error' :
+                'bg-pf-bg-2 text-pf-text-secondary'
               }`}
             >
               {displayDetails.status}
@@ -205,9 +205,9 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
 
         {/* Error Message */}
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800" role="alert">
+          <div className="mb-4 p-3 bg-pf-error/10 border border-pf-error/30 rounded-lg" role="alert">
             <div className="flex items-center justify-between">
-              <span className="text-red-800 dark:text-red-200">
+              <span className="text-pf-error">
                 <strong>Error:</strong> {error}
               </span>
               <Button
@@ -223,59 +223,40 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         )}
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4" role="tablist">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'overview' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+        <div className="flex border-b border-pf-border mb-4" role="tablist">
+          <Button
+            variant="tab"
+            active={activeTab === 'overview'}
+            className="px-4 py-2 text-sm font-medium"
             onClick={() => setActiveTab('overview')}
             role="tab"
             aria-selected={activeTab === 'overview'}
             aria-controls="tab-overview"
           >
             Overview
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'details' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          </Button>
+          <Button
+            variant="tab"
+            active={activeTab === 'details'}
+            className="px-4 py-2 text-sm font-medium"
             onClick={() => setActiveTab('details')}
             role="tab"
             aria-selected={activeTab === 'details'}
             aria-controls="tab-details"
           >
             Details
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'timing' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
-            onClick={() => setActiveTab('timing')}
-            role="tab"
-            aria-selected={activeTab === 'timing'}
-            aria-controls="tab-timing"
-          >
-            Timing
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'history' 
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            }`}
+          </Button>
+          <Button
+            variant="tab"
+            active={activeTab === 'history'}
+            className="px-4 py-2 text-sm font-medium"
             onClick={() => setActiveTab('history')}
             role="tab"
             aria-selected={activeTab === 'history'}
             aria-controls="tab-history"
           >
             History
-          </button>
+          </Button>
         </div>
 
         {/* Tab Content */}
@@ -288,10 +269,10 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                     isEditing={isEditing}
                     onFieldChange={handleFieldChange}
                   />
-                  <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
+                  <div className="border-t border-pf-border my-4"></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Notes</h3>
+                      <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-2">Notes</h3>
                       <JobNotesEditor
                         notes={displayDetails.notes || ''}
                         isEditing={isEditing}
@@ -299,7 +280,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                       />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Tags</h3>
+                      <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-2">Tags</h3>
                       <JobTagsEditor
                         tags={displayDetails.tags || []}
                         isEditing={isEditing}
@@ -311,107 +292,196 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               )}
 
               {/* Details Tab */}
-              {activeTab === 'details' && (
-                <div id="tab-details" role="tabpanel" className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Printer</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.printerName}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Model</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.printerModel}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Material Type</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.materialType || 'Not specified'}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Nozzle Diameter</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.nozzleDiameter ? `${displayDetails.nozzleDiameter}mm` : 'Not specified'}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Priority</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.priority}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Queue Position</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.queuePosition}</p>
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">File Name</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.fileName || 'Unknown'}</p>
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Estimated Filament</label>
-                    <p className="text-gray-900 dark:text-gray-100">{displayDetails.estimatedFilamentUsage || 'Not available'}</p>
-                  </div>
-                </div>
-              )}
+              {activeTab === 'details' && (() => {
+                // Helper to format seconds to human-readable duration
+                const formatDuration = (seconds: number | undefined | null): string => {
+                  if (!seconds) return '—';
+                  const hours = Math.floor(seconds / 3600);
+                  const mins = Math.floor((seconds % 3600) / 60);
+                  if (hours > 0) return `${hours}h ${mins}m`;
+                  return `${mins}m`;
+                };
+                // Helper for formatting dates safely
+                const formatDate = (date: string | undefined | null): string => {
+                  if (!date) return '—';
+                  return new Date(date).toLocaleString();
+                };
 
-              {/* Timing Tab */}
-              {activeTab === 'timing' && (
-                <div id="tab-timing" role="tabpanel" className="space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Estimated Print Time</label>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {Math.round(displayDetails.estimatedPrintTimeSeconds / 60)} minutes
-                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
-                        ({Math.round(displayDetails.estimatedPrintTimeSeconds / 3600)} hours)
-                      </span>
-                    </p>
+                // Get material and nozzle from either new or legacy field names
+                const materialType = displayDetails.requiredMaterialType || displayDetails.materialType;
+                const nozzleDiameter = displayDetails.requiredNozzleDiameter || displayDetails.nozzleDiameter;
+                
+                // Get dates from either new or legacy field names
+                const createdAt = displayDetails.createdAtUtc || displayDetails.createdAt;
+                const queuedAt = displayDetails.queuedAtUtc || displayDetails.queuedAt;
+                const startedAt = displayDetails.actualStartTimeUtc || displayDetails.startedAt;
+                const completedAt = displayDetails.actualEndTimeUtc || displayDetails.completedAt;
+
+                return (
+                <div id="tab-details" role="tabpanel" className="space-y-6">
+                  {/* Two-column layout for main content */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column - Printer & File Info */}
+                    <div className="space-y-6">
+                      {/* Printer Info Section */}
+                      <div className="bg-pf-bg-1 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3 flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                          </svg>
+                          Printer
+                        </h3>
+                        <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+                          <div>
+                            <dt className="text-xs text-pf-text-muted">Name</dt>
+                            <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerName || <span className="italic text-pf-text-muted">Not assigned</span>}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-pf-text-muted">Model</dt>
+                            <dd className="text-sm font-medium text-pf-text-primary">{displayDetails.printerModel || <span className="italic text-pf-text-muted">—</span>}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-pf-text-muted">Material</dt>
+                            <dd className="text-sm font-medium text-pf-text-primary">{materialType || <span className="italic text-pf-text-muted">—</span>}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-pf-text-muted">Nozzle</dt>
+                            <dd className="text-sm font-medium text-pf-text-primary">{nozzleDiameter ? `${nozzleDiameter}mm` : <span className="italic text-pf-text-muted">—</span>}</dd>
+                          </div>
+                        </dl>
+                      </div>
+
+                      {/* File Info Section */}
+                      <div className="bg-pf-bg-1 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3 flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          File
+                        </h3>
+                        <p className="text-sm font-mono text-pf-text-primary break-all">{displayDetails.name || <span className="italic text-pf-text-muted">Unknown</span>}</p>
+                      </div>
+                    </div>
+
+                    {/* Right Column - Duration & Filament */}
+                    <div className="space-y-6">
+                      {/* Duration Section */}
+                      <div className="bg-pf-bg-1 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3 flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Print Duration
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="text-center p-3 bg-pf-bg-0 rounded-md">
+                            <p className="text-xs text-pf-text-muted mb-1">Estimated</p>
+                            <p className="text-xl font-bold text-pf-text-primary">{formatDuration(displayDetails.estimatedPrintTimeSeconds)}</p>
+                          </div>
+                          <div className="text-center p-3 bg-pf-bg-0 rounded-md">
+                            <p className="text-xs text-pf-text-muted mb-1">Actual</p>
+                            <p className="text-xl font-bold text-pf-text-primary">{formatDuration(displayDetails.actualPrintTimeSeconds)}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Filament Usage Section */}
+                      <div className="bg-pf-bg-1 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3 flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                          </svg>
+                          Filament Usage
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="text-center p-3 bg-pf-bg-0 rounded-md">
+                            <p className="text-xs text-pf-text-muted mb-1">Estimated</p>
+                            <p className="text-xl font-bold text-pf-text-primary">
+                              {displayDetails.estimatedFilamentUsageGrams != null ? `${displayDetails.estimatedFilamentUsageGrams.toFixed(2)}g` : '—'}
+                            </p>
+                          </div>
+                          <div className="text-center p-3 bg-pf-bg-0 rounded-md">
+                            <p className="text-xs text-pf-text-muted mb-1">Actual</p>
+                            <p className="text-xl font-bold text-pf-text-primary">
+                              {displayDetails.actualFilamentUsageGrams != null ? `${displayDetails.actualFilamentUsageGrams.toFixed(2)}g` : '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</label>
-                    <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.createdAt).toLocaleString()}</p>
+
+                  {/* Timeline Section - Full Width */}
+                  <div className="bg-pf-bg-1 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-pf-text-secondary uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Timeline
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-pf-text-muted">Created</p>
+                        <p className="text-sm font-medium text-pf-text-primary">{formatDate(createdAt)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-pf-text-muted">Queued</p>
+                        <p className="text-sm font-medium text-pf-text-primary">{formatDate(queuedAt)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-pf-text-muted">Started</p>
+                        <p className="text-sm font-medium text-pf-text-primary">{formatDate(startedAt)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-pf-text-muted">Completed</p>
+                        <p className="text-sm font-medium text-pf-text-primary">{formatDate(completedAt)}</p>
+                      </div>
+                    </div>
                   </div>
-                  {displayDetails.queuedAt && (
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Queued</label>
-                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.queuedAt).toLocaleString()}</p>
-                    </div>
-                  )}
-                  {displayDetails.startedAt && (
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Started</label>
-                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.startedAt).toLocaleString()}</p>
-                    </div>
-                  )}
-                  {displayDetails.completedAt && (
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Completed</label>
-                      <p className="text-gray-900 dark:text-gray-100">{new Date(displayDetails.completedAt).toLocaleString()}</p>
-                    </div>
-                  )}
                 </div>
-              )}
+                );
+              })()}
 
               {/* History Tab */}
-              {activeTab === 'history' && (
+              {activeTab === 'history' && (() => {
+                // Helper for formatting dates safely
+                const formatDate = (date: string | undefined | null): string => {
+                  if (!date) return 'Not available';
+                  return new Date(date).toLocaleString();
+                };
+                // Get dates from either new or legacy field names
+                const createdAt = displayDetails.createdAtUtc || displayDetails.createdAt;
+                const queuedAt = displayDetails.queuedAtUtc || displayDetails.queuedAt;
+                const startedAt = displayDetails.actualStartTimeUtc || displayDetails.startedAt;
+                const completedAt = displayDetails.actualEndTimeUtc || displayDetails.completedAt;
+
+                return (
                 <div id="tab-history" role="tabpanel" className="space-y-2">
-                  <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">Created</span>
-                    <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.createdAt).toLocaleString()}</span>
+                  <div className="flex justify-between py-2 border-b border-pf-border">
+                    <span className="font-medium text-pf-text-secondary">Created</span>
+                    <span className="text-pf-text-primary">{formatDate(createdAt)}</span>
                   </div>
-                  {displayDetails.queuedAt && (
-                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Queued</span>
-                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.queuedAt).toLocaleString()}</span>
+                  {queuedAt && (
+                    <div className="flex justify-between py-2 border-b border-pf-border">
+                      <span className="font-medium text-pf-text-secondary">Queued</span>
+                      <span className="text-pf-text-primary">{formatDate(queuedAt)}</span>
                     </div>
                   )}
-                  {displayDetails.startedAt && (
-                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Started</span>
-                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.startedAt).toLocaleString()}</span>
+                  {startedAt && (
+                    <div className="flex justify-between py-2 border-b border-pf-border">
+                      <span className="font-medium text-pf-text-secondary">Started</span>
+                      <span className="text-pf-text-primary">{formatDate(startedAt)}</span>
                     </div>
                   )}
-                  {displayDetails.completedAt && (
-                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Completed</span>
-                      <span className="text-gray-600 dark:text-gray-400">{new Date(displayDetails.completedAt).toLocaleString()}</span>
+                  {completedAt && (
+                    <div className="flex justify-between py-2 border-b border-pf-border">
+                      <span className="font-medium text-pf-text-secondary">Completed</span>
+                      <span className="text-pf-text-primary">{formatDate(completedAt)}</span>
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
             </div>
       </Modal>
 
@@ -440,20 +510,27 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   onClose,
   onSave,
 }) => {
-  if (!isOpen || !jobId) return null;
+  // Memoize the promise so it only changes when jobId changes
+  // This prevents Suspense from re-triggering on every parent render
+  const jobDetailsPromise = useMemo(() => {
+    if (!jobId) return null;
+    return fetchJobDetails(jobId);
+  }, [jobId]);
+
+  if (!isOpen || !jobId || !jobDetailsPromise) return null;
 
   return (
     // React 19 Suspense boundary shows fallback while promise resolves
     <Suspense fallback={
       <Modal isOpen={true} onClose={onClose} title="Job Details" size="lg">
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
-          <p className="text-gray-500 dark:text-gray-400">Loading job details...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent mb-4"></div>
+          <p className="text-pf-text-muted">Loading job details...</p>
         </div>
       </Modal>
     }>
       <JobDetailsContent
-        jobDetailsPromise={fetchJobDetails(jobId)}
+        jobDetailsPromise={jobDetailsPromise}
         isOpen={isOpen}
         onClose={onClose}
         onSave={onSave}

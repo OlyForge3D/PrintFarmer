@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Models.Admin;
 using Farm.Web.Api.Services;
@@ -14,6 +15,7 @@ public class DataExportServiceTests
 {
     private readonly AppDbContext _context;
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<ISensitiveDataProtector> _sensitiveDataProtectorMock;
     private readonly DataExportService _exportService;
 
     public DataExportServiceTests()
@@ -24,7 +26,21 @@ public class DataExportServiceTests
         _context = new AppDbContext(options);
 
         _loggerMock = new Mock<IUnifiedLoggingService>();
-        _exportService = new DataExportService(_context, _loggerMock.Object);
+        _sensitiveDataProtectorMock = new Mock<ISensitiveDataProtector>();
+        _sensitiveDataProtectorMock
+            .Setup(x => x.Unprotect(It.IsAny<string?>()))
+            .Returns<string?>(s =>
+            {
+                if (string.IsNullOrEmpty(s))
+                {
+                    return s;
+                }
+
+                const string prefix = "prot:";
+                return s.StartsWith(prefix, StringComparison.Ordinal) ? s[prefix.Length..] : null;
+            });
+
+        _exportService = new DataExportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object);
     }
 
     [Fact]

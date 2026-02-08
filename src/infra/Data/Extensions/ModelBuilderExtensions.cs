@@ -38,9 +38,6 @@ public static class ModelBuilderExtensions
 
             _ = entity.Property(p => p.OriginalServerUrl)
                   .HasMaxLength(500);
-
-            _ = entity.Property(p => p.IpAddress)
-                  .HasMaxLength(50);
         });
 
         // Manufacturer table optimizations

@@ -40,6 +40,9 @@ import {
   PrinterFast,
   PrinterFileDto,
   PrinterModelDto,
+  PrinterVersionInfo,
+  QueuedPrintJobWithFileMetaDto,
+  QueueOverviewDto,
   RegisterRequest,
   ResolveHostnameRequest,
   StartDiscoveryRequest,
@@ -355,6 +358,11 @@ export class ApiClient {
 
   async getPrinter(id: string): Promise<Printer> {
     const response = await this.client.get<Printer>(`/printers/${id}`);
+    return response.data;
+  }
+
+  async getPrinterVersionInfo(printerId: string): Promise<PrinterVersionInfo> {
+    const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`);
     return response.data;
   }
 
@@ -1594,11 +1602,44 @@ export class ApiClient {
   // NOTE: This is the simpler job queue API for basic queue management.
   // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
-  async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {
-    const params = printerId ? { printerId } : {};
-    const response = await this.client.get<JobQueuePrintJob[]>("/job-queue", {
+  /**
+   * Get queue overview for available printers with compatibility filtering.
+   * All filtering is done server-side for consistency with auto-assign.
+   * @param model Optional printer model name or slicer alias (e.g., "COREONEL", "Prusa MK4")
+   * @param nozzle Optional required nozzle diameter in mm (e.g., 0.4)
+   * @param material Optional required material type (e.g., "PLA", "PCTG")
+   */
+  async getQueueOverview(model?: string, nozzle?: number, material?: string): Promise<QueueOverviewDto[]> {
+    const params: Record<string, string | number> = {};
+    if (model) params.model = model;
+    if (nozzle !== undefined) params.nozzle = nozzle;
+    if (material) params.material = material;
+    const response = await this.client.get<QueueOverviewDto[]>("/job-queue", {
       params,
     });
+    return response.data;
+  }
+
+  /**
+   * Get all queued print jobs with file metadata.
+   * Uses the job-queue-analytics endpoint which returns actual job data.
+   * @param printerId Optional printer ID to filter jobs by printer
+   */
+  async getJobQueue(printerId?: string): Promise<QueuedPrintJobWithFileMetaDto[]> {
+    const params: Record<string, string | number> = { limit: 100 };
+    if (printerId) {
+      // Use the printer-specific endpoint
+      const response = await this.client.get<QueuedPrintJobWithFileMetaDto[]>(
+        `/job-queue-analytics/printer/${printerId}`,
+        { params: { limit: 100 } }
+      );
+      return response.data;
+    }
+    // Use the global queue endpoint
+    const response = await this.client.get<QueuedPrintJobWithFileMetaDto[]>(
+      "/job-queue-analytics",
+      { params }
+    );
     return response.data;
   }
 
@@ -1615,11 +1656,11 @@ export class ApiClient {
     return response.data;
   }
 
-  async cancelJob(jobId: string): Promise<void> {
-    await this.client.patch(`/job-queue/${jobId}/cancel`);
-  }
-
-  async deleteJob(jobId: string): Promise<void> {
+  /**
+   * Delete a print queue job from the queue.
+   * Cannot delete jobs that are currently printing.
+   */
+  async deletePrintQueueJob(jobId: string): Promise<void> {
     await this.client.delete(`/job-queue/${jobId}`);
   }
 
@@ -1629,7 +1670,7 @@ export class ApiClient {
    * @param jobId - The ID of the job to dispatch
    * @returns The updated job with Starting/Printing status
    */
-  async dispatchJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+  async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
     const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
       `/job-queue/${jobId}/dispatch`
     );
@@ -2599,16 +2640,51 @@ export class ApiClient {
   }
 
   /**
-   * Get queue history with pagination (analytics)
+   * Get queue history with pagination and filtering (analytics)
+   * @param limit Maximum number of results (default 50)
+   * @param offset Number of results to skip (default 0)
+   * @param sortBy Field to sort by (newest, oldest, duration, model)
+   * @param statuses Array of statuses to filter by (completed, failed, cancelled)
+   * @param dateStart Start date filter (ISO string)
+   * @param dateEnd End date filter (ISO string)
    */
   async getAnalyticsQueueHistory(
     limit: number = 50,
     offset: number = 0,
-    sortBy: string = "completedAtUtc"
-  ): Promise<unknown> {
-    const response = await this.client.get(`/job-queue-analytics/history`, {
-      params: { limit, offset, sortBy },
-    });
+    sortBy: string = "newest",
+    statuses?: string[],
+    dateStart?: string | null,
+    dateEnd?: string | null
+  ): Promise<{ 
+    entries: unknown[]; 
+    totalCount: number; 
+    currentPage: number; 
+    pageSize: number;
+    stats: {
+      totalCompleted: number;
+      totalFailed: number;
+      totalCancelled: number;
+      successRate: number;
+      averageDurationMinutes: number;
+      totalPrintTimeMinutes: number;
+    };
+  }> {
+    const params: Record<string, unknown> = { limit, offset, sortBy };
+    
+    // Add statuses as comma-separated string if provided
+    if (statuses && statuses.length > 0) {
+      params.statuses = statuses.join(',');
+    }
+    
+    // Add date filters if provided
+    if (dateStart) {
+      params.dateStart = dateStart;
+    }
+    if (dateEnd) {
+      params.dateEnd = dateEnd;
+    }
+    
+    const response = await this.client.get(`/job-queue-analytics/history`, { params });
     return response.data;
   }
 
@@ -2663,16 +2739,17 @@ export class ApiClient {
   }
 
   /**
-   * Cancel a print job
+   * Cancel a print job - stops the print if currently printing.
+   * Sends a cancel command to the printer if the job is actively printing.
    */
   async cancelPrintQueueJob(jobId: string): Promise<void> {
-    await this.client.delete(`/job-queue/${jobId}`);
+    await this.client.post(`/job-queue/${jobId}/cancel`);
   }
 
   /**
-   * Rerun a completed job (add it back to queue)
+   * Rerun a completed print queue job (add it back to queue)
    */
-  async rerunJob(jobId: string): Promise<unknown> {
+  async rerunPrintQueueJob(jobId: string): Promise<unknown> {
     const response = await this.client.post(
       `/job-queue/${jobId}/rerun`
     );
@@ -2688,12 +2765,13 @@ export class ApiClient {
   }
 
   /**
-   * Seed history from printer APIs
+   * Seed history from printer APIs.
+   * Fetches all available history and uses deduplication to prevent duplicates.
+   * Safe to call multiple times.
    */
-  async seedHistory(printerIds?: string[], daysBack: number = 30): Promise<void> {
+  async seedHistory(printerIds?: string[]): Promise<void> {
     await this.client.post(`/job-queue/history/seed`, {
       printerIds,
-      daysBack,
     });
   }
 
@@ -2807,6 +2885,72 @@ export class ApiClient {
 
   async getApiKeySettings(): Promise<unknown> {
     const response = await this.client.get('/apikeys/settings');
+    return response.data;
+  }
+
+  // ============ Camera API methods ============
+  
+  /**
+   * Get all standalone cameras
+   */
+  async getAllCameras(): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.get('/cameras');
+    return response.data;
+  }
+
+  /**
+   * Get all enabled cameras (standalone only)
+   */
+  async getEnabledCameras(): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.get('/cameras/enabled');
+    return response.data;
+  }
+
+  /**
+   * Get combined display cameras (standalone + printer-attached)
+   * This is what should be shown in the Camera View
+   */
+  async getDisplayCameras(): Promise<import('@/types/api').DisplayCameraDto[]> {
+    const response = await this.client.get('/cameras/display');
+    return response.data;
+  }
+
+  /**
+   * Get a specific camera by ID
+   */
+  async getCameraById(id: string): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.get(`/cameras/${id}`);
+    return response.data;
+  }
+
+  /**
+   * Create a new standalone camera
+   */
+  async createCamera(request: import('@/types/api').CreateCameraDto): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.post('/cameras', request);
+    return response.data;
+  }
+
+  /**
+   * Update an existing camera
+   */
+  async updateCamera(id: string, request: import('@/types/api').UpdateCameraDto): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.put(`/cameras/${id}`, request);
+    return response.data;
+  }
+
+  /**
+   * Delete a camera
+   */
+  async deleteCamera(id: string): Promise<void> {
+    await this.client.delete(`/cameras/${id}`);
+  }
+
+  /**
+   * Toggle camera enabled status
+   */
+  async toggleCamera(id: string, isEnabled: boolean): Promise<import('@/types/api').CameraDto> {
+    const response = await this.client.patch(`/cameras/${id}/toggle`, { isEnabled });
     return response.data;
   }
 }

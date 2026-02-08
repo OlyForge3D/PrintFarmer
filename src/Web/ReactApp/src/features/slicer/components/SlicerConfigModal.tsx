@@ -215,9 +215,9 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 validationResult.valid ? 'text-green-700' : 'text-red-700'
               }`}>
                 {validationResult.valid ? (
-                  <CheckCircleIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <CheckCircleIcon className="w-4 h-4 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircleIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <AlertCircleIcon className="w-4 h-4 shrink-0 mt-0.5" />
                 )}
                 <div>
                   {validationResult.valid ? (
@@ -284,7 +284,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 />
                 <span className="flex items-center">
                   PrusaSlicer
-                  <span className="ml-2 px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded">
+                  <span className="ml-2 px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-sm">
                     Reliable
                   </span>
                 </span>
@@ -301,7 +301,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 />
                 <span className="flex items-center">
                   OrcaSlicer
-                  <span className="ml-2 px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded">
+                  <span className="ml-2 px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-sm">
                     Advanced
                   </span>
                 </span>
@@ -323,7 +323,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   const quality = e.target.value as 'draft' | 'standard' | 'fine';
                   setProfile(DEFAULT_PROFILES[quality]);
                 }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               >
                 <option value="draft">Draft (0.3mm)</option>
                 <option value="standard">Standard (0.2mm)</option>
@@ -344,7 +344,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   nozzleTemperature: e.target.value === 'PLA' ? 210 : e.target.value === 'PETG' ? 240 : 250,
                   bedTemperature: e.target.value === 'PLA' ? 60 : e.target.value === 'PETG' ? 80 : 90
                 })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               >
                 <option value="PLA">PLA</option>
                 <option value="PETG">PETG</option>
@@ -399,7 +399,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 max="300"
                 value={profile.nozzleTemperature}
                 onChange={(e) => updateProfile({ nozzleTemperature: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
@@ -415,7 +415,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 max="120"
                 value={profile.bedTemperature}
                 onChange={(e) => updateProfile({ bedTemperature: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>

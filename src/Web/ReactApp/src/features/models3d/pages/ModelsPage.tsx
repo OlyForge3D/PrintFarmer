@@ -142,9 +142,9 @@ export const ModelsPage: React.FC = () => {
 
         {/* Model Viewer Modal */}
         {viewerModel && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border flex flex-col max-w-4xl w-full max-h-[90vh]">
-              <div className="flex items-center justify-between p-4 border-b border-pf-border flex-shrink-0">
+              <div className="flex items-center justify-between p-4 border-b border-pf-border shrink-0">
                 <h3 className="font-medium text-lg text-pf-text-primary">{viewerModel.name}</h3>
                 <Button
                   onClick={() => setViewerModel(null)}
@@ -159,7 +159,7 @@ export const ModelsPage: React.FC = () => {
                   fallback={
                     <ViewerSkeleton
                       variant="model"
-                      className="h-[32rem] w-full"
+                      className="h-128 w-full"
                     />
                   }
                 >
@@ -168,7 +168,7 @@ export const ModelsPage: React.FC = () => {
                       modelUrl={viewerModel.url}
                       fileType={viewerModel.fileType}
                       showGrid={false}
-                      className="h-[32rem] w-full"
+                      className="h-128 w-full"
                     />
                   )}
                 </Suspense>
@@ -179,7 +179,7 @@ export const ModelsPage: React.FC = () => {
 
         {/* G-code Viewer Modal */}
         {gcodeViewer && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto border border-pf-border">
               <div className="flex items-center justify-between p-4 border-b border-pf-border">
                 <h3 className="font-medium text-lg text-pf-text-primary">{gcodeViewer.name}</h3>

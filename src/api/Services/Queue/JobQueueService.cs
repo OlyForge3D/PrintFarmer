@@ -58,6 +58,8 @@ namespace Farm.Web.Api.Services.Queue
         /// (matching either the canonical model name or a slicer-specific alias like "COREONEL").
         /// </summary>
         /// <param name="requiredModel">Optional printer model name or alias to filter by</param>
+        /// <param name="requiredNozzle">Optional required nozzle diameter in mm (exact match ±0.01mm)</param>
+        /// <param name="requiredMaterial">Optional required material type (case-insensitive)</param>
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>Read-only list of QueueOverviewDto objects, one per compatible printer</returns>
         /// <remarks>
@@ -65,22 +67,47 @@ namespace Farm.Web.Api.Services.Queue
         /// For each available printer, it includes queue count, currently printing job information, and
         /// estimated completion time. Used for dashboard displays and queue status monitoring.
         ///
-        /// When requiredModel is specified (e.g., "COREONEL", "Prusa MK4"), only printers whose
-        /// model name or aliases match will be returned. This enables efficient server-side filtering
-        /// for large printer fleets instead of loading all printers client-side.
+        /// All filtering is done server-side for consistency with auto-assign logic:
+        /// - Model: Case-insensitive matching against model name and aliases
+        /// - Nozzle: Exact match with ±0.01mm tolerance for floating point comparison
+        /// - Material: Case-insensitive matching against any toolhead's supported materials
         /// </remarks>
-        public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, CancellationToken ct)
+        public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(string? requiredModel, decimal? requiredNozzle, string? requiredMaterial, CancellationToken ct)
         {
             // Get printers - either all available or filtered by model compatibility
             List<Printer> printers = string.IsNullOrWhiteSpace(requiredModel)
                 ? await _dataService.GetAvailablePrintersAsync(ct)
                 : await _dataService.GetCompatiblePrintersAsync(requiredModel, ct);
 
+            // Apply nozzle filter if specified (exact match with tolerance)
+            // Only printers with a matching nozzle configured are included
+            if (requiredNozzle.HasValue)
+            {
+                double required = (double)requiredNozzle.Value;
+                printers = printers
+                    .Where(p => p.Toolheads?.Any(t =>
+                        t.NozzleModel != null &&
+                        Math.Abs(t.NozzleModel.Diameter - required) <= 0.01) ?? false)
+                    .ToList();
+            }
+
+            // Apply material filter if specified (case-insensitive)
+            if (!string.IsNullOrWhiteSpace(requiredMaterial))
+            {
+                printers = printers
+                    .Where(p => p.Toolheads?.Any(t => t.SupportedMaterials?.Any(m => string.Equals(m, requiredMaterial, StringComparison.OrdinalIgnoreCase)) ?? false) ?? false)
+                    .ToList();
+            }
+
             List<QueueOverviewDto> overview = [];
 
             foreach (Printer printer in printers)
             {
-                List<PrintJob> queuedJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+                List<PrintJob> allJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+
+                // Count jobs with Queued or Assigned status for the QueuedJobsCount display
+                // Assigned = job is assigned to this printer but not yet printing
+                int queuedCount = allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned);
                 PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
 
                 // Get primary toolhead info (first toolhead or the one marked as primary)
@@ -107,10 +134,10 @@ namespace Farm.Web.Api.Services.Queue
                     PrinterModel = printer.Model?.Name ?? "Unknown",
                     ModelAliases = modelAliases,
                     IsAvailable = printer.IsAvailable,
-                    QueuedJobsCount = queuedJobs.Count,
+                    QueuedJobsCount = queuedCount,
                     CurrentJobId = currentJob?.Id,
                     CurrentJobName = currentJob?.Name,
-                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(queuedJobs, currentJob),
+                    EstimatedCompletionTime = CalculateEstimatedCompletionTime(allJobs, currentJob),
                     NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                     SupportedMaterials = supportedMaterials
                 });
@@ -188,10 +215,26 @@ namespace Farm.Web.Api.Services.Queue
                 return null;
             }
 
-            Guid? assignedPrinterId = request.AssignedPrinterId;
+            // Merge request values with G-code file metadata (request takes precedence, G-code as fallback)
+            // This ensures the same matching logic works for:
+            // 1. OctoPrint upload+print (slicer sends values in request)
+            // 2. Manual queue from UI (may not include values - use G-code metadata)
+            // 3. Direct API calls (can specify overrides or rely on G-code metadata)
+            // Build effective request: request values take precedence, G-code metadata as fallback
+            QueuePrintJobDto effectiveRequest = new QueuePrintJobDto
+            {
+                GcodeFileId = request.GcodeFileId,
+                AssignedPrinterId = request.AssignedPrinterId,
+                Priority = request.Priority,
+                RequiredNozzleDiameter = request.RequiredNozzleDiameter ?? (decimal?)gcode.RequiredNozzleDiameter,
+                RequiredMaterialType = request.RequiredMaterialType ?? gcode.RequiredMaterial,
+                RequiredPrinterModel = request.RequiredPrinterModel ?? gcode.PrinterModel?.Name ?? gcode.ExtractedPrinterModelName
+            };
+
+            Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
             if (assignedPrinterId == null)
             {
-                assignedPrinterId = await FindBestAvailablePrinterAsync(request, ct);
+                assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, ct);
                 if (assignedPrinterId == null)
                 {
                     return null;
@@ -448,7 +491,10 @@ namespace Farm.Web.Api.Services.Queue
 
         private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request, CancellationToken ct)
         {
-            List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
+            // Filter by model if specified (same logic as manual printer selection)
+            List<Printer> printers = string.IsNullOrWhiteSpace(request.RequiredPrinterModel)
+                ? await _dataService.GetAvailablePrintersAsync(ct)
+                : await _dataService.GetCompatiblePrintersAsync(request.RequiredPrinterModel, ct);
 
             foreach (Printer printer in printers)
             {
@@ -463,10 +509,11 @@ namespace Farm.Web.Api.Services.Queue
                     }
                 }
 
-                // Check supported materials - now per-toolhead, check if any toolhead supports the material
+                // Check supported materials - case-insensitive comparison for material matching
                 if (!string.IsNullOrEmpty(request.RequiredMaterialType))
                 {
-                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.SupportedMaterials?.Contains(request.RequiredMaterialType) ?? false) ?? false;
+                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t =>
+                        t.SupportedMaterials?.Any(m => string.Equals(m, request.RequiredMaterialType, StringComparison.OrdinalIgnoreCase)) ?? false) ?? false;
                     if (!hasCompatibleToolhead)
                     {
                         continue;

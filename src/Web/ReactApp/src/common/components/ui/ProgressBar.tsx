@@ -20,7 +20,7 @@ const heightMap = {
 const colorMap: Record<string, string> = {
   blue: 'bg-pf-accent',
   green: 'bg-pf-success-bg',
-  purple: 'bg-gradient-to-r from-pf-gradient-secondary-start to-pf-gradient-secondary-end',
+  purple: 'bg-linear-to-r from-pf-gradient-secondary-start to-pf-gradient-secondary-end',
   red: 'bg-pf-error',
   gray: 'bg-pf-text-muted'
 };

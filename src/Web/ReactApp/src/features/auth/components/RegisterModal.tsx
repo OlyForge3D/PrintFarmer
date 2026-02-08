@@ -1,9 +1,9 @@
-import React, { useState, useActionState, useCallback } from 'react';
-import { useFormStatus } from 'react-dom';
+import React, { useState, useCallback } from 'react';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { EyeIcon, EyeOffIcon, UserPlusIcon } from '@/common/components/icons/MdiIcons';
+import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { Button } from '@/common/components/ui';
+import { Button, Input } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 
 interface RegisterModalProps {
@@ -12,86 +12,37 @@ interface RegisterModalProps {
   onSwitchToLogin: () => void;
 }
 
-interface RegisterFormState {
-  errors: string[];
-  success?: boolean;
-}
-
-/**
- * React 19 Action: Handles form validation and account creation
- * Extracted from component to work with useActionState pattern
- */
-async function registerAction(
-  prevState: RegisterFormState,
-  formData: FormData
-): Promise<RegisterFormState> {
-  const username = formData.get('username') as string;
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
-  const confirmPassword = formData.get('confirmPassword') as string;
-  // firstName and lastName are extracted here for validation but used in handleSubmit
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const firstName = (formData.get('firstName') as string) || undefined;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const lastName = (formData.get('lastName') as string) || undefined;
-
+function validateRegisterForm(data: {
+  username: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+}): string[] {
   const errors: string[] = [];
 
-  // Client-side validation
-  if (username.length < 3) {
+  if (data.username.trim().length < 3) {
     errors.push('Username must be at least 3 characters long');
   }
 
-  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+  if (!data.email || !/\S+@\S+\.\S+/.test(data.email)) {
     errors.push('Please enter a valid email address');
   }
 
-  if (password.length < 6) {
+  if (data.password.length < 6) {
     errors.push('Password must be at least 6 characters long');
   }
 
-  if (password !== confirmPassword) {
+  if (data.password !== data.confirmPassword) {
     errors.push('Passwords do not match');
   }
 
-  if (errors.length > 0) {
-    return { errors };
-  }
-
-  // Note: Server-side auth will be handled by the register function
-  // This action just returns the form data for validation
-  return { errors, success: false };
-}
-
-/**
- * SubmitButton component using React 19 useFormStatus
- * Automatically shows pending state from form submission
- */
-function RegisterSubmitButton({ isDisabled }: { isDisabled: boolean }) {
-  const { pending } = useFormStatus();
-
-  return (
-    <Button
-      type="submit"
-      disabled={pending || isDisabled}
-      variant="primary"
-      iconLeft={pending ? undefined : <UserPlusIcon className="h-4 w-4" />}
-    >
-      {pending ? (
-        <>
-          <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-          <span>Creating Account...</span>
-        </>
-      ) : (
-        'Create Account'
-      )}
-    </Button>
-  );
+  return errors;
 }
 
 export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -101,56 +52,56 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
     lastName: '',
   });
 
-  // React 19 useActionState for form state and submission
-  const [state, formAction, isPending] = useActionState(registerAction, {
-    errors: [],
-  });
-
   const { register, error: authError } = useAuth();
+  const [clientErrors, setClientErrors] = useState<string[]>([]);
 
-  const handleSubmit = async (formDataObj: FormData) => {
-    const username = formDataObj.get('username') as string;
-    const email = formDataObj.get('email') as string;
-    const password = formDataObj.get('password') as string;
-    const firstName = (formDataObj.get('firstName') as string) || undefined;
-    const lastName = (formDataObj.get('lastName') as string) || undefined;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
 
-    // Validation already done by action, if we reach here it's valid
-    if (state.errors.length === 0) {
-      try {
-        const result = await register({
-          username,
-          email,
-          password,
-          firstName,
-          lastName,
-        });
+    const errors = validateRegisterForm({
+      username: formData.username,
+      email: formData.email,
+      password: formData.password,
+      confirmPassword: formData.confirmPassword,
+    });
+    setClientErrors(errors);
+    if (errors.length > 0) return;
 
-        if (result === 'pending') {
-          window.location.href = '/registration-pending';
-          return;
-        }
+    setIsLoading(true);
+    try {
+      const result = await register({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName.trim() ? formData.firstName.trim() : undefined,
+        lastName: formData.lastName.trim() ? formData.lastName.trim() : undefined,
+      });
 
-        if (result) {
-          onClose();
-          setFormData({
-            username: '',
-            email: '',
-            password: '',
-            confirmPassword: '',
-            firstName: '',
-            lastName: '',
-          });
-        }
-      } catch (err) {
-        // Error handled by useAuth context
-        console.error('Registration error:', err);
+      if (result === 'pending') {
+        window.location.href = '/registration-pending';
+        return;
       }
+
+      if (result) {
+        onClose();
+        setFormData({
+          username: '',
+          email: '',
+          password: '',
+          confirmPassword: '',
+          firstName: '',
+          lastName: '',
+        });
+        setClientErrors([]);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleClose = useCallback(() => {
-    if (!isPending) {
+    if (!isLoading) {
       onClose();
       setFormData({
         username: '',
@@ -160,72 +111,72 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
         firstName: '',
         lastName: '',
       });
+      setClientErrors([]);
     }
-  }, [isPending, onClose]);
+  }, [isLoading, onClose]);
 
   const handleInputChange = (field: keyof typeof formData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
-
-
-  const allErrors = [...(state.errors || []), ...(authError ? [authError] : [])];
+  const allErrors = [...clientErrors, ...(authError ? [authError] : [])];
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
       title="Create Account"
+      titleIcon={<PrintFarmerLogo size={28} />}
       width="max-w-md"
-      isDisabled={isPending}
+      isDisabled={isLoading}
+      closeButtonVariant="ghost"
     >
-      {isPending && (
+      {isLoading && (
         <div className="px-6 pt-4"><FormSkeleton fields={6} /></div>
       )}
-      <form action={formAction} className="p-6 space-y-4" onSubmit={(e) => {
-        e.preventDefault();
-        const formDataObj = new FormData(e.currentTarget);
-        handleSubmit(formDataObj);
-      }}>
-          <div className="sr-only" role="status" aria-live="polite">
-            {isPending ? 'Creating account...' : 'Form ready'}
-          </div>
-          {allErrors.length > 0 && (
-            <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm space-y-1" style={{ color: 'var(--pf-error)' }}>
-              {allErrors.map((err, index) => (
-                <div key={index}>{err}</div>
-              ))}
-            </div>
-          )}
+      <form onSubmit={handleSubmit} className="space-y-4" aria-live="polite">
+        <div className="sr-only" role="status" aria-live="polite">
+          {isLoading ? 'Creating account...' : 'Form ready'}
+        </div>
 
-          <div className="grid grid-cols-2 gap-4">
+        {allErrors.length > 0 && (
+          <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm space-y-1" style={{ color: 'var(--pf-error)' }}>
+            {allErrors.map((err, index) => (
+              <div key={index}>{err}</div>
+            ))}
+          </div>
+        )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-1">
                 First Name
               </label>
-              <input
+              <Input
                 type="text"
                 id="firstName"
                 name="firstName"
                 value={formData.firstName}
                 onChange={(e) => handleInputChange('firstName', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+                className="bg-pf-bg-0"
                 placeholder="Optional"
-                disabled={isPending}
+                autoComplete="given-name"
+                disabled={isLoading}
               />
             </div>
             <div>
               <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-1">
                 Last Name
               </label>
-              <input
+              <Input
                 type="text"
                 id="lastName"
                 name="lastName"
                 value={formData.lastName}
                 onChange={(e) => handleInputChange('lastName', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+                className="bg-pf-bg-0"
                 placeholder="Optional"
-                disabled={isPending}
+                autoComplete="family-name"
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -234,16 +185,17 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
               Username *
             </label>
-            <input
+            <Input
               type="text"
               id="username"
               name="username"
               value={formData.username}
               onChange={(e) => handleInputChange('username', e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+              className="bg-pf-bg-0"
               placeholder="Choose a username"
               required
-              disabled={isPending}
+              autoComplete="username"
+              disabled={isLoading}
             />
           </div>
 
@@ -251,16 +203,17 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-1">
               Email Address *
             </label>
-            <input
+            <Input
               type="email"
               id="email"
               name="email"
               value={formData.email}
               onChange={(e) => handleInputChange('email', e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
+              className="bg-pf-bg-0"
               placeholder="Enter your email"
               required
-              disabled={isPending}
+              autoComplete="email"
+              disabled={isLoading}
             />
           </div>
 
@@ -269,23 +222,26 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               Password *
             </label>
             <div className="relative">
-              <input
+              <Input
                 type={showPassword ? 'text' : 'password'}
                 id="password"
                 name="password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
+                className="pr-10 bg-pf-bg-0"
                 placeholder="Create a password"
                 required
-                disabled={isPending}
+                autoComplete="new-password"
+                disabled={isLoading}
               />
               <Button
                 onClick={() => setShowPassword(!showPassword)}
                 variant="subtle"
-                disabled={isPending}
+                size="sm"
+                disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
@@ -297,40 +253,61 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               Confirm Password *
             </label>
             <div className="relative">
-              <input
+              <Input
                 type={showConfirmPassword ? 'text' : 'password'}
                 id="confirmPassword"
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
+                className="pr-10 bg-pf-bg-0"
                 placeholder="Confirm your password"
                 required
-                disabled={isPending}
+                autoComplete="new-password"
+                disabled={isLoading}
               />
               <Button
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 variant="subtle"
-                disabled={isPending}
+                size="sm"
+                disabled={isLoading}
                 type="button"
-                className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+                aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
               >
                 {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4">
+          <div className="pt-4 space-y-3">
             <Button
-              onClick={onSwitchToLogin}
-              variant="subtle"
-              type="button"
-              className="text-pf-accent hover:text-pf-accent-dark text-sm"
-              disabled={isPending}
+              type="submit"
+              disabled={isLoading || !formData.username || !formData.email || !formData.password || !formData.confirmPassword}
+              variant="primary"
+              iconLeft={isLoading ? undefined : <UserPlusIcon className="h-4 w-4" />}
+              className="w-full justify-center"
             >
-              Already have an account? Sign In
+              {isLoading ? (
+                <>
+                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Creating Account...</span>
+                </>
+              ) : (
+                'Create Account'
+              )}
             </Button>
-            <RegisterSubmitButton isDisabled={!formData.username || !formData.email || !formData.password} />
+
+            <div className="flex items-center justify-center gap-1 text-sm text-pf-text-secondary">
+              <span>Have an account?</span>
+              <Button
+                onClick={onSwitchToLogin}
+                variant="link"
+                type="button"
+                disabled={isLoading}
+              >
+                Sign in
+              </Button>
+            </div>
           </div>
         </form>
       </Modal>

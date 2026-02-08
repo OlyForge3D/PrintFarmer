@@ -30,11 +30,11 @@ const getStatusIcon = (status: string) => {
 const getStatusClass = (status: string) => {
   switch (status) {
     case 'Imported':
-      return 'bg-pf-bg-0 bg-opacity-50';
+      return 'bg-pf-bg-0/50';
     case 'Failed':
-      return 'bg-red-500 bg-opacity-10';
+      return 'bg-red-500/10';
     case 'Skipped':
-      return 'bg-yellow-500 bg-opacity-10';
+      return 'bg-yellow-500/10';
     default:
       return '';
   }
@@ -88,7 +88,7 @@ const ImportProgressTable: React.FC<ImportProgressTableProps> = ({ items, fileNa
       )}
 
       {/* Results table */}
-      <div className="max-h-96 overflow-y-auto border border-pf-border rounded">
+      <div className="max-h-96 overflow-y-auto border border-pf-border rounded-sm">
         <table className="w-full text-sm">
           <thead className="bg-pf-bg-1 sticky top-0 border-b border-pf-border">
             <tr>

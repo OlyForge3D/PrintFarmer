@@ -124,7 +124,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                             checked={selectAllModels}
                             onChange={(e) => handleSelectAllModels(e.target.checked)}
                             disabled={isLoading}
-                                className="rounded"
+                                className="rounded-sm"
                             />
                             Select All
                         </label>
@@ -134,7 +134,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                             models.map((model: ModelOption) => (
                                 <label
                                     key={model.id}
-                                    className={`flex items-center gap-3 p-2 rounded transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
+                                    className={`flex items-center gap-3 p-2 rounded-sm transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
                                 >
                                     <Checkbox
                                         checked={selectedModelIds.includes(model.id)}
@@ -147,7 +147,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                             }
                                         }}
                                         disabled={isLoading}
-                                        className="rounded"
+                                        className="rounded-sm"
                                     />
                                     <div className="flex-1">
                                         <div className="text-pf-text-primary font-medium">{model.name}</div>
@@ -176,7 +176,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
 
                 {/* Error Message */}
                 {assignTagsMutation.isError && (
-                    <div className="p-4 bg-pf-error bg-opacity-10 border border-pf-error text-pf-error rounded-lg">
+                    <div className="p-4 bg-pf-error/10 border border-pf-error text-pf-error rounded-lg">
                         {assignTagsMutation.error instanceof Error
                             ? assignTagsMutation.error.message
                             : 'Failed to assign tags'}
@@ -185,7 +185,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
 
                 {/* Success Message */}
                 {assignTagsMutation.isSuccess && (
-                    <div className="p-4 bg-pf-success bg-opacity-10 border border-pf-success text-pf-success rounded-lg flex items-center gap-2">
+                    <div className="p-4 bg-pf-success/10 border border-pf-success text-pf-success rounded-lg flex items-center gap-2">
                         <CheckIcon className="w-5 h-5" />
                         Tags assigned successfully!
                     </div>

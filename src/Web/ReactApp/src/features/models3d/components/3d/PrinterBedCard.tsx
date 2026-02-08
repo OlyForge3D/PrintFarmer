@@ -112,7 +112,7 @@ const ProgressBar: React.FC<{
       </div>
       <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
         <div
-          className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+          className="h-full bg-linear-to-r from-purple-500 to-pink-500 transition-all duration-300"
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -245,7 +245,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
 
           {/* Error Message */}
           {status.state === 'Error' && status.state === 'Error' && (
-            <div className="bg-red-900/30 border border-red-700 rounded p-2">
+            <div className="bg-red-900/30 border border-red-700 rounded-sm p-2">
               <p className="text-xs text-red-200">Error: Check printer status</p>
             </div>
           )}

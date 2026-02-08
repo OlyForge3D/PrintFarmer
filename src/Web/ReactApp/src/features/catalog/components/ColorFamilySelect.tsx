@@ -79,18 +79,18 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
         data-open={open ? 'true' : 'false'}
         onClick={() => { setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
         onKeyDown={onKeyDown}
-        className="w-40 border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none pr-7 flex items-center justify-between gap-2"
+        className="w-40 border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none pr-7 flex items-center justify-between gap-2"
         variant="subtle"
       >
         <span className="flex items-center gap-2 flex-1">
           {value ? (
-            <span className={`w-4 h-4 rounded border border-pf-border flex-shrink-0 ${colorFamilyBgClass[value] || 'bg-pf-text-muted'}`} aria-hidden="true" />
+            <span className={`w-4 h-4 rounded-sm border border-pf-border shrink-0 ${colorFamilyBgClass[value] || 'bg-pf-text-muted'}`} aria-hidden="true" />
           ) : (
-            <span className="w-4 h-4 rounded border border-dashed border-pf-border flex-shrink-0" aria-hidden="true" />
+            <span className="w-4 h-4 rounded-sm border border-dashed border-pf-border shrink-0" aria-hidden="true" />
           )}
           <span className="truncate">{visibleLabel}</span>
         </span>
-        <span className="text-xs opacity-60 flex-shrink-0" aria-hidden="true">{open ? '▲' : '▼'}</span>
+        <span className="text-xs opacity-60 shrink-0" aria-hidden="true">{open ? '▲' : '▼'}</span>
       </Button>
       {open && (
         <div
@@ -99,7 +99,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
           tabIndex={-1}
           aria-label={label}
           aria-activedescendant={activeIdx >= 0 ? `${id || 'color-family'}-opt-${activeIdx}` : undefined}
-          className="absolute z-50 mt-1 w-40 max-h-72 overflow-auto rounded border border-pf-border bg-pf-bg-1 shadow-lg py-1"
+          className="absolute z-50 mt-1 w-40 max-h-72 overflow-auto rounded-sm border border-pf-border bg-pf-bg-1 shadow-lg py-1"
           onKeyDown={onKeyDown}
         >
           <div
@@ -111,7 +111,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
             onClick={() => commit('')}
             data-active={activeIdx === 0 ? 'true' : 'false'}
           >
-            <span className="w-4 h-4 rounded border border-dashed border-pf-border" aria-hidden="true" />
+            <span className="w-4 h-4 rounded-sm border border-dashed border-pf-border" aria-hidden="true" />
             All Colors
           </div>
           {families.map((fam, i) => {
@@ -129,7 +129,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
                 onClick={() => commit(fam)}
                 data-active={active ? 'true' : 'false'}
               >
-                <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[fam] || 'bg-pf-text-muted'}`} aria-hidden="true" />
+                <span className={`w-4 h-4 rounded-sm border border-pf-border ${colorFamilyBgClass[fam] || 'bg-pf-text-muted'}`} aria-hidden="true" />
                 <span>{fam}</span>
               </div>
             );

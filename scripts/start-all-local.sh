@@ -301,7 +301,19 @@ if [[ $TEAR_DOWN -eq 1 ]]; then
   rm -f "$API_DIR/farm.db" 2>/dev/null || true
   rm -f "$API_DIR/farm.db-shm" 2>/dev/null || true
   rm -f "$API_DIR/farm.db-wal" 2>/dev/null || true
-  log_success "Databases deleted - will be recreated on next startup"
+
+  # The API can also create a database under build output directories (depending on working directory).
+  if [[ -d "$API_DIR/bin" ]]; then
+    find "$API_DIR/bin" -maxdepth 6 -type f \( \
+      -name 'farm.db' -o -name 'farm.db-shm' -o -name 'farm.db-wal' \
+    \) -delete 2>/dev/null || true
+  fi
+
+  if [[ -f "$API_DIR/farm.db" ]] || [[ -f "$API_DIR/farm.db-shm" ]] || [[ -f "$API_DIR/farm.db-wal" ]]; then
+    log_warn "Database files are still present under $API_DIR (may be recreated by a running process)"
+  else
+    log_success "Databases deleted - will be recreated on next startup"
+  fi
   
   # Delete React .env file so it's regenerated on next startup
   log_info "Deleting React .env file..."
@@ -328,12 +340,14 @@ require_command node
 # Verify .NET version
 if ! dotnet --version | grep -q "^10\.0\."; then
   log_error ".NET SDK 10.0+ required. Current version: $(dotnet --version)"
+  exit 1
 fi
 
 # Verify Node.js version
 node_version=$(node --version | sed 's/v//')
 if ! printf '%s\n18.0.0\n' "$node_version" | sort -V | head -1 | grep -q "^18"; then
   log_error "Node.js >=20.19 required. Current version: $node_version"
+  exit 1
 fi
 
 log_success "Prerequisites check passed"
@@ -375,18 +389,41 @@ if [[ ! -f "$API_DIR/bin/Debug/net10.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]
   dotnet restore ./farm-web.sln
   if ! dotnet build ./farm-web.sln -c Debug; then
     log_error "❌ .NET build failed! Fix build errors before starting services."
+    exit 1
   fi
   log_success "✅ .NET build completed successfully"
 fi
 
 cd "$REACT_DIR"
+
+# If node_modules already exists, it can still be stale after pulling new deps.
+# Ensure required packages exist before starting Vite.
+NEEDS_NPM_INSTALL=0
 if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
+  NEEDS_NPM_INSTALL=1
+elif [[ ! -d "node_modules/@tailwindcss/postcss" ]]; then
+  # Tailwind v4 uses @tailwindcss/postcss; Vite will fail hard if it's missing.
+  NEEDS_NPM_INSTALL=1
+fi
+
+if [[ $NEEDS_NPM_INSTALL -eq 1 ]]; then
   log_info "Installing React dependencies..."
   if ! npm install --legacy-peer-deps; then
     log_error "❌ npm install failed! Check npm errors before starting services."
+    exit 1
   fi
   log_success "✅ React dependencies installed successfully"
 fi
+
+# Verify critical dependencies are installed (Tailwind CSS v4 PostCSS plugin)
+log_info "Verifying Tailwind CSS v4 PostCSS plugin..."
+if [[ ! -d "node_modules/@tailwindcss/postcss" ]]; then
+  log_error "❌ Critical dependency @tailwindcss/postcss not found!"
+  log_error "   This is required for Tailwind CSS v4 to work with Vite."
+  log_error "   Try running: npm install --legacy-peer-deps"
+  exit 1
+fi
+log_success "✅ Tailwind CSS v4 PostCSS plugin verified"
 
 # Always clear Vite cache to ensure fresh dev server with latest code
 log_info "Clearing Vite cache for fresh development..."
@@ -409,6 +446,7 @@ export ALLOW_LOCAL_NETWORK="true"
 if [[ "$AUTO_ADMIN" == "true" ]]; then
   if [[ -z "$AUTO_ADMIN_PASSWORD" ]]; then
     log_error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
+    exit 1
   fi
   log_info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
   # Export AUTO_ADMIN variables so API can use them
@@ -435,10 +473,10 @@ fi
 log_info "Starting Printer Discovery service on 0.0.0.0:5246..."
 cd "$SRC_DIR"
 if [[ $FOREGROUND -eq 1 ]]; then
-  ASPNETCORE_URLS="http://0.0.0.0:5246" Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --project printer-discovery/PrinterDiscoveryService.csproj > "$DISCOVERY_LOG" 2>&1 &
+  Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --no-launch-profile --project printer-discovery/PrinterDiscoveryService.csproj --urls "http://0.0.0.0:5246" > "$DISCOVERY_LOG" 2>&1 &
   DISCOVERY_PID=$!
 else
-  ASPNETCORE_URLS="http://0.0.0.0:5246" Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --project printer-discovery/PrinterDiscoveryService.csproj > "$DISCOVERY_LOG" 2>&1 &
+  Discovery__ApiBaseUrl="http://localhost:5245" dotnet run --no-launch-profile --project printer-discovery/PrinterDiscoveryService.csproj --urls "http://0.0.0.0:5246" > "$DISCOVERY_LOG" 2>&1 &
   DISCOVERY_PID=$!
 fi
 
@@ -494,7 +532,7 @@ REACT_PID=$REACT_PID
 API_URL=$API_URL
 DISCOVERY_URL=$DISCOVERY_URL
 REACT_URL=$REACT_URL
-STARTED_AT=$(date)
+STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
 log_success "Services starting..."

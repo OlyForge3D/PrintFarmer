@@ -4,6 +4,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
+import { Textarea } from '@/common/components/ui/Textarea';
 import type { MaintenanceSchedule, CreateMaintenanceLogRequest } from '@/types/maintenance';
 import { WrenchIcon } from '@heroicons/react/24/outline';
 
@@ -263,11 +264,11 @@ export function LogMaintenanceModal({
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
             Notes
           </label>
-          <textarea
+          <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Describe what was done, any issues found, etc."
-            className="w-full h-24 px-3 py-2 bg-pf-bg-dark border border-pf-border rounded-lg text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-primary"
+            className="w-full h-24"
           />
         </div>
 

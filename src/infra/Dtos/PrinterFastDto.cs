@@ -22,7 +22,6 @@ public record PrinterFastDto(
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null,
     int BackendPort = 80,
     int? FrontendPort = null,
     bool InMaintenance = false,

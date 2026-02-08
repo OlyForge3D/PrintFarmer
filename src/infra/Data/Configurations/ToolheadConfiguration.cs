@@ -1,0 +1,61 @@
+﻿using System.Text.Json;
+using Farm.Infrastructure.Domain;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Farm.Infrastructure.Data.Configurations;
+
+/// <summary>
+/// Entity Framework configuration for the Toolhead entity.
+/// Extracted from AppDbContext.OnModelCreating for better maintainability.
+/// </summary>
+public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
+{
+    public void Configure(EntityTypeBuilder<Toolhead> builder)
+    {
+        builder.HasKey(t => t.Id);
+
+        // Basic properties
+        builder.Property(t => t.Name).HasMaxLength(128);
+        builder.Property(t => t.Index).IsRequired();
+        builder.Property(t => t.IsPrimary).HasDefaultValue(false);
+        builder.Property(t => t.UpdatedAt).IsRequired();
+
+        // JSON array properties
+        builder.Property(t => t.SupportedMaterials)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+
+        // Foreign Key to Printer
+        builder.HasOne(t => t.Printer)
+            .WithMany(p => p.Toolheads)
+            .HasForeignKey(t => t.PrinterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Foreign Keys to Component Models (optional relationships)
+        builder.HasOne(t => t.HotendModel)
+            .WithMany()
+            .HasForeignKey(t => t.HotendModelId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(t => t.ExtruderModel)
+            .WithMany()
+            .HasForeignKey(t => t.ExtruderModelId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(t => t.ToolheadModelDef)
+            .WithMany()
+            .HasForeignKey(t => t.ToolheadModelDefId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(t => t.NozzleModel)
+            .WithMany()
+            .HasForeignKey(t => t.NozzleModelId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Indexes
+        builder.HasIndex(t => t.PrinterId);
+        builder.HasIndex(t => t.Index);
+    }
+}

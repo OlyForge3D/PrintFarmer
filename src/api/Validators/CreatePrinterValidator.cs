@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure;
+﻿using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using FluentValidation;
 
@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Validators;
 /// <summary>
 /// Validates printer creation requests to ensure data integrity and security
 /// </summary>
-public class CreatePrinterValidator : AbstractValidator<CreatePrinterDto>
+public class CreatePrinterValidator : AbstractValidator<CreatePrinterFromDiscoveryDto>
 {
     public CreatePrinterValidator()
     {

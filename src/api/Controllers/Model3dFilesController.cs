@@ -241,6 +241,7 @@ public class Model3DFilesController(
     /// <param name="forceStl">Force conversion of 3MF files to STL format</param>
     /// <returns>Model file</returns>
     [HttpGet("file/{id:guid}")]
+    [AllowAnonymous] // Allow 3D viewer to load models without authentication
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelFileAsync(Guid id, [FromQuery] bool forceStl = false)

@@ -186,7 +186,7 @@ export function ApiKeysPage() {
             <p className="text-pf-text-secondary text-sm mb-3">
               <strong className="text-pf-warning">Important:</strong> Copy this API key now. You won't be able to see it again!
             </p>
-            <div className="bg-pf-bg-2 p-3 rounded border border-pf-border font-mono text-sm break-all">
+            <div className="bg-pf-bg-2 p-3 rounded-sm border border-pf-border font-mono text-sm break-all">
               {createdKey.key}
             </div>
             <div className="mt-3 flex gap-2">
@@ -229,7 +229,7 @@ export function ApiKeysPage() {
           </div>
 
           {showCreateForm && (
-            <div className="mb-6 p-4 bg-pf-bg-2 rounded border border-pf-border">
+            <div className="mb-6 p-4 bg-pf-bg-2 rounded-sm border border-pf-border">
               <h3 className="font-semibold text-pf-text-primary mb-3">Create New API Key</h3>
               <div className="flex gap-2">
                 <input
@@ -237,7 +237,7 @@ export function ApiKeysPage() {
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder="Enter a descriptive name (e.g., 'PrusaSlicer Workstation')"
-                  className="flex-1 px-3 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-primary"
+                  className="flex-1 px-3 py-2 bg-pf-bg-1 border border-pf-border rounded-sm text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-primary"
                   onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                 />
                 <Button
@@ -274,7 +274,7 @@ export function ApiKeysPage() {
               {apiKeys.map((apiKey: ApiKeyDto) => (
                 <div
                   key={apiKey.id}
-                  className="p-4 bg-pf-bg-2 rounded border border-pf-border"
+                  className="p-4 bg-pf-bg-2 rounded-sm border border-pf-border"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -331,7 +331,7 @@ export function ApiKeysPage() {
                   {revealedKeys[apiKey.id] && (
                     <div className="mt-3 pt-3 border-t border-pf-border">
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 bg-pf-bg-1 px-3 py-2 rounded border border-pf-border font-mono text-sm break-all text-pf-text-primary">
+                        <code className="flex-1 bg-pf-bg-1 px-3 py-2 rounded-sm border border-pf-border font-mono text-sm break-all text-pf-text-primary">
                           {revealedKeys[apiKey.id]}
                         </code>
                         <Button

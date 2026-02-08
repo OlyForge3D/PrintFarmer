@@ -25,8 +25,9 @@ public record PrinterDetailsDto(
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null,
     int? BackendPort = null,
     int? FrontendPort = null,
     PrinterCapabilitiesDto? Capabilities = null,
-    ToolheadDto[]? Toolheads = null);
+    ToolheadDto[]? Toolheads = null,
+    string? Username = null,
+    string? Password = null);

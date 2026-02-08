@@ -79,44 +79,47 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
 
   useEffect(() => {
     if (model) {
-      const initialData: UpdateModelRequest = {
-        name: model.name,
-        motionType: model.motionType,
-        maxX: model.maxX,
-        maxY: model.maxY,
-        maxZ: model.maxZ,
-        defaultBackend: model.defaultBackend,
-        supportedFilamentTypeIds: undefined, // Will be set based on supportedMaterialNames
+      // Defer all state updates to satisfy React Compiler rules
+      queueMicrotask(() => {
+        const initialData: UpdateModelRequest = {
+          name: model.name,
+          motionType: model.motionType,
+          maxX: model.maxX,
+          maxY: model.maxY,
+          maxZ: model.maxZ,
+          defaultBackend: model.defaultBackend,
+          supportedFilamentTypeIds: undefined, // Will be set based on supportedMaterialNames
+          
+          // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
+          hasHeatedBed: model.hasHeatedBed,
+          hasEnclosure: model.hasEnclosure,
+          multiMaterial: model.multiMaterial,
+          supportsAutoLeveling: model.supportsAutoLeveling,
+          
+          // Temperature ranges
+          maxBedTemp: model.maxBedTemp,
+          
+          // Speed capabilities
+          maxPrintSpeed: model.maxPrintSpeed,
+        };
         
-        // Default capabilities (nozzle diameter and max hotend temp are now on toolheads)
-        hasHeatedBed: model.hasHeatedBed,
-        hasEnclosure: model.hasEnclosure,
-        multiMaterial: model.multiMaterial,
-        supportsAutoLeveling: model.supportsAutoLeveling,
+        setFormData(initialData);
+        setOriginalFormData(initialData);
         
-        // Temperature ranges
-        maxBedTemp: model.maxBedTemp,
+        // Initialize supported material names from the model
+        const materials = model.supportedFilamentTypes || [];
+        setSupportedMaterialNames(materials);
+        setOriginalMaterialNames(materials);
         
-        // Speed capabilities
-        maxPrintSpeed: model.maxPrintSpeed,
-      };
-      
-      setFormData(initialData);
-      setOriginalFormData(initialData);
-      
-      // Initialize supported material names from the model
-      const materials = model.supportedFilamentTypes || [];
-      setSupportedMaterialNames(materials);
-      setOriginalMaterialNames(materials);
-      
-      // Initialize toolheads from the model
-      const modelToolheads = model.toolheads || [];
-      setToolheads(modelToolheads);
-      setOriginalToolheads(modelToolheads);
-      setExpandedToolheads(new Set());
-      
-      // Reset alias tracking
-      setAliasesHaveChanges(false);
+        // Initialize toolheads from the model
+        const modelToolheads = model.toolheads || [];
+        setToolheads(modelToolheads);
+        setOriginalToolheads(modelToolheads);
+        setExpandedToolheads(new Set());
+        
+        // Reset alias tracking
+        setAliasesHaveChanges(false);
+      });
     }
   }, [model]);
 
@@ -594,7 +597,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   value={formData.defaultBackend}
                   onChange={(backend) => handleInputChange('defaultBackend', backend)}
                   valueType="string"
-                  className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
+                  className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-hidden focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
                 />
               </FormField>
             </div>
@@ -636,7 +639,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                       <span className="flex items-center gap-2">
                         {toolhead.name || `Toolhead ${index + 1}`}
                         {toolhead.isPrimary && (
-                          <span className="text-xs px-1.5 py-0.5 bg-pf-accent/20 text-pf-accent rounded font-normal">
+                          <span className="text-xs px-1.5 py-0.5 bg-pf-accent/20 text-pf-accent rounded-sm font-normal">
                             Primary
                           </span>
                         )}

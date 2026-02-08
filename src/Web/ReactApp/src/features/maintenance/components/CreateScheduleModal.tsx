@@ -3,6 +3,8 @@ import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
+import { Textarea } from '@/common/components/ui/Textarea';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import type { CreateMaintenanceScheduleRequest } from '@/types/maintenance';
 import { CalendarDaysIcon } from '@heroicons/react/24/outline';
 
@@ -246,11 +248,11 @@ export function CreateScheduleModal({
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
             Description
           </label>
-          <textarea
+          <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What should be done during this maintenance?"
-            className="w-full h-20 px-3 py-2 bg-pf-bg-dark border border-pf-border rounded-lg text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-primary"
+            className="w-full h-20"
           />
         </div>
 
@@ -277,19 +279,21 @@ export function CreateScheduleModal({
             Maintenance Interval <span className="text-red-500">*</span>
           </label>
           <div className="flex gap-2">
-            <Input
-              type="number"
-              min="1"
-              value={intervalValue}
-              onChange={(e) => setIntervalValue(e.target.value)}
-              placeholder="Enter value"
-              className="flex-1"
-              required
-            />
+            <div className="flex-1">
+              <Input
+                type="number"
+                min="1"
+                value={intervalValue}
+                onChange={(e) => setIntervalValue(e.target.value)}
+                placeholder="Enter value"
+                className="w-full"
+                required
+              />
+            </div>
             <Select
               value={intervalType}
               onChange={(e) => setIntervalType(e.target.value as 'hours' | 'days')}
-              className="w-40"
+              containerClassName="w-40"
             >
               <option value="hours">Print Hours</option>
               <option value="days">Calendar Days</option>
@@ -320,12 +324,10 @@ export function CreateScheduleModal({
 
         {/* Active Toggle */}
         <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
+          <Checkbox
             id="isActive"
             checked={isActive}
             onChange={(e) => setIsActive(e.target.checked)}
-            className="w-4 h-4 rounded border-pf-border text-pf-primary focus:ring-pf-primary"
           />
           <label htmlFor="isActive" className="text-sm text-pf-text-primary">
             Schedule is active (will generate alerts)

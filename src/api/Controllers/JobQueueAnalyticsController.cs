@@ -146,7 +146,10 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
-    /// <param name="sortBy">Field to sort by (default completedAt)</param>
+    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status)</param>
+    /// <param name="statuses">Comma-separated list of statuses to filter by (completed, failed, cancelled)</param>
+    /// <param name="dateStart">Start date filter (ISO 8601 format, inclusive)</param>
+    /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("history")]
     [ProducesResponseType(typeof(QueueHistoryPageDto), StatusCodes.Status200OK)]
@@ -156,6 +159,9 @@ public class JobQueueAnalyticsController(
         [FromQuery] int limit = 50,
         [FromQuery] int offset = 0,
         [FromQuery] string sortBy = "completedAt",
+        [FromQuery] string? statuses = null,
+        [FromQuery] DateTime? dateStart = null,
+        [FromQuery] DateTime? dateEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -165,7 +171,15 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Limit must be between 1 and 1000" });
             }
 
-            QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(limit, offset, sortBy, cancellationToken);
+            // Parse comma-separated statuses into a list
+            List<string>? statusList = null;
+            if (!string.IsNullOrWhiteSpace(statuses))
+            {
+                statusList = statuses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            }
+
+            QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(
+                limit, offset, sortBy, statusList, dateStart, dateEnd, cancellationToken);
             return Ok(history);
         }
         catch (Exception ex)
@@ -618,9 +632,11 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Seed queue history from printer APIs (Phase 2)
+    /// Seed queue history from printer APIs.
+    /// Fetches all available history (up to 10,000 jobs per printer) and uses
+    /// deduplication to prevent duplicates. Safe to call multiple times.
     /// </summary>
-    /// <param name="request">Optional request specifying printer IDs and days back to seed</param>
+    /// <param name="request">Optional request specifying printer IDs to seed from</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("history/seed")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
@@ -634,9 +650,8 @@ public class JobQueueAnalyticsController(
         try
         {
             List<string>? printerIds = request?.PrinterIds;
-            int daysBack = request?.DaysBack ?? 30;
 
-            await _printJobManagementService.SeedHistoryFromPrintersAsync(printerIds, daysBack, cancellationToken);
+            await _printJobManagementService.SeedHistoryFromPrintersAsync(printerIds, cancellationToken);
 
             return Accepted();
         }

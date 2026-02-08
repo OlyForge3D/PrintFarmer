@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { Button } from '@/common/components/ui';
 import { useMaintenanceTrends } from '../hooks/useMaintenanceTrends';
 import { CSVLink } from 'react-csv';
 import jsPDF from 'jspdf';
@@ -45,19 +46,20 @@ export const MaintenanceReport: React.FC = () => {
     <section aria-labelledby="maintenance-report-title" className="mt-8">
       <h2 id="maintenance-report-title" className="text-lg font-semibold mb-2">Maintenance Report</h2>
       <div className="flex gap-2 mb-4">
-        <button
+        <Button
+          variant="primary"
           type="button"
           onClick={exportPDF}
-          className="px-3 py-1 bg-blue-600 text-white rounded focus:outline focus-visible:ring"
+          className="px-3 py-1"
         >
           Export PDF
-        </button>
+        </Button>
         <CSVLink
           data={data}
           headers={headers}
           filename="maintenance-report.csv"
           ref={csvLinkRef}
-          className="px-3 py-1 bg-green-600 text-white rounded focus:outline focus-visible:ring"
+          className="px-3 py-1 bg-green-600 text-white rounded-sm focus:outline-solid focus-visible:ring-3"
           aria-label="Export CSV"
         >
           Export CSV

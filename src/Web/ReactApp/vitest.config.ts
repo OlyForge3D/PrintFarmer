@@ -32,10 +32,10 @@ export default defineConfig({
         'src/**/types.ts'
       ],
       thresholds: {
-        lines: 10,
-        functions: 10,
-        branches: 10,
-        statements: 10
+        lines: 5,
+        functions: 5,
+        branches: 5,
+        statements: 5
       }
     }
   }

@@ -213,9 +213,9 @@ const FolderTreeItem = ({
           <span className="inline-block w-5" aria-hidden="true" />
         )}
         {isCurrent && expanded && hasChildren ? (
-          <FolderOpenIcon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <FolderOpenIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
         ) : (
-          <FolderIcon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <FolderIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
         )}
         <Button
           type="button"
@@ -229,7 +229,7 @@ const FolderTreeItem = ({
 
       {/* Context Menu */}
       {showContextMenu && (
-        <div className="absolute z-50 left-0 top-full mt-0.5 bg-pf-bg-2 border border-pf-border rounded shadow-lg py-1 min-w-max">
+        <div className="absolute z-50 left-0 top-full mt-0.5 bg-pf-bg-2 border border-pf-border rounded-sm shadow-lg py-1 min-w-max">
           <Button
             type="button"
             variant="subtle"
@@ -349,7 +349,7 @@ export const ExplorerView = ({
     >
       {/* Left Pane: Folder Tree or Collapsed Bar */}
       {isPanelCollapsed ? (
-        <div className="border-r border-pf-border bg-pf-bg-0 flex flex-col items-center py-2 px-1 flex-shrink-0" style={{ width: '48px' }}>
+        <div className="border-r border-pf-border bg-pf-bg-0 flex flex-col items-center py-2 px-1 shrink-0" style={{ width: '48px' }}>
           <Button
             type="button"
             size="sm"
@@ -364,10 +364,10 @@ export const ExplorerView = ({
       ) : (
         <>
           <div
-            className="border-r border-pf-border overflow-y-auto bg-pf-bg-0 flex flex-col flex-shrink-0"
+            className="border-r border-pf-border overflow-y-auto bg-pf-bg-0 flex flex-col shrink-0"
             style={{ width: `${treeWidth}px` }}
           >
-            <div className="sticky top-0 flex-shrink-0">
+            <div className="sticky top-0 shrink-0">
               <FolderTree 
                 nodes={folders} 
                 currentPath={currentPath} 
@@ -398,7 +398,7 @@ export const ExplorerView = ({
 
           {/* Resizable Divider - only show when panel is expanded */}
           <div
-            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent transition-colors cursor-col-resize flex-shrink-0"
+            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent transition-colors cursor-col-resize shrink-0"
             onMouseDown={handleResizeDivider}
             role="separator"
             aria-orientation="vertical"
@@ -440,7 +440,7 @@ export const ExplorerView = ({
               );
             })}
           </nav>
-          <div className="ml-4 flex-shrink-0 text-xs text-pf-text-secondary whitespace-nowrap">
+          <div className="ml-4 shrink-0 text-xs text-pf-text-secondary whitespace-nowrap">
             {selectedIds.length > 0 ? `${selectedIds.length} selected` : ''}
           </div>
         </div>

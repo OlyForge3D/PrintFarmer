@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from 'react';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui/Button';
+import { Button, type ButtonVariant } from '@/common/components/ui/Button';
 import clsx from 'clsx';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -42,6 +42,10 @@ export interface ModalProps {
   closeOnEscape?: boolean;
   /** Whether to show the close button (default: true) */
   showCloseButton?: boolean;
+  /** Close button variant (default: subtle) */
+  closeButtonVariant?: ButtonVariant;
+  /** Additional className for the close button */
+  closeButtonClassName?: string;
   /** Additional className for the modal content */
   className?: string;
 }
@@ -91,6 +95,8 @@ export function Modal({
   closeOnBackdrop = false,
   closeOnEscape = true,
   showCloseButton = true,
+  closeButtonVariant = 'subtle',
+  closeButtonClassName,
   className,
 }: ModalProps) {
   // Compute width class - explicit width takes precedence, then size, then default
@@ -138,7 +144,7 @@ export function Modal({
 
   return (
     <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
@@ -155,10 +161,10 @@ export function Modal({
       >
         {/* Header */}
         {showHeader && (
-          <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               {titleIcon && (
-                <div className="flex-shrink-0">
+                <div className="shrink-0">
                   {titleIcon}
                 </div>
               )}
@@ -172,10 +178,10 @@ export function Modal({
               <Button
                 onClick={onClose}
                 disabled={isDisabled}
-                variant="subtle"
+                variant={closeButtonVariant}
                 size="sm"
                 aria-label={closeAriaLabel}
-                className="!p-1 !h-auto"
+                className={clsx('!p-1 !h-auto', closeButtonClassName)}
               >
                 <CloseIcon className="w-6 h-6" />
               </Button>
@@ -190,7 +196,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3 flex-shrink-0">
+          <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3 shrink-0">
             {footer}
           </div>
         )}

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.OctoPrint;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using FluentAssertions;
@@ -63,7 +64,7 @@ public class OctoPrintClientTests
                 }
             });
         });
-        OctoPrintPrinterState? state = await client.GetPrinterStateAsync("http://octo", "key");
+        OctoPrintPrinterState? state = await client.GetPrinterStateAsync("http://octo", new PrinterCredential { ApiKey = "key" });
         _ = state.Should().NotBeNull();
         _ = state!.State.Should().Be("Operational");
         _ = state.Operational.Should().BeTrue();
@@ -81,7 +82,7 @@ public class OctoPrintClientTests
                 progress = new { completion = 42.0 }
             });
         });
-        OctoPrintJobStatus? status = await client.GetJobStatusAsync("http://octo", "key");
+        OctoPrintJobStatus? status = await client.GetJobStatusAsync("http://octo", new PrinterCredential { ApiKey = "key" });
         _ = status.Should().NotBeNull();
         _ = status!.Filename.Should().Be("test.gcode");
         _ = status.Progress.Should().Be(42.0);

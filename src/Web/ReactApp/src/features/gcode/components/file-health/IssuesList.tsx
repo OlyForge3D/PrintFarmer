@@ -108,12 +108,12 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
           ) : (
             <div className="space-y-3">
               {activeTab.items.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-hover rounded transition-colors">
-                  <div className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${activeTab.color}`} />
+                <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-hover rounded-sm transition-colors">
+                  <div className={`shrink-0 w-2 h-2 rounded-full mt-1.5 ${activeTab.color}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
-                        <p className={`font-medium ${activeTab.color} break-words`}>{item.fileName}</p>
+                        <p className={`font-medium ${activeTab.color} wrap-break-word`}>{item.fileName}</p>
                         <p className="text-xs text-pf-text-secondary mt-1">{item.fileType} file</p>
                         {selectedTab === 'missing' && 'lastHealthCheckDate' in item && item.lastHealthCheckDate && (
                           <p className="text-xs text-pf-text-secondary mt-1">

@@ -109,7 +109,7 @@ const TreeItem: React.FC<{
           currentPath === node.path ? 'bg-pf-accent-bg border-l-2 border-pf-accent text-white font-semibold' : ''
         } ${
           isDragOver 
-            ? 'bg-pf-primary bg-opacity-15 border-l-4 border-pf-primary' 
+            ? 'bg-pf-primary/15 border-l-4 border-pf-primary' 
             : ''
         }`}
         style={{ paddingLeft: `${isRoot ? 8 : level * 16 + 8}px` }}
@@ -123,7 +123,7 @@ const TreeItem: React.FC<{
             onClick={handleToggleExpand}
             variant="subtle"
             size="sm"
-            className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
+            className="!p-0 !bg-transparent !border-0 shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
             aria-hidden="true"
           >
             <ChevronRightIcon
@@ -131,23 +131,23 @@ const TreeItem: React.FC<{
             />
           </Button>
         ) : node.isDirectory ? (
-          <div className="w-4 h-4 flex-shrink-0" />
+          <div className="w-4 h-4 shrink-0" />
         ) : (
-          <div className="w-4 h-4 flex-shrink-0" />
+          <div className="w-4 h-4 shrink-0" />
         )}
 
         {!node.isDirectory && (
           <Checkbox
             checked={isSelected}
             onChange={handleCheckboxChange}
-            className="flex-shrink-0"
+            className="shrink-0"
             onClick={(e) => e.stopPropagation()}
           />
         )}
 
         {node.isDirectory ? (
           <FolderIcon 
-            className={`w-4 h-4 flex-shrink-0 ${
+            className={`w-4 h-4 shrink-0 ${
               currentPath === node.path 
                 ? 'text-white' 
                 : isDragOver 
@@ -156,7 +156,7 @@ const TreeItem: React.FC<{
             }`}
           />
         ) : (
-          <DocumentIcon className="w-4 h-4 text-pf-text-tertiary flex-shrink-0" />
+          <DocumentIcon className="w-4 h-4 text-pf-text-tertiary shrink-0" />
         )}
 
         <span
@@ -167,7 +167,7 @@ const TreeItem: React.FC<{
         </span>
 
         {node.size && !node.isDirectory && (
-          <span className="text-xs text-pf-text-tertiary flex-shrink-0">
+          <span className="text-xs text-pf-text-tertiary shrink-0">
             {formatBytes(node.size)}
           </span>
         )}

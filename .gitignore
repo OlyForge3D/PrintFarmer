@@ -3,6 +3,9 @@
 # Build Folders
 bin/
 obj/
+# Malformed Windows-style paths (literal backslashes)
+*\\Debug/
+*\\Release/
 
 # Visual Studio 
 .vs/
@@ -32,6 +35,8 @@ node_modules/
 # Environment files
 .env
 .env.*
+!.env.template
+!.env.example
 .deploy-config
 
 # Docker generated files (created by deployment script)
@@ -105,3 +110,7 @@ src/api/uploads/
 /dockerfiles/
 /docker-entrypoint-config.sh
 /Dockerfile.multistage
+/src/publish/
+/publish/
+# Data Protection Keys (auto-generated, contain encryption keys)
+src/api/data-protection-keys/

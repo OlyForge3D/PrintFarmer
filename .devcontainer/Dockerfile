@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/typescript-node:22-bookworm
+FROM mcr.microsoft.com/devcontainers/typescript-node:24-bookworm
 
 # Install dotnet 10.0.101 using the official dotnet-install script
 ARG DOTNET_VERSION=10.0.101

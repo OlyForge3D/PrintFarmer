@@ -132,7 +132,7 @@ export class SlicerSignalRService {
   }
 
   private buildConnection(): void {
-    const slicerSignalrUrl = getHubUrl("/hubs/slicer");
+    const slicerSignalrUrl = getHubUrl("/hubs/slicers");
 
     this.connection = new HubConnectionBuilder()
       .withUrl(slicerSignalrUrl)

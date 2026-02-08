@@ -297,7 +297,7 @@ export function HarvestWizardStep1Selection({
               size="sm"
               onClick={clearFilters}
               iconLeft={<CloseIcon className="w-4 h-4" />}
-              className="flex-shrink-0"
+              className="shrink-0"
             >
               Clear
             </Button>
@@ -330,7 +330,7 @@ export function HarvestWizardStep1Selection({
                   {printer.name}
                   <span className="inline-block w-2 h-2 rounded-full bg-pf-success" />
                   {hasActiveHarvest && (
-                    <span className="ml-auto text-xs bg-pf-warning text-white px-2 py-1 rounded whitespace-nowrap">
+                    <span className="ml-auto text-xs bg-pf-warning text-white px-2 py-1 rounded-sm whitespace-nowrap">
                       Harvest in progress
                     </span>
                   )}
@@ -343,7 +343,7 @@ export function HarvestWizardStep1Selection({
                 </div>
               </div>
               {selectedPrinterId === printer.id && !hasActiveHarvest && (
-                <CheckCircleIcon className="w-5 h-5 text-pf-accent flex-shrink-0" />
+                <CheckCircleIcon className="w-5 h-5 text-pf-accent shrink-0" />
               )}
             </div>
           </button>

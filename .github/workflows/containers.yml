@@ -1,358 +1,348 @@
-name: Containers
+name: Build Containers
+
+# Optimized container build workflow
+# - .NET and React are built natively on the runner (faster, better caching)
+# - Container images only COPY the pre-built artifacts
 
 on:
   push:
-    branches: [ main, release ]
-    tags: [ 'v*.*.*' ]
+    branches: [main, release/*]
+    paths:
+      - 'src/**'
+      - 'scripts/docker/dockerfiles/**'
+      - '.github/workflows/containers.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - 'src/**'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
-  API_IMAGE_NAME: printfarmer-api
-  FRONTEND_IMAGE_NAME: printfarmer-frontend
-  PLATFORMS: linux/amd64,linux/arm64
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '24'
+  ORCA_VERSION: '2.3.1'
 
 jobs:
-  build-and-push:
-    name: Build & Push Images
+  # ====================
+  # JOB 1: Build .NET projects natively
+  # ====================
+  build-dotnet:
+    name: Build .NET
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('src/**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore src/farm-web.sln
+
+      - name: Build all projects
+        run: dotnet build src/farm-web.sln -c Release --no-restore
+
+      - name: Publish API
+        run: dotnet publish src/api/Farm.Web.Api.csproj -c Release -o ./publish/api --no-build
+
+      - name: Publish OrcaSlicer Worker
+        run: dotnet publish src/orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o ./publish/orcaslicer-worker --no-build
+
+      - name: Publish Printer Discovery
+        run: dotnet publish src/printer-discovery/PrinterDiscoveryService.csproj -c Release -o ./publish/printer-discovery --no-build
+
+      - name: Upload API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-publish
+          path: ./publish/api
+          retention-days: 1
+
+      - name: Upload OrcaSlicer Worker artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orcaslicer-worker-publish
+          path: ./publish/orcaslicer-worker
+          retention-days: 1
+
+      - name: Upload Printer Discovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: printer-discovery-publish
+          path: ./publish/printer-discovery
+          retention-days: 1
+
+  # ====================
+  # JOB 2: Build React frontend natively
+  # ====================
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/Web/ReactApp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/Web/ReactApp
+        run: npm ci
+
+      - name: Build React app
+        working-directory: src/Web/ReactApp
+        run: npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: src/Web/ReactApp/dist
+          retention-days: 1
+
+  # ====================
+  # JOB 3: Ensure OrcaSlicer base image exists
+  # ====================
+  ensure-orca-base:
+    name: Ensure OrcaSlicer Base
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      id-token: write
+    outputs:
+      base_image: ${{ steps.output.outputs.base_image }}
+    steps:
+      - name: Log in to GHCR (for manifest check)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if OrcaSlicer base image exists
+        id: check
+        run: |
+          BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
+          echo "Checking for base image: $BASE_IMAGE"
+          
+          if docker manifest inspect "$BASE_IMAGE" > /dev/null 2>&1; then
+            echo "✓ Base image exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ Base image not found - will trigger build"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger base image build if needed
+        if: steps.check.outputs.exists != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Triggering OrcaSlicer base image workflow...');
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'orcaslicer-base-image.yml',
+              ref: context.ref,
+              inputs: {
+                orca_version: '${{ env.ORCA_VERSION }}',
+                force_rebuild: 'false'
+              }
+            });
+            console.log('Workflow dispatched - waiting for it to complete...');
+            
+            // Wait and poll for completion (max 10 minutes)
+            const maxWait = 10 * 60 * 1000;
+            const startTime = Date.now();
+            
+            while (Date.now() - startTime < maxWait) {
+              await new Promise(r => setTimeout(r, 30000)); // Wait 30s
+              
+              // Check if manifest exists now
+              const { execSync } = require('child_process');
+              try {
+                execSync(`docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}`, { stdio: 'pipe' });
+                console.log('Base image is now available!');
+                return;
+              } catch {
+                console.log('Still waiting for base image...');
+              }
+            }
+            
+            core.setFailed('Timed out waiting for base image');
+
+      - name: Output base image reference
+        id: output
+        run: |
+          echo "base_image=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}" >> $GITHUB_OUTPUT
+
+  # ====================
+  # JOB 4: Build container images
+  # ====================
+  build-containers:
+    name: Build ${{ matrix.image }} container
+    runs-on: ubuntu-latest
+    needs: [build-dotnet, build-frontend, ensure-orca-base]
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
-        component: [ api, frontend ]
-      fail-fast: false
+        include:
+          - image: api
+            artifact: api-publish
+            dockerfile: Dockerfile.api-optimized
+          - image: frontend
+            artifact: frontend-build
+            dockerfile: Dockerfile.frontend-optimized
+          - image: printer-discovery
+            artifact: printer-discovery-publish
+            dockerfile: Dockerfile.discovery-optimized
+          - image: orcaslicer-worker
+            artifact: orcaslicer-worker-publish
+            dockerfile: Dockerfile.orcaslicer-worker-optimized
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Create optimized Dockerfile
+        run: |
+          mkdir -p .github/dockerfiles
+          
+          case "${{ matrix.image }}" in
+            api)
+              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
+          FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+          WORKDIR /app
+          COPY artifact/ ./
+          ENV ASPNETCORE_URLS=http://+:5245
+          EXPOSE 5245
+          ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
+          EOF
+              ;;
+            
+            frontend)
+              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
+          FROM nginx:alpine
+          COPY artifact/ /usr/share/nginx/html
+          COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+              ;;
+            
+            printer-discovery)
+              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
+          FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+          WORKDIR /app
+          COPY artifact/ ./
+          EXPOSE 8080
+          ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
+          EOF
+              ;;
+            
+            orcaslicer-worker)
+              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'DOCKERFILE'
+          # Use OrcaSlicer base image with pre-extracted binaries
+          FROM ${{ needs.ensure-orca-base.outputs.base_image }}
+          
+          # Install .NET runtime
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+                  wget ca-certificates \
+              && wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh \
+              && chmod +x dotnet-install.sh \
+              && ./dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
+              && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet \
+              && rm dotnet-install.sh \
+              && apt-get remove -y wget \
+              && apt-get autoremove -y \
+              && rm -rf /var/lib/apt/lists/*
+          
+          WORKDIR /app
+          COPY artifact/ ./
+          
+          ENV ASPNETCORE_URLS=http://+:8080
+          ENV ORCASLICER_PATH=/opt/orcaslicer
+          EXPOSE 8080
+          
+          ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
+          DOCKERFILE
+              ;;
+          esac
+
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.component == 'api' && env.API_IMAGE_NAME || env.FRONTEND_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           tags: |
             type=ref,event=branch
-            type=ref,event=tag
-            type=sha
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}},prefix=v
-            type=semver,pattern={{major}}.{{minor}},prefix=v
 
-      - name: Select Dockerfile / context
-        id: paths
-        run: |
-          if [ "${{ matrix.component }}" = "api" ]; then
-            echo "dockerfile=Dockerfile.api" >> $GITHUB_OUTPUT
-            echo "context=./" >> $GITHUB_OUTPUT
-          else
-            # Frontend build (React)
-            if [ -f Dockerfile.frontend ]; then
-              echo "dockerfile=Dockerfile.frontend" >> $GITHUB_OUTPUT
-              echo "context=./" >> $GITHUB_OUTPUT
-            else
-              echo "dockerfile=Dockerfile.react" >> $GITHUB_OUTPUT
-              echo "context=./" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-      - name: Load security policy
-        id: sec
-        run: |
-          if [ -f security-config.json ]; then
-            echo "policy=$(cat security-config.json | tr -d '\n' | sed 's/\"/\\\"/g')" >> $GITHUB_OUTPUT
-          else
-            echo "policy={}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build (PR) / Build & Push (main/tags)
-        id: build
-        uses: docker/build-push-action@v5
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
-          context: ${{ steps.paths.outputs.context }}
-          file: ${{ steps.paths.outputs.dockerfile }}
+          context: .
+          file: .github/dockerfiles/${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
-          platforms: ${{ env.PLATFORMS }}
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-            BUILD_VERSION=${{ github.ref_name }}
-          provenance: true
-          sbom: true
 
-      - name: Record image digest
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "DIGEST=${{ steps.build.outputs.digest }}" >> $GITHUB_ENV
-          echo "Image digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.build.outputs.digest }}" > digest-${{ matrix.component }}.txt
-
-      - name: Upload digest artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.component }}
-          path: digest-${{ matrix.component }}.txt
-
-      - name: Consolidate digests (matrix append)
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p digests
-          cp digest-${{ matrix.component }}.txt digests/${{ matrix.component }}.digest
-          # Package partial (will be overwritten/merged last run wins but contents additive)
-          tar -cf digests-${{ matrix.component }}.tar digests || true
-        continue-on-error: true
-      - name: Upload consolidated digests (per-matrix)
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-digests-${{ matrix.component }}
-          path: digests/${{ matrix.component }}.digest
-
-      - name: Export SBOM artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.component }}
-          path: sbom/**
-          if-no-files-found: ignore
-
-      - name: Fetch release notes (if tag/release)
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-        id: release_notes
-        run: |
-          TOKEN='${{ secrets.GITHUB_TOKEN }}'
-          TAG=''
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG='${{ github.event.release.tag_name }}'
-            BODY='${{ github.event.release.body }}'
-          else
-            TAG=${GITHUB_REF#refs/tags/}
-            BODY=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$TAG" | jq -r '.body // ""' 2>/dev/null || true)
-          fi
-          SANITIZED=$(printf "%s" "$BODY" | tr '\n' ' ' | sed 's/"/'"'"'/g' | cut -c1-2000)
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "notes=$SANITIZED" >> $GITHUB_OUTPUT
-
-      - name: Inspect pushed image manifest and extract labels
-        if: github.event_name != 'pull_request'
-        run: |
-          set -e
-          IMAGE_REF=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          echo "Inspecting: $IMAGE_REF"
-          # Wait briefly for registry to be ready
-          sleep 5
-          docker pull "$IMAGE_REF" || true
-          docker manifest inspect "$IMAGE_REF" > manifest.json || true
-          # Try to extract common labels and annotate step summary
-          LABELS=$(jq -r '.[0].annotations // {}' manifest.json 2>/dev/null || echo "{}")
-          echo "Labels: $LABELS" >> $GITHUB_STEP_SUMMARY
-          echo "$LABELS" > image-labels-${{ matrix.component }}.json || true
-        continue-on-error: true
-
-      - name: Upload image labels artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-labels-${{ matrix.component }}
-          path: image-labels-${{ matrix.component }}.json
-
-      - name: Security Scan (Trivy)
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@v0.24.0
-        with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          format: 'table'
-          exit-code: ${{ github.ref == 'refs/heads/main' && fromJSON(steps.sec.outputs.policy).failOnHigh && '1' || '0' }}
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Security Scan (Trivy JSON)
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@v0.24.0
-        with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          format: 'json'
-          output: trivy-${{ matrix.component }}.json
-          exit-code: '0'
-          vuln-type: 'os,library'
-          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
-      - name: Upload Trivy JSON
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-json-${{ matrix.component }}
-          path: trivy-${{ matrix.component }}.json
-
-      - name: Generate SBOM (Syft)
-        if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@v0.17.7
-        with:
-          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          format: 'spdx-json'
-          output-file: sbom/syft-${{ matrix.component }}.spdx.json
-
-      - name: Upload Syft SBOM
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: syft-sbom-${{ matrix.component }}
-          path: sbom/syft-${{ matrix.component }}.spdx.json
-
-      - name: Vulnerability Scan (Grype)
-        if: github.event_name != 'pull_request'
-        uses: anchore/scan-action@v4
-        with:
-          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          fail-build: ${{ github.ref == 'refs/heads/main' && fromJSON(steps.sec.outputs.policy).failOnHigh }}
-          severity-cutoff: high
-
-      - name: Install Cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: 'v2.2.4'
-
-      - name: Sign image (keyless fallback)
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        run: |
-          set -e
-          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          # If a private key is provided, use it; else use keyless OIDC
-          if [ -n "${{ secrets.COSIGN_PRIVATE_KEY }}" ] && [ -n "${{ secrets.COSIGN_PASSWORD }}" ]; then
-            echo "Using key-based signing"
-            printf '%s' "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
-            COSIGN_PASSWORD='${{ secrets.COSIGN_PASSWORD }}' cosign sign --key cosign.key --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}"
-          else
-            echo "Using keyless signing"
-            cosign sign --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}"
-          fi
-          cosign verify "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Verification (non-fatal) failed"
-
-      - name: Attest SBOM (Syft)
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        run: |
-          set -e
-          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          SBOM_FILE=sbom/syft-${{ matrix.component }}.spdx.json
-          if [ -f "$SBOM_FILE" ]; then
-            cosign attest --predicate "$SBOM_FILE" --predicate-type spdxjson --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "SBOM attestation failed"
-          fi
-
-      - name: Attest Vulnerability Scan (Trivy JSON)
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        run: |
-          set -e
-            FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-            VULN_FILE=trivy-${{ matrix.component }}.json
-            if [ -f "$VULN_FILE" ]; then
-              cosign attest --predicate "$VULN_FILE" --predicate-type cyclonedx --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Vuln attestation failed"
-            fi
-      - name: Attest Provenance (SLSA predicate)
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: '1'
-        run: |
-          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          cat > provenance.json <<'EOF'
-          {
-            "_type": "https://in-toto.io/Statement/v1",
-            "subject": [{"name": "image","digest": {"sha256": "${{ steps.build.outputs.digest }}"}}],
-            "predicateType": "https://slsa.dev/provenance/v1",
-            "predicate": {"builder": {"id": "github-actions"}, "buildType": "containers", "invocation": {"parameters": {}}, "metadata": {"buildInvocationID": "${{ github.run_id }}"}}
-          }
-          EOF
-          cosign attest --predicate provenance.json --predicate-type slsa-provenance --yes "${FIRST_TAG}@${{ steps.build.outputs.digest }}" || echo "Provenance attestation failed"
-
-      - name: Summary
-        run: |
-          echo "Built image for component: ${{ matrix.component }}" >> $GITHUB_STEP_SUMMARY
-          echo "Tags:" >> $GITHUB_STEP_SUMMARY
-          echo '${{ steps.meta.outputs.tags }}' >> $GITHUB_STEP_SUMMARY
-          echo "Primary tag used for scan: $(echo '${{ steps.meta.outputs.tags }}' | head -n1)" >> $GITHUB_STEP_SUMMARY
-          echo "Security policy: ${{ steps.sec.outputs.policy }}" >> $GITHUB_STEP_SUMMARY
-
-  manifest-combined:
-    name: Create Combined Manifest (optional)
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
+  # ====================
+  # JOB 5: Summary
+  # ====================
+  summary:
+    name: Build Summary
     runs-on: ubuntu-latest
+    needs: [build-containers]
+    if: always()
     steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create manifest placeholders
+      - name: Generate summary
         run: |
-          echo "(Optional) Add manifest aggregation here if multi-arch later."
-
-      # Placeholder for future multi-arch expansion
-      # - name: Build multi-arch
-      #   run: echo "Add multi-arch manifest creation when arm64 images available"
-
-  verify-labels:
-    name: Verify required image labels
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine primary image tag
-        id: primary
-        run: |
-          PRIMARY_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          echo "primary=$PRIMARY_TAG" >> $GITHUB_OUTPUT
-
-      - name: Inspect manifest and ensure labels exist
-        run: |
-          set -e
-          IMG=${{ steps.primary.outputs.primary }}
-          echo "Inspecting $IMG"
-          docker manifest inspect "$IMG" > manifest.json || true
-          ANNOT=$(jq -r '.[0].annotations // {}' manifest.json 2>/dev/null || echo '{}')
-          REV=$(echo "$ANNOT" | jq -r '."org.opencontainers.image.revision" // ""')
-          CREATED=$(echo "$ANNOT" | jq -r '."org.opencontainers.image.created" // ""')
-          echo "Revision: $REV"
-          echo "Created: $CREATED"
-          if [ -z "$REV" ] || [ -z "$CREATED" ]; then
-            echo "Required image labels missing on $IMG"; exit 1
-          fi
+          echo "## Container Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | ${{ needs.build-containers.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ needs.build-containers.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Printer Discovery | ${{ needs.build-containers.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OrcaSlicer Worker | ${{ needs.build-containers.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-orcaslicer-worker\`" >> $GITHUB_STEP_SUMMARY

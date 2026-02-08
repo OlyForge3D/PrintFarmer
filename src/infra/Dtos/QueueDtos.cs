@@ -81,6 +81,12 @@ public class QueuePrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Required printer model name or slicer alias (e.g., "QIDI X-Plus 4", "COREONEL").
+    /// Used for auto-assign to filter printers by model compatibility.
+    /// </summary>
+    public string? RequiredPrinterModel { get; set; }
 }
 
 /// <summary>
@@ -132,7 +138,11 @@ public class JobQueuePrintJobDto
 {
     public Guid Id { get; set; }
 
-    public Guid GcodeFileId { get; set; }
+    /// <summary>
+    /// G-code file ID. Nullable for history-seeded jobs where the original
+    /// file may not exist in PrintFarmer's library.
+    /// </summary>
+    public Guid? GcodeFileId { get; set; }
 
     public string GcodeFileName { get; set; } = string.Empty;
 

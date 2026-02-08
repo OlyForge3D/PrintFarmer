@@ -3,7 +3,7 @@
  * Shows hierarchy and allows navigation between levels
  */
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ChevronRightIcon } from '@/common/components/icons/MdiIcons';
 
 export interface BreadcrumbItem {
@@ -26,7 +26,7 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, className = '' 
             {item.href && !item.current ? (
               <Link
                 to={item.href}
-                className="text-pf-accent hover:text-pf-accent-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent rounded px-1"
+                className="text-pf-accent hover:text-pf-accent-hover transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent rounded-sm px-1"
               >
                 {item.label}
               </Link>
@@ -37,7 +37,7 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, className = '' 
             )}
             
             {index < items.length - 1 && (
-              <ChevronRightIcon className="w-4 h-4 flex-shrink-0 text-pf-border" />
+              <ChevronRightIcon className="w-4 h-4 shrink-0 text-pf-border" />
             )}
           </li>
         ))}

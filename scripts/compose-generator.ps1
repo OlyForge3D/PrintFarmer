@@ -131,7 +131,7 @@ try {
     # Read the base template for the architecture
     $BaseTemplate = switch ($Architecture) {
         "monolithic" { Join-Path $TemplatesDir "docker-compose.yml" }
-        "microservices" { Join-Path $TemplatesDir "docker-compose.microservices.yml" }
+        "microservices" { Join-Path $TemplatesDir "docker-compose.yml" }
     }
     
     if (-not (Test-Path $BaseTemplate)) {

@@ -173,7 +173,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                             setShowSuggestions(false);
                         }
                     }}
-                    className="flex-1 min-w-32 px-2 py-1 bg-transparent outline-none text-pf-text-primary placeholder-pf-text-tertiary"
+                    className="flex-1 min-w-32 px-2 py-1 bg-transparent outline-hidden text-pf-text-primary placeholder-pf-text-tertiary"
                 />
             </div>
 
@@ -191,10 +191,10 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                                 variant="subtle"
                                 size="sm"
                                 onClick={() => selectTag(tag.id)}
-                                className="w-full flex items-center gap-3 p-2 rounded text-left !justify-start"
+                                className="w-full flex items-center gap-3 p-2 rounded-sm text-left !justify-start"
                             >
                                 <div
-                                    className="w-3 h-3 rounded-full flex-shrink-0"
+                                    className="w-3 h-3 rounded-full shrink-0"
                                     style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                                 />
                                 <div className="flex-1 min-w-0">

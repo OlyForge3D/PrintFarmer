@@ -3,11 +3,12 @@
 // Dashboard widget showing active maintenance alerts across all printers
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { maintenanceService } from '@/services/maintenanceService';
 import { maintenanceSignalRService } from '@/services/maintenance-signalr';
 import type { MaintenanceAlert } from '@/types/maintenance';
 import { MaintenanceAlertStatus } from '@/types/maintenance';
+import { Button } from '@/common/components/ui';
 
 /**
  * Props for MaintenanceAlertsPanel component
@@ -35,35 +36,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load alerts on mount and when printerId changes
-  useEffect(() => {
-    loadAlerts();
-  }, [printerId]);
-
-  // Subscribe to real-time alert updates
-  useEffect(() => {
-    // Connect to SignalR hub
-    maintenanceSignalRService.start().catch(err => {
-      console.error('[MaintenanceAlertsPanel] Failed to connect to SignalR:', err);
-    });
-
-    // Register event handlers
-    const unsubscribeCreated = maintenanceSignalRService.onAlertCreated(() => {
-      loadAlerts(); // Reload alerts when new one is created
-    });
-
-    const unsubscribeStatusChanged = maintenanceSignalRService.onAlertStatusChanged(() => {
-      loadAlerts(); // Reload alerts when status changes
-    });
-
-    // Cleanup on unmount
-    return () => {
-      unsubscribeCreated();
-      unsubscribeStatusChanged();
-    };
-  }, [printerId]);
-
-  const loadAlerts = async () => {
+  const loadAlerts = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -93,7 +66,35 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [printerId, maxAlerts]);
+
+  // Load alerts on mount and when printerId changes
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
+
+  // Subscribe to real-time alert updates
+  useEffect(() => {
+    // Connect to SignalR hub
+    maintenanceSignalRService.start().catch(err => {
+      console.error('[MaintenanceAlertsPanel] Failed to connect to SignalR:', err);
+    });
+
+    // Register event handlers
+    const unsubscribeCreated = maintenanceSignalRService.onAlertCreated(() => {
+      loadAlerts(); // Reload alerts when new one is created
+    });
+
+    const unsubscribeStatusChanged = maintenanceSignalRService.onAlertStatusChanged(() => {
+      loadAlerts(); // Reload alerts when status changes
+    });
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribeCreated();
+      unsubscribeStatusChanged();
+    };
+  }, [loadAlerts]);
 
   const getSeverityColor = (severity: number): string => {
     switch (severity) {
@@ -128,7 +129,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   if (loading && alerts.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
+      <div className="bg-white rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -140,23 +141,24 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
   if (error) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
+      <div className="bg-white rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-3">Maintenance Alerts</h3>
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <p className="text-red-800">Error: {error}</p>
-          <button
+          <Button
+            variant="link"
             onClick={loadAlerts}
-            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+            className="mt-2 text-sm text-red-600 hover:text-red-800"
           >
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white rounded-lg shadow-sm p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Maintenance Alerts</h3>
         {alerts.length > 0 && (
@@ -195,7 +197,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={`px-2 py-0.5 text-xs font-semibold rounded ${getStatusBadge(alert.status)}`}>
+                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-sm ${getStatusBadge(alert.status)}`}>
                       {MaintenanceAlertStatus[alert.status]}
                     </span>
                     <span className="text-xs font-medium">
@@ -216,7 +218,7 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
                   )}
                 </div>
                 <svg
-                  className="h-5 w-5 flex-shrink-0"
+                  className="h-5 w-5 shrink-0"
                   fill="currentColor"
                   viewBox="0 0 20 20"
                 >
@@ -238,9 +240,9 @@ export const MaintenanceAlertsPanel: React.FC<MaintenanceAlertsPanelProps> = ({
 
       {alerts.length > 0 && maxAlerts < alerts.length && (
         <div className="mt-3 text-center">
-          <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+          <Button variant="link" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
             View all alerts →
-          </button>
+          </Button>
         </div>
       )}
     </div>

@@ -10,7 +10,7 @@ export const SystemHealthSkeleton: React.FC<{ compact?: boolean; className?: str
     );
   }
   return (
-    <div className={`bg-white rounded-lg shadow p-6 ${className ?? ''}`} aria-busy="true" aria-label="Loading detailed system health">
+    <div className={`bg-white rounded-lg shadow-sm p-6 ${className ?? ''}`} aria-busy="true" aria-label="Loading detailed system health">
       <div className="pf-skeleton pf-animate-skeleton h-5 w-40 mb-4" />
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (

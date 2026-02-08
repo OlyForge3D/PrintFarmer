@@ -21,7 +21,7 @@ echo ""
 
 # Step 1: Copy template
 echo "Step 1: Copying microservices template"
-cp "$TEMPLATES_DIR/docker-compose.microservices.yml" "$DEBUG_DIR/01-template.yml"
+cp "$TEMPLATES_DIR/docker-compose.yml" "$DEBUG_DIR/01-template.yml"
 echo "  Line count: $(wc -l < "$DEBUG_DIR/01-template.yml")"
 echo "  Services section lines:"
 grep -n "^services:" "$DEBUG_DIR/01-template.yml"

@@ -268,7 +268,7 @@ export const TagInput: React.FC<TagInputProps> = ({
           aria-controls="tag-suggestions"
           aria-autocomplete="list"
           aria-haspopup="listbox"
-          className={`w-full px-4 py-2 border-2 border-gray-300 rounded-lg transition-colors duration-200 focus:outline-none focus:border-indigo-500 ${
+          className={`w-full px-4 py-2 border-2 border-gray-300 rounded-lg transition-colors duration-200 focus:outline-hidden focus:border-indigo-500 ${
             disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
           } ${error ? 'border-red-500' : ''}`}
         />

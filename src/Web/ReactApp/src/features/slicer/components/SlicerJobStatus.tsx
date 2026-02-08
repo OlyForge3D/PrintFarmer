@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { Button, Input, FormField, Alert, Card } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 

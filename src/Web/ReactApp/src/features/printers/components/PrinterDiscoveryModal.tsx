@@ -339,7 +339,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           <div className="space-y-4">
             {/* Debug panel (gated) */}
             {window.PrintFarmerDebug?.printerDiscoveryDisplay && (
-              <div className="mb-2 p-2 bg-pf-bg-2 border border-pf-border rounded text-xs text-pf-text-tertiary">
+              <div className="mb-2 p-2 bg-pf-bg-2 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
                 {renderUnknown({ foundPrinters, progress })}
               </div>
             )}
@@ -459,7 +459,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                               const primaryToolhead = selectedModel.toolheads?.find(t => t.isPrimary) ?? selectedModel.toolheads?.[0];
                               const nozzleDiameter = primaryToolhead?.nozzleDiameter;
                               return (
-                                <div className="text-xs text-pf-text-tertiary bg-pf-bg-2 rounded p-2">
+                                <div className="text-xs text-pf-text-tertiary bg-pf-bg-2 rounded-sm p-2">
                                   <p className="font-medium mb-1">Model Capabilities:</p>
                                   <div className="grid grid-cols-2 gap-1">
                                     {nozzleDiameter && (

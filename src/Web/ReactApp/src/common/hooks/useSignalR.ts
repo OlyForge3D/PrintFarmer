@@ -22,15 +22,11 @@ export function useSignalRConnection(service: 'harvest' | 'printer' = 'harvest')
     // Connect on mount for the selected service
     svc.connect();
 
-    // Subscribe to connection state changes
+    // Subscribe to connection state changes - callback is async so it's allowed
     const unsubscribe = svc.onConnectionStateChange(() => {
       setConnectionState(svc.connectionState);
       setConnectionId(svc.connectionId);
     });
-
-    // Update initial state
-    setConnectionState(svc.connectionState);
-    setConnectionId(svc.connectionId);
 
     return () => {
       unsubscribe();
@@ -327,25 +323,22 @@ export function useDiscoveryProgress(
   sessionId?: string,
   onProgress?: (progress: import('@/types/api').DiscoveryProgressDto) => void
 ) {
+  // State is reset by parent remounting with key prop when sessionId changes
   const [progress, setProgress] = useState<import('@/types/api').DiscoveryProgressDto | null>(null);
 
   useEffect(() => {
-    if (!sessionId) {
-      // Clear stale progress when ending a session
-      setProgress(null);
-      return;
-    }
+    if (!sessionId) return;
 
-  const unsubscribe = printerSignalRService.onDiscoveryProgress?.((progressUpdate) => {
-    if (progressUpdate.sessionId === sessionId) {
-      // Force synchronous render to bypass React batching for smooth progress updates
-      flushSync(() => {
-        setProgress(progressUpdate);
-      });
-      onProgress?.(progressUpdate);
-    }
-  });
-  return unsubscribe;
+    const unsubscribe = printerSignalRService.onDiscoveryProgress?.((progressUpdate) => {
+      if (progressUpdate.sessionId === sessionId) {
+        // Force synchronous render to bypass React batching for smooth progress updates
+        flushSync(() => {
+          setProgress(progressUpdate);
+        });
+        onProgress?.(progressUpdate);
+      }
+    });
+    return unsubscribe;
   }, [sessionId, onProgress]);
 
   return { progress };
@@ -355,22 +348,19 @@ export function useDiscoveryPrinterFound(
   sessionId?: string,
   onPrinterFound?: (found: import('@/types/api').DiscoveryPrinterFoundDto) => void
 ) {
+  // State is reset by parent remounting with key prop when sessionId changes
   const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterDto[]>([]);
 
   useEffect(() => {
-    if (!sessionId) {
-      // Reset previously found printers when session ends
-      setFoundPrinters([]);
-      return;
-    }
+    if (!sessionId) return;
 
-  const unsubscribe = printerSignalRService.onDiscoveryPrinterFound?.((found) => {
-    if (found.sessionId === sessionId) {
-      setFoundPrinters(prev => [...prev, found.printer]);
-      onPrinterFound?.(found);
-    }
-  });
-  return unsubscribe;
+    const unsubscribe = printerSignalRService.onDiscoveryPrinterFound?.((found) => {
+      if (found.sessionId === sessionId) {
+        setFoundPrinters(prev => [...prev, found.printer]);
+        onPrinterFound?.(found);
+      }
+    });
+    return unsubscribe;
   }, [sessionId, onPrinterFound]);
 
   return { foundPrinters, setFoundPrinters };
@@ -380,22 +370,19 @@ export function useDiscoveryCompleted(
   sessionId?: string,
   onCompleted?: (completed: import('@/types/api').DiscoveryCompletedDto) => void
 ) {
+  // State is reset by parent remounting with key prop when sessionId changes
   const [completed, setCompleted] = useState<import('@/types/api').DiscoveryCompletedDto | null>(null);
 
   useEffect(() => {
-    if (!sessionId) {
-      // Clear completion marker when session resets
-      setCompleted(null);
-      return;
-    }
+    if (!sessionId) return;
 
-  const unsubscribe = printerSignalRService.onDiscoveryCompleted?.((completedUpdate) => {
-    if (completedUpdate.sessionId === sessionId) {
-      setCompleted(completedUpdate);
-      onCompleted?.(completedUpdate);
-    }
-  });
-  return unsubscribe;
+    const unsubscribe = printerSignalRService.onDiscoveryCompleted?.((completedUpdate) => {
+      if (completedUpdate.sessionId === sessionId) {
+        setCompleted(completedUpdate);
+        onCompleted?.(completedUpdate);
+      }
+    });
+    return unsubscribe;
   }, [sessionId, onCompleted]);
 
   return { completed, setCompleted };

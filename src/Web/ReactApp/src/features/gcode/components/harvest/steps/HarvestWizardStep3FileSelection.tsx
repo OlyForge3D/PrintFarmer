@@ -121,13 +121,13 @@ export function HarvestWizardStep3FileSelection({
             {files.map(file => (
               <label
                 key={file.id}
-                className="flex items-start gap-3 p-3 hover:bg-pf-hover rounded cursor-pointer transition-colors"
+                className="flex items-start gap-3 p-3 hover:bg-pf-hover rounded-sm cursor-pointer transition-colors"
               >
                 <Checkbox
                   checked={selectedFileIds.has(file.id)}
                   onChange={() => handleToggleFile(file.id)}
                   title={`Select ${file.name}`}
-                  className="mt-1 flex-shrink-0"
+                  className="mt-1 shrink-0"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-pf-text-primary truncate">
@@ -146,7 +146,7 @@ export function HarvestWizardStep3FileSelection({
           {selectedFileIds.size > 0 && (
             <Alert type="success">
               <div className="flex items-center gap-2">
-                <CheckCircleIcon className="w-5 h-5 flex-shrink-0" />
+                <CheckCircleIcon className="w-5 h-5 shrink-0" />
                 <span>
                   {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected for import
                 </span>
@@ -157,7 +157,7 @@ export function HarvestWizardStep3FileSelection({
           {selectedFileIds.size === 0 && files.length > 0 && (
             <Alert type="warning">
               <div className="flex items-center gap-2">
-                <AlertCircleIcon className="w-5 h-5 flex-shrink-0" />
+                <AlertCircleIcon className="w-5 h-5 shrink-0" />
                 <span>
                   Please select at least one file to continue
                 </span>

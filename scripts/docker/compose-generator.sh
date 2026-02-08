@@ -23,7 +23,7 @@ fi
 # Ensure required compose templates exist (monolithic and microservices)
 required_templates=(
     "$TEMPLATES_DIR/docker-compose.yml"
-    "$TEMPLATES_DIR/docker-compose.microservices.yml"
+    "$TEMPLATES_DIR/docker-compose.yml"
     "$TEMPLATES_DIR/docker-compose.common.yml"
 )
 for tf in "${required_templates[@]}"; do
@@ -115,10 +115,10 @@ OPTIONS:
     --include-telemetry     Include telemetry/observability
     --include-security      Include security configurations  
     --include-registry      Include local registry
-    --include-discovery     Include printer discovery service (microservices only)
+    --include-discovery     Include printer discovery service
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
 
-    --db-provider PROVIDER  Database provider (postgres|sqlserver|mysql, default: postgres)
+    --db-provider PROVIDER  Database provider (postgres|sqlserver, default: postgres)
     --cleanup-generated     Remove generated files after deployment (default keeps them)
     --keep-generated        Preserve generated files (default; retained for compatibility)
     --dry-run              Show what would be generated without creating files
@@ -147,9 +147,7 @@ generate_database_config() {
         "sqlserver"|"mssql"|"sql-server")
             provider="sqlserver"
             ;;
-        "mysql"|"mariadb")
-            provider="mysql"
-            ;;
+
         *)
             log_warning "Unknown database provider '$provider', defaulting to postgres"
             provider="postgres"
@@ -181,8 +179,9 @@ generate_database_config() {
 parse_args() {
     ARCHITECTURE=""
     OUTPUT_DIR=""
-    INCLUDE_MONITORING="false"
-    INCLUDE_TELEMETRY="false"
+    # Monitoring and telemetry enabled by default for production observability
+    INCLUDE_MONITORING="true"
+    INCLUDE_TELEMETRY="true"
     INCLUDE_SECURITY="false"
     INCLUDE_REGISTRY="false"
     INCLUDE_DISCOVERY="false"
@@ -201,10 +200,16 @@ parse_args() {
                 OUTPUT_DIR="$2"; shift 2 ;;
             --api-port)
                 API_PORT="$2"; shift 2 ;;
+            # Legacy include flags (monitoring/telemetry now on by default)
             --include-monitoring)
                 INCLUDE_MONITORING="true"; shift ;;
             --include-telemetry)
                 INCLUDE_TELEMETRY="true"; shift ;;
+            # Exclude flags to opt-out of default observability stack
+            --exclude-monitoring)
+                INCLUDE_MONITORING="false"; shift ;;
+            --exclude-telemetry)
+                INCLUDE_TELEMETRY="false"; shift ;;
             --include-security)
                 INCLUDE_SECURITY="true"; shift ;;
             --include-registry)
@@ -557,7 +562,7 @@ generate_compose() {
             base_template="$TEMPLATES_DIR/docker-compose.yml"
             ;;
         "microservices")
-            base_template="$TEMPLATES_DIR/docker-compose.microservices.yml"
+            base_template="$TEMPLATES_DIR/docker-compose.yml"
             ;;
         *)
             log_error "Unsupported architecture: $arch"
@@ -591,73 +596,71 @@ generate_compose() {
     fi
     
     # Replace the database service with provider-specific configuration
-    # Check if architecture needs a database service (skip monolithic as it uses SQLite)
-    if [[ "$arch" == "microservices" ]]; then
-        # Generate provider-specific database config
-        local db_config
-        if ! db_config="$(generate_database_config)"; then
-            log_error "Failed to generate database configuration"
-            return 1
-        fi
-        
-        # CRITICAL: Check for required dependencies BEFORE attempting any replacements
-        # Python3 is required to properly handle YAML structure and indentation
-        if ! command -v python3 >/dev/null 2>&1; then
-            log_error "FATAL: python3 is required for database service configuration"
-            log_error "       Please install Python 3 to continue"
-            log_error "       Installation: apt-get install python3 (Debian/Ubuntu) or equivalent"
-            return 1
-        fi
-        
-        # CRITICAL: ruamel.yaml is required for proper YAML handling
-        # Check if the Python module is available
-        if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
-            log_error "FATAL: Python module 'ruamel.yaml' is not installed"
-            log_error "       This module is REQUIRED for proper Docker Compose YAML generation"
-            log_error "       Installation: pip install ruamel.yaml"
-            log_error "       Or for system-wide: apt-get install python3-ruamel.yaml (Debian/Ubuntu)"
-            return 1
-        fi
-        
-        # CRITICAL: Verify the Python replacement script exists
-        if [[ ! -f "$SCRIPT_DIR/compose-replace-db.py" ]]; then
-            log_error "FATAL: Python script not found: $SCRIPT_DIR/compose-replace-db.py"
-            log_error "       This script is required for database service configuration"
-            return 1
-        fi
-        
-        # Now perform the Python-based YAML replacement
-        # There is NO FALLBACK - if this fails, we fail loudly so users know there's a problem
-        local temp_replaced py_error
-        temp_replaced="$(mktemp)"
-        py_error="$(mktemp)"
-        
-        if ! python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
-            log_error "FATAL: Failed to generate database configuration"
-            log_error "       Error details:"
-            cat "$py_error" | sed 's/^/         /' >&2
-            rm -f "$temp_replaced" "$py_error"
-            return 1
-        fi
-        
-        # Verify Python produced valid output
-        if [[ ! -s "$temp_replaced" ]]; then
-            log_error "FATAL: Python script produced empty output"
-            log_error "       This indicates a problem with the YAML generation"
-            rm -f "$temp_replaced" "$py_error"
-            return 1
-        fi
-        
-        # Replace the original compose file
-        if ! mv "$temp_replaced" "$compose_file"; then
-            log_error "FATAL: Failed to update compose file with generated configuration"
-            rm -f "$temp_replaced" "$py_error"
-            return 1
-        fi
-        
-        rm -f "$py_error"
-        log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
+    # Database is now required for ALL architectures (monolithic and microservices)
+    # Generate provider-specific database config
+    local db_config
+    if ! db_config="$(generate_database_config)"; then
+        log_error "Failed to generate database configuration"
+        return 1
     fi
+    
+    # CRITICAL: Check for required dependencies BEFORE attempting any replacements
+    # Python3 is required to properly handle YAML structure and indentation
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "FATAL: python3 is required for database service configuration"
+        log_error "       Please install Python 3 to continue"
+        log_error "       Installation: apt-get install python3 (Debian/Ubuntu) or equivalent"
+        return 1
+    fi
+    
+    # CRITICAL: ruamel.yaml is required for proper YAML handling
+    # Check if the Python module is available
+    if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+        log_error "FATAL: Python module 'ruamel.yaml' is not installed"
+        log_error "       This module is REQUIRED for proper Docker Compose YAML generation"
+        log_error "       Installation: pip install ruamel.yaml"
+        log_error "       Or for system-wide: apt-get install python3-ruamel.yaml (Debian/Ubuntu)"
+        return 1
+    fi
+    
+    # CRITICAL: Verify the Python replacement script exists
+    if [[ ! -f "$SCRIPT_DIR/compose-replace-db.py" ]]; then
+        log_error "FATAL: Python script not found: $SCRIPT_DIR/compose-replace-db.py"
+        log_error "       This script is required for database service configuration"
+        return 1
+    fi
+    
+    # Now perform the Python-based YAML replacement
+    # There is NO FALLBACK - if this fails, we fail loudly so users know there's a problem
+    local temp_replaced py_error
+    temp_replaced="$(mktemp)"
+    py_error="$(mktemp)"
+    
+    if ! python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
+        log_error "FATAL: Failed to generate database configuration"
+        log_error "       Error details:"
+        cat "$py_error" | sed 's/^/         /' >&2
+        rm -f "$temp_replaced" "$py_error"
+        return 1
+    fi
+    
+    # Verify Python produced valid output
+    if [[ ! -s "$temp_replaced" ]]; then
+        log_error "FATAL: Python script produced empty output"
+        log_error "       This indicates a problem with the YAML generation"
+        rm -f "$temp_replaced" "$py_error"
+        return 1
+    fi
+    
+    # Replace the original compose file
+    if ! mv "$temp_replaced" "$compose_file"; then
+        log_error "FATAL: Failed to update compose file with generated configuration"
+        rm -f "$temp_replaced" "$py_error"
+        return 1
+    fi
+    
+    rm -f "$py_error"
+    log_info "Replaced database service with ${DB_PROVIDER:-postgres} configuration"
 
     # Merge addon services into the compose file
     local addons_merged=false
@@ -699,16 +702,11 @@ generate_compose() {
     fi
     
     if [[ "$INCLUDE_DISCOVERY" == "true" ]]; then
-        # Printer discovery is only supported in microservices mode
-        if [[ "$arch" == "microservices" ]]; then
-            if merge_addon_services "$compose_file" "discovery"; then
-                log_info "Merged printer discovery service"
-                addons_merged=true
-            else
-                log_warning "Failed to merge discovery service, continuing without it"
-            fi
+        if merge_addon_services "$compose_file" "discovery"; then
+            log_info "Merged printer discovery service"
+            addons_merged=true
         else
-            log_warning "Printer discovery service is only supported in microservices architecture (skipping)"
+            log_warning "Failed to merge discovery service, continuing without it"
         fi
     fi
     
@@ -991,22 +989,27 @@ main() {
             ;;
     esac
     
-    # Validate database provider
+    # Validate database provider - SQLite not supported for Docker deployments
+    # Docker deployments require a separate database container for production reliability
     case "$DB_PROVIDER" in
-        postgres|sqlserver|mysql)
-            : # Valid provider
+        postgres|sqlserver)
+            : # Valid provider for Docker deployments
             ;;
+
         sqlite)
-            # SQLite only allowed for monolithic deployments
-            if [ "$ARCHITECTURE" != "monolithic" ]; then
-                log_error "SQLite database provider is only supported for monolithic architecture"
-                log_error "Use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
-                return 1
-            fi
+            log_error "SQLite is not supported for Docker deployments"
+            log_error "Docker deployments require a separate database container for:"
+            log_error "  - Data persistence across container rebuilds"
+            log_error "  - Independent backup/restore capabilities"
+            log_error "  - Production-ready concurrent access"
+            log_error ""
+            log_error "Use --db-provider postgres (default) or --db-provider sqlserver"
+            log_error "For local development without Docker, SQLite is still available"
+            return 1
             ;;
         *)
             log_error "Invalid database provider: $DB_PROVIDER"
-            log_error "Valid options: postgres, sqlserver, mysql (sqlite for monolithic only)"
+            log_error "Valid options: postgres (default), sqlserver"
             return 1
             ;;
     esac

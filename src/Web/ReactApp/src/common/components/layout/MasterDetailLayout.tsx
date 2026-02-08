@@ -182,7 +182,7 @@ export function MasterDetailLayout({
         <div className={`flex-1 overflow-hidden flex flex-col ${detailClassName}`}>
           {/* Mobile header with back button */}
           {!isDesktop && showDetail && (
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-pf-border bg-pf-bg-1 flex-shrink-0">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-pf-border bg-pf-bg-1 shrink-0">
               <Button
                 variant="subtle"
                 size="sm"

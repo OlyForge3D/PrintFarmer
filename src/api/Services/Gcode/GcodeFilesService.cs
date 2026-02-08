@@ -486,59 +486,57 @@ namespace Farm.Web.Api.Services.Gcode
             await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             await file.CopyToAsync(fs, ct);
             await fs.FlushAsync(ct);  // Ensure all bytes are written before reading
-            fs.Position = 0;  // Reset position
 
             System.IO.FileInfo info = new(fullTarget);
 
-            // Create database record with metadata and thumbnail extraction
-            // Pass the fileId so both file and thumbnail use the same GUID
+            // Check for duplicate file by hash BEFORE attempting to create database record
+            // This is more efficient than catching a constraint violation exception
+            string fileHash = await ComputeFileHashAsync(fullTarget, ct);
+            GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
+
+            if (existingFile != null)
+            {
+                // Duplicate detected - delete the newly uploaded file and return existing record
+                string hashPrefix = fileHash.Length > 12 ? fileHash[..12] : fileHash;
+                _logger.LogInformation(
+                    $"File {originalName} already exists (hash {hashPrefix}), returning existing record {existingFile.Id}");
+
+                TryDeleteFile(fullTarget, "duplicate file");
+
+                string virtualFilePath = CombineVirtual(virtualDir, existingFile.FileName);
+                return new GcodeFileEntryDto(
+                    Path: virtualFilePath,
+                    FileName: existingFile.FileName,
+                    Name: existingFile.Name,
+                    FileSize: existingFile.FileSizeBytes,
+                    UploadedAt: existingFile.UpdatedAt,
+                    IsDirectory: false,
+                    Id: existingFile.Id.ToString());
+            }
+
+            // No duplicate - create database record with metadata and thumbnail extraction
+            // Pass the fileId and precomputed hash so both file and thumbnail use the same GUID
             GcodeFile gcodeFile;
             try
             {
-                gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, originalName, info.Length, ext, virtualDir, fileId, ct);
+                gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, originalName, info.Length, ext, virtualDir, fileId, ct, fileHash);
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
                 _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", originalName, gcodeFile.Id);
             }
-            catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx) when (dbEx.InnerException?.Message?.Contains("IX_GcodeFiles_FileHash", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                // File with same hash already exists (deduplication)
-                // Delete the newly created physical file and return the existing record
-                try
-                {
-                    System.IO.File.Delete(fullTarget);
-                }
-                catch
-                { /* Ignore deletion errors */
-                }
-
-                // Find the existing file by hash
-                string fileHash = await ComputeFileHashAsync(fullTarget, ct);
-                GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
-
-                if (existingFile != null)
-                {
-                    _logger.LogInformation("File {FileName} already exists (hash {FileHash}), returning existing record", originalName, fileHash);
-                    string virtualFilePath = CombineVirtual(virtualDir, existingFile.FileName);
-                    return new GcodeFileEntryDto(
-                        Path: virtualFilePath,
-                        FileName: existingFile.FileName,
-                        Name: existingFile.Name,
-                        FileSize: existingFile.FileSizeBytes,
-                        UploadedAt: existingFile.UpdatedAt,
-                        IsDirectory: false,
-                        Id: existingFile.Id.ToString());  // Include the existing file's ID
-                }
-
-                throw;
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create GcodeFile database record for {FileName}, but file was uploaded successfully", originalName);
+                _logger.LogError(ex, "Failed to create GcodeFile database record for {FileName}, cleaning up uploaded file", originalName);
+
+                // Clean up the uploaded file on database failure
+                TryDeleteFile(fullTarget, "cleanup after DB failure");
+
                 throw;
             }
 
             // Return the virtual path using the display name (original filename), not the GUID
+            // Note: gcodeFile.PrinterModel navigation property is NOT loaded here, so we use ExtractedPrinterModelName
+            // which contains the raw extracted model name from the G-code file header.
             string virtualFilePath2 = CombineVirtual(virtualDir, gcodeFile.FileName);
             return new GcodeFileEntryDto(
                 Path: virtualFilePath2,
@@ -547,7 +545,25 @@ namespace Farm.Web.Api.Services.Gcode
                 FileSize: gcodeFile.FileSizeBytes,
                 UploadedAt: info.LastWriteTimeUtc,
                 IsDirectory: false,
-                Id: gcodeFile.Id.ToString());  // Include the file ID for OctoPrint upload and other lookups
+                Id: gcodeFile.Id.ToString(),
+                FileType: gcodeFile.FileType,
+                DirectoryId: null,
+                TargetModelName: gcodeFile.ExtractedPrinterModelName,  // Raw extracted model name
+                RequiredMaterial: gcodeFile.RequiredMaterial,
+                Tags: null,  // Tags not loaded during upload
+                ExtractedSlicerName: gcodeFile.SlicerName,
+                ExtractedSlicerVersion: gcodeFile.SlicerVersion,
+                ExtractedPrintTime: gcodeFile.EstimatedPrintTimeMinutes,
+                ExtractedFilamentLength: gcodeFile.EstimatedFilamentLengthMm,
+                ExtractedNozzleDiameter: gcodeFile.RequiredNozzleDiameter,
+                ExtractedMaterial: gcodeFile.RequiredMaterial,
+                ExtractedPrinterModel: gcodeFile.ExtractedPrinterModelName,  // Raw extracted model name (for printer matching)
+                ExtractedPrinterModelName: gcodeFile.ExtractedPrinterModelName,
+                ExtractedLayerHeight: gcodeFile.LayerHeight,
+                ExtractedInfill: gcodeFile.InfillPercentage,
+                ExtractedPerimeters: gcodeFile.Perimeters,
+                ExtractedHotendTemp: gcodeFile.PrintTemperature,
+                ExtractedBedTemp: gcodeFile.BedTemperature);
         }
 
         /// <summary>
@@ -857,21 +873,9 @@ namespace Farm.Web.Api.Services.Gcode
                     {
                         string thumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
                         _logger.LogInformation($"[DeleteFilesAsync] Checking for thumbnail: {thumbnailPath}");
-                        try
+                        if (TryDeleteFile(thumbnailPath, "thumbnail"))
                         {
-                            if (File.Exists(thumbnailPath))
-                            {
-                                File.Delete(thumbnailPath);
-                                _logger.LogInformation($"[DeleteFilesAsync] ✓ Deleted thumbnail: {thumbnailPath}");
-                            }
-                            else
-                            {
-                                _logger.LogInformation($"[DeleteFilesAsync] Thumbnail file not found on disk: {thumbnailPath}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning($"[DeleteFilesAsync] Failed to delete thumbnail: {ex.Message}");
+                            _logger.LogInformation($"[DeleteFilesAsync] ✓ Deleted thumbnail: {thumbnailPath}");
                         }
                     }
                 }
@@ -1038,6 +1042,37 @@ namespace Farm.Web.Api.Services.Gcode
         #region Helper Methods
 
         /// <summary>
+        /// Attempts to delete a file if it exists. Logs a warning on failure but does not throw.
+        /// </summary>
+        /// <param name="filePath">Full path to the file to delete.</param>
+        /// <param name="logContext">Optional context description for the log message (e.g., "duplicate file", "cleanup").</param>
+        /// <returns>True if file was deleted or didn't exist; false if deletion failed.</returns>
+        private bool TryDeleteFile(string? filePath, string? logContext = null)
+        {
+            if (string.IsNullOrEmpty(filePath))
+            {
+                return true;
+            }
+
+            if (!System.IO.File.Exists(filePath))
+            {
+                return true;
+            }
+
+            try
+            {
+                System.IO.File.Delete(filePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string context = string.IsNullOrEmpty(logContext) ? "file" : logContext;
+                _logger.LogWarning(ex, $"Failed to delete {context}: {filePath}");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Checks if a filename matches the search term (case-insensitive).
         /// </summary>
         /// <param name="name">Filename to check</param>
@@ -1183,6 +1218,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// <param name="virtualDirectory">Virtual directory path for file organization.</param>
         /// <param name="fileId">GUID to use for the file record.</param>
         /// <param name="ct">Cancellation token for async operation.</param>
+        /// <param name="precomputedHash">Optional pre-computed SHA256 hash to avoid recomputing.</param>
         private async Task<GcodeFile> CreateGcodeFileRecordAsync(
             string filePath,
             string originalFileName,
@@ -1190,15 +1226,21 @@ namespace Farm.Web.Api.Services.Gcode
             string fileExtension,
             string? virtualDirectory,
             Guid fileId,
-            CancellationToken ct)
+            CancellationToken ct,
+            string? precomputedHash = null)
         {
             _logger.LogInformation($"CreateGcodeFileRecordAsync: Starting for {originalFileName} at {filePath} with fileId {fileId}");
 
-            // Compute file hash
+            // Use pre-computed hash if provided, otherwise compute it
             string fileHash;
-            await using (FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (SHA256 sha256 = SHA256.Create())
+            if (!string.IsNullOrEmpty(precomputedHash))
             {
+                fileHash = precomputedHash;
+            }
+            else
+            {
+                await using FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using SHA256 sha256 = SHA256.Create();
                 byte[] hashBytes = await sha256.ComputeHashAsync(fs, ct);
                 fileHash = Convert.ToHexString(hashBytes);
             }
@@ -1552,26 +1594,13 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             // Delete physical
-            try
-            {
-                string fullFilePath = Path.Combine(file.FilePath, file.FileName);
-                if (!string.IsNullOrEmpty(fullFilePath) && System.IO.File.Exists(fullFilePath))
-                {
-                    System.IO.File.Delete(fullFilePath);
-                }
+            string fullFilePath = Path.Combine(file.FilePath, file.FileName);
+            TryDeleteFile(fullFilePath, $"gcode file {id}");
 
-                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
-                {
-                    string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-                    if (System.IO.File.Exists(fullThumbnailPath))
-                    {
-                        System.IO.File.Delete(fullThumbnailPath);
-                    }
-                }
-            }
-            catch (Exception ex)
+            if (!string.IsNullOrEmpty(file.ThumbnailFileName))
             {
-                _logger.LogWarning(ex, $"Failed to delete physical file for gcode {id}");
+                string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                TryDeleteFile(fullThumbnailPath, $"thumbnail for gcode {id}");
             }
 
             await _gcodeRepo.RemoveAsync(file, ct);
@@ -1768,14 +1797,7 @@ namespace Farm.Web.Api.Services.Gcode
                 _logger.LogWarning($"[GcodeProcessing] Duplicate file detected: {originalFileName} matches existing file {existingFile.Id}");
 
                 // Clean up the file we just wrote
-                try
-                {
-                    System.IO.File.Delete(finalFilePath);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, $"[GcodeProcessing] Failed to clean up duplicate file: {finalFilePath}");
-                }
+                TryDeleteFile(finalFilePath, "duplicate file cleanup");
 
                 throw new DuplicateFileException(originalFileName, existingFile.Id.ToString(), fileHash);
             }
@@ -1862,14 +1884,7 @@ namespace Farm.Web.Api.Services.Gcode
                 _logger.LogError(ex, $"[GcodeProcessing] Failed to persist GcodeFile to database: {originalFileName}");
 
                 // Clean up the stored file since database save failed
-                try
-                {
-                    System.IO.File.Delete(finalFilePath);
-                }
-                catch (Exception deleteEx)
-                {
-                    _logger.LogWarning(deleteEx, $"[GcodeProcessing] Failed to clean up file after database error: {finalFilePath}");
-                }
+                TryDeleteFile(finalFilePath, "cleanup after database error");
 
                 throw new FilePersistenceException(originalFileName, $"Failed to save file to database: {ex.Message}", ex);
             }

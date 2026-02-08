@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import slicerProfilesService, { 
+import { useNavigate } from 'react-router';
+import { 
+  slicerProfilesService,
   SlicerProfileListItem, 
   ExtendedProfilesResponse,
   ProcessProfileListItem, 
@@ -12,7 +13,7 @@ import slicerProfilesService, {
   SlicerProfileExportDto 
 } from '@/services/slicerProfilesService';
 import { officialProfilesService } from '@/services/officialProfilesService';
-import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
+import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { Settings, Download, Upload, Search, Filter } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
@@ -273,9 +274,9 @@ export const SlicerProfilesPage: React.FC = () => {
       <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).infillPercentage + '%' : '-'}</td>
       <td className="p-2">
         <div className="flex flex-col text-xs gap-1">
-          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded">Default</span>}
-          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded">System</span>}
-          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded">Public</span>}
+          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded-sm">Default</span>}
+          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded-sm">System</span>}
+          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded-sm">Public</span>}
         </div>
       </td>
       <td className="p-2">
@@ -314,7 +315,7 @@ export const SlicerProfilesPage: React.FC = () => {
       maxWidth="max-w-6xl"
     >
       {/* OrcaSlicer Quick Actions */}
-      <div className="mb-6 bg-pf-panel rounded-lg shadow p-4">
+      <div className="mb-6 bg-pf-panel rounded-lg shadow-sm p-4">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Settings className="w-5 h-5" />
           OrcaSlicer Integration
@@ -388,7 +389,7 @@ export const SlicerProfilesPage: React.FC = () => {
 
       <div className="grid md:grid-cols-3 gap-6">
         <div className="md:col-span-1 space-y-4">
-          <form onSubmit={onImport} className="bg-pf-panel rounded shadow p-4 flex flex-col gap-4">
+          <form onSubmit={onImport} className="bg-pf-panel rounded-sm shadow-sm p-4 flex flex-col gap-4">
             <h3 className="text-lg font-semibold">Import Profile</h3>
             <FormField label="Raw Profile JSON" required helper="Paste raw slicer profile JSON exported from your slicer.">
               <Textarea
@@ -446,7 +447,7 @@ export const SlicerProfilesPage: React.FC = () => {
           {message && <Alert type="success">{message}</Alert>}
         </div>
         <div className="md:col-span-2">
-          <div className="bg-pf-panel rounded shadow">
+          <div className="bg-pf-panel rounded-sm shadow-sm">
             {/* Header with Search and Filters */}
             <div className="p-4 border-b border-pf-border">
               <div className="flex items-center gap-4 mb-4">

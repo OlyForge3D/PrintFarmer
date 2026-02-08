@@ -26,8 +26,9 @@ namespace Farm.Infrastructure;
 /// <param name="BedTarget">Target bed temperature (°C) if heating.</param>
 /// <param name="Backend">Printer backend implementation.</param>
 /// <param name="ApiKey">API key / token for the backend if required.</param>
+/// <param name="Username">Username for HTTP Digest authentication (primarily for PrusaLink).</param>
+/// <param name="Password">Password for HTTP Digest authentication (primarily for PrusaLink).</param>
 /// <param name="OriginalServerUrl">Original user-entered URL prior to normalization.</param>
-/// <param name="IpAddress">Resolved IP address when known.</param>
 /// <param name="BackendPort">Backend port number.</param>
 /// <param name="FrontendPort">Frontend port number.</param>
 /// <param name="SpoolInfo">Active spool information (Moonraker + Spoolman integration).</param>
@@ -56,8 +57,9 @@ public record PrinterDto(
     double? BedTarget = null,
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
+    string? Username = null,
+    string? Password = null,
     string? OriginalServerUrl = null,
-    string? IpAddress = null,
     int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
     int? FrontendPort = null,
     PrinterSpoolInfoDto? SpoolInfo = null,

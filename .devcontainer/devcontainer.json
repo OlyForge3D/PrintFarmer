@@ -1,9 +1,9 @@
 {
-  "name": "PrintFarmer (React + .NET 9, SQLite default)",
+  "name": "PrintFarmer (React + .NET 10, SQLite default)",
   "image": "ghcr.io/jpapiez/printfarmer-devcontainer:latest",
   "features": {
     "ghcr.io/devcontainers/features/dotnet:2": {
-      "version": "9.0.302",
+      "version": "10.0",
       "installUsingApt": false
     },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {

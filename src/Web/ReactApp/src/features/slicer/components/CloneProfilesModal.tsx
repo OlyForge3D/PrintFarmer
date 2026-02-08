@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { Button, Select, Alert, FormField } from '@/common/components/ui';
 import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
@@ -33,12 +33,10 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
   const { data: allProfiles, isLoading: profilesLoading } = useQuery({
     queryKey: ['slicerProfilesExtended'],
     queryFn: async () => {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/slicer/profiles`, {
-        headers: getAuthHeaders()
-      });
-      if (!res.ok) throw new Error('Failed to load profiles');
-      return res.json();
+      const response = await apiClient.get<{
+        machineProfiles?: Array<{ id: string; name: string; manufacturer?: string }>;
+      }>('/slicer/profiles');
+      return response.data;
     },
     enabled: isOpen,
     staleTime: 30_000
@@ -48,11 +46,7 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
   const machineProfiles = useMemo<MachineProfile[]>(() => {
     if (!allProfiles?.machineProfiles) return [];
     
-    const profiles = allProfiles.machineProfiles as Array<{
-      id: string;
-      name: string;
-      manufacturer?: string;
-    }>;
+    const profiles = allProfiles.machineProfiles;
     
     return profiles
       .map(p => ({
@@ -65,25 +59,14 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
 
   const cloneMutation = useMutation({
     mutationFn: async (sourceMachineId: string) => {
-      const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/slicer/profiles/clone-from-template`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          sourceMachineProfileId: sourceMachineId,
-          targetPrinterId: printerId
-        })
+      const response = await apiClient.post<{
+        totalProfilesCloned: number;
+        sourceMachineName: string;
+      }>('/slicer/profiles/clone-from-template', {
+        sourceMachineProfileId: sourceMachineId,
+        targetPrinterId: printerId
       });
-
-      if (!res.ok) {
-        const error = await res.text();
-        throw new Error(error || 'Failed to clone profiles');
-      }
-
-      return res.json();
+      return response.data;
     },
     onSuccess: (data) => {
       toast.success(

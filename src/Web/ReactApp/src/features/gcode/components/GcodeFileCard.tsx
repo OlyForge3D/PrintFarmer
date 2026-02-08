@@ -53,7 +53,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
     <>
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">
       {/* Thumbnail */}
-      <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden flex-shrink-0">
+      <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden shrink-0">
         {!file.isDirectory && file.thumbnailUrl ? (
           <img
             src={file.thumbnailUrl}
@@ -81,7 +81,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
               {file.tags.map(tag => (
                 <span
                   key={tag.id}
-                  className="inline-block px-2 py-0.5 rounded text-[10px] font-medium text-white"
+                  className="inline-block px-2 py-0.5 rounded-sm text-[10px] font-medium text-white"
                   style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                   title={tag.description}
                 >
@@ -112,7 +112,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
               {/* Printer Model */}
               {file.extractedPrinterModel && (
                 <div className="flex items-center gap-1.5 pt-1 border-t border-pf-border/50">
-                  <CubeIcon className="w-3.5 h-3.5 text-pf-accent flex-shrink-0" />
+                  <CubeIcon className="w-3.5 h-3.5 text-pf-accent shrink-0" />
                   <span className="truncate" title={file.extractedPrinterModel}>
                     {file.extractedPrinterModel}
                   </span>
@@ -124,7 +124,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <div className="flex items-center gap-2">
                   {file.extractedNozzleDiameter && (
                     <div className="flex items-center gap-1 flex-1 min-w-0">
-                      <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary flex-shrink-0" />
+                      <RectangleStackIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
                       <span className="truncate" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>
                         {file.extractedNozzleDiameter}mm
                       </span>
@@ -132,7 +132,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                   )}
                   {file.extractedMaterial && (
                     <div className="flex items-center gap-1 flex-1 min-w-0">
-                      <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary flex-shrink-0" />
+                      <BeakerIcon className="w-3.5 h-3.5 text-pf-text-tertiary shrink-0" />
                       <span className="truncate" title={`Material: ${file.extractedMaterial}`}>
                         {file.extractedMaterial}
                       </span>
@@ -146,7 +146,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <div className="flex items-center gap-2">
                   {file.extractedHotendTemp && (
                     <div className="flex items-center gap-1 flex-1">
-                      <FireIcon className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
+                      <FireIcon className="w-3.5 h-3.5 text-orange-500 shrink-0" />
                       <span title={`Hotend: ${formatTemperature(file.extractedHotendTemp)}`}>
                         {formatTemperature(file.extractedHotendTemp)}
                       </span>
@@ -154,7 +154,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                   )}
                   {file.extractedBedTemp && (
                     <div className="flex items-center gap-1 flex-1">
-                      <RectangleStackIcon className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                      <RectangleStackIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                       <span title={`Bed: ${formatTemperature(file.extractedBedTemp)}`}>
                         {formatTemperature(file.extractedBedTemp)}
                       </span>

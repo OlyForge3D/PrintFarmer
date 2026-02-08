@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { LoadingIcon, CheckIcon, WiFiIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, CheckIcon, WiFiIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto, ManufacturerDto, TestConnectionResponse } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { apiClient } from '@/services/api';
@@ -40,6 +40,9 @@ function AddPrinterModalContent({
     manufacturerId: undefined,
     modelId: undefined,
     apiKey: undefined,
+    // Digest authentication for PrusaLink - username defaults to "maker"
+    username: 'maker',
+    password: undefined,
     cameraStreamUrl: '',
     cameraSnapshotUrl: '',
     backendPort: 7125,
@@ -53,6 +56,7 @@ function AddPrinterModalContent({
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleInputChange = (field: keyof typeof formData, value: unknown) => {
     setFormData(prev => ({
@@ -96,11 +100,19 @@ function AddPrinterModalContent({
       return;
     }
 
-    // Check API key for backends that require it
-    if ((formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && !formData.apiKey?.trim()) {
+    // Check authentication requirements per backend
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
       setTestResult({ 
         success: false, 
-        message: `API Key is required for ${formData.backend === PrinterBackend.OctoPrint ? 'OctoPrint' : 'PrusaLink'} printers` 
+        message: 'Password is required for PrusaLink printers (get it from printer Settings → Network → Credentials)' 
+      });
+      return;
+    }
+    
+    if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
+      setTestResult({ 
+        success: false, 
+        message: 'API Key is required for OctoPrint printers' 
       });
       return;
     }
@@ -113,6 +125,8 @@ function AddPrinterModalContent({
         serverUrl: formData.serverUrl,
         backend: formData.backend,
         apiKey: formData.apiKey,
+        username: formData.username,
+        password: formData.password,
         backendPort: formData.backendPort,
       });
       setTestResult(result);
@@ -143,12 +157,13 @@ function AddPrinterModalContent({
       }
     }
     
-    if ((formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && !formData.apiKey?.trim()) {
-      errors.apiKey = [
-        formData.backend === PrinterBackend.OctoPrint
-          ? 'API Key is required for OctoPrint printers'
-          : 'API Key is required for PrusaLink printers'
-      ];
+    // Validate authentication per backend
+    if (formData.backend === PrinterBackend.PrusaLink && !formData.password?.trim()) {
+      errors.password = ['Password is required for PrusaLink printers'];
+    }
+    
+    if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
+      errors.apiKey = ['API Key is required for OctoPrint printers'];
     }
 
     setValidationErrors(errors);
@@ -193,6 +208,8 @@ function AddPrinterModalContent({
       manufacturerId: undefined,
       modelId: undefined,
       apiKey: undefined,
+      username: 'maker', // Reset to default
+      password: undefined,
       cameraStreamUrl: '',
       cameraSnapshotUrl: '',
     });
@@ -326,8 +343,51 @@ function AddPrinterModalContent({
               />
             </FormField>
 
-            {/* API Key (for PrusaLink and OctoPrint) */}
-            {(formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && (
+            {/* PrusaLink Authentication (Digest Auth with Username/Password) */}
+            {formData.backend === PrinterBackend.PrusaLink && (
+              <>
+                <FormField
+                  label="Username"
+                  helper="Default is 'maker' for most PrusaLink printers"
+                >
+                  <Input
+                    type="text"
+                    value={formData.username || 'maker'}
+                    onChange={(e) => handleInputChange('username', e.target.value)}
+                    placeholder="maker"
+                    aria-label="Username for PrusaLink"
+                  />
+                </FormField>
+                <FormField
+                  label="Password"
+                  required
+                  error={validationErrors.password?.[0]}
+                  helper="Get this from printer: Settings → Network → Credentials"
+                >
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password || ''}
+                      onChange={(e) => handleInputChange('password', e.target.value)}
+                      placeholder="Enter password from printer"
+                      aria-label="Password for PrusaLink"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 !p-1 !h-auto"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      iconCenter={showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                    />
+                  </div>
+                </FormField>
+              </>
+            )}
+
+            {/* OctoPrint Authentication (API Key) */}
+            {formData.backend === PrinterBackend.OctoPrint && (
               <FormField
                 label="API Key"
                 required
@@ -337,7 +397,7 @@ function AddPrinterModalContent({
                   type="text"
                   value={formData.apiKey || ''}
                   onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                  placeholder={formData.backend === PrinterBackend.OctoPrint ? "Enter OctoPrint API key" : "Enter PrusaLink API key"}
+                  placeholder="Enter OctoPrint API key"
                   aria-label="API Key"
                 />
               </FormField>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background -->
+  <rect width="120" height="120" rx="8" fill="#1a1a2e"/>
+  
+  <!-- Frame - CoreXY distinctive cube frame -->
+  <rect x="15" y="20" width="90" height="85" rx="3" stroke="#4a5568" stroke-width="2" fill="none"/>
+  <rect x="20" y="25" width="80" height="75" rx="2" stroke="#2d3748" stroke-width="1.5" fill="#0f0f1a"/>
+  
+  <!-- Top gantry rails (X-axis) -->
+  <rect x="22" y="30" width="76" height="4" rx="1" fill="#718096"/>
+  <rect x="22" y="36" width="76" height="4" rx="1" fill="#718096"/>
+  
+  <!-- CoreXY characteristic crossed belts (simplified) -->
+  <line x1="25" y1="32" x2="60" y2="50" stroke="#f6ad55" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <line x1="95" y1="32" x2="60" y2="50" stroke="#f6ad55" stroke-width="1.5" stroke-dasharray="3,2"/>
+  
+  <!-- Print head carriage -->
+  <rect x="52" y="45" width="16" height="20" rx="2" fill="#4299e1"/>
+  <rect x="56" y="62" width="8" height="8" rx="1" fill="#ed8936"/>
+  <!-- Nozzle -->
+  <path d="M58 70 L62 70 L60 76 Z" fill="#fbd38d"/>
+  
+  <!-- Heated bed -->
+  <rect x="25" y="88" width="70" height="8" rx="2" fill="#48bb78"/>
+  <rect x="28" y="90" width="64" height="4" rx="1" fill="#38a169"/>
+  
+  <!-- Z-axis lead screws -->
+  <rect x="18" y="45" width="3" height="50" rx="1" fill="#a0aec0"/>
+  <rect x="99" y="45" width="3" height="50" rx="1" fill="#a0aec0"/>
+  
+  <!-- Stepper motors (top corners for CoreXY) -->
+  <rect x="15" y="20" width="12" height="12" rx="2" fill="#2d3748" stroke="#4a5568" stroke-width="1"/>
+  <circle cx="21" cy="26" r="3" fill="#718096"/>
+  <rect x="93" y="20" width="12" height="12" rx="2" fill="#2d3748" stroke="#4a5568" stroke-width="1"/>
+  <circle cx="99" cy="26" r="3" fill="#718096"/>
+  
+  <!-- Label -->
+  <text x="60" y="112" font-family="system-ui, sans-serif" font-size="8" fill="#a0aec0" text-anchor="middle">CoreXY</text>
+</svg>

@@ -64,41 +64,173 @@ export interface PrintJobStatusDto {
 }
 // Mirror existing shared models from Farm.Web.Shared
 
-export interface Printer {
+// ============== Printer Base Interfaces ==============
+// These interfaces provide a consistent foundation for all printer DTOs.
+// Use composition (extends) to build specific DTOs from these building blocks.
+
+/**
+ * Core printer identity - the minimum fields to identify a printer.
+ * Every printer DTO that represents a specific printer should have these.
+ */
+export interface PrinterIdentity {
+  /** Unique identifier for the printer */
   id: string;
+  /** Display name for the printer */
   name: string;
-  backendUrl: string;
-  frontendUrl?: string;
-  notes?: string;
-  isOnline: boolean;
-  isReachable: boolean;
-  state?: string;
-  manufacturerId?: string;
-  manufacturerName?: string;
-  modelId?: string;
-  modelName?: string;
-  progress?: number;
-  jobName?: string;
-  thumbnailUrl?: string;
-  cameraStreamUrl?: string;
-  cameraSnapshotUrl?: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  hotendTemp?: number;
-  bedTemp?: number;
-  hotendTarget?: number;
-  bedTarget?: number;
-  homedAxes?: string;
+  /** Backend type (Moonraker, PrusaLink, OctoPrint, SDCP) */
   backend: PrinterBackend;
+}
+
+/**
+ * Authentication credentials for printer connections.
+ * All printer DTOs that handle connection/authentication should extend or include these fields.
+ */
+export interface PrinterCredentials {
+  /** API key for backends that use key-based auth (Moonraker, OctoPrint) */
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. Required for PrusaLink. */
+  password?: string;
+}
+
+/**
+ * Connection/network details for reaching a printer.
+ * Used by DTOs that need to establish connections.
+ */
+export interface PrinterConnection {
+  /** Backend API URL (e.g., "http://192.168.1.100:7125") */
+  backendUrl?: string;
+  /** Frontend web interface URL (e.g., "http://192.168.1.100") */
+  frontendUrl?: string;
+  /** Alternative property name for serverUrl (some DTOs use this) */
+  serverUrl?: string;
+  /** Original URL before hostname resolution */
   originalServerUrl?: string;
+  /** Resolved IP address */
   ipAddress?: string;
-  spoolInfo?: PrinterSpoolInfo;
+  /** Backend API port (e.g., 7125 for Moonraker) */
   backendPort?: number;
+  /** Frontend web interface port */
   frontendPort?: number;
+}
+
+/**
+ * Descriptive metadata about a printer.
+ */
+export interface PrinterMetadata {
+  /** User notes/description */
+  notes?: string;
+  /** Manufacturer ID (foreign key) */
+  manufacturerId?: string;
+  /** Manufacturer name (e.g., "Prusa", "Creality") */
+  manufacturerName?: string;
+  /** Model ID (foreign key) */
+  modelId?: string;
+  /** Model name (e.g., "MK4", "Ender 3") */
+  modelName?: string;
+}
+
+/**
+ * Camera URL information for a printer.
+ */
+export interface PrinterCameraInfo {
+  /** Live camera stream URL (MJPEG, etc.) */
+  cameraStreamUrl?: string;
+  /** Single frame snapshot URL */
+  cameraSnapshotUrl?: string;
+}
+
+/**
+ * Live status information for a printer.
+ */
+export interface PrinterLiveStatus {
+  /** Whether the printer is currently online/reachable */
+  isOnline: boolean;
+  /** Current printer state (e.g., "Idle", "Printing", "Paused") */
+  state?: string;
+}
+
+/**
+ * Temperature readings from printer sensors.
+ */
+export interface PrinterTemperatures {
+  /** Current hotend/nozzle temperature */
+  hotendTemp?: number;
+  /** Current bed temperature */
+  bedTemp?: number;
+  /** Target hotend temperature */
+  hotendTarget?: number;
+  /** Target bed temperature */
+  bedTarget?: number;
+}
+
+/**
+ * Position coordinates for printer toolhead.
+ */
+export interface PrinterPosition {
+  /** X axis position in mm */
+  x?: number;
+  /** Y axis position in mm */
+  y?: number;
+  /** Z axis position in mm */
+  z?: number;
+}
+
+/**
+ * Current print job information.
+ */
+export interface PrinterJobInfo {
+  /** Print progress 0-100 */
+  progress?: number;
+  /** Name of the current job/file */
+  jobName?: string;
+  /** Thumbnail URL for the current job */
+  thumbnailUrl?: string;
+  /** Active spool/filament information */
+  spoolInfo?: PrinterSpoolInfo;
+}
+
+/**
+ * Operational state flags for a printer.
+ */
+export interface PrinterOperationalState {
+  /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
+  /** Whether printer is enabled for operations */
   isEnabled?: boolean;
+}
+
+/**
+ * Combined base interface for full printer DTOs.
+ * Extends all common base interfaces for a complete printer representation.
+ * Use this as the base for DTOs that need most/all printer information.
+ */
+export interface PrinterBase extends 
+  PrinterIdentity,
+  PrinterCredentials,
+  PrinterConnection,
+  PrinterMetadata,
+  PrinterCameraInfo,
+  PrinterOperationalState {
+}
+
+/**
+ * Full printer DTO with all status and configuration information.
+ * This is the most complete printer representation returned by the API.
+ */
+export interface Printer extends 
+  PrinterBase,
+  PrinterLiveStatus,
+  PrinterTemperatures,
+  PrinterPosition,
+  PrinterJobInfo {
+  // Required override - backendUrl is required for Printer
+  backendUrl: string;
+  // Additional Printer-specific fields
+  isReachable: boolean;
+  motionType?: MotionType;
+  homedAxes?: string;
 }
 
 export interface PrinterCameraUrls {
@@ -106,6 +238,17 @@ export interface PrinterCameraUrls {
   name: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+}
+
+export interface PrinterVersionInfo {
+  printerId: string;
+  backend: PrinterBackend;
+  supported: boolean;
+  firmwareVersion?: string | null;
+  backendVersion?: string | null;
+  apiVersion?: string | null;
+  retrievedAtUtc: string;
+  message?: string | null;
 }
 
 export interface PrinterBackendCapabilitiesDto {
@@ -125,35 +268,17 @@ export interface PrinterBackendCapabilitiesDto {
   supportsHistory: boolean;
 }
 
-export interface PrinterFast {
-  id: string;
-  name: string;
+/**
+ * Lightweight printer DTO optimized for fast list retrieval.
+ * Contains essential display info without full configuration details.
+ */
+export interface PrinterFast extends 
+  PrinterBase,
+  PrinterLiveStatus,
+  PrinterTemperatures,
+  PrinterPosition {
+  // Required override - backendUrl is required for PrinterFast
   backendUrl: string;
-  notes?: string;
-  isOnline: boolean;
-  state?: string;
-  manufacturerName?: string;
-  modelName?: string;
-  backend: PrinterBackend;
-  apiKey?: string;
-  originalServerUrl?: string;
-  ipAddress?: string;
-  backendPort?: number;
-  frontendPort?: number;
-  inMaintenance?: boolean;
-  isEnabled?: boolean;
-  // Camera URLs from database (discovered during printer registration)
-  cameraStreamUrl?: string;
-  cameraSnapshotUrl?: string;
-  // Temperature data (may be populated from real-time status)
-  hotendTemp?: number;
-  bedTemp?: number;
-  hotendTarget?: number;
-  bedTarget?: number;
-  // Position data
-  x?: number;
-  y?: number;
-  z?: number;
 }
 
 export enum PrinterBackend {
@@ -199,21 +324,37 @@ export interface PrinterSpoolInfo {
   last_used?: string;
 }
 
-// Combined printer identity with capabilities snapshot (mirrors shared DTO)
+/**
+ * Combined printer identity with capabilities snapshot.
+ * Used for export/import operations.
+ * 
+ * Note: Uses standard field names (id, name, modelName) for consistency.
+ * Nullable types (| null) are used instead of optional (?) for explicit JSON serialization
+ * in export/import scenarios, which is why this doesn't extend the base interfaces directly.
+ */
 export interface PrinterWithCapabilitiesDto {
-  printerId: string;
-  printerName: string;
-  printerModel: string;
-  capabilities?: PrinterCapabilitiesExportDto | null; // Lean export format (no duplicate printerId/printerName)
-  manufacturerName?: string | null;
+  // Identity (standard naming)
+  id: string;
+  name: string;
   backend?: PrinterBackend | null;
-  ipAddress?: string | null;
-  // Import-friendly fields (for re-importing exported printers)
-  serverUrl?: string | null; // Base URL without port (e.g., "http://192.168.1.100")
-  backendPort?: number | null; // Backend API port (e.g., 7125 for Moonraker)
-  frontendPort?: number | null; // Frontend port if applicable (e.g., 5000 for PrusaLink)
-  apiKey?: string | null;
+  
+  // Metadata (standard naming)
+  modelName: string;
+  manufacturerName?: string | null;
   notes?: string | null;
+  
+  // Connection
+  serverUrl?: string | null;
+  backendPort?: number | null;
+  frontendPort?: number | null;
+  
+  // Credentials
+  apiKey?: string | null;
+  username?: string | null;
+  password?: string | null;
+  
+  // Capabilities (unique to export DTO)
+  capabilities?: PrinterCapabilitiesExportDto | null;
 }
 
 export interface FilamentInfo {
@@ -232,61 +373,43 @@ export interface VendorInfo {
   name?: string;
 }
 
-// Basic printer info without live status
-export interface PrinterBasic {
-  id: string;
-  name: string;
+/**
+ * Basic printer info without live status.
+ * Used for configuration/management scenarios where real-time data isn't needed.
+ */
+export interface PrinterBasic extends 
+  PrinterIdentity,
+  PrinterCredentials,
+  PrinterMetadata {
+  /** Server URL (uses serverUrl instead of backendUrl) */
   serverUrl: string;
-  notes?: string;
-  manufacturerName?: string;
-  modelName?: string;
-  backend: PrinterBackend;
-  apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
   backendPort?: number;
   frontendPort?: number;
 }
 
-// Live status info
-export interface PrinterStatus {
+/**
+ * Live status info for real-time updates.
+ * Contains only dynamic/changing printer state, no configuration.
+ */
+export interface PrinterStatus extends 
+  PrinterLiveStatus,
+  PrinterCameraInfo,
+  PrinterTemperatures,
+  PrinterPosition,
+  PrinterJobInfo {
+  /** Printer ID for correlation */
   id: string;
-  isOnline: boolean;
-  state?: string;
-  progress?: number;
-  jobName?: string;
-  thumbnailUrl?: string;
-  cameraStreamUrl?: string;
-  cameraSnapshotUrl?: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  hotendTemp?: number;
-  bedTemp?: number;
-  hotendTarget?: number;
-  bedTarget?: number;
-  spoolInfo?: PrinterSpoolInfo;
 }
 
-// Real-time update payload for SignalR
-export interface PrinterStatusUpdate {
-  id: string;
-  isOnline: boolean;
-  state?: string;
-  progress?: number;
-  jobName?: string;
-  thumbnailUrl?: string;
-  cameraStreamUrl?: string;
-  cameraSnapshotUrl?: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  hotendTemp?: number;
-  bedTemp?: number;
-  hotendTarget?: number;
-  bedTarget?: number;
+/**
+ * Real-time update payload for SignalR.
+ * Extends PrinterStatus with additional fields sent during live updates.
+ */
+export interface PrinterStatusUpdate extends PrinterStatus {
+  /** Axes that have been homed (e.g., "xyz") */
   homedAxes?: string;
-  spoolInfo?: PrinterSpoolInfo;
 }
 
 // File information with thumbnail
@@ -310,6 +433,10 @@ export interface CreatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
   backendPort?: number;
@@ -321,6 +448,10 @@ export interface TestConnectionRequest {
   serverUrl: string;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   backendPort?: number;
 }
 
@@ -357,6 +488,10 @@ export interface UpdatePrinterDto {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  /** Username for HTTP Digest authentication (primarily for PrusaLink). Defaults to "maker" if not specified. */
+  username?: string;
+  /** Password for HTTP Digest authentication. User must obtain this from the printer's web interface. */
+  password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
   // Printer capabilities
@@ -833,6 +968,8 @@ export interface PrinterDetails {
   dateAcquired?: Date;
   backend: PrinterBackend;
   apiKey?: string;
+  username?: string;
+  password?: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
   originalServerUrl?: string;
@@ -1238,6 +1375,25 @@ export interface JobQueuePrintJob {
   failureReason?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Queue overview DTO - provides printer availability and queue status
+ * Used for displaying available printers when queueing a print job
+ */
+export interface QueueOverviewDto {
+  printerId: string;
+  printerName: string;
+  printerModel: string;
+  /** Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS") */
+  modelAliases?: string[];
+  isAvailable: boolean;
+  queuedJobsCount: number;
+  currentJobId?: string;
+  currentJobName?: string;
+  estimatedCompletionTime?: string;
+  nozzleDiameter?: number;
+  supportedMaterials?: string[];
 }
 
 // API response types
@@ -1648,6 +1804,16 @@ export interface QueueHistoryPageDto {
   totalCount: number;
   currentPage: number;
   pageSize: number;
+  stats: QueueHistoryStatsDto;
+}
+
+export interface QueueHistoryStatsDto {
+  totalCompleted: number;
+  totalFailed: number;
+  totalCancelled: number;
+  successRate: number;
+  averageDurationMinutes: number;
+  totalPrintTimeMinutes: number;
 }
 
 export interface QueueHistoryEntryDto {
@@ -1778,4 +1944,60 @@ export interface BackgroundServicesSummary {
   disabledServices: number;
   servicesWithErrors: number;
   byCategory: Record<string, CategorySummary>;
+}
+
+// Camera Types - for standalone webcam management
+export interface CameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  createdAt: string;
+  updatedAt?: string;
+  isStandalone: boolean;
+}
+
+export interface CreateCameraDto {
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface UpdateCameraDto {
+  name?: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  location?: string;
+}
+
+export interface ToggleCameraDto {
+  isEnabled: boolean;
+}
+
+// Combined camera view - shows both standalone and printer-attached cameras
+export interface DisplayCameraDto {
+  id: string;
+  name: string;
+  description?: string;
+  streamUrl?: string;
+  snapshotUrl?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  location?: string;
+  isStandalone: boolean;
+  printerId?: string;
+  printerName?: string;
+  printerState?: string;
+  isPrinterOnline?: boolean;
 }

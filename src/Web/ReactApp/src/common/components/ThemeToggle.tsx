@@ -45,7 +45,7 @@ export function ThemeToggle({
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value as Theme)}
-          className={`appearance-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
+          className={`appearance-none bg-pf-panel border border-pf-border rounded-lg ${sizeClasses[size]} pr-8 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent hover:bg-pf-bg-2 transition-colors duration-200`}
           aria-label="Select theme"
         >
           {themes.map(({ value, label }) => (
@@ -103,7 +103,7 @@ export function ThemeToggle({
         const nextIndex = (currentIndex + 1) % themes.length;
         setTheme(themes[nextIndex].value);
       }}
-      className={`${sizeClasses[size]} ${className ?? ''} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
+      className={`${sizeClasses[size]} ${className ?? ''} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
       aria-label={`Current theme: ${currentTheme.label}. Click to cycle themes.`}
       title={`Current: ${currentTheme.label} (${computedThemeLabel}). Click to change.`}
     >

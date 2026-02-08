@@ -10,7 +10,7 @@
  * - Temperature and state displays
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -196,16 +196,15 @@ export const PrinterBedVisualization: React.FC<PrinterBedVisualizationProps> = (
   showAxes = false,
   showGrid = true,
 }) => {
-  const [error, setError] = useState<string | null>(null);
-
-  // Validate props
-  useEffect(() => {
+  // Derive error from props (no effect needed for validation)
+  const error = useMemo(() => {
     if (!printerModel) {
-      setError('Printer model is required');
+      return 'Printer model is required';
     }
     if (!status) {
-      setError('Printer status is required');
+      return 'Printer status is required';
     }
+    return null;
   }, [printerModel, status]);
 
   if (error) {

@@ -20,6 +20,11 @@ interface TagSelectorProps {
   placeholder?: string;
 }
 
+// Generate random color outside of render (called once per tag creation)
+function generateRandomColor(): string {
+  return '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+}
+
 /**
  * Reusable tag selector component for tagging any object (models, gcode files, etc.)
  * Displays available tags, allows selection/deselection, and provides save callback
@@ -40,7 +45,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
     mutationFn: async (tagName: string) => {
       return await apiClient.createTag(
         tagName,
-        '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
+        generateRandomColor(),
         ''
       );
     },
@@ -147,7 +152,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                   >
                     {tag.color && (
                       <div
-                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        className="w-3 h-3 rounded-full shrink-0"
                         style={{ backgroundColor: tag.color }}
                       />
                     )}

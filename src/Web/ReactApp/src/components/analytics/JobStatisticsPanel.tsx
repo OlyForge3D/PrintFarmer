@@ -58,18 +58,18 @@ export const JobStatisticsPanel: React.FC<JobStatisticsPanelProps> = ({
       <div className="space-y-4">
         {/* Overview */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="pf-bg-0 pf-border rounded p-3">
+          <div className="pf-bg-0 pf-border rounded-sm p-3">
             <div className="pf-text-secondary text-xs">Total Jobs</div>
             <div className="text-lg font-semibold pf-text-primary">{stats.totalJobs}</div>
           </div>
-          <div className="pf-bg-0 pf-border rounded p-3">
+          <div className="pf-bg-0 pf-border rounded-sm p-3">
             <div className="pf-text-secondary text-xs">Success Rate</div>
             <div className="text-lg font-semibold pf-success">{successRate}%</div>
           </div>
         </div>
 
         {/* Duration Statistics */}
-        <div className="pf-bg-0 pf-border rounded p-4">
+        <div className="pf-bg-0 pf-border rounded-sm p-4">
           <h5 className="font-semibold pf-text-primary mb-3 text-sm">Duration Statistics</h5>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between items-center">
@@ -92,7 +92,7 @@ export const JobStatisticsPanel: React.FC<JobStatisticsPanelProps> = ({
         </div>
 
         {/* Variance */}
-        <div className="pf-bg-0 pf-border rounded p-3">
+        <div className="pf-bg-0 pf-border rounded-sm p-3">
           <div className="pf-text-secondary text-xs">Standard Deviation</div>
           <div className="text-lg font-semibold pf-text-primary">
             {(stats.standardDeviation / 1000).toFixed(2)}s

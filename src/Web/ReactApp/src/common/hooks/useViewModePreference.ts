@@ -1,8 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
 export type ViewMode = 'grid' | 'explorer';
 
 const DEFAULT_VIEW_MODE: ViewMode = 'explorer';
+
+// Initialize from localStorage, with migration from 'list' to 'grid'
+function getInitialViewMode(storageKey: string): ViewMode {
+  if (typeof window === 'undefined') return DEFAULT_VIEW_MODE;
+  const saved = localStorage.getItem(storageKey);
+  if (saved === 'grid' || saved === 'explorer') return saved;
+  if (saved === 'list') {
+    // Migrate old 'list' view mode to 'grid'
+    localStorage.setItem(storageKey, 'grid');
+    return 'grid';
+  }
+  return DEFAULT_VIEW_MODE;
+}
 
 /**
  * Custom hook for managing view mode preference.
@@ -10,28 +23,14 @@ const DEFAULT_VIEW_MODE: ViewMode = 'explorer';
  * @param storageKey - localStorage key for persisting preference (e.g., 'printfarmer-models-viewmode')
  */
 export function useViewModePreference(storageKey: string = 'printfarmer-models-viewmode') {
-  const [viewMode, setViewModeState] = useState<ViewMode>(DEFAULT_VIEW_MODE);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  // Load preference from localStorage on mount
-  useEffect(() => {
-    const savedViewMode = localStorage.getItem(storageKey);
-    // Convert 'list' to 'grid' for backwards compatibility
-    if (savedViewMode === 'grid' || savedViewMode === 'explorer') {
-      setViewModeState(savedViewMode);
-    } else if (savedViewMode === 'list') {
-      // Migrate old 'list' view mode to 'grid'
-      setViewModeState('grid');
-      localStorage.setItem(storageKey, 'grid');
-    }
-    setIsLoaded(true);
-  }, [storageKey]);
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => getInitialViewMode(storageKey));
 
   // Update viewMode and persist to localStorage
-  const setViewMode = (newMode: ViewMode) => {
+  const setViewMode = useCallback((newMode: ViewMode) => {
     setViewModeState(newMode);
     localStorage.setItem(storageKey, newMode);
-  };
+  }, [storageKey]);
 
-  return { viewMode, setViewMode, isLoaded };
+  // isLoaded is now always true since we initialize synchronously
+  return { viewMode, setViewMode, isLoaded: true };
 }

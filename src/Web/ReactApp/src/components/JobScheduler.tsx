@@ -213,7 +213,7 @@ export const JobScheduler: React.FC<JobSchedulerProps> = ({
               type="datetime-local"
               value={scheduledTime}
               onChange={(e) => setScheduledTime(e.target.value)}
-              className="w-full rounded-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-none focus:ring-1 focus:ring-pf-accent"
+              className="w-full rounded-xs border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
               required
             />
           </div>
@@ -263,7 +263,7 @@ export const JobScheduler: React.FC<JobSchedulerProps> = ({
                 type="date"
                 value={recurrenceEndDate}
                 onChange={(e) => setRecurrenceEndDate(e.target.value)}
-                className="w-full rounded-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                className="w-full rounded-xs border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
               />
             </div>
           )}

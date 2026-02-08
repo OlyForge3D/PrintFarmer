@@ -37,6 +37,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     private Location _testLocation1;
     private Location _testLocation2;
     private PrinterBackend _testBackend = PrinterBackend.Moonraker;
+    private Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
 
     public PrinterLocationImportTests()
     {
@@ -49,6 +50,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         _dbContext = _scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _printersService = _scope.ServiceProvider.GetRequiredService<IPrintersService>();
         _locationService = _scope.ServiceProvider.GetRequiredService<ILocationService>();
+        _sensitiveDataProtector = _scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>();
 
         // Create test locations - use unique IDs to avoid conflicts
         _testLocation1 = new Location
@@ -220,9 +222,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "OverwritePrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             ManufacturerId = manufacturerId,
@@ -300,9 +301,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "RoundTripPrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             LocationId = _testLocation1.Id,
@@ -347,9 +347,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "JsonRoundTripPrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             LocationId = _testLocation1.Id,
@@ -387,6 +386,93 @@ public class PrinterLocationImportTests : IAsyncLifetime
     #region CSV Export Tests
 
     [Fact]
+    public async Task ExportPrintersCsvAsync_PrusaLink_DecryptsPassword_AndDoesNotDuplicateInApiKey()
+    {
+        // Arrange
+        Manufacturer? manufacturer = await _dbContext.Manufacturers.FirstOrDefaultAsync();
+        if (manufacturer == null)
+        {
+            manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = GetNextUniqueMfgName() };
+            _dbContext.Manufacturers.Add(manufacturer);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        PrinterModel? model = await _dbContext.PrinterModels.FirstOrDefaultAsync();
+        if (model == null)
+        {
+            model = new PrinterModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "TestModel",
+                ManufacturerId = manufacturer.Id,
+                DefaultBackend = (int)PrinterBackend.PrusaLink,
+                MaxX = 250,
+                MaxY = 210,
+                MaxZ = 220
+            };
+            _dbContext.PrinterModels.Add(model);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        string plainPassword = "super-secret-password";
+        string protectedPassword = _sensitiveDataProtector.Protect(plainPassword)!;
+
+        string plainLegacyApiKey = "legacy-should-not-export";
+        string protectedLegacyApiKey = _sensitiveDataProtector.Protect(plainLegacyApiKey)!;
+
+        string ip = GetNextIpAddress();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "PrusaLinkExportPrinter",
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
+            Backend = (int)PrinterBackend.PrusaLink,
+            BackendPort = 80,
+            LocationId = _testLocation1.Id,
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id,
+            IsEnabled = true,
+            Username = "maker",
+            // Persist encrypted-at-rest values to simulate real database state
+            ApiKey = protectedLegacyApiKey,
+            Password = protectedPassword,
+        };
+
+        _dbContext.Printers.Add(printer);
+        await _dbContext.SaveChangesAsync();
+
+        // Act
+        byte[] csvBytes = await _printersService.BuildExportCsvAsync(null, CancellationToken.None);
+        string csv = Encoding.UTF8.GetString(csvBytes);
+
+        // Assert
+        csv.Should().NotContain("CfDJ");
+
+        string[] lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string headerLine = lines[0].TrimEnd('\r');
+        string? printerLine = lines.FirstOrDefault(l => l.Contains("PrusaLinkExportPrinter"));
+        printerLine.Should().NotBeNullOrEmpty();
+
+        string[] headerColumns = headerLine.Split(',');
+        string[] dataColumns = printerLine!.TrimEnd('\r').Split(',');
+
+        int apiKeyIdx = Array.IndexOf(headerColumns, "ApiKey");
+        int usernameIdx = Array.IndexOf(headerColumns, "Username");
+        int passwordIdx = Array.IndexOf(headerColumns, "Password");
+
+        apiKeyIdx.Should().BeGreaterThan(-1);
+        usernameIdx.Should().BeGreaterThan(-1);
+        passwordIdx.Should().BeGreaterThan(-1);
+
+        dataColumns[usernameIdx].Should().Be("maker");
+        dataColumns[passwordIdx].Should().Be(plainPassword);
+
+        // For PrusaLink digest auth, we export username/password and keep ApiKey empty.
+        dataColumns[apiKeyIdx].Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExportPrintersCsvAsync_IncludesLocationNameColumn()
     {
         // Arrange - Create printer with location
@@ -398,9 +484,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "ExportPrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             LocationId = _testLocation1.Id,  // Changed from _testLocation2 to match GetCsvWithLocations usage
@@ -437,9 +522,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "NoLocationPrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             LocationId = null,
@@ -467,6 +551,67 @@ public class PrinterLocationImportTests : IAsyncLifetime
     #region JSON Export Tests
 
     [Fact]
+    public async Task ExportPrintersJsonAsync_DecryptsProtectedPassword()
+    {
+        // Arrange
+        Manufacturer? manufacturer = await _dbContext.Manufacturers.FirstOrDefaultAsync();
+        if (manufacturer == null)
+        {
+            manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = GetNextUniqueMfgName() };
+            _dbContext.Manufacturers.Add(manufacturer);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        PrinterModel? model = await _dbContext.PrinterModels.FirstOrDefaultAsync();
+        if (model == null)
+        {
+            model = new PrinterModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "TestModel",
+                ManufacturerId = manufacturer.Id,
+                DefaultBackend = (int)PrinterBackend.PrusaLink,
+                MaxX = 250,
+                MaxY = 210,
+                MaxZ = 220
+            };
+            _dbContext.PrinterModels.Add(model);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        string plainPassword = "json-secret-password";
+        string protectedPassword = _sensitiveDataProtector.Protect(plainPassword)!;
+
+        string ip = GetNextIpAddress();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "JsonPrusaLinkExportPrinter",
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
+            Backend = (int)PrinterBackend.PrusaLink,
+            BackendPort = 80,
+            LocationId = _testLocation1.Id,
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id,
+            IsEnabled = true,
+            Username = "maker",
+            Password = protectedPassword,
+        };
+
+        _dbContext.Printers.Add(printer);
+        await _dbContext.SaveChangesAsync();
+
+        // Act
+        byte[] jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
+        string json = Encoding.UTF8.GetString(jsonBytes);
+
+        // Assert
+        json.Should().NotContain("CfDJ");
+        json.Should().Contain(plainPassword);
+    }
+
+    [Fact]
     public async Task ExportPrintersJsonAsync_IncludesLocationNameField()
     {
         // Arrange
@@ -478,9 +623,8 @@ public class PrinterLocationImportTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             Name = "JsonExportPrinter",
-            ServerUrl = $"http://{ip}:7125",
-            OriginalServerUrl = $"http://{ip}:7125",
-            IpAddress = ip,
+            ServerUrl = $"http://{ip}",
+            OriginalServerUrl = $"http://{ip}",
             Backend = (int)_testBackend,
             BackendPort = 7125,
             LocationId = _testLocation1.Id,

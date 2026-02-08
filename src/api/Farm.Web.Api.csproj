@@ -48,13 +48,13 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="OpenTelemetry" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.14.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.14.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.14.0" />
     <PackageReference Include="AutoMapper" Version="14.0.0" />
     <PackageReference Include="AssimpNetter" Version="6.0.2.1" />
@@ -67,6 +67,8 @@
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
     <!-- Slicer libraries -->
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
+    <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
   </ItemGroup>
 
 

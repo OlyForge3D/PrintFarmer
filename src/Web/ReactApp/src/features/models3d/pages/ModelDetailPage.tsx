@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -341,7 +341,7 @@ export const ModelDetailPage: React.FC = () => {
                                             variant="subtle"
                                             size="sm"
                                             onClick={() => setIsEditingDescription(true)}
-                                            className="p-1 flex-shrink-0"
+                                            className="p-1 shrink-0"
                                         >
                                             <EditIcon className="w-4 h-4" />
                                         </Button>
@@ -400,7 +400,7 @@ export const ModelDetailPage: React.FC = () => {
                                 <a
                                     href={model.url}
                                     download
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover mt-3"
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded-sm hover:bg-pf-success-hover mt-3"
                                 >
                                     <DownloadIcon className="w-4 h-4" />
                                     Download File

@@ -4,6 +4,7 @@ import { Button } from "@/common/components/ui/Button";
 import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
+import HistoryJobTable from "./HistoryJobTable";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
@@ -29,12 +30,29 @@ export default function QueueHistoryTab({
   // State
   const [jobs, setJobs] = useState<HistoryJob[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [serverStats, setServerStats] = useState<{
+    totalCompleted: number;
+    totalFailed: number;
+    totalCancelled: number;
+    successRate: number;
+    averageDurationMinutes: number;
+    totalPrintTimeMinutes: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Filter state
-  const [dateStart, setDateStart] = useState<Date | null>(null);
-  const [dateEnd, setDateEnd] = useState<Date | null>(null);
+  // Filter state - default to last 7 days
+  const [dateStart, setDateStart] = useState<Date | null>(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 7);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  });
+  const [dateEnd, setDateEnd] = useState<Date | null>(() => {
+    const date = new Date();
+    date.setHours(23, 59, 59, 999);
+    return date;
+  });
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(["completed", "failed", "cancelled"]);
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "duration" | "model">("newest");
   
@@ -44,19 +62,52 @@ export default function QueueHistoryTab({
   
   // Modal
   const [rerunJobId, setRerunJobId] = useState<string | null>(null);
+  
+  // View mode (cards or table) - persisted to localStorage
+  const STORAGE_KEY_VIEW_MODE = 'printfarmer-queue-history-viewmode';
+  const [viewMode, setViewModeState] = useState<"cards" | "table">(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_VIEW_MODE);
+    return saved === 'cards' || saved === 'table' ? saved : 'table';
+  });
+  
+  const setViewMode = useCallback((mode: "cards" | "table") => {
+    setViewModeState(mode);
+    localStorage.setItem(STORAGE_KEY_VIEW_MODE, mode);
+  }, []);
 
   /**
-   * Load history from API
+   * Load history from API with filters
    */
   const loadHistory = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const response = await apiClient.getAnalyticsQueueHistory(pageSize, currentPage * pageSize, sortBy);
+      // Pass all filters to API
+      const response = await apiClient.getAnalyticsQueueHistory(
+        pageSize,
+        currentPage * pageSize,
+        sortBy,
+        selectedStatuses.length > 0 ? selectedStatuses : undefined,
+        dateStart?.toISOString() ?? null,
+        dateEnd?.toISOString() ?? null
+      );
       
       // Convert API response to HistoryJob format
-      const historyJobs: HistoryJob[] = (response?.entries || []).map((job) => ({
+      interface HistoryEntryResponse {
+        id: string;
+        jobName: string;
+        printerName?: string;
+        status?: string;
+        completionPercentage?: number;
+        startedAtUtc?: string;
+        completedAtUtc?: string;
+        actualPrintTimeSeconds?: number;
+        failureReason?: string;
+      }
+      
+      const entries = (response?.entries || []) as HistoryEntryResponse[];
+      const historyJobs: HistoryJob[] = entries.map((job) => ({
         id: job.id,
         name: job.jobName,
         printerName: job.printerName || "Unknown",
@@ -70,6 +121,7 @@ export default function QueueHistoryTab({
       
       setJobs(historyJobs);
       setTotalCount(response?.totalCount || 0);
+      setServerStats(response?.stats || null);
     } catch (err) {
       setError(
         err instanceof Error
@@ -80,19 +132,41 @@ export default function QueueHistoryTab({
     } finally {
       setLoading(false);
     }
-  }, [currentPage, sortBy, pageSize]);
+  }, [currentPage, sortBy, pageSize, selectedStatuses, dateStart, dateEnd]);
 
   /**
-   * Load history on mount and when pagination/sort changes
+   * Load history on mount and when filters change
+   * Reset to first page when filters change (except pagination)
    */
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
   /**
-   * Calculate statistics
+   * Reset to first page when filters change
+   */
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [selectedStatuses, dateStart, dateEnd, sortBy]);
+
+  /**
+   * Use server-side statistics for the full filtered result set
+   * Falls back to client-side calculation if server stats unavailable
    */
   const stats = useMemo(() => {
+    // Use server-side stats if available (covers entire filtered result set)
+    if (serverStats) {
+      return {
+        totalCompleted: serverStats.totalCompleted,
+        totalFailed: serverStats.totalFailed,
+        totalCancelled: serverStats.totalCancelled,
+        successRate: serverStats.successRate,
+        averageDurationMinutes: serverStats.averageDurationMinutes,
+        failureReasons: {} as { [key: string]: number }, // Not available from server yet
+      };
+    }
+    
+    // Fallback to client-side calculation (only for current page)
     const completed = jobs.filter(j => j.status === "completed").length;
     const failed = jobs.filter(j => j.status === "failed").length;
     const cancelled = jobs.filter(j => j.status === "cancelled").length;
@@ -119,31 +193,13 @@ export default function QueueHistoryTab({
       averageDurationMinutes: avgDuration,
       failureReasons,
     };
-  }, [jobs]);
+  }, [serverStats, jobs]);
 
   /**
-   * Filter jobs by status
+   * Jobs are now filtered server-side, so we use them directly
+   * (Client-side filtering removed - all filtering done in API)
    */
-  const filteredJobs = useMemo(() => {
-    let filtered = jobs;
-    
-    // Filter by status
-    if (selectedStatuses.length > 0) {
-      filtered = filtered.filter(j => selectedStatuses.includes(j.status));
-    }
-    
-    // Filter by date range
-    if (dateStart || dateEnd) {
-      filtered = filtered.filter(j => {
-        const jobDate = new Date(j.completedAt || j.startedAt);
-        if (dateStart && jobDate < dateStart) return false;
-        if (dateEnd && jobDate > dateEnd) return false;
-        return true;
-      });
-    }
-    
-    return filtered;
-  }, [jobs, selectedStatuses, dateStart, dateEnd]);
+  const filteredJobs = jobs;
 
   /**
    * Handle rerun confirmation
@@ -188,6 +244,8 @@ export default function QueueHistoryTab({
         onSortChange={setSortBy}
         onRefresh={loadHistory}
         isLoading={loading}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {/* Statistics Panel */}
@@ -214,16 +272,24 @@ export default function QueueHistoryTab({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {filteredJobs.map((job) => (
-              <HistoryJobCard
-                key={job.id}
-                job={job}
-                onRerun={() => setRerunJobId(job.id)}
-                onViewDetails={onViewDetails}
-              />
-            ))}
-          </div>
+          {viewMode === "table" ? (
+            <HistoryJobTable
+              jobs={filteredJobs}
+              onRerun={(jobId) => setRerunJobId(jobId)}
+              onViewDetails={onViewDetails}
+            />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredJobs.map((job) => (
+                <HistoryJobCard
+                  key={job.id}
+                  job={job}
+                  onRerun={() => setRerunJobId(job.id)}
+                  onViewDetails={onViewDetails}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Pagination */}
           <div className="flex items-center justify-between py-4">

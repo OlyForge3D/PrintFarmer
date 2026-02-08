@@ -65,7 +65,7 @@ export function JobTimeline({ events }: JobTimelineProps) {
         {events.map((event, index) => (
           <div key={`${event.jobId}-${index}`} className="flex gap-3 sm:gap-4" role="listitem">
             {/* Timeline bar */}
-            <div className="flex flex-col items-center flex-shrink-0">
+            <div className="flex flex-col items-center shrink-0">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm ${getStateColor(event.state)}`} title={`Event status: ${event.state}`}>
                 {event.state.substring(0, 1).toUpperCase()}
               </div>
@@ -77,8 +77,8 @@ export function JobTimeline({ events }: JobTimelineProps) {
             {/* Event details */}
             <div className="flex-1 py-2 min-w-0">
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-2 mb-2 sm:mb-3">
-                <h3 className="font-semibold text-pf-text-primary text-base break-words">{event.jobName}</h3>
-                <span className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${getStateColor(event.state)}`}>
+                <h3 className="font-semibold text-pf-text-primary text-base wrap-break-word">{event.jobName}</h3>
+                <span className={`px-2.5 py-1 rounded-sm text-xs font-medium whitespace-nowrap ${getStateColor(event.state)}`}>
                   {event.state}
                 </span>
               </div>

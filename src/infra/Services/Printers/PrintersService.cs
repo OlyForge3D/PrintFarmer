@@ -18,6 +18,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
@@ -59,6 +60,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="statusClientFactory">Factory for backend-specific status clients</param>
 /// <param name="statusCache">Cache reader for SignalR-updated status</param>
 /// <param name="locationService">Service for location management</param>
+/// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -71,7 +73,8 @@ public class PrintersService(
     IMultiPrinterStatusCoordinator coordinator,
     IPrinterStatusClientFactory statusClientFactory,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
-    Farm.Infrastructure.Services.Locations.ILocationService locationService) : IPrintersService
+    Farm.Infrastructure.Services.Locations.ILocationService locationService,
+    Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
@@ -84,6 +87,7 @@ public class PrintersService(
     private readonly IPrinterStatusClientFactory _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
     private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
+    private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -111,6 +115,8 @@ public class PrintersService(
     /// Requires backend to implement IHistoryCapability interface.
     /// Currently supported by Moonraker and PrusaLink backends.
     /// Uses circuit breaker for fault tolerance against unavailable backends.
+    /// The 'since' parameter enables incremental seeding - Moonraker supports server-side filtering,
+    /// while OctoPrint requires client-side filtering.
     /// </remarks>
     public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
     {
@@ -123,7 +129,7 @@ public class PrintersService(
             // Use factory to get strongly-typed history client
             if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
                 if (response == null)
                 {
                     _logger.LogWarning($"[History] No response from history API for printer {printerId}");
@@ -180,7 +186,7 @@ public class PrintersService(
                 throw new InvalidOperationException("History is only available for backends that support it");
             }
 
-            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
 
             // Set ThumbnailUrl
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
@@ -220,14 +226,14 @@ public class PrintersService(
 
             if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
             {
-                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
                 if (totals != null)
                 {
                     return totals;
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, printer.ApiKey, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.Credential, ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);
@@ -265,7 +271,7 @@ public class PrintersService(
 
         return !_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient)
             ? throw new InvalidOperationException("History deletion is only available for backends that support it")
-            : await historyClient!.DeleteHistoryJobAsync(printer!.BackendUrl, jobId, printer.ApiKey, ct).ConfigureAwait(false);
+            : await historyClient!.DeleteHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -279,6 +285,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllAsync(ct);
     }
 
@@ -293,6 +300,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
     }
 
@@ -303,6 +311,7 @@ public class PrintersService(
     /// <returns>List of all printer entities with Toolheads, suitable for template application</returns>
     public async Task<List<Printer>> GetAllForTemplateUpdateAsync(CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.GetAllForTemplateUpdateAsync(ct);
     }
 
@@ -329,6 +338,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct)
     {
+        // Repository already populates Credential property
         return await _unitOfWork.Printers.FindByIdAsync(id, ct);
     }
 
@@ -358,6 +368,8 @@ public class PrintersService(
     /// </remarks>
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
+        // Encrypt sensitive data before saving
+        EncryptSensitiveData(p);
         await _unitOfWork.Printers.AddAsync(p, ct);
     }
 
@@ -567,8 +579,8 @@ public class PrintersService(
                     // indicates camera support. Frontend can validate accessibility.
                     if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
                     {
-                        streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
-                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                        streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -614,20 +626,19 @@ public class PrintersService(
     }
 
     /// <summary>
-    /// Finds a printer by its IP address (extracted from server URL).
+    /// Finds a printer by its ServerUrl.
     /// </summary>
-    /// <param name="serverUrl">The server URL containing an IP address</param>
+    /// <param name="serverUrl">The server URL to search for</param>
     /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>Printer with matching IP address if found; otherwise null</returns>
+    /// <returns>Printer with matching ServerUrl if found; otherwise null</returns>
     /// <remarks>
-    /// Extracts IP from ServerUrl input and compares against stored IpAddress.
     /// Uses efficient direct database query instead of loading all printers.
     /// Useful for discovering existing printers during network scanning.
     /// </remarks>
-    public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+    public async Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct)
     {
         // Use the repository's efficient direct database query instead of loading all printers
-        return await _unitOfWork.Printers.FindByIpAddressAsync(serverUrl, ct);
+        return await _unitOfWork.Printers.FindByServerUrlAsync(serverUrl, ct);
     }
 
     /// <summary>
@@ -665,7 +676,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -693,7 +704,7 @@ public class PrintersService(
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -758,12 +769,15 @@ public class PrintersService(
                     Id: p.Id,
                     Name: p.Name,
                     Notes: p.Notes,
+                    ManufacturerId: p.ManufacturerId,
                     ManufacturerName: p.Manufacturer?.Name,
+                    ModelId: p.ModelId,
                     ModelName: p.Model?.Name,
+                    MotionType: p.Model?.MotionType.HasValue == true ? (MotionType)p.Model.MotionType.Value : null,
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -800,12 +814,15 @@ public class PrintersService(
                     Id: p.Id,
                     Name: p.Name,
                     Notes: p.Notes,
+                    ManufacturerId: p.ManufacturerId,
                     ManufacturerName: p.Manufacturer?.Name,
+                    ModelId: p.ModelId,
                     ModelName: p.Model?.Name,
+                    MotionType: p.Model?.MotionType.HasValue == true ? (MotionType)p.Model.MotionType.Value : null,
                     Backend: MapBackendEnum(p.Backend),
                     ApiKey: p.ApiKey,
                     OriginalServerUrl: p.OriginalServerUrl,
-                    IpAddress: p.IpAddress,
+
                     BackendPort: p.BackendPort,
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
@@ -841,6 +858,36 @@ public class PrintersService(
     /// </summary>
     private static PrinterBackend MapBackendEnum(int backendValue) => (PrinterBackend)backendValue;
 
+    /// <summary>
+    /// Encrypts sensitive data on a printer entity before saving to the database.
+    /// Only encrypts ApiKey and Password fields if they are not already encrypted.
+    /// </summary>
+    private void EncryptSensitiveData(Printer p)
+    {
+        // Encrypt ApiKey if present and not already encrypted
+        if (!string.IsNullOrEmpty(p.ApiKey) && !IsAlreadyEncrypted(p.ApiKey))
+        {
+            p.ApiKey = _sensitiveDataProtector.Protect(p.ApiKey);
+        }
+
+        // Encrypt Password if present and not already encrypted
+        if (!string.IsNullOrEmpty(p.Password) && !IsAlreadyEncrypted(p.Password))
+        {
+            p.Password = _sensitiveDataProtector.Protect(p.Password);
+        }
+    }
+
+    /// <summary>
+    /// Simple heuristic to check if data is already encrypted.
+    /// Data Protection produces Base64-encoded strings that are typically longer than plain text credentials.
+    /// </summary>
+    private static bool IsAlreadyEncrypted(string value)
+    {
+        // Data Protection output is Base64 and typically starts with "CfDJ8" for default configuration
+        // It's also significantly longer than typical plaintext passwords/API keys
+        return value.Length > 100 && value.StartsWith("CfDJ", StringComparison.Ordinal);
+    }
+
     private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
     {
         TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver(),
@@ -854,7 +901,7 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>CSV content as UTF-8 encoded byte array</returns>
     /// <remarks>
-    /// CSV format includes: Name, IpAddress, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
+    /// CSV format includes: Name, ServerUrl, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, Username, Password, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
     /// Format matches AdminCli CSV format for consistency across tools.
     /// Properly escapes CSV values to handle commas and quotes in string fields.
     /// </remarks>
@@ -867,8 +914,27 @@ public class PrintersService(
         List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
         IQueryable<Printer> query = printers.AsQueryable();
 
-        // Export fields matching AdminCli CSV format for consistency
-        List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired", "LocationName" };
+        // Export fields matching discovery DTO format for consistency
+        // Use IpAddress (not ServerUrl) to match discovery DTOs and be more user-friendly
+        List<string> headerParts = new()
+        {
+            "Name",
+            "IpAddress",
+            "Backend",
+            "BackendPort",
+            "FrontendPort",
+            "ManufacturerName",
+            "ModelName",
+            "Notes",
+            "ApiKey",
+            "Username",
+            "Password",
+            "IsEnabled",
+            "CameraStreamUrl",
+            "CameraSnapshotUrl",
+            "DateAcquired",
+            "LocationName"
+        };
 
         await writer.WriteLineAsync(string.Join(',', headerParts));
 
@@ -877,14 +943,55 @@ public class PrintersService(
             PrinterBackend backend = (PrinterBackend)p.Backend;
             string backendName = backend.ToString();
 
+            // Extract IP address from ServerUrl (remove http:// prefix)
+            string ipAddress = p.ServerUrl.Replace("http://", string.Empty).Replace("https://", string.Empty).TrimEnd('/');
+
             string backendPort = p.BackendPort.ToString();
             string frontendPort = p.FrontendPort?.ToString() ?? string.Empty;
-            string apiKey = p.ApiKey ?? string.Empty;
+
+            string apiKeyProtected = p.ApiKey ?? string.Empty;
+            string apiKey = apiKeyProtected;
+            string username = p.Username ?? string.Empty;
+            string password = p.Password ?? string.Empty;
+
+            // Decrypt for export (GetPrintersForExportAsync should already have decrypted,
+            // but this is a safe extra pass to avoid exporting protected blobs).
+            apiKey = string.IsNullOrWhiteSpace(apiKey) ? string.Empty : (_sensitiveDataProtector.Unprotect(apiKey) ?? apiKey);
+            password = string.IsNullOrWhiteSpace(password) ? string.Empty : (_sensitiveDataProtector.Unprotect(password) ?? password);
+
+            // PrusaLink uses digest auth (username/password). Older CSV imports sometimes placed the
+            // password into ApiKey; normalize for export so re-import works.
+            if (backend == PrinterBackend.PrusaLink)
+            {
+                // Legacy: password stored in ApiKey.
+                // Only treat ApiKey as password when it looks like a protected blob, or when a username
+                // is present (digest auth expected).
+                if (string.IsNullOrWhiteSpace(password)
+                    && !string.IsNullOrWhiteSpace(apiKey)
+                    && (!string.IsNullOrWhiteSpace(username) || IsAlreadyEncrypted(apiKeyProtected)))
+                {
+                    password = apiKey;
+                    apiKey = string.Empty;
+                }
+
+                bool hasDigestCreds = !string.IsNullOrWhiteSpace(username) || !string.IsNullOrWhiteSpace(password);
+                if (hasDigestCreds)
+                {
+                    if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+                    {
+                        username = "maker";
+                    }
+
+                    // Export digest auth only for PrusaLink (do not duplicate secrets across columns).
+                    apiKey = string.Empty;
+                }
+            }
+
             string cameraStreamUrl = p.CameraStreamUrl ?? string.Empty;
             string cameraSnapshotUrl = p.CameraSnapshotUrl ?? string.Empty;
             string dateAcquired = p.DateAcquired?.ToString("O") ?? string.Empty;
             string locationName = p.Location?.Name ?? string.Empty;
-            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
+            string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(ipAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{EscapeCsvValue(username)},{EscapeCsvValue(password)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
             await writer.WriteLineAsync(csvLine);
         }
 
@@ -959,19 +1066,25 @@ public class PrintersService(
         {
             return new PrinterWithCapabilitiesDto
             {
-                PrinterId = p.Id,
-                PrinterName = p.Name,
-                PrinterModel = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
-                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
+                // Identity (standard naming)
+                Id = p.Id,
+                Name = p.Name,
                 Backend = MapBackendEnum(p.Backend),
-                IpAddress = p.IpAddress,
 
-                // Add import-friendly fields for re-importing
+                // Metadata (standard naming)
+                ModelName = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
+                ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
+                Notes = p.Notes,
+
+                // Connection (IpAddress extracted from ServerUrl if needed)
                 ServerUrl = p.ServerUrl,
                 BackendPort = p.BackendPort,
                 FrontendPort = p.FrontendPort,
+
+                // Credentials
                 ApiKey = p.ApiKey,
-                Notes = p.Notes,
+                Username = p.Username,
+                Password = p.Password,
 
                 // Export hardware specs from Printer instance (populated at creation time from PrinterModel)
                 // NozzleDiameter and MaxHotendTemp are derived from the primary toolhead's component models
@@ -1011,14 +1124,51 @@ public class PrintersService(
         return raw.Contains(',') || raw.Contains('"') || raw.Contains('\n') ? '"' + raw.Replace("\"", "\"\"") + '"' : raw;
     }
 
-    private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
+    private Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
     {
+        var backend = (PrinterBackend)p.Backend;
+
+        string? apiKeyProtected = p.ApiKey;
+        string? apiKey = p.ApiKey;
+        string? username = p.Username;
+        string? password = p.Password;
+
+        // Decrypt for export (GetPrintersForExportAsync should already have decrypted,
+        // but this is a safe extra pass to avoid exporting protected blobs).
+        apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : (_sensitiveDataProtector.Unprotect(apiKey) ?? apiKey);
+        password = string.IsNullOrWhiteSpace(password) ? null : (_sensitiveDataProtector.Unprotect(password) ?? password);
+
+        // Normalize legacy PrusaLink auth where password was stored in ApiKey.
+        if (backend == PrinterBackend.PrusaLink)
+        {
+            if (string.IsNullOrWhiteSpace(password)
+                && !string.IsNullOrWhiteSpace(apiKey)
+                && (!string.IsNullOrWhiteSpace(username) || (!string.IsNullOrWhiteSpace(apiKeyProtected) && IsAlreadyEncrypted(apiKeyProtected))))
+            {
+                password = apiKey;
+                apiKey = null;
+            }
+
+            bool hasDigestCreds = !string.IsNullOrWhiteSpace(username) || !string.IsNullOrWhiteSpace(password);
+            if (hasDigestCreds)
+            {
+                if (string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password))
+                {
+                    username = "maker";
+                }
+
+                // Export digest auth only for PrusaLink (do not duplicate secrets across fields).
+                apiKey = null;
+            }
+        }
+
         Dictionary<string, object?> dict = new Dictionary<string, object?>
         {
             // Core configuration (always present)
             ["id"] = p.Id,
             ["name"] = p.Name,
-            ["ipAddress"] = p.IpAddress,
+
+            // ipAddress removed - use serverUrl
             ["serverUrl"] = p.ServerUrl,
             ["originalServerUrl"] = p.OriginalServerUrl,
             ["notes"] = p.Notes,
@@ -1028,7 +1178,9 @@ public class PrintersService(
             ["backend"] = p.Backend,
             ["backendPort"] = p.BackendPort,
             ["frontendPort"] = p.FrontendPort,
-            ["apiKey"] = p.ApiKey,
+            ["apiKey"] = apiKey,
+            ["username"] = username,
+            ["password"] = password,
             ["dateAcquired"] = p.DateAcquired,
 
             // Hardware specs from Printer instance (populated at creation time from PrinterModel)
@@ -1099,8 +1251,10 @@ public class PrintersService(
             BedTarget: null,
             Backend: MapBackendEnum(p.Backend),
             ApiKey: p.ApiKey,
+            Username: p.Username,
+            Password: p.Password,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress,
+
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             SpoolInfo: null,
@@ -1129,10 +1283,10 @@ public class PrintersService(
     /// 7. Broadcasts printer creation via SignalR
     /// Camera URLs discovered asynchronously and updated after initial creation.
     /// </remarks>
-    public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
+    public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
     {
         // Check for duplicate printer by IP address
-        Printer? duplicate = await FindByIpAddressAsync(dto.ServerUrl, ct);
+        Printer? duplicate = await FindByServerUrlAsync(dto.ServerUrl, ct);
 
         if (duplicate != null)
         {
@@ -1244,7 +1398,6 @@ public class PrintersService(
             Name = dto.Name,
             ServerUrl = serverUrlForStorage,
             OriginalServerUrl = originalUrlForStorage,
-            IpAddress = resolvedIp,
             Notes = dto.Notes,
             ManufacturerId = manufacturerId,
             ModelId = modelId,
@@ -1257,6 +1410,11 @@ public class PrintersService(
             },
             Backend = (int)dto.Backend,
             ApiKey = dto.ApiKey,
+
+            // Digest authentication credentials (primarily for PrusaLink)
+            // Default username to "maker" for PrusaLink if password is provided but username is not
+            Username = dto.Username ?? (dto.Backend == PrinterBackend.PrusaLink && !string.IsNullOrEmpty(dto.Password) ? "maker" : null),
+            Password = dto.Password,
 
             // BackendPort MUST be set by discovery probes (always includes actual port, even if standard)
             BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
@@ -1522,7 +1680,7 @@ public class PrintersService(
                     : p.BackendUrl;
 
                 // Get camera snapshot URL using capability interface
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(snapshotUrl))
                 {
                     return await FetchBytesFromUrlAsync(snapshotUrl, p.ApiKey, ct).ConfigureAwait(false);
@@ -1574,8 +1732,8 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             if (_capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient))
             {
-                string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
-                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                string? streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 return (streamUrl, snapshotUrl);
             }
 
@@ -1620,9 +1778,9 @@ public class PrintersService(
             }
 
             // Use capability interface for movement
-            if (backend == PrinterBackend.OctoPrint)
+            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
             {
-                return await movement.HomeAsync(p.BackendUrl, p.ApiKey).ConfigureAwait(false);
+                return await movement.HomeAsync(p.BackendUrl, p.Credential).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1660,13 +1818,20 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is ISupportsMovement movement)
+            if (client is not ISupportsMovement movement)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.HomeXYAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return false;
             }
 
-            return false;
+            // PrusaLink and OctoPrint need credentials via apiKey parameter
+            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
+            {
+                return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
+            }
+
+            // Moonraker doesn't need credentials
+            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            return await movement.HomeXYAsync(moonrakerUrl, null, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1703,7 +1868,7 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.HomeZAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return await movement.HomeZAsync(moonrakerUrl, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1774,7 +1939,7 @@ public class PrintersService(
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.ApiKey, ct).ConfigureAwait(false);
+                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1863,7 +2028,7 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, ct).ConfigureAwait(false);
+                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -1902,7 +2067,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.PauseAsync(p!.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                ? await controlClient!.PauseAsync(p!.BackendUrl, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -1938,7 +2103,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.ResumeAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
+                ? await controlClient!.ResumeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -1955,11 +2120,46 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if stop command succeeded, false if printer not found or backend unavailable</returns>
     /// <remarks>
-    /// Cancels the current print job completely (cannot be resumed).
-    /// Print head stays at current position; heaters cool down after stop.
-    /// This is an emergency stop - irreversible and immediate.
+    /// Gracefully cancels the current print job (cannot be resumed).
+    /// Uses CANCEL_PRINT macro on Moonraker, stop endpoint on PrusaLink, cancel command on OctoPrint.
+    /// Print head stays at current position; heaters cool down after cancel.
     /// Use PauseAsync if you want to resume later.
     /// Requires backend to support print control capability.
+    /// </remarks>
+    public async Task<bool> CancelPrintAsync(Guid id, CancellationToken ct)
+    {
+        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (p == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+
+            // Try print job control capability - calls CancelAsync which routes to backend-specific cancel
+            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
+                ? await controlClient!.CancelAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
+                : false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Failed to cancel print on printer {id}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Immediately stops the printer using emergency stop (M112).
+    /// </summary>
+    /// <param name="id">Unique printer identifier (GUID)</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>True if emergency stop succeeded, false if printer not found or backend unavailable</returns>
+    /// <remarks>
+    /// This is more aggressive than CancelPrintAsync - sends M112 emergency stop command.
+    /// Use only in emergencies when normal cancel is insufficient.
+    /// May require firmware restart after use.
     /// </remarks>
     public async Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
@@ -1972,11 +2172,16 @@ public class PrintersService(
         try
         {
             var backend = (PrinterBackend)p.Backend;
+            IBackendClient client = GetBackendClient(backend);
 
-            // Try print job control capability
-            return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.CancelAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false)
-                : false;
+            // Send M112 emergency stop via gcode execution capability
+            if (client is ISupportsGcodeExecution gcodeClient)
+            {
+                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                return await gcodeClient.SendGcodeAsync(moonrakerUrl, "M112", ct).ConfigureAwait(false);
+            }
+
+            return false;
         }
         catch (Exception ex)
         {
@@ -2094,7 +2299,7 @@ public class PrintersService(
 
             // Try start print capability
             return _capabilityFactory.TryGetStartPrintClientTyped(backend, out ISupportsStartPrint? startPrintClient)
-                ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.ApiKey, ct).ConfigureAwait(false)
+                ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2199,7 +2404,7 @@ public class PrintersService(
         {
             var backend = (PrinterBackend)p.Backend;
             return _capabilityFactory.TryGetFileUploadClientTyped(backend, out ISupportsFileUpload? uploadClient)
-                ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.ApiKey, ct).ConfigureAwait(false)
+                ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.Credential, ct).ConfigureAwait(false)
                 : false;
         }
         catch (Exception ex)
@@ -2247,7 +2452,7 @@ public class PrintersService(
 
             // Get file list with standardized PrinterFileInfo objects
             // Backend clients are responsible for retrieving thumbnails and converting timestamps to Unix format
-            List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.ApiKey, ct).ConfigureAwait(false);
+            List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.Credential, ct).ConfigureAwait(false);
 
             if (fileInfos.Count == 0)
             {
@@ -2465,7 +2670,7 @@ public class PrintersService(
     /// Camera discovery deferred to next status poll to avoid threading issues.
     /// Returns comprehensive error details for failed printers.
     /// </remarks>
-    public async Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
+    public async Task<object> BulkCreatePrintersAsync(CreatePrinterFromDiscoveryDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(printers);
 
@@ -2479,26 +2684,26 @@ public class PrintersService(
         {
             try
             {
-                CreatePrinterDto printerDto = printers[i];
+                CreatePrinterFromDiscoveryDto printerDto = printers[i];
                 string status = "Imported";
                 string? reason = null;
                 PrinterDto? createdDto = null;
                 Guid? createdPrinterId = null;
 
                 // Check for duplicates by IP address
-                Printer? existingByIp = await FindByIpAddressAsync(printerDto.ServerUrl, ct);
+                Printer? existingByIp = await FindByServerUrlAsync(printerDto.ServerUrl, ct);
                 if (existingByIp != null)
                 {
                     if ((duplicateHandling ?? "skip") == "skip")
                     {
-                        _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (IP: {existingByIp.IpAddress})");
+                        _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (ServerUrl: {existingByIp.ServerUrl})");
                         skippedCount++;
                         status = "Skipped";
-                        reason = $"Printer with IP {existingByIp.IpAddress} already exists";
+                        reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                     }
                     else if ((duplicateHandling ?? "skip") == "overwrite")
                     {
-                        _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (IP: {existingByIp.IpAddress})");
+                        _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (ServerUrl: {existingByIp.ServerUrl})");
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
 
@@ -2513,7 +2718,7 @@ public class PrintersService(
                     else if ((duplicateHandling ?? "skip") == "error")
                     {
                         status = "Failed";
-                        reason = $"Printer with IP {existingByIp.IpAddress} already exists";
+                        reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                         errorResults[i] = reason;
                     }
                 }
@@ -2641,7 +2846,7 @@ public class PrintersService(
                 ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                 : printer.BackendUrl;
 
-            PrinterJob? job = await jobClient.GetJobAsync(url, printer.ApiKey, ct).ConfigureAwait(false);
+            PrinterJob? job = await jobClient.GetJobAsync(url, printer.Credential, ct).ConfigureAwait(false);
 
             return job != null
                 ? new PrintJobStatusDto
@@ -2675,7 +2880,7 @@ public class PrintersService(
     /// <returns>Object containing import results with counts and detailed per-printer status</returns>
     /// <remarks>
     /// Supports CSV and JSON import formats.
-    /// CSV format requires columns: Name, IpAddress, Backend (plus optional columns for other fields).
+    /// CSV format requires columns: Name, ServerUrl, Backend (plus optional columns for other fields).
     /// JSON format requires array of printer objects matching CreatePrinterDto schema.
     /// IDs are not portable between systems; import uses names and IP addresses for matching.
     /// Delegates to BulkCreatePrintersAsync for actual printer creation and duplicate handling.
@@ -2701,7 +2906,7 @@ public class PrintersService(
 
         try
         {
-            CreatePrinterDto[] printers;
+            CreatePrinterFromDiscoveryDto[] printers;
 
             if (fileExtension == ".csv")
             {
@@ -2734,13 +2939,13 @@ public class PrintersService(
 
     /// <summary>
     /// Parses a CSV stream into printer DTOs.
-    /// Required columns: Name, IpAddress, Backend
+    /// Required columns: Name, ServerUrl, Backend
     /// Optional columns: Notes, ManufacturerName, ModelName, ApiKey, IsEnabled, BackendPort, FrontendPort, CameraStreamUrl, CameraSnapshotUrl
     /// IDs are not portable between systems; use names instead.
     /// </summary>
-    private async Task<CreatePrinterDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
+    private async Task<CreatePrinterFromDiscoveryDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
     {
-        List<CreatePrinterDto> printers = [];
+        List<CreatePrinterFromDiscoveryDto> printers = [];
         List<string> errors = [];
 
         try
@@ -2762,6 +2967,8 @@ public class PrintersService(
                 int manufacturerNameIdx = Array.IndexOf(headers, "manufacturername");
                 int modelNameIdx = Array.IndexOf(headers, "modelname");
                 int apiKeyIdx = Array.IndexOf(headers, "apikey");
+                int usernameIdx = Array.IndexOf(headers, "username");
+                int passwordIdx = Array.IndexOf(headers, "password");
                 int isEnabledIdx = Array.IndexOf(headers, "isenabled");
                 int backendPortIdx = Array.IndexOf(headers, "backendport");
                 int frontendPortIdx = Array.IndexOf(headers, "frontendport");
@@ -2793,7 +3000,7 @@ public class PrintersService(
 
                         if (values.Length < 3)
                         {
-                            errors.Add($"Line {lineNumber}: Insufficient columns (need at least Name, IpAddress, Backend)");
+                            errors.Add($"Line {lineNumber}: Insufficient columns (need at least Name, ServerUrl, Backend)");
                             continue;
                         }
 
@@ -2804,7 +3011,7 @@ public class PrintersService(
                             continue;
                         }
 
-                        // Build ServerUrl from IpAddress
+                        // IpAddress is the required column for CSV import
                         string ipAddress = values[ipAddressIdx];
 
                         // Get BackendPort from CSV - use default if not provided
@@ -2821,7 +3028,7 @@ public class PrintersService(
 
                         string serverUrl = $"http://{ipAddress}";
 
-                        CreatePrinterDto printer = new()
+                        CreatePrinterFromDiscoveryDto printer = new()
                         {
                             Name = values[nameIdx],
                             ServerUrl = serverUrl,
@@ -2829,6 +3036,8 @@ public class PrintersService(
                             NewManufacturerName = manufacturerNameIdx >= 0 && manufacturerNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[manufacturerNameIdx]) ? values[manufacturerNameIdx] : null,
                             NewModelName = modelNameIdx >= 0 && modelNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[modelNameIdx]) ? values[modelNameIdx] : null,
                             ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
+                            Username = usernameIdx >= 0 && usernameIdx < values.Length ? values[usernameIdx] : null,
+                            Password = passwordIdx >= 0 && passwordIdx < values.Length ? values[passwordIdx] : null,
                             Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
                             IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out bool ie) ? ie : true,
                             BackendPort = backendPort,
@@ -2840,6 +3049,21 @@ public class PrintersService(
 #pragma warning restore S6580
                             LocationName = locationNameIdx >= 0 && locationNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[locationNameIdx]) ? values[locationNameIdx] : null
                         };
+
+                        // Backward compatibility: older CSV exports/imports used ApiKey for PrusaLink password.
+                        if (printer.Backend == PrinterBackend.PrusaLink)
+                        {
+                            if (string.IsNullOrWhiteSpace(printer.Password) && !string.IsNullOrWhiteSpace(printer.ApiKey))
+                            {
+                                printer.Password = printer.ApiKey;
+                                printer.ApiKey = null;
+                            }
+
+                            if (string.IsNullOrWhiteSpace(printer.Username) && !string.IsNullOrWhiteSpace(printer.Password))
+                            {
+                                printer.Username = "maker";
+                            }
+                        }
 
                         if (string.IsNullOrWhiteSpace(printer.Name))
                         {
@@ -2874,7 +3098,7 @@ public class PrintersService(
     /// Parses a JSON stream into printer DTOs.
     /// Expected format: Array of printer objects with Name, ServerUrl, Backend, etc.
     /// </summary>
-    private async Task<CreatePrinterDto[]> ParseJsonStreamAsync(Stream stream, CancellationToken ct)
+    private async Task<CreatePrinterFromDiscoveryDto[]> ParseJsonStreamAsync(Stream stream, CancellationToken ct)
     {
         try
         {
@@ -2894,7 +3118,7 @@ public class PrintersService(
                     TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver()
                 };
 
-                CreatePrinterDto[]? printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);
+                CreatePrinterFromDiscoveryDto[]? printers = JsonSerializer.Deserialize<CreatePrinterFromDiscoveryDto[]>(content, options);
 
                 return printers == null || printers.Length == 0
                     ? throw new InvalidOperationException("JSON file contains no valid printer entries")
@@ -3014,7 +3238,7 @@ public class PrintersService(
                 (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
                     baseUrlForCamera,
                     printer.FrontendPort,
-                    printer.ApiKey,
+                    printer.Credential,
                     ct).ConfigureAwait(false);
 
                 _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from detection - stream={streamUrl}, snapshot={snapshotUrl}");
@@ -3031,8 +3255,8 @@ public class PrintersService(
                         ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                         : printer.BackendUrl;
 
-                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
+                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
 
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from standard interface - stream={streamUrl}, snapshot={snapshotUrl}");
                 }

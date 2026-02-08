@@ -19,6 +19,12 @@ public class RegisterSlicerDto
     public int MaxConcurrentJobs { get; set; }
 
     public string? Tags { get; set; }
+
+    /// <summary>
+    /// If true, seed all system profiles from the worker on registration (push-based).
+    /// Default is false - profiles are imported on-demand when printers are added (pull-based).
+    /// </summary>
+    public bool SeedProfilesOnRegistration { get; set; } = false;
 }
 
 public class HeartbeatDto

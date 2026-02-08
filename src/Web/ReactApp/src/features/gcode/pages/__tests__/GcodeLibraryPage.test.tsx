@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 

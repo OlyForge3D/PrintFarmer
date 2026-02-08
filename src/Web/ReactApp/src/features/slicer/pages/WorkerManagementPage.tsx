@@ -319,7 +319,7 @@ export function WorkerManagementPage() {
 
       {/* Workers table (shown on Workers tab) */}
       {activeTab === 'workers' && (
-        <div className="bg-pf-bg-1 rounded border border-pf-border overflow-hidden">
+        <div className="bg-pf-bg-1 rounded-sm border border-pf-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
@@ -464,7 +464,7 @@ export function WorkerManagementPage() {
                           <h4 className="text-sm font-medium text-pf-text-primary mb-3">Active Slicing Jobs:</h4>
                           <div className="space-y-2">
                             {workerJobs.get(worker.id)?.map(job => (
-                              <div key={job.jobId} className="bg-pf-bg-1 rounded p-3 border border-pf-border">
+                              <div key={job.jobId} className="bg-pf-bg-1 rounded-sm p-3 border border-pf-border">
                                 <div className="flex justify-between items-start mb-2">
                                   <div className="flex-1">
                                     <div className="text-sm font-medium text-pf-text-primary">{job.modelFileName}</div>

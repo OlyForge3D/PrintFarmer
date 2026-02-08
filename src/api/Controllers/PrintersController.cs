@@ -8,14 +8,16 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.PrusaLink;
 using Farm.Infrastructure;
-using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
@@ -40,21 +42,25 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     Farm.Infrastructure.Repositories.Catalog.ICatalogRepository catalogRepository,
-    IValidator<CreatePrinterDto> validator,
+    IValidator<CreatePrinterFromDiscoveryDto> validator,
     Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
     Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
-    IHttpClientFactory httpClientFactory)
+    IHttpClientFactory httpClientFactory,
+    Services.Slicing.ISlicersService slicersService,
+    IPrinterVersionCache printerVersionCache)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly Farm.Infrastructure.Repositories.Catalog.ICatalogRepository _catalogRepository = catalogRepository;
-    private readonly IValidator<CreatePrinterDto> _validator = validator;
+    private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
     private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly Services.Slicing.ISlicersService _slicersService = slicersService;
+    private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
 #pragma warning disable IDE0052 // Remove unread private members - backendClientFactory reserved for future enhanced connection tests
 #pragma warning disable S1144 // Unused private types or members should be removed
 #pragma warning disable CA1823 // Avoid unused private fields
@@ -129,6 +135,35 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Retrieves firmware/backend/API version information for a specific printer.
+    /// Values are best-effort and may be null when not available.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    [HttpGet("{printerId:guid}/version")]
+    [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
+            return dto == null ? NotFound($"Printer with ID {printerId} not found") : Ok(dto);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[PRINTER-VERSION] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/version. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Retrieves backend capabilities for a specific printer.
     /// Indicates which features the printer's backend (Moonraker, PrusaLink, etc.) supports.
     /// </summary>
@@ -189,7 +224,7 @@ public class PrintersController(
 
         try
         {
-            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.Username, request.Password, request.BackendPort, ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -207,7 +242,7 @@ public class PrintersController(
     /// Tests connection to a printer backend based on the backend type.
     /// </summary>
     private async Task<TestConnectionResponse> TestBackendConnectionAsync(
-        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+        Uri serverUrl, PrinterBackend backend, string? apiKey, string? username, string? password, int? backendPort, CancellationToken ct)
     {
         using HttpClient httpClient = _httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
@@ -215,7 +250,7 @@ public class PrintersController(
         return backend switch
         {
             PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
-            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, username, password, ct),
             PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
             PrinterBackend.SDCP => new TestConnectionResponse
             {
@@ -277,34 +312,43 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with API key.
+    /// Tests PrusaLink connection by hitting /api/v1/status endpoint with Digest Authentication.
     /// </summary>
     private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
-        HttpClient httpClient, Uri serverUrl, string? apiKey, CancellationToken ct)
+        Uri serverUrl, string? username, string? password, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (string.IsNullOrWhiteSpace(password))
         {
-            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers" };
+            return new TestConnectionResponse { Success = false, Message = "Password is required for PrusaLink printers. Get it from printer Settings → Network → Credentials" };
         }
+
+        // Default username to "maker" if not provided
+        string effectiveUsername = string.IsNullOrWhiteSpace(username) ? "maker" : username;
 
         var builder = new UriBuilder(serverUrl)
         {
             Path = "/api/v1/status"
         };
 
+        // Create a new HttpClient with Digest auth handler for this test
+        using var digestHandler = new DigestAuthHandler(effectiveUsername, password);
+        using var digestClient = new HttpClient(digestHandler)
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+
         var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
-        request.Headers.Add("X-Api-Key", apiKey);
 
         try
         {
-            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+            HttpResponseMessage response = await digestClient.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {
                 return new TestConnectionResponse
                 {
                     Success = true,
-                    Message = "Successfully connected to PrusaLink printer"
+                    Message = "Successfully connected to PrusaLink printer using Digest authentication"
                 };
             }
 
@@ -313,7 +357,7 @@ public class PrintersController(
                 return new TestConnectionResponse
                 {
                     Success = false,
-                    Message = "Invalid API key - authentication failed"
+                    Message = "Invalid credentials - authentication failed. Verify username (usually 'maker') and password from printer settings."
                 };
             }
 
@@ -449,7 +493,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> BulkCreateAsync(
-        [FromBody] CreatePrinterDto[] printers,
+        [FromBody] CreatePrinterFromDiscoveryDto[] printers,
         [FromQuery] string? duplicateHandling = "skip",
         CancellationToken ct = default)
     {
@@ -768,11 +812,12 @@ public class PrintersController(
             p.CameraStreamUrl,
             p.CameraSnapshotUrl,
             p.OriginalServerUrl,
-            p.IpAddress,
             p.BackendPort,
             p.FrontendPort,
             capabilitiesDto,
-            toolheadDtos);
+            toolheadDtos,
+            p.Username,
+            p.Password);
     }
 
     /// <summary>
@@ -791,7 +836,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterDto dto, CancellationToken ct)
+    public async Task<ActionResult<PrinterDto>> CreateAsync([FromBody] CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -813,6 +858,36 @@ public class PrintersController(
 
         // Delegate creation/business logic to the service
         PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+
+        // Import slicer profiles for this printer's model (pull-based, on-demand import)
+        // Only imports if profiles don't already exist for this model
+        // Use the input DTO since it has ModelId, and the result DTO only has names
+        Guid? modelId = dto.ModelId;
+        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
+        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
+
+        if (modelId.HasValue && modelId.Value != Guid.Empty)
+        {
+            try
+            {
+                int imported = await _slicersService.ImportProfilesForModelAsync(
+                    modelId.Value,
+                    modelName,
+                    manufacturerName,
+                    ct);
+
+                if (imported > 0)
+                {
+                    _logger.LogInformation($"Imported {imported} slicer profiles for {modelName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail printer creation if profile import fails
+                _logger.LogWarning($"Failed to import profiles for {modelName}: {ex.Message}");
+            }
+        }
+
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
     }
 
@@ -897,11 +972,11 @@ public class PrintersController(
                     $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
 
                 // Check if printer already exists by IP address
-                Printer? existing = await _printersService.FindByIpAddressAsync(discovered.ServerUrl, ct);
+                Printer? existing = await _printersService.FindByServerUrlAsync(discovered.ServerUrl, ct);
 
                 if (existing != null)
                 {
-                    _logger.LogInformation($"Printer already registered: {existing.Name} (IP: {existing.IpAddress})");
+                    _logger.LogInformation($"Printer already registered: {existing.Name} (ServerUrl: {existing.ServerUrl})");
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -912,7 +987,7 @@ public class PrintersController(
                 }
 
                 // Create new printer from discovered data, preserving all discovered metadata
-                CreatePrinterDto createDto = CreatePrinterDto.FromDiscovered(discovered);
+                CreatePrinterFromDiscoveryDto createDto = CreatePrinterFromDiscoveryDto.FromDiscovered(discovered);
 
                 ValidationResult validationResult = await _validator.ValidateAsync(createDto, ct);
                 if (!validationResult.IsValid)
@@ -927,6 +1002,28 @@ public class PrintersController(
                 registered.Add(created);
 
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
+
+                // Import slicer profiles for this printer's model (pull-based, on-demand import)
+                if (createDto.ModelId.HasValue && createDto.ModelId.Value != Guid.Empty)
+                {
+                    try
+                    {
+                        int imported = await _slicersService.ImportProfilesForModelAsync(
+                            createDto.ModelId.Value,
+                            createDto.NewModelName ?? created.ModelName ?? "Unknown",
+                            createDto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown",
+                            ct);
+
+                        if (imported > 0)
+                        {
+                            _logger.LogInformation($"Imported {imported} slicer profiles for {created.ModelName}");
+                        }
+                    }
+                    catch (Exception profileEx)
+                    {
+                        _logger.LogWarning($"Failed to import profiles for {created.ModelName}: {profileEx.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1003,7 +1100,6 @@ public class PrintersController(
             Backend: (PrinterBackend)printer.Backend,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
@@ -1225,7 +1321,6 @@ public class PrintersController(
             ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
             p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
             p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
-            p.IpAddress = resolveResp.ResolvedIp;
         }
 
         // Track if model changed for template application
@@ -1251,6 +1346,17 @@ public class PrintersController(
         if (dto.ApiKey != null)
         {
             p.ApiKey = dto.ApiKey;
+        }
+
+        // Update digest authentication credentials (primarily for PrusaLink)
+        if (dto.Username != null)
+        {
+            p.Username = dto.Username;
+        }
+
+        if (dto.Password != null)
+        {
+            p.Password = dto.Password;
         }
 
         // Update port settings
@@ -1367,7 +1473,6 @@ public class PrintersController(
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress,
             BackendPort: p.BackendPort,
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
@@ -2190,7 +2295,6 @@ public class PrintersController(
                 name = printer.Name,
                 serverUrl = printer.ServerUrl,
                 originalServerUrl = printer.OriginalServerUrl,
-                ipAddress = printer.IpAddress,
                 backend = printer.Backend,
                 apiKey = printer.ApiKey,
                 cameraStreamUrl = printer.CameraStreamUrl,
@@ -2317,7 +2421,6 @@ public class PrintersController(
                     name = printer.Name,
                     serverUrl = printer.ServerUrl,
                     originalServerUrl = printer.OriginalServerUrl,
-                    ipAddress = printer.IpAddress,
                     backend = printer.Backend,
                     apiKey = printer.ApiKey,
                     cameraStreamUrl = printer.CameraStreamUrl,

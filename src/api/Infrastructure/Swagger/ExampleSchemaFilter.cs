@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
+using Farm.Infrastructure.Discovery;
 
 // Explicit using to disambiguate from Moonraker's LoginRequest
 using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
@@ -20,7 +21,7 @@ public static class ExampleSchemaFilter
     {
         // TODO: Update to use ASP.NET Core 10 OpenAPI types
         // object schema = new object();
-        if (t == typeof(CreatePrinterDto))
+        if (t == typeof(CreatePrinterFromDiscoveryDto))
         {
             // TODO: Update to use new API
             /*

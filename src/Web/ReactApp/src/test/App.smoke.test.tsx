@@ -15,17 +15,16 @@ vi.mock('@/services/api', () => ({
 }));
 
 // Mock services that perform network or SignalR work
-vi.mock('@/services/assetService', () => {
-  const mockAssetService = { 
-    initialize: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/services/assetService', () => ({
+  assetService: { 
+    initialize: vi.fn(() => Promise.resolve()),
     getAssets: vi.fn().mockReturnValue({}),
     getManufacturer: vi.fn(),
     getPrinter: vi.fn(),
     getPrintersByName: vi.fn(),
     getPrintersByManufacturer: vi.fn(),
-  };
-  return { assetService: mockAssetService };
-});
+  },
+}));
 vi.mock('@/services/printer-signalr', () => ({ printerSignalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
 vi.mock('@/services/harvest-signalr', () => ({ signalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
 

@@ -130,7 +130,7 @@ export function AddManufacturerModal({
 
         {/* Error Message */}
         {error && (
-          <div className="p-3 bg-red-900/20 border border-red-600 rounded text-red-400 text-sm">
+          <div className="p-3 bg-red-900/20 border border-red-600 rounded-sm text-red-400 text-sm">
             {error}
           </div>
         )}

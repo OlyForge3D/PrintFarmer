@@ -88,8 +88,8 @@ export function ComponentReplacementHistory({
     return (
       <div className={`space-y-4 ${className}`}>
         <div className="flex items-center justify-between">
-          <div className="h-8 w-48 bg-pf-border rounded animate-pulse" />
-          <div className="h-8 w-32 bg-pf-border rounded animate-pulse" />
+          <div className="h-8 w-48 bg-pf-border rounded-sm animate-pulse" />
+          <div className="h-8 w-32 bg-pf-border rounded-sm animate-pulse" />
         </div>
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="h-20 bg-pf-border/50 rounded-lg animate-pulse" />

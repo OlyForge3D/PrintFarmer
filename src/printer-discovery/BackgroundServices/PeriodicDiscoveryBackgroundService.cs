@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Settings;
 using PrinterDiscovery.Services;
 
@@ -140,7 +141,7 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
             using IServiceScope scope = _serviceScopeFactory.CreateScope();
             INetworkDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<INetworkDiscoveryService>();
 
-            IReadOnlyList<Farm.Infrastructure.DiscoveredPrinterDto> printers = await discoveryService.ScanOnceAsync(stoppingToken);
+            IReadOnlyList<DiscoveredPrinterDto> printers = await discoveryService.ScanOnceAsync(stoppingToken);
             _logger.LogInformation("Periodic discovery scan found {Count} printers", printers.Count);
 
             if (printers.Count > 0)

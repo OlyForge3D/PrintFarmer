@@ -104,7 +104,7 @@ export const GridView = ({
                   <div className="p-3 flex flex-col gap-3 bg-pf-bg-0">
                     {/* File Name */}
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-pf-text line-clamp-2 break-words">
+                      <h3 className="text-sm font-semibold text-pf-text line-clamp-2 wrap-break-word">
                         {file.fileName}
                       </h3>
                     </div>

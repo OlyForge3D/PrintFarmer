@@ -8,6 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
@@ -81,6 +82,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return new Mock<IMachineProfileRepository>(MockBehavior.Loose);
         }
 
+        private static Mock<IMachineModelProfileRepository> CreateMockMachineModelProfileRepository()
+        {
+            return new Mock<IMachineModelProfileRepository>(MockBehavior.Loose);
+        }
+
         private static Mock<ICatalogService> CreateMockCatalogService()
         {
             Mock<ICatalogService> mock = new Mock<ICatalogService>(MockBehavior.Loose);
@@ -105,6 +111,14 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return mock;
         }
 
+        private static Mock<IPrinterModelAliasService> CreateMockAliasService()
+        {
+            var mock = new Mock<IPrinterModelAliasService>(MockBehavior.Loose);
+            _ = mock.Setup(s => s.ResolveModelAliasAsync(It.IsAny<string>(), It.IsAny<string?>()))
+                .ReturnsAsync((Guid?)null);
+            return mock;
+        }
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -119,9 +133,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -173,9 +189,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -223,9 +241,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
             Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
