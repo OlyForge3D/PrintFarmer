@@ -150,6 +150,63 @@ public class SdcpAckResult
     public int Ack { get; set; }
 }
 
+/// <summary>
+/// SDCP Cmd 258 (GetFileList) response envelope.
+/// The printer responds with Cmd 192 containing a FileList array.
+/// </summary>
+public class SdcpFileListAckResponse
+{
+    public string? Id { get; set; }
+
+    public SdcpFileListAckData? Data { get; set; }
+
+    public string? Topic { get; set; }
+}
+
+public class SdcpFileListAckData
+{
+    public int Cmd { get; set; }
+
+    public SdcpFileListResult? Data { get; set; }
+
+    public string? RequestID { get; set; }
+
+    public string? MainboardID { get; set; }
+
+    public long TimeStamp { get; set; }
+}
+
+/// <summary>
+/// Contains the acknowledgement status and list of files returned by the printer.
+/// </summary>
+public class SdcpFileListResult
+{
+    public int Ack { get; set; }
+
+    public List<SdcpFileEntry>? FileList { get; set; }
+}
+
+/// <summary>
+/// Represents a single file or folder entry from the SDCP file list response.
+/// </summary>
+public class SdcpFileEntry
+{
+    /// <summary>Full path on the printer (e.g., "/local/model.gcode").</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Used storage space in bytes.</summary>
+    public long UsedSize { get; set; }
+
+    /// <summary>Total storage space in bytes.</summary>
+    public long TotalSize { get; set; }
+
+    /// <summary>Storage type: 0 = Internal, 1 = External (USB).</summary>
+    public int StorageType { get; set; }
+
+    /// <summary>Entry type: 0 = Folder, 1 = File.</summary>
+    public int Type { get; set; }
+}
+
 public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
     ISupportsCamera
@@ -963,7 +1020,11 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     }
 
     // File management methods
-    public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
+
+    /// <summary>
+    /// Returns all file/folder entries from the printer's local storage via SDCP Cmd 258.
+    /// </summary>
+    internal async Task<List<SdcpFileEntry>> GetFileListEntriesAsync(string baseUrl, CancellationToken ct = default)
     {
         try
         {
@@ -976,12 +1037,12 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             {
                 string wsUrl = wsUri.ToString();
 
-                // Send file list request
+                // Send file list request — Url specifies the storage path to list
                 SdcpMessage<object> fileListRequest = new(
                     string.Empty,
                     new SdcpData<object>(
                         Cmd: SdcpCommandIds.GetFileList,
-                        Data: new { },
+                        Data: new { Url = "/local" },
                         RequestID: requestId,
                         MainboardID: string.Empty,
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
@@ -1000,9 +1061,19 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetFileList", correlationId: requestId, cts.Token);
                 if (!string.IsNullOrWhiteSpace(responseJson))
                 {
-                    // Parse file list response and return filenames
-                    // This would need to be implemented based on the actual SDCP file list response format
-                    return ["placeholder.gcode"]; // Placeholder implementation
+                    var response = JsonSerializer.Deserialize<SdcpFileListAckResponse>(responseJson, JsonOptions);
+                    var result = response?.Data?.Data;
+
+                    if (result is null || result.Ack != 0)
+                    {
+                        LogSdcp(LogLevel.Warning, $"SDCP file list returned Ack={result?.Ack ?? -1}", requestId);
+                        return [];
+                    }
+
+                    List<SdcpFileEntry> entries = result.FileList ?? [];
+                    int fileCount = entries.Count(e => e.Type == 1);
+                    LogSdcp(LogLevel.Debug, $"SDCP file list: {fileCount} files, {entries.Count - fileCount} folders", requestId);
+                    return entries;
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -1019,6 +1090,15 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             LogSdcp(LogLevel.Debug, "SDCP file list failed", correlationId: null, new { operation = "GetFileList" }, ex);
             return [];
         }
+    }
+
+    public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
+    {
+        List<SdcpFileEntry> entries = await GetFileListEntriesAsync(baseUrl, ct);
+        return entries
+            .Where(e => e.Type == 1)
+            .Select(e => e.Name)
+            .ToArray();
     }
 
     public Task<string[]> GetFileListAsync(Uri baseUrl, CancellationToken ct = default)
@@ -1211,20 +1291,17 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // TODO: SDCP file list implementation needs to parse actual response from SDCP protocol
-        // Currently returns placeholder data - should extract size and modified timestamp from SDCP response
-        string[] files = await GetFileListAsync(baseUrl, ct);
-        return files?.Select(f => new PrinterFileInfo
-        {
-            Name = f,
-            Path = f,
-            Size = null,
-            Modified = null,
-            ThumbnailUrl = null
-
-            // Size and Modified should be extracted from SDCP protocol response
-            // when proper implementation is added
-        }).ToList() ?? new();
+        List<SdcpFileEntry> entries = await GetFileListEntriesAsync(baseUrl, ct);
+        return entries
+            .Where(e => e.Type == 1) // files only
+            .Select(e => new PrinterFileInfo
+            {
+                Name = System.IO.Path.GetFileName(e.Name),
+                Path = e.Name,
+                Size = e.UsedSize > 0 ? e.UsedSize : null,
+                Modified = null, // SDCP does not provide modification timestamps
+                ThumbnailUrl = null
+            }).ToList();
     }
 
     Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
