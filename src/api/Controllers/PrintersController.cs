@@ -252,13 +252,40 @@ public class PrintersController(
             PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
             PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, username, password, ct),
             PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
-            PrinterBackend.SDCP => new TestConnectionResponse
-            {
-                Success = true,
-                Message = "SDCP uses UDP broadcast discovery. Manual connection test not available."
-            },
+            PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
             _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
         };
+    }
+
+    private async Task<TestConnectionResponse> TestSdcpConnectionAsync(Uri serverUrl, int? backendPort, CancellationToken ct)
+    {
+        Uri uriToTest = serverUrl;
+        if (backendPort.HasValue)
+        {
+            uriToTest = new UriBuilder(serverUrl) { Port = backendPort.Value }.Uri;
+        }
+
+        try
+        {
+            Farm.Infrastructure.Contracts.Printers.IBackendClient client = _backendClientFactory.GetClient(PrinterBackend.SDCP);
+            if (client is not Farm.Backend.Plugin.Sdcp.ISdcpClient sdcpClient)
+            {
+                return new TestConnectionResponse { Success = false, Message = "SDCP client is not available." };
+            }
+
+            bool ok = await sdcpClient.TestConnectionAsync(uriToTest, ct);
+            return ok
+                ? new TestConnectionResponse { Success = true, Message = "Successfully connected to SDCP printer." }
+                : new TestConnectionResponse { Success = false, Message = "SDCP endpoint did not respond." };
+        }
+        catch (OperationCanceledException)
+        {
+            return new TestConnectionResponse { Success = false, Message = "Connection timed out" };
+        }
+        catch (Exception ex)
+        {
+            return new TestConnectionResponse { Success = false, Message = $"Connection failed: {ex.Message}" };
+        }
     }
 
     /// <summary>

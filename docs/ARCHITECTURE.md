@@ -279,8 +279,10 @@ App
    - Print job management
 
 3. **SDCP** (Some printers)
-   - Simple binary protocol
-   - Basic status and control
+    - WebSocket + JSON request/response protocol (typically at `/websocket`)
+    - Polled for status (no real-time subscription)
+    - Connections are short-lived per operation; an idle keepalive/ping is not required in the current implementation
+    - File operations are not fully implemented yet (e.g., file listing may be empty)
 
 ### Catalog Integration
 

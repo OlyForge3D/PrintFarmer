@@ -13,6 +13,17 @@ namespace Farm.Backend.Plugin.Sdcp;
 public interface ISdcpClient : IBackendClient, ISupportsFileList, IDisposable
 {
     /// <summary>
+    /// Tests connectivity to an SDCP printer by opening a WebSocket and requesting a status payload.
+    /// This is intentionally lightweight and avoids camera probing.
+    /// </summary>
+    /// <param name="baseUrl">The base URL for the printer (e.g., http://printer-ip or ws://printer-ip)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the SDCP endpoint responded</returns>
+    Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default);
+
+    Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the basic status information from an SDCP printer.
     /// </summary>
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer (e.g., ws://printer-ip)</param>

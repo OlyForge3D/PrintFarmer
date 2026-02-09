@@ -1,5 +1,6 @@
 ﻿#pragma warning disable S1006, CA2213, S1939 // Default parameters, HttpClient disposal, and interface inheritance are intentional
 
+using System.Buffers;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
@@ -9,6 +10,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Sdcp;
 
@@ -155,6 +157,24 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+    private const int DefaultOperationTimeoutSeconds = 10;
+    private const string SdcpLogCategory = "SDCP";
+    private const int SdcpWebSocketPort = 3030;
+
+    private static class SdcpCommandIds
+    {
+        public const int GetStatus = 0;
+        public const int StartPrint = 128;
+        public const int PausePrint = 129;
+        public const int CancelPrint = 130;
+        public const int ResumePrint = 131;
+        public const int GetFileList = 258;
+        public const int SetCameraEnabled = 386;
+    }
+
+    private void LogSdcp(LogLevel level, string message, string? correlationId = null, object? metadata = null, Exception? exception = null)
+        => _logger.LogWithContext(level, SdcpLogCategory, message, correlationId, metadata, context: null, exception);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP
@@ -166,70 +186,324 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     private static readonly Dictionary<int, string> StatusCodeMap = new()
     {
         { 0, "idle" },
+        { 5, "idle" },
         { 8, "preparing" },
         { 9, "starting" },
         { 10, "paused" },
-        { 13, "printing" }
+        { 13, "printing" },
+        { 20, "printing" }
     };
+
+    private async Task<string?> ReceiveTextMessageAsync(ClientWebSocket ws, string operation, string correlationId, CancellationToken ct)
+    {
+        byte[] rented = ArrayPool<byte>.Shared.Rent(8192);
+        try
+        {
+            ArrayBufferWriter<byte> writer = new();
+
+            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            LogSdcp(LogLevel.Debug, "SDCP WS receive started", correlationId, new { operation });
+
+            while (true)
+            {
+                WebSocketReceiveResult result = await ws.ReceiveAsync(rented, ct);
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    LogSdcp(
+                        LogLevel.Debug,
+                        "SDCP WS received close frame",
+                        correlationId,
+                        new { operation, closeStatus = ws.CloseStatus?.ToString(), closeStatusDescription = ws.CloseStatusDescription });
+                    return null;
+                }
+
+                if (result.MessageType != WebSocketMessageType.Text)
+                {
+                    if (result.EndOfMessage)
+                    {
+                        LogSdcp(
+                            LogLevel.Debug,
+                            "SDCP WS received non-text message",
+                            correlationId,
+                            new { operation, messageType = result.MessageType.ToString() });
+                        return null;
+                    }
+
+                    continue;
+                }
+
+                writer.Write(rented.AsSpan(0, result.Count));
+
+                if (result.EndOfMessage)
+                {
+                    string text = Encoding.UTF8.GetString(writer.WrittenSpan);
+                    long endedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    LogSdcp(
+                        LogLevel.Debug,
+                        "SDCP WS receive completed",
+                        correlationId,
+                        new { operation, bytes = writer.WrittenCount, durationMs = endedAt - startedAt });
+                    return text;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static List<Uri> GetWebSocketCandidateUris(string baseUrl)
+    {
+        string normalizedUrl = NormalizeBaseUrl(baseUrl, 80);
+        Uri uri = new(normalizedUrl);
+        bool isSecure = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+
+        // SDCP v3.0.0 spec:
+        // - WebSocket service on port 3030
+        // - ws://${MainboardIP}:3030/websocket
+        // Some printers (e.g., observed Centauri Carbon) expose SDCP via port 80 reverse proxy.
+        bool isLocalHost =
+            string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(uri.Host, "::1", StringComparison.OrdinalIgnoreCase);
+
+        string wsScheme = isSecure ? "wss" : "ws";
+
+        List<Uri> candidates = new();
+
+        void AddPort(int port)
+        {
+            Uri candidate = new UriBuilder
+            {
+                Scheme = wsScheme,
+                Host = uri.Host,
+                Port = port,
+                Path = "/websocket"
+            }.Uri;
+
+            if (!candidates.Contains(candidate))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        // For localhost tests, keep the explicit port so Kestrel can use an ephemeral port.
+        if (isLocalHost && !uri.IsDefaultPort)
+        {
+            AddPort(uri.Port);
+            return candidates;
+        }
+
+        // If the caller explicitly specifies a likely SDCP port, try it first.
+        if (!uri.IsDefaultPort && (uri.Port == SdcpWebSocketPort || uri.Port == 80 || uri.Port == 443))
+        {
+            AddPort(uri.Port);
+        }
+
+        // Spec default.
+        AddPort(SdcpWebSocketPort);
+
+        // Common fallback when SDCP is exposed behind a web server.
+        if (!isSecure)
+        {
+            AddPort(80);
+        }
+        else
+        {
+            AddPort(443);
+        }
+
+        return candidates;
+    }
+
+    private async Task<(ClientWebSocket ws, Uri wsUri)> ConnectWebSocketAsync(
+        string baseUrl,
+        string operation,
+        string correlationId,
+        CancellationToken ct)
+    {
+        List<Uri> candidates = GetWebSocketCandidateUris(baseUrl);
+        Exception? lastException = null;
+
+        foreach (Uri candidate in candidates)
+        {
+            ClientWebSocket ws = new();
+            try
+            {
+                LogSdcp(LogLevel.Debug, "SDCP WS connecting", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port });
+                await ws.ConnectAsync(candidate, ct);
+                LogSdcp(LogLevel.Debug, "SDCP WS connected", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port });
+                return (ws, candidate);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                ws.Dispose();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                LogSdcp(LogLevel.Debug, "SDCP WS connect attempt failed", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port }, ex);
+                ws.Dispose();
+            }
+        }
+
+        throw new InvalidOperationException("SDCP WS connection failed for all candidates.", lastException);
+    }
+
+    public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+
+            string requestId = Guid.NewGuid().ToString("N");
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "TestConnection", correlationId: requestId, cts.Token);
+            using (ws)
+            {
+                string wsUrl = wsUri.ToString();
+
+                SdcpMessage<object> statusRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetStatus,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(LogLevel.Debug, "SDCP WS test request sent", requestId, new { operation = "TestConnection", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "TestConnection", correlationId: requestId, cts.Token);
+
+                try
+                {
+                    if (ws.State == WebSocketState.Open)
+                    {
+                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "TestConnection", wsUrl }, ex);
+                }
+
+                bool responded = !string.IsNullOrWhiteSpace(responseJson);
+                LogSdcp(LogLevel.Debug, responded ? "SDCP test connection succeeded" : "SDCP test connection got no response", requestId, new { operation = "TestConnection", wsUrl });
+                return responded;
+            }
+        }
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP test connection cancelled", correlationId: null, exception: ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP test connection failed", correlationId: null, new { operation = "TestConnection" }, ex);
+            return false;
+        }
+    }
+
+    public Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return TestConnectionAsync(baseUrl.ToString(), ct);
+    }
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
     {
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10)); // SDCP may be slower than HTTP APIs
-
-            string wsUrl = GetWebSocketUrl(baseUrl);
-            using ClientWebSocket ws = new();
-
-            await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-
-            // Send status request (Cmd: 0)
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds)); // SDCP may be slower than HTTP APIs
             string requestId = Guid.NewGuid().ToString("N");
-            SdcpMessage<object> statusRequest = new(
-                string.Empty,
-                new SdcpData<object>(
-                    Cmd: 0,
-                    Data: new { },
-                    RequestID: requestId,
-                    MainboardID: string.Empty,
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                string.Empty);
 
-            string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
-
-            // Read response
-            byte[] buffer = new byte[8192];
-            WebSocketReceiveResult result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-
-            if (result.MessageType == WebSocketMessageType.Text)
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetStatus", correlationId: requestId, cts.Token);
+            using (ws)
             {
-                string responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                string wsUrl = wsUri.ToString();
 
-                // Try to parse as status response
-                try
+                // Send status request
+                SdcpMessage<object> statusRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetStatus,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(LogLevel.Debug, "SDCP WS status request sent", requestId, new { operation = "GetStatus", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetStatus", correlationId: requestId, cts.Token);
+                if (!string.IsNullOrWhiteSpace(responseJson))
                 {
-                    SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
-                    if (statusResponse?.Status?.PrintInfo != null)
+                    // Try to parse as status response
+                    try
                     {
-                        string state = StatusCodeMap.GetValueOrDefault(statusResponse.Status.PrintInfo.Status, "unknown");
-                        return new PrinterStatus(true, state);
+                        SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                        if (statusResponse?.Status?.PrintInfo != null)
+                        {
+                            string state = StatusCodeMap.GetValueOrDefault(statusResponse.Status.PrintInfo.Status, "unknown");
+                            LogSdcp(
+                                LogLevel.Debug,
+                                "SDCP status parsed",
+                                requestId,
+                                new
+                                {
+                                    operation = "GetStatus",
+                                    statusCode = statusResponse.Status.PrintInfo.Status,
+                                    state,
+                                    hasPrintInfo = true
+                                });
+                            return new PrinterStatus(true, state);
+                        }
+
+                        LogSdcp(LogLevel.Debug, "SDCP status response did not include printInfo", requestId, new { operation = "GetStatus", hasStatus = statusResponse?.Status != null, wsUrl });
+                    }
+                    catch (Exception ex)
+                    {
+                        // Might be an ACK response, still indicates printer is online
+                        LogSdcp(
+                            LogLevel.Debug,
+                            "SDCP status response parse failed; treating as online",
+                            requestId,
+                            new { operation = "GetStatus", responseLength = responseJson.Length, wsUrl },
+                            ex);
+                        return new PrinterStatus(true, "online");
                     }
                 }
-                catch
+                else
                 {
-                    // Might be an ACK response, still indicates printer is online
-                    return new PrinterStatus(true, "online");
+                    LogSdcp(LogLevel.Debug, "SDCP empty status response; treating as online", requestId, new { operation = "GetStatus", wsUrl });
                 }
-            }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-            return new PrinterStatus(true, "online");
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                return new PrinterStatus(true, "online");
+            }
         }
-        catch
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            LogSdcp(LogLevel.Debug, "SDCP status cancelled", correlationId: null, exception: ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP status failed", correlationId: null, new { operation = "GetStatus" }, ex);
             return new PrinterStatus(false, null);
         }
     }
@@ -245,56 +519,63 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-            string wsUrl = GetWebSocketUrl(baseUrl);
-            using ClientWebSocket ws = new();
-
-            await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-
-            // Send status request to get print info
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
             string requestId = Guid.NewGuid().ToString("N");
-            SdcpMessage<object> statusRequest = new(
-                string.Empty,
-                new SdcpData<object>(
-                    Cmd: 0,
-                    Data: new { },
-                    RequestID: requestId,
-                    MainboardID: string.Empty,
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                string.Empty);
 
-            string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
-
-            // Read response
-            byte[] buffer = new byte[8192];
-            WebSocketReceiveResult result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-
-            if (result.MessageType == WebSocketMessageType.Text)
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetJob", correlationId: requestId, cts.Token);
+            using (ws)
             {
-                string responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                string wsUrl = wsUri.ToString();
 
-                if (statusResponse?.Status?.PrintInfo != null)
+                // Send status request to get print info
+                SdcpMessage<object> statusRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetStatus,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(LogLevel.Debug, "SDCP WS job request sent", requestId, new { operation = "GetJob", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetJob", correlationId: requestId, cts.Token);
+                if (!string.IsNullOrWhiteSpace(responseJson))
                 {
-                    SdcpPrintInfo printInfo = statusResponse.Status.PrintInfo;
-                    string state = StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown");
-                    double progress = printInfo.Progress / 100.0; // Convert percentage to decimal
-                    string? jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null :
-                                 Path.GetFileName(printInfo.Filename);
+                    SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
 
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-                    return new PrinterJob(state, progress, jobName, null);
+                    if (statusResponse?.Status?.PrintInfo != null)
+                    {
+                        SdcpPrintInfo printInfo = statusResponse.Status.PrintInfo;
+                        string state = StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown");
+                        double progress = printInfo.Progress / 100.0; // Convert percentage to decimal
+                        string? jobName = string.IsNullOrWhiteSpace(printInfo.Filename) ? null :
+                                     Path.GetFileName(printInfo.Filename);
+
+                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                        return new PrinterJob(state, progress, jobName, null);
+                    }
+
+                    LogSdcp(LogLevel.Debug, "SDCP job response did not include printInfo", requestId, new { operation = "GetJob", hasStatus = statusResponse?.Status != null, wsUrl });
                 }
-            }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-            return new PrinterJob(null, null, null, null);
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                return new PrinterJob(null, null, null, null);
+            }
         }
-        catch
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            LogSdcp(LogLevel.Debug, "SDCP job cancelled", correlationId: null, exception: ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP job failed", correlationId: null, new { operation = "GetJob" }, ex);
             return new PrinterJob(null, null, null, null);
         }
     }
@@ -310,101 +591,142 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-            string wsUrl = GetWebSocketUrl(baseUrl);
-            using ClientWebSocket ws = new();
-
-            await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-
-            // Send status request
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
             string requestId = Guid.NewGuid().ToString("N");
-            SdcpMessage<object> statusRequest = new(
-                string.Empty,
-                new SdcpData<object>(
-                    Cmd: 0,
-                    Data: new { },
-                    RequestID: requestId,
-                    MainboardID: string.Empty,
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                string.Empty);
 
-            string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
-
-            // Read response
-            byte[] buffer = new byte[8192];
-            WebSocketReceiveResult result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-
-            if (result.MessageType == WebSocketMessageType.Text)
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
+            using (ws)
             {
-                string responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                string wsUrl = wsUri.ToString();
 
-                if (statusResponse?.Status != null)
+                // Send status request
+                SdcpMessage<object> statusRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetStatus,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(statusRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(LogLevel.Debug, "SDCP WS composite status request sent", requestId, new { operation = "GetCompositeStatus", cmd = SdcpCommandIds.GetStatus, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
+                if (!string.IsNullOrWhiteSpace(responseJson))
                 {
-                    SdcpStatus status = statusResponse.Status;
-                    SdcpPrintInfo? printInfo = status.PrintInfo;
-
-                    string state = printInfo != null ? StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown") : "online";
-                    double? progress = printInfo?.Progress / 100.0;
-                    string? jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
-                                 Path.GetFileName(printInfo.Filename);
-
-                    // Parse coordinates
-                    double? x = null, y = null, z = null;
-                    if (!string.IsNullOrWhiteSpace(status.CurrenCoord))
+                    SdcpStatusResponse? statusResponse;
+                    try
                     {
-                        string[] coords = status.CurrenCoord.Split(',');
-                        if (coords.Length >= 3)
+                        statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                    }
+                    catch (JsonException ex)
+                    {
+                        LogSdcp(
+                            LogLevel.Debug,
+                            "SDCP composite status parse failed; treating endpoint as online",
+                            requestId,
+                            new { operation = "GetCompositeStatus", responseLength = responseJson.Length, wsUrl },
+                            ex);
+
+                        try
                         {
-                            if (double.TryParse(coords[0], out double xVal))
+                            if (ws.State == WebSocketState.Open)
                             {
-                                x = xVal;
-                            }
-
-                            if (double.TryParse(coords[1], out double yVal))
-                            {
-                                y = yVal;
-                            }
-
-                            if (double.TryParse(coords[2], out double zVal))
-                            {
-                                z = zVal;
+                                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
                             }
                         }
+                        catch (Exception closeEx)
+                        {
+                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "GetCompositeStatus" }, closeEx);
+                        }
+
+                        return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
                     }
 
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                    if (statusResponse?.Status != null)
+                    {
+                        SdcpStatus status = statusResponse.Status;
+                        SdcpPrintInfo? printInfo = status.PrintInfo;
 
-                    // Get camera URLs if available
-                    string? cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
-                    string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(baseUrl, ct);
+                        string state = printInfo != null ? StatusCodeMap.GetValueOrDefault(printInfo.Status, "unknown") : "online";
+                        double? progress = printInfo?.Progress / 100.0;
+                        string? jobName = string.IsNullOrWhiteSpace(printInfo?.Filename) ? null :
+                                     Path.GetFileName(printInfo.Filename);
 
-                    return new PrinterCompositeStatus(
-                        IsOnline: true,
-                        State: state,
-                        Progress: progress,
-                        JobName: jobName,
-                        ThumbnailUrl: null, // SDCP doesn't provide thumbnails directly
-                        CameraStreamUrl: cameraStreamUrl,
-                        CameraSnapshotUrl: cameraSnapshotUrl,
-                        X: x,
-                        Y: y,
-                        Z: z,
-                        HotendTemp: status.TempOfNozzle,
-                        BedTemp: status.TempOfHotbed,
-                        HotendTarget: status.TempTargetNozzle,
-                        BedTarget: status.TempTargetHotbed);
+                        // Parse coordinates
+                        double? x = null, y = null, z = null;
+                        if (!string.IsNullOrWhiteSpace(status.CurrenCoord))
+                        {
+                            string[] coords = status.CurrenCoord.Split(',');
+                            if (coords.Length >= 3)
+                            {
+                                if (double.TryParse(coords[0], out double xVal))
+                                {
+                                    x = xVal;
+                                }
+
+                                if (double.TryParse(coords[1], out double yVal))
+                                {
+                                    y = yVal;
+                                }
+
+                                if (double.TryParse(coords[2], out double zVal))
+                                {
+                                    z = zVal;
+                                }
+                            }
+                        }
+
+                        try
+                        {
+                            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogSdcp(LogLevel.Debug, "SDCP WS close failed", requestId, new { operation = "GetCompositeStatus" }, ex);
+                        }
+
+                        // Get camera URLs if available
+                        string? cameraStreamUrl = await GetCameraUrlAsync(baseUrl, ct);
+                        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(baseUrl, ct);
+
+                        return new PrinterCompositeStatus(
+                            IsOnline: true,
+                            State: state,
+                            Progress: progress,
+                            JobName: jobName,
+                            ThumbnailUrl: null, // SDCP doesn't provide thumbnails directly
+                            CameraStreamUrl: cameraStreamUrl,
+                            CameraSnapshotUrl: cameraSnapshotUrl,
+                            X: x,
+                            Y: y,
+                            Z: z,
+                            HotendTemp: status.TempOfNozzle,
+                            BedTemp: status.TempOfHotbed,
+                            HotendTarget: status.TempTargetNozzle,
+                            BedTarget: status.TempTargetHotbed);
+                    }
+
+                    LogSdcp(LogLevel.Debug, "SDCP composite status response did not include status payload", requestId, new { operation = "GetCompositeStatus" });
                 }
-            }
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-            return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                return new PrinterCompositeStatus(true, "online", null, null, null, null, null);
+            }
         }
-        catch
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            LogSdcp(LogLevel.Debug, "SDCP composite status cancelled", correlationId: null, exception: ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP composite status failed", correlationId: null, new { operation = "GetCompositeStatus" }, ex);
             return new PrinterCompositeStatus(false, null, null, null, null, null, null);
         }
     }
@@ -460,7 +782,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     // Print control methods
     public async Task<bool> StartPrintAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 128, new { Filename = filename, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = filename, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
     }
 
     public Task<bool> StartPrintAsync(Uri baseUrl, string filename, CancellationToken ct = default)
@@ -472,7 +794,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     public async Task<bool> PausePrintAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 129, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.PausePrint, new { }, ct);
     }
 
     public Task<bool> PausePrintAsync(Uri baseUrl, CancellationToken ct = default)
@@ -483,7 +805,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 130, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.CancelPrint, new { }, ct);
     }
 
     public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
@@ -494,7 +816,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     public async Task<bool> ResumePrintAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 131, new { }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.ResumePrint, new { }, ct);
     }
 
     public Task<bool> ResumePrintAsync(Uri baseUrl, CancellationToken ct = default)
@@ -510,58 +832,37 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         {
             // SDCP cameras are typically accessible via HTTP streaming
             Uri baseUri = new(NormalizeBaseUrl(baseUrl, 80));
-            Uri cameraUri = new UriBuilder
+            async Task<string?> TryGetUrlAsync(int port)
             {
-                Scheme = Uri.UriSchemeHttp,
-                Host = baseUri.Host,
-                Port = 8080,
-                Path = "/video"
-            }.Uri;
-
-            // Test if camera stream is available
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-
-            try
-            {
-                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    return cameraUri.ToString();
-                }
-            }
-            catch (HttpRequestException)
-            {
-                // Try alternative port
-                cameraUri = new UriBuilder
+                Uri cameraUri = new UriBuilder
                 {
                     Scheme = Uri.UriSchemeHttp,
                     Host = baseUri.Host,
-                    Port = 3030,
+                    Port = port,
                     Path = "/video"
                 }.Uri;
-                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
-                if (response.IsSuccessStatusCode)
+
+                using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+                try
                 {
-                    return cameraUri.ToString();
+                    using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
+                    return response.IsSuccessStatusCode ? cameraUri.ToString() : null;
+                }
+                catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+                {
+                    return null;
                 }
             }
-            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+
+            string? url = await TryGetUrlAsync(8080);
+            if (!string.IsNullOrWhiteSpace(url))
             {
-                // Timeout trying first port, try alternative port
-                cameraUri = new UriBuilder
-                {
-                    Scheme = Uri.UriSchemeHttp,
-                    Host = baseUri.Host,
-                    Port = 3030,
-                    Path = "/video"
-                }.Uri;
-                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    return cameraUri.ToString();
-                }
+                return url;
             }
+
+            return await TryGetUrlAsync(3030);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -570,7 +871,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Failed to get camera URL for {BaseUrl}", baseUrl);
+            LogSdcp(LogLevel.Debug, "Failed to get camera URL", correlationId: null, new { baseUrl }, ex);
         }
 
         return null;
@@ -588,58 +889,37 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         {
             // SDCP camera snapshots are typically available via HTTP
             Uri baseUri = new(NormalizeBaseUrl(baseUrl, 80));
-            Uri snapshotUri = new UriBuilder
+            async Task<string?> TryGetUrlAsync(int port)
             {
-                Scheme = Uri.UriSchemeHttp,
-                Host = baseUri.Host,
-                Port = 8080,
-                Path = "/snapshot"
-            }.Uri;
-
-            // Test if snapshot endpoint is available
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-
-            try
-            {
-                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    return snapshotUri.ToString();
-                }
-            }
-            catch (HttpRequestException)
-            {
-                // Try alternative port
-                snapshotUri = new UriBuilder
+                Uri snapshotUri = new UriBuilder
                 {
                     Scheme = Uri.UriSchemeHttp,
                     Host = baseUri.Host,
-                    Port = 3030,
+                    Port = port,
                     Path = "/snapshot"
                 }.Uri;
-                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
-                if (response.IsSuccessStatusCode)
+
+                using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+                try
                 {
-                    return snapshotUri.ToString();
+                    using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
+                    return response.IsSuccessStatusCode ? snapshotUri.ToString() : null;
+                }
+                catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+                {
+                    return null;
                 }
             }
-            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+
+            string? url = await TryGetUrlAsync(8080);
+            if (!string.IsNullOrWhiteSpace(url))
             {
-                // Timeout trying first port, try alternative port
-                snapshotUri = new UriBuilder
-                {
-                    Scheme = Uri.UriSchemeHttp,
-                    Host = baseUri.Host,
-                    Port = 3030,
-                    Path = "/snapshot"
-                }.Uri;
-                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
-                if (response.IsSuccessStatusCode)
-                {
-                    return snapshotUri.ToString();
-                }
+                return url;
             }
+
+            return await TryGetUrlAsync(3030);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -648,7 +928,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Failed to get camera snapshot URL for {BaseUrl}", baseUrl);
+            LogSdcp(LogLevel.Debug, "Failed to get camera snapshot URL", correlationId: null, new { baseUrl }, ex);
         }
 
         return null;
@@ -662,7 +942,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     public async Task<bool> EnableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 386, new { Enable = 1 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 1 }, ct);
     }
 
     public Task<bool> EnableCameraAsync(Uri baseUrl, CancellationToken ct = default)
@@ -673,7 +953,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     public async Task<bool> DisableCameraAsync(string baseUrl, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, 386, new { Enable = 0 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.SetCameraEnabled, new { Enable = 0 }, ct);
     }
 
     public Task<bool> DisableCameraAsync(Uri baseUrl, CancellationToken ct = default)
@@ -688,45 +968,55 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-            string wsUrl = GetWebSocketUrl(baseUrl);
-            using ClientWebSocket ws = new();
-
-            await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-
-            // Send file list request (Cmd: 258)
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
             string requestId = Guid.NewGuid().ToString("N");
-            SdcpMessage<object> fileListRequest = new(
-                string.Empty,
-                new SdcpData<object>(
-                    Cmd: 258,
-                    Data: new { },
-                    RequestID: requestId,
-                    MainboardID: string.Empty,
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                string.Empty);
 
-            string json = JsonSerializer.Serialize(fileListRequest, JsonOptions);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
-
-            // Read response
-            byte[] buffer = new byte[8192];
-            WebSocketReceiveResult result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-
-            if (result.MessageType == WebSocketMessageType.Text)
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetFileList", correlationId: requestId, cts.Token);
+            using (ws)
             {
-                // Parse file list response and return filenames
-                // This would need to be implemented based on the actual SDCP file list response format
-                return ["placeholder.gcode"]; // Placeholder implementation
-            }
+                string wsUrl = wsUri.ToString();
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-            return [];
+                // Send file list request
+                SdcpMessage<object> fileListRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetFileList,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(fileListRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(
+                    LogLevel.Debug,
+                    "SDCP WS file list request sent",
+                    requestId,
+                    new { operation = "GetFileList", cmd = SdcpCommandIds.GetFileList, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetFileList", correlationId: requestId, cts.Token);
+                if (!string.IsNullOrWhiteSpace(responseJson))
+                {
+                    // Parse file list response and return filenames
+                    // This would need to be implemented based on the actual SDCP file list response format
+                    return ["placeholder.gcode"]; // Placeholder implementation
+                }
+
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                return [];
+            }
         }
-        catch
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            LogSdcp(LogLevel.Debug, "SDCP file list cancelled", correlationId: null, exception: ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP file list failed", correlationId: null, new { operation = "GetFileList" }, ex);
             return [];
         }
     }
@@ -737,72 +1027,75 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         return GetFileListAsync(baseUrl.ToString(), ct);
     }
 
-    private static async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
+    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, CancellationToken ct = default)
     {
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-            string wsUrl = GetWebSocketUrl(baseUrl);
-            using ClientWebSocket ws = new();
-
-            await ws.ConnectAsync(new Uri(wsUrl), cts.Token);
-
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
             string requestId = Guid.NewGuid().ToString("N");
-            SdcpMessage<T> command = new(
-                string.Empty,
-                new SdcpData<T>(
-                    Cmd: cmd,
-                    Data: data,
-                    RequestID: requestId,
-                    MainboardID: string.Empty,
-                    TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                string.Empty);
 
-            string json = JsonSerializer.Serialize(command, JsonOptions);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
-
-            // Read ACK response
-            byte[] buffer = new byte[4096];
-            WebSocketReceiveResult result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
-
-            if (result.MessageType == WebSocketMessageType.Text)
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "SendCommand", correlationId: requestId, cts.Token);
+            using (ws)
             {
-                string responseJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                SdcpAckResponse? ackResponse = JsonSerializer.Deserialize<SdcpAckResponse>(responseJson, JsonOptions);
+                string wsUrl = wsUri.ToString();
+
+                SdcpMessage<T> command = new(
+                    string.Empty,
+                    new SdcpData<T>(
+                        Cmd: cmd,
+                        Data: data,
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(command, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(
+                    LogLevel.Debug,
+                    "SDCP WS command sent",
+                    requestId,
+                    new { operation = "SendCommand", cmd, bytes = bytes.Length, wsUrl });
+
+                string? responseJson = await ReceiveTextMessageAsync(ws, operation: "SendCommand", correlationId: requestId, cts.Token);
+                if (!string.IsNullOrWhiteSpace(responseJson))
+                {
+                    SdcpAckResponse? ackResponse = JsonSerializer.Deserialize<SdcpAckResponse>(responseJson, JsonOptions);
+
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+
+                    // ACK code 0 = success, anything else is error
+                    LogSdcp(
+                        LogLevel.Debug,
+                        "SDCP WS command ack received",
+                        requestId,
+                        new { operation = "SendCommand", cmd, ack = ackResponse?.Data?.Data?.Ack, wsUrl });
+                    return ackResponse?.Data?.Data?.Ack == 0;
+                }
+
+                LogSdcp(
+                    LogLevel.Debug,
+                    "SDCP WS command returned empty response",
+                    requestId,
+                    new { operation = "SendCommand", cmd, wsUrl });
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-
-                // ACK code 0 = success, anything else is error
-                return ackResponse?.Data?.Data?.Ack == 0;
+                return false;
             }
-
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+        }
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP command cancelled", correlationId: null, new { operation = "SendCommand", cmd }, ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP command failed", correlationId: null, new { operation = "SendCommand", cmd }, ex);
             return false;
         }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string GetWebSocketUrl(string baseUrl)
-    {
-        // Convert HTTP(S) URL to WebSocket URL
-        // SDCP WebSocket is available at ws://ip/websocket
-        string normalizedUrl = NormalizeBaseUrl(baseUrl, 80);
-        Uri uri = new(normalizedUrl);
-        bool isSecure = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-        UriBuilder ub = new()
-        {
-            Scheme = isSecure ? "wss" : "ws",
-            Host = uri.Host,
-            Port = uri.Port,
-            Path = "/websocket"
-        };
-        return ub.Uri.ToString();
     }
 
     // File upload and management methods
@@ -813,24 +1106,88 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(60)); // Allow more time for file uploads
 
-            // SDCP file upload is typically done via HTTP POST to a specific endpoint
-            // This implementation assumes a standard HTTP file upload endpoint
-            string host = GetHostFromUrl(baseUrl);
-            Uri uploadUri = new UriBuilder
+            // SDCP v3 docs show HTTP upload endpoints living on port 3030.
+            // Some printers may expose SDCP behind a reverse proxy on port 80; if the stream is seekable,
+            // we can safely retry on fallback ports.
+            Uri normalizedBaseUri = new(NormalizeBaseUrl(baseUrl, 80));
+            string requestId = Guid.NewGuid().ToString("N");
+
+            List<Uri> candidates = new();
+            candidates.Add(new UriBuilder
             {
                 Scheme = Uri.UriSchemeHttp,
-                Host = host,
-                Port = -1, // preserve default port formatting (no explicit port)
-                Path = "/api/upload"
-            }.Uri; // Common SDCP upload endpoint
+                Host = normalizedBaseUri.Host,
+                Port = SdcpWebSocketPort,
+                Path = "/uploadFile/upload"
+            }.Uri);
 
-            using MultipartFormDataContent formContent = new();
-            using StreamContent streamContent = new(fileContent);
-            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-            formContent.Add(streamContent, "file", fileName);
+            // Fallbacks for devices that proxy SDCP over common ports.
+            candidates.Add(new UriBuilder
+            {
+                Scheme = Uri.UriSchemeHttp,
+                Host = normalizedBaseUri.Host,
+                Port = 80,
+                Path = "/uploadFile/upload"
+            }.Uri);
 
-            using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
-            return resp.IsSuccessStatusCode;
+            // Remove duplicates while preserving order.
+            List<Uri> uploadUris = candidates.Distinct().ToList();
+
+            long? startPosition = null;
+            if (fileContent.CanSeek)
+            {
+                startPosition = fileContent.Position;
+            }
+
+            MultipartFormDataContent CreateMultipartContent()
+            {
+                MultipartFormDataContent formContent = new();
+                StreamContent streamContent = new(fileContent);
+                streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                formContent.Add(streamContent, "file", fileName);
+                return formContent;
+            }
+
+            foreach (Uri uploadUri in uploadUris)
+            {
+                if (startPosition != null)
+                {
+                    fileContent.Position = startPosition.Value;
+                }
+
+                LogSdcp(LogLevel.Debug, "SDCP HTTP upload sending", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString(), fileName, canSeek = fileContent.CanSeek });
+
+                using MultipartFormDataContent formContent = CreateMultipartContent();
+
+                try
+                {
+                    using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
+                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload response", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString(), statusCode = (int)resp.StatusCode });
+
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        return true;
+                    }
+
+                    if (!fileContent.CanSeek)
+                    {
+                        // Can't retry with a forward-only stream.
+                        return false;
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (fileContent.CanSeek)
+                {
+                    LogSdcp(LogLevel.Debug, "SDCP HTTP upload attempt failed", requestId, new { operation = "UploadGcode", uploadUrl = uploadUri.ToString() }, ex);
+
+                    // continue to next candidate
+                }
+            }
+
+            return false;
         }
         catch
         {
@@ -844,15 +1201,6 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         ArgumentNullException.ThrowIfNull(fileName);
         ArgumentNullException.ThrowIfNull(fileContent);
         return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, ct);
-    }
-
-    // The existing StartPrintAsync method already handles starting prints for SDCP
-    // GetFileListAsync method already exists for SDCP
-    private static string GetHostFromUrl(string baseUrl)
-    {
-        string normalizedUrl = NormalizeBaseUrl(baseUrl, 80);
-        Uri uri = new(normalizedUrl);
-        return uri.Host;
     }
 
     public void Dispose()
