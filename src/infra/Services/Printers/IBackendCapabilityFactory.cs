@@ -170,6 +170,20 @@ public interface IBackendCapabilityFactory
     /// <param name="backend">The printer backend type to get a client for.</param>
     /// <param name="client">When this method returns, contains the typed start print client if the capability is supported; otherwise, null.</param>
     bool TryGetStartPrintClientTyped(PrinterBackend backend, out ISupportsStartPrint? client);
+
+    /// <summary>
+    /// Tries to get a backend client that supports file delete operations.
+    /// </summary>
+    /// <param name="backend">The printer backend type to get a client for.</param>
+    /// <param name="client">When this method returns, contains the backend client if the capability is supported; otherwise, null.</param>
+    bool TryGetFileDeleteClient(PrinterBackend backend, out IBackendClient? client);
+
+    /// <summary>
+    /// Tries to get a backend client typed as ISupportsFileDelete for file deletion operations.
+    /// </summary>
+    /// <param name="backend">The printer backend type to get a client for.</param>
+    /// <param name="client">When this method returns, contains the typed file delete client if the capability is supported; otherwise, null.</param>
+    bool TryGetFileDeleteClientTyped(PrinterBackend backend, out ISupportsFileDelete? client);
 }
 
 /// <summary>
@@ -191,9 +205,10 @@ public enum BackendCapabilities
     TemperatureControl = 1 << 8,
     PrinterInformation = 1 << 9,
     History = 1 << 10,
+    FileDelete = 1 << 11,
 
-    /// <summary>All file operations (download, list, upload)</summary>
-    FileOperations = FileDownload | FileList | FileUpload,
+    /// <summary>All file operations (download, list, upload, delete)</summary>
+    FileOperations = FileDownload | FileList | FileUpload | FileDelete,
 
     /// <summary>All information retrieval operations (metadata, printer info, etc.)</summary>
     InformationRetrieval = FileMetadata | PrinterInformation,
@@ -202,5 +217,5 @@ public enum BackendCapabilities
     AllControlOps = ControlOperations | Movement | TemperatureControl,
 
     /// <summary>All capabilities combined</summary>
-    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History
+    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete
 }

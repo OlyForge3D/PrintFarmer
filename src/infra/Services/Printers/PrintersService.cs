@@ -2316,12 +2316,6 @@ public class PrintersService(
     /// <param name="filename">Filename of gcode file to delete (backend-specific path format)</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if file deletion succeeded, false if not currently supported</returns>
-    /// <remarks>
-    /// File deletion is not currently exposed through capability interfaces.
-    /// This would require adding ISupportsFileDelete capability interface.
-    /// Currently returns false regardless of input parameters.
-    /// TODO: Implement file deletion capability when interface is available.
-    /// </remarks>
     public async Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -2330,9 +2324,19 @@ public class PrintersService(
             return false;
         }
 
-        // File deletion is not currently exposed through capability interfaces
-        // This would require adding ISupportsFileDelete capability interface
-        return false;
+        try
+        {
+            var backend = (PrinterBackend)p.Backend;
+
+            return _capabilityFactory.TryGetFileDeleteClientTyped(backend, out ISupportsFileDelete? deleteClient)
+                ? await deleteClient!.DeleteFileAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
+                : false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete file {Filename} on printer {PrinterId}", filename, id);
+            return false;
+        }
     }
 
     /// <summary>

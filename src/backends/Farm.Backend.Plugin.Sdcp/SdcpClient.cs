@@ -296,7 +296,8 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     ISupportsStartPrint,
     ISupportsControlOperations,
     ISupportsCamera,
-    ISupportsHistory
+    ISupportsHistory,
+    ISupportsFileDelete
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -320,6 +321,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         public const int CancelPrint = 130;
         public const int ResumePrint = 131;
         public const int GetFileList = 258;
+        public const int DeleteFile = 259;
         public const int GetHistoryIds = 320;
         public const int GetHistoryDetail = 321;
         public const int SetCameraEnabled = 386;
@@ -1412,6 +1414,22 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return GetCameraSnapshotUrlAsync(baseUrl, ct);
+    }
+
+    // ========== FILE DELETE CAPABILITY ==========
+
+    /// <summary>
+    /// Deletes a file from the printer's storage via SDCP Cmd 259.
+    /// </summary>
+    async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
+    {
+        bool result = await SendCommandAsync(baseUrl, SdcpCommandIds.DeleteFile, new { Url = filePath }, ct);
+        if (!result)
+        {
+            LogSdcp(LogLevel.Warning, $"SDCP file delete failed for '{filePath}'");
+        }
+
+        return result;
     }
 
     // ========== HISTORY CAPABILITY ==========

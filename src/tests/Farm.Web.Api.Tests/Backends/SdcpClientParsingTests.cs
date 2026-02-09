@@ -367,6 +367,34 @@ public sealed class SdcpClientParsingTests
         result.Jobs[0].Filename.Should().Be("new.gcode");
     }
 
+    // ==================== File Delete Tests (Cmd 259) ====================
+
+    [Fact]
+    public async Task DeleteFileAsync_AckZero_ReturnsTrue()
+    {
+        string responsePayload = BuildCommandAckResponse(cmd: 259, ack: 0);
+
+        await using var env = await CreateSdcpServer(responsePayload);
+
+        ISupportsFileDelete deleteClient = env.Client;
+        bool result = await deleteClient.DeleteFileAsync(env.BaseUrl, "/local/model.gcode", credential: null, CancellationToken.None);
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DeleteFileAsync_AckNonZero_ReturnsFalse()
+    {
+        string responsePayload = BuildCommandAckResponse(cmd: 259, ack: 1);
+
+        await using var env = await CreateSdcpServer(responsePayload);
+
+        ISupportsFileDelete deleteClient = env.Client;
+        bool result = await deleteClient.DeleteFileAsync(env.BaseUrl, "/local/missing.gcode", credential: null, CancellationToken.None);
+
+        result.Should().BeFalse();
+    }
+
     // ==================== Heartbeat / Ping-Pong Tests ====================
 
     [Fact]
@@ -668,6 +696,26 @@ public sealed class SdcpClientParsingTests
         {
             return null;
         }
+    }
+
+    private static string BuildCommandAckResponse(int cmd, int ack)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            Id = (string?)null,
+            Data = new
+            {
+                Cmd = cmd,
+                Data = new
+                {
+                    Ack = ack
+                },
+                RequestID = "req-ack",
+                MainboardID = "mb-1",
+                TimeStamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            },
+            Topic = (string?)null
+        });
     }
 
     private static int GetFreeTcpPort()

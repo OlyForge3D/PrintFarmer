@@ -36,7 +36,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsMovement), BackendCapabilities.Movement },
         { typeof(ISupportsTemperatureControl), BackendCapabilities.TemperatureControl },
         { typeof(ISupportsPrinterInformation), BackendCapabilities.PrinterInformation },
-        { typeof(ISupportsHistory), BackendCapabilities.History }
+        { typeof(ISupportsHistory), BackendCapabilities.History },
+        { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -262,6 +263,23 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         // File management includes upload and delete operations
         return TryGetClientWithCapability(backend, BackendCapabilities.FileUpload, out client);
+    }
+
+    public bool TryGetFileDeleteClient(PrinterBackend backend, out IBackendClient? client)
+    {
+        return TryGetClientWithCapability(backend, BackendCapabilities.FileDelete, out client);
+    }
+
+    public bool TryGetFileDeleteClientTyped(PrinterBackend backend, out ISupportsFileDelete? client)
+    {
+        client = null;
+        if (TryGetFileDeleteClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsFileDelete deleteClient)
+        {
+            client = deleteClient;
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryGetCameraClientTyped(PrinterBackend backend, out ISupportsCamera? client)
