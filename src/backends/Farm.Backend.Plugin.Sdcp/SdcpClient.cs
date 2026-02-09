@@ -305,6 +305,13 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     private const string SdcpLogCategory = "SDCP";
     private const int SdcpWebSocketPort = 3030;
 
+    /// <summary>
+    /// Interval at which the client sends WebSocket ping frames to the printer.
+    /// Keeps long-lived connections (e.g., multi-step history retrieval) alive
+    /// and allows the runtime to detect unresponsive peers.
+    /// </summary>
+    private static readonly TimeSpan WebSocketKeepAliveInterval = TimeSpan.FromSeconds(15);
+
     private static class SdcpCommandIds
     {
         public const int GetStatus = 0;
@@ -366,14 +373,17 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
                 if (result.MessageType != WebSocketMessageType.Text)
                 {
+                    // Skip non-text frames (e.g., binary heartbeat/ping frames from the printer)
+                    // without aborting the receive loop. Protocol-level WebSocket pings are
+                    // handled transparently by .NET's ClientWebSocket; application-level
+                    // binary frames should be silently consumed.
                     if (result.EndOfMessage)
                     {
                         LogSdcp(
                             LogLevel.Debug,
-                            "SDCP WS received non-text message",
+                            "SDCP WS skipping non-text frame",
                             correlationId,
                             new { operation, messageType = result.MessageType.ToString() });
-                        return null;
                     }
 
                     continue;
@@ -476,6 +486,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         foreach (Uri candidate in candidates)
         {
             ClientWebSocket ws = new();
+            ws.Options.KeepAliveInterval = WebSocketKeepAliveInterval;
             try
             {
                 LogSdcp(LogLevel.Debug, "SDCP WS connecting", correlationId, new { operation, wsUrl = candidate.ToString(), host = candidate.Host, port = candidate.Port });
