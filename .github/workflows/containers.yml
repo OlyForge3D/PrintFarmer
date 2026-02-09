@@ -5,12 +5,8 @@ name: Build Containers
 # - Container images only COPY the pre-built artifacts
 
 on:
-  push:
-    branches: [main, release/*]
-    paths:
-      - 'src/**'
-      - 'scripts/docker/dockerfiles/**'
-      - '.github/workflows/containers.yml'
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
   workflow_dispatch:
 
 env:
