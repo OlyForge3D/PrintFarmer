@@ -207,9 +207,93 @@ public class SdcpFileEntry
     public int Type { get; set; }
 }
 
+// ========== SDCP History Response DTOs (Cmd 320 / 321) ==========
+
+/// <summary>
+/// Response envelope for Cmd 320 (GetHistoryIds) — returns a list of task IDs.
+/// </summary>
+public class SdcpHistoryIdsAckResponse
+{
+    public string? Id { get; set; }
+
+    public SdcpHistoryIdsAckData? Data { get; set; }
+
+    public string? Topic { get; set; }
+}
+
+public class SdcpHistoryIdsAckData
+{
+    public int Cmd { get; set; }
+
+    public SdcpHistoryIdsResult? Data { get; set; }
+
+    public string? RequestID { get; set; }
+
+    public string? MainboardID { get; set; }
+
+    public long TimeStamp { get; set; }
+}
+
+public class SdcpHistoryIdsResult
+{
+    public int Ack { get; set; }
+
+    public List<string>? TaskIdList { get; set; }
+}
+
+/// <summary>
+/// Response envelope for Cmd 321 (GetHistoryDetail) — returns details for one task.
+/// </summary>
+public class SdcpHistoryDetailAckResponse
+{
+    public string? Id { get; set; }
+
+    public SdcpHistoryDetailAckData? Data { get; set; }
+
+    public string? Topic { get; set; }
+}
+
+public class SdcpHistoryDetailAckData
+{
+    public int Cmd { get; set; }
+
+    public SdcpHistoryDetail? Data { get; set; }
+
+    public string? RequestID { get; set; }
+
+    public string? MainboardID { get; set; }
+
+    public long TimeStamp { get; set; }
+}
+
+/// <summary>
+/// SDCP history detail for a single print job.
+/// Unknown fields are tolerated via case-insensitive deserialization.
+/// </summary>
+public class SdcpHistoryDetail
+{
+    public int Ack { get; set; }
+
+    /// <summary>The unique task identifier.</summary>
+    public string? TaskId { get; set; }
+
+    /// <summary>The printed filename.</summary>
+    public string? Filename { get; set; }
+
+    /// <summary>Job status: 0 = Completed, 1 = Cancelled, 2 = Error.</summary>
+    public int Status { get; set; }
+
+    /// <summary>Start time as Unix timestamp (seconds).</summary>
+    public double StartTime { get; set; }
+
+    /// <summary>End time as Unix timestamp (seconds), or 0 if not finished.</summary>
+    public double EndTime { get; set; }
+}
+
 public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
-    ISupportsCamera
+    ISupportsCamera,
+    ISupportsHistory
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -226,6 +310,8 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         public const int CancelPrint = 130;
         public const int ResumePrint = 131;
         public const int GetFileList = 258;
+        public const int GetHistoryIds = 320;
+        public const int GetHistoryDetail = 321;
         public const int SetCameraEnabled = 386;
     }
 
@@ -1312,6 +1398,222 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return GetCameraSnapshotUrlAsync(baseUrl, ct);
+    }
+
+    // ========== HISTORY CAPABILITY ==========
+
+    /// <summary>
+    /// Retrieves print history via SDCP Cmd 320 (list IDs) then Cmd 321 (details per ID).
+    /// Maps SDCP-specific fields into the shared HistoryJob DTO.
+    /// </summary>
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(
+        string baseUrl, int? limit, int? start, DateTime? since,
+        PrinterCredential? credential, CancellationToken ct)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            string requestId = Guid.NewGuid().ToString("N");
+
+            var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "GetHistoryIds", correlationId: requestId, cts.Token);
+            using (ws)
+            {
+                // Step 1: Request history task ID list (Cmd 320)
+                SdcpMessage<object> idsRequest = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetHistoryIds,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: string.Empty,
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(idsRequest, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                string? idsResponseJson = await ReceiveTextMessageAsync(ws, "GetHistoryIds", requestId, cts.Token);
+                if (string.IsNullOrWhiteSpace(idsResponseJson))
+                {
+                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                }
+
+                var idsResponse = JsonSerializer.Deserialize<SdcpHistoryIdsAckResponse>(idsResponseJson, JsonOptions);
+                var idsResult = idsResponse?.Data?.Data;
+
+                if (idsResult is null || idsResult.Ack != 0 || idsResult.TaskIdList is null or { Count: 0 })
+                {
+                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                }
+
+                List<string> taskIds = idsResult.TaskIdList;
+
+                // Apply since filter client-side (SDCP has no server-side date filter)
+                // Apply start/limit pagination client-side
+                int skipCount = start ?? 0;
+                int takeCount = limit ?? taskIds.Count;
+                List<string> pageIds = taskIds.Skip(skipCount).Take(takeCount).ToList();
+
+                // Step 2: Request details for each task ID (Cmd 321)
+                List<HistoryJob> jobs = [];
+                foreach (string taskId in pageIds)
+                {
+                    HistoryJob? job = await RequestHistoryDetailAsync(ws, taskId, requestId, since, cts.Token);
+                    if (job is not null)
+                    {
+                        jobs.Add(job);
+                    }
+                }
+
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+
+                LogSdcp(LogLevel.Debug, $"SDCP history: {jobs.Count} jobs from {taskIds.Count} total", requestId);
+                return new HistoryListResponse { Count = taskIds.Count, Jobs = jobs.ToArray() };
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP history list failed", correlationId: null, new { operation = "GetHistoryList" }, ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Requests details for a single history job via Cmd 321.
+    /// Returns null if the job doesn't match the since filter.
+    /// </summary>
+    private async Task<HistoryJob?> RequestHistoryDetailAsync(
+        ClientWebSocket ws, string taskId, string correlationId, DateTime? since, CancellationToken ct)
+    {
+        string detailRequestId = Guid.NewGuid().ToString("N");
+        SdcpMessage<object> detailRequest = new(
+            string.Empty,
+            new SdcpData<object>(
+                Cmd: SdcpCommandIds.GetHistoryDetail,
+                Data: new { TaskId = taskId },
+                RequestID: detailRequestId,
+                MainboardID: string.Empty,
+                TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+            string.Empty);
+
+        string json = JsonSerializer.Serialize(detailRequest, JsonOptions);
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
+
+        string? detailJson = await ReceiveTextMessageAsync(ws, "GetHistoryDetail", correlationId, ct);
+        if (string.IsNullOrWhiteSpace(detailJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var detailResponse = JsonSerializer.Deserialize<SdcpHistoryDetailAckResponse>(detailJson, JsonOptions);
+            var detail = detailResponse?.Data?.Data;
+            if (detail is null || detail.Ack != 0)
+            {
+                return null;
+            }
+
+            // Apply client-side since filter
+            if (since.HasValue && detail.StartTime > 0)
+            {
+                double sinceUnix = new DateTimeOffset(since.Value.ToUniversalTime()).ToUnixTimeSeconds();
+                if (detail.StartTime < sinceUnix)
+                {
+                    return null;
+                }
+            }
+
+            return MapSdcpHistoryToJob(detail);
+        }
+        catch (JsonException ex)
+        {
+            // Tolerate unknown fields per acceptance criteria
+            LogSdcp(LogLevel.Debug, $"Failed to parse history detail for {taskId}", correlationId, exception: ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Maps SDCP-specific history detail fields into the shared HistoryJob DTO.
+    /// Fields that have no SDCP equivalent are left at their default.
+    /// </summary>
+    private static HistoryJob MapSdcpHistoryToJob(SdcpHistoryDetail detail)
+    {
+        string status = detail.Status switch
+        {
+            0 => "completed",
+            1 => "cancelled",
+            2 => "error",
+            _ => $"unknown({detail.Status})"
+        };
+
+        double duration = detail.EndTime > 0 && detail.StartTime > 0
+            ? detail.EndTime - detail.StartTime
+            : 0;
+
+        return new HistoryJob
+        {
+            JobId = detail.TaskId ?? string.Empty,
+            Exists = true,
+            Filename = detail.Filename ?? string.Empty,
+            Status = status,
+            StartTime = detail.StartTime,
+            EndTime = detail.EndTime > 0 ? detail.EndTime : null,
+            PrintDuration = duration,
+            TotalDuration = duration,
+            FilamentUsed = 0, // SDCP does not report filament usage in history
+            User = string.Empty
+        };
+    }
+
+    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(
+        string baseUrl, string jobId, PrinterCredential? credential, CancellationToken ct)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            string requestId = Guid.NewGuid().ToString("N");
+
+            var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "GetHistoryDetail", correlationId: requestId, cts.Token);
+            using (ws)
+            {
+                HistoryJob? job = await RequestHistoryDetailAsync(ws, jobId, requestId, since: null, cts.Token);
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                return job;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, $"SDCP history job detail failed for {jobId}", correlationId: null, exception: ex);
+            return null;
+        }
+    }
+
+    Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(
+        string baseUrl, PrinterCredential? credential, CancellationToken ct)
+    {
+        // SDCP protocol does not provide aggregate history totals
+        return Task.FromResult<HistoryTotals?>(null);
+    }
+
+    Task<bool> ISupportsHistory.DeleteHistoryJobAsync(
+        string baseUrl, string jobId, PrinterCredential? credential, CancellationToken ct)
+    {
+        // SDCP protocol does not support deleting individual history entries
+        return Task.FromResult(false);
     }
 }
 

@@ -190,6 +190,7 @@ public enum BackendCapabilities
     Movement = 1 << 7,
     TemperatureControl = 1 << 8,
     PrinterInformation = 1 << 9,
+    History = 1 << 10,
 
     /// <summary>All file operations (download, list, upload)</summary>
     FileOperations = FileDownload | FileList | FileUpload,
@@ -201,5 +202,5 @@ public enum BackendCapabilities
     AllControlOps = ControlOperations | Movement | TemperatureControl,
 
     /// <summary>All capabilities combined</summary>
-    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation
+    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History
 }

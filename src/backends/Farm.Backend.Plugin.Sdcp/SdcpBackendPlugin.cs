@@ -96,7 +96,8 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
     {
         return new[]
         {
-            typeof(ISupportsFileList)
+            typeof(ISupportsFileList),
+            typeof(ISupportsHistory)
         };
     }
 
