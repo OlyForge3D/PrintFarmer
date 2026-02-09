@@ -15,7 +15,7 @@ public record PrinterBasicDto(
     PrinterBackend Backend = PrinterBackend.Moonraker,
     string? ApiKey = null,
     string? OriginalServerUrl = null,
-    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
     int? FrontendPort = null,
     string? BackendUrl = null,
     string? FrontendUrl = null);

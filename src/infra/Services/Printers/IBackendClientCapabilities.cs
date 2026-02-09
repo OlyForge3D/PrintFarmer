@@ -459,6 +459,23 @@ public interface ISupportsOctoPrintTemperature
 }
 
 /// <summary>
+/// Capability marker interface for backend clients that support file deletion.
+/// Backends implementing this interface can remove files from the printer's storage.
+/// </summary>
+public interface ISupportsFileDelete
+{
+    /// <summary>
+    /// Deletes a file from the printer's storage.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="filePath">The path to the file to delete (e.g., "/local/model.gcode")</param>
+    /// <param name="credential">Optional credential for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if the file was deleted successfully, false if it failed (e.g., file not found, permission denied)</returns>
+    Task<bool> DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Standardized printer file information across all backend implementations.
 /// Provides consistent file metadata regardless of the backend printer type.
 /// </summary>

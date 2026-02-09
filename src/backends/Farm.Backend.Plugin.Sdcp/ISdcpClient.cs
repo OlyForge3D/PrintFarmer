@@ -10,8 +10,19 @@ namespace Farm.Backend.Plugin.Sdcp;
 /// Supports printer status monitoring, job control, camera operations, and file management for Elegoo and other SDCP printers.
 /// Implements IDisposable to properly cleanup WebSocket connections.
 /// </summary>
-public interface ISdcpClient : IBackendClient, ISupportsFileList, IDisposable
+public interface ISdcpClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations, ISupportsHistory, ISupportsFileDelete, ISupportsPrinterInformation, IDisposable
 {
+    /// <summary>
+    /// Tests connectivity to an SDCP printer by opening a WebSocket and requesting a status payload.
+    /// This is intentionally lightweight and avoids camera probing.
+    /// </summary>
+    /// <param name="baseUrl">The base URL for the printer (e.g., http://printer-ip or ws://printer-ip)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the SDCP endpoint responded</returns>
+    Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default);
+
+    Task<bool> TestConnectionAsync(Uri baseUrl, CancellationToken ct = default);
+
     /// <summary>
     /// Gets the basic status information from an SDCP printer.
     /// </summary>
@@ -47,42 +58,46 @@ public interface ISdcpClient : IBackendClient, ISupportsFileList, IDisposable
     /// Starts printing a G-code file by name on the SDCP printer.
     /// </summary>
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer</param>
-    /// <param name="filename">The name of the G-code file to print</param>
+    /// <param name="fileName">The name of the G-code file to print</param>
+    /// <param name="credential">Optional credential (unused by SDCP)</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the print start command was successfully sent</returns>
-    Task<bool> StartPrintAsync(string baseUrl, string filename, CancellationToken ct = default);
+    new Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> StartPrintAsync(Uri baseUrl, string filename, CancellationToken ct = default);
+    Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Pauses the current print job on the SDCP printer.
     /// </summary>
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer</param>
+    /// <param name="credential">Optional credential (unused by SDCP)</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the pause command was successfully sent</returns>
-    Task<bool> PausePrintAsync(string baseUrl, CancellationToken ct = default);
+    new Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> PausePrintAsync(Uri baseUrl, CancellationToken ct = default);
+    Task<bool> PauseAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Cancels the current print job on the SDCP printer.
     /// </summary>
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer</param>
+    /// <param name="credential">Optional credential (unused by SDCP)</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the cancel command was successfully sent</returns>
-    Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default);
+    new Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default);
+    Task<bool> CancelAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Resumes a paused print job on the SDCP printer.
     /// </summary>
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer</param>
+    /// <param name="credential">Optional credential (unused by SDCP)</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the resume command was successfully sent</returns>
-    Task<bool> ResumePrintAsync(string baseUrl, CancellationToken ct = default);
+    new Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> ResumePrintAsync(Uri baseUrl, CancellationToken ct = default);
+    Task<bool> ResumeAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the camera stream URL from the SDCP printer.
@@ -140,11 +155,12 @@ public interface ISdcpClient : IBackendClient, ISupportsFileList, IDisposable
     /// <param name="baseUrl">The WebSocket URL of the SDCP printer</param>
     /// <param name="fileName">The name to save the file as</param>
     /// <param name="fileContent">Stream containing the G-code file content</param>
+    /// <param name="credential">Optional credential (unused by SDCP)</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task indicating whether the upload was successful</returns>
-    Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
+    new Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default);
 
-    Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default);
+    Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default);
 
     /// <summary>
     /// Creates a PrinterDto from a database Printer entity and its composite status.

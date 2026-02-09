@@ -17,6 +17,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
+    ISupportsFileDelete,
     ISupportsStartPrint,
     ISupportsControlOperations,
     ISupportsCamera,
@@ -2659,6 +2660,9 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
     async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
         => await DeleteHistoryJobAsync(baseUrl, jobId, ct);
+
+    async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
+        => await DeleteFileAsync(baseUrl, filePath, ct);
 
     /// <summary>
     /// ISupportsPrinterInformation implementation - get detailed printer information.

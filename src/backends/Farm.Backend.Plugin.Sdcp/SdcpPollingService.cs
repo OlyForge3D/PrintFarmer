@@ -9,6 +9,7 @@ using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Sdcp;
 
@@ -187,6 +188,9 @@ public sealed class SdcpPollingService(
                 // Poll the printer
                 try
                 {
+                    bool wasOnline = state.LastKnownIsOnline;
+                    int previousFailures = state.ConsecutiveFailures;
+
                     // Get the SDCP client from a scoped context
                     // (scoped services cannot be injected directly into singletons)
                     using IServiceScope scope = _scopeFactory.CreateScope();
@@ -197,6 +201,25 @@ public sealed class SdcpPollingService(
                     PrinterCompositeStatus status = await sdcpClient.GetCompositeStatusAsync(
                         printer.BackendUrl,
                         ct);
+
+                    if (!wasOnline && status.IsOnline)
+                    {
+                        _logger.LogWithContext(
+                            LogLevel.Information,
+                            "SDCP",
+                            "SDCP printer recovered to Online",
+                            correlationId: printerId.ToString("N"),
+                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures });
+                    }
+                    else if (previousFailures > 0)
+                    {
+                        _logger.LogWithContext(
+                            LogLevel.Debug,
+                            "SDCP",
+                            "SDCP poll succeeded after failures",
+                            correlationId: printerId.ToString("N"),
+                            metadata: new { printerId, backendUrl = printer.BackendUrl, previousFailures, isOnline = status.IsOnline, state = status.State });
+                    }
 
                     _logger.LogDebug($"SDCP {printerId}: Got status - Online={status.IsOnline}, State={status.State}, Progress={status.Progress}, JobName={status.JobName}");
 
@@ -261,11 +284,27 @@ public sealed class SdcpPollingService(
                     state.ConsecutiveFailures++;
                     _logger.LogDebug(ex, $"Failed to poll SDCP printer {printerId} (attempt {state.ConsecutiveFailures})");
 
+                    _logger.LogWithContext(
+                        LogLevel.Debug,
+                        "SDCP",
+                        "SDCP poll failed",
+                        correlationId: printerId.ToString("N"),
+                        metadata: new { printerId, backendUrl = printer?.BackendUrl, attempt = state.ConsecutiveFailures },
+                        exception: ex);
+
                     // After 3 consecutive failures, mark as offline
                     if (state.ConsecutiveFailures >= 3 && state.LastKnownIsOnline)
                     {
                         _logger.LogWarning($"SDCP printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
                         state.LastKnownIsOnline = false;
+
+                        _logger.LogWithContext(
+                            LogLevel.Warning,
+                            "SDCP",
+                            "SDCP printer marked Offline after consecutive failures",
+                            correlationId: printerId.ToString("N"),
+                            metadata: new { printerId, backendUrl = printer?.BackendUrl, failures = state.ConsecutiveFailures });
+
                         var offlineUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,

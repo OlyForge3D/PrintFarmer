@@ -101,6 +101,7 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
         {
             typeof(ISupportsFileList),
             typeof(ISupportsFileUpload),
+            typeof(ISupportsFileDelete),
             typeof(ISupportsStartPrint),
             typeof(ISupportsCamera),
             typeof(ISupportsPrinterInformation),

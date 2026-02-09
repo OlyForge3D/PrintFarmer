@@ -36,7 +36,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsMovement), BackendCapabilities.Movement },
         { typeof(ISupportsTemperatureControl), BackendCapabilities.TemperatureControl },
         { typeof(ISupportsPrinterInformation), BackendCapabilities.PrinterInformation },
-        { typeof(ISupportsHistory), BackendCapabilities.None } // History is special-cased in TryGetHistoryClient
+        { typeof(ISupportsHistory), BackendCapabilities.History },
+        { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -249,23 +250,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public bool TryGetHistoryClient(PrinterBackend backend, out IBackendClient? client)
     {
-        // History is supported by specific backends - only Moonraker and OctoPrint
-        client = null;
-
-        if (backend == PrinterBackend.Moonraker || backend == PrinterBackend.OctoPrint)
-        {
-            try
-            {
-                client = _clientFactory.GetClient(backend);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        return false;
+        return TryGetClientWithCapability(backend, BackendCapabilities.History, out client);
     }
 
     public bool TryGetPrintJobControlClient(PrinterBackend backend, out IBackendClient? client)
@@ -278,6 +263,23 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         // File management includes upload and delete operations
         return TryGetClientWithCapability(backend, BackendCapabilities.FileUpload, out client);
+    }
+
+    public bool TryGetFileDeleteClient(PrinterBackend backend, out IBackendClient? client)
+    {
+        return TryGetClientWithCapability(backend, BackendCapabilities.FileDelete, out client);
+    }
+
+    public bool TryGetFileDeleteClientTyped(PrinterBackend backend, out ISupportsFileDelete? client)
+    {
+        client = null;
+        if (TryGetFileDeleteClient(backend, out IBackendClient? baseClient) && baseClient is ISupportsFileDelete deleteClient)
+        {
+            client = deleteClient;
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryGetCameraClientTyped(PrinterBackend backend, out ISupportsCamera? client)
@@ -458,6 +460,12 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                         break;
                     case BackendCapabilities.PrinterInformation:
                         implementsRequiredInterface = client is ISupportsPrinterInformation;
+                        break;
+                    case BackendCapabilities.History:
+                        implementsRequiredInterface = client is ISupportsHistory;
+                        break;
+                    case BackendCapabilities.FileDelete:
+                        implementsRequiredInterface = client is ISupportsFileDelete;
                         break;
                 }
 
