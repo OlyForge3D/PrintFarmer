@@ -53,6 +53,7 @@ public class PrinterBackendCapabilitiesService(
     {
         var backend = (PrinterBackend)printer.Backend;
         BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
+        bool supportsHistory = _capabilityFactory.TryGetHistoryClientTyped(backend, out _);
 
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
@@ -68,6 +69,6 @@ public class PrinterBackendCapabilitiesService(
             SupportsMovement: (capabilities & BackendCapabilities.Movement) == BackendCapabilities.Movement,
             SupportsTemperatureControl: (capabilities & BackendCapabilities.TemperatureControl) == BackendCapabilities.TemperatureControl,
             SupportsPrinterInformation: (capabilities & BackendCapabilities.PrinterInformation) == BackendCapabilities.PrinterInformation,
-            SupportsHistory: false); // History is handled specially, set to false for now
+            SupportsHistory: supportsHistory);
     }
 }

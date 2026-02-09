@@ -1551,6 +1551,18 @@ export interface DiscoveryCompletedDto {
   autoDetectedNetworks?: boolean;
 }
 
+// Dispatch upload progress (SignalR)
+export interface DispatchUploadProgressDto {
+  jobId: string;
+  printerId: string;
+  fileName: string;
+  bytesSent: number;
+  totalBytes: number;
+  percentage: number;
+  isCompleted: boolean;
+  isFailed?: boolean;
+}
+
 // Printer control types
 export interface MoveRequest {
   x?: number;
@@ -1753,6 +1765,7 @@ export interface QueuedPrintJobDto {
   createdAtUtc: string;
   updatedAtUtc: string;
   queuedAtUtc: string;
+  wasSeededFromHistory?: boolean;
   notes?: string;
   tags?: string[];
   projectId?: string;

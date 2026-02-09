@@ -18,15 +18,15 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-pf-accent-bg hover:bg-pf-accent-hover text-white border border-pf-accent-bg hover:border-pf-accent-hover shadow-md font-semibold',
-  secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light hover:border-pf-border',
-  danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
-  subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
-  ghost: '[background:none] hover:[background:rgba(255,255,255,0.10)] text-inherit border-transparent shadow-none',
-  success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
+  primary: 'bg-pf-accent-bg enabled:hover:bg-pf-accent-hover text-white border border-pf-accent-bg enabled:hover:border-pf-accent-hover shadow-md font-semibold',
+  secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
+  danger: 'bg-pf-error enabled:hover:bg-pf-error-hover text-white border border-pf-error-border shadow-md font-semibold',
+  subtle: 'bg-transparent enabled:hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
+  ghost: '[background:none] enabled:hover:[background:rgba(255,255,255,0.10)] text-inherit border-transparent shadow-none',
+  success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
-  toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent',
-  link: 'bg-transparent text-pf-primary hover:underline border-transparent px-0 py-0 shadow-none',
+  toggle: 'bg-transparent text-pf-text-secondary enabled:hover:text-pf-text-primary border-transparent',
+  link: 'bg-transparent text-pf-primary enabled:hover:underline border-transparent px-0 py-0 shadow-none',
   unstyled: '' // No default styles - fully controlled by className prop
 };
 
@@ -56,7 +56,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   const tabActiveClasses = variant === 'tab' && active
     ? 'border-pf-primary text-pf-text-primary'
     : variant === 'tab'
-    ? 'text-pf-text-muted hover:text-pf-text-primary'
+    ? 'text-pf-text-muted enabled:hover:text-pf-text-primary'
     : '';
 
   // Link variant should not apply size padding classes
@@ -69,8 +69,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   return (
     <button
       ref={ref}
+      data-pf-button
       className={clsx(
-        applyBaseStyles && 'rounded-xs font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+        applyBaseStyles &&
+          'rounded-xs font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
         applyShadow && 'shadow-xs focus-visible:ring-offset-2',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],

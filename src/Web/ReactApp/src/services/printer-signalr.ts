@@ -10,6 +10,7 @@ import {
   DiscoveryProgressDto,
   DiscoveryPrinterFoundDto,
   DiscoveryCompletedDto,
+  DispatchUploadProgressDto,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
@@ -21,6 +22,7 @@ type DiscoveryProgressCallback = (progress: DiscoveryProgressDto) => void;
 type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
 type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
 type PrinterImportProgressCallback = (progress: unknown) => void;
+type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
@@ -232,6 +234,20 @@ export class PrinterSignalRService {
       });
     });
 
+    // Dispatch upload progress event
+    this.connection.on(
+      "dispatchuploadprogress",
+      (progress: DispatchUploadProgressDto) => {
+        this.dispatchUploadProgressCallbacks.forEach((cb) => {
+          try {
+            cb(progress);
+          } catch (e) {
+            console.error("Dispatch upload progress cb error:", e);
+          }
+        });
+      }
+    );
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -271,6 +287,7 @@ export class PrinterSignalRService {
   private discoveryPrinterFoundCallbacks: DiscoveryPrinterFoundCallback[] = [];
   private discoveryCompletedCallbacks: DiscoveryCompletedCallback[] = [];
   private printerImportProgressCallbacks: PrinterImportProgressCallback[] = [];
+  private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -502,6 +519,14 @@ export class PrinterSignalRService {
     };
   }
 
+  onDispatchUploadProgress(callback: DispatchUploadProgressCallback): () => void {
+    this.dispatchUploadProgressCallbacks.push(callback);
+    return () => {
+      const idx = this.dispatchUploadProgressCallbacks.indexOf(callback);
+      if (idx > -1) this.dispatchUploadProgressCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -519,6 +544,7 @@ export class PrinterSignalRService {
     this.discoveryPrinterFoundCallbacks = [];
     this.discoveryCompletedCallbacks = [];
     this.printerImportProgressCallbacks = [];
+    this.dispatchUploadProgressCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

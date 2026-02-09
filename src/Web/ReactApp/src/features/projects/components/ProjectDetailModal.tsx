@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button } from '@/common/components/ui';
+import { Button, Select, Textarea } from '@/common/components/ui';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
   CheckIcon, 
@@ -304,52 +304,52 @@ const EditProjectForm: React.FC<EditProjectFormProps> = ({ project, onChange }) 
 
     <div>
       <label className="block text-sm font-medium text-pf-text-primary mb-1">Description</label>
-      <textarea
+      <Textarea
         value={project.description}
         onChange={(e) => onChange({ ...project, description: e.target.value })}
         rows={2}
-        className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary resize-none"
+        className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
       />
     </div>
 
     <div className="grid grid-cols-2 gap-4">
       <div>
         <label className="block text-sm font-medium text-pf-text-primary mb-1">Status</label>
-        <select
+        <Select
           value={project.status}
           onChange={(e) => onChange({ ...project, status: e.target.value as PrintProjectStatus })}
-          className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary"
+          className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
         >
           <option value="Open">Open</option>
           <option value="InProgress">In Progress</option>
           <option value="OnHold">On Hold</option>
           <option value="Completed">Completed</option>
           <option value="Cancelled">Cancelled</option>
-        </select>
+        </Select>
       </div>
 
       <div>
         <label className="block text-sm font-medium text-pf-text-primary mb-1">Priority</label>
-        <select
+        <Select
           value={project.priority}
           onChange={(e) => onChange({ ...project, priority: Number(e.target.value) })}
-          className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary"
+          className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
         >
           <option value={-1}>Low</option>
           <option value={0}>Normal</option>
           <option value={1}>High</option>
           <option value={2}>Urgent</option>
-        </select>
+        </Select>
       </div>
     </div>
 
     <div>
       <label className="block text-sm font-medium text-pf-text-primary mb-1">Notes</label>
-      <textarea
+      <Textarea
         value={project.notes}
         onChange={(e) => onChange({ ...project, notes: e.target.value })}
         rows={3}
-        className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary resize-none"
+        className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
       />
     </div>
   </div>

@@ -117,4 +117,12 @@ public interface IQueueRepository
     /// <param name="gcodeFileId">The gcode file ID to check</param>
     /// <param name="ct">Cancellation token for async operation</param>
     Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct);
+
+    /// <summary>
+    /// Clears (sets to null) the GcodeFileId for any print jobs that reference the specified G-code file.
+    /// This is used to allow library file deletion without losing job history.
+    /// </summary>
+    /// <param name="gcodeFileId">The G-code file ID whose references should be cleared</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task ClearGcodeFileReferencesAsync(Guid gcodeFileId, CancellationToken ct);
 }

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { PanelRightOpen } from 'lucide-react';
 import { apiClient } from '@/services/api';
-import type { Printer, TempTargets, MoveRequest } from '@/types/api';
+import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
+import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { Button, TemperatureInput, MovementInput, Select, ControlPadButton } from '@/common/components/ui';
 import { 
   NozzleIcon, 
@@ -18,12 +19,30 @@ import {
   ExternalLinkIcon,
   CameraIcon,
   SnowflakeIcon,
+  XCircleIcon,
+  FileIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
+import {
+  canCancel,
+  canCooldown,
+  canDisableMotors,
+  canEmergencyStop,
+  canMove,
+  canOpenFiles,
+  canOpenHistory,
+  canPauseOrResume,
+  canSetStep,
+  canSetTemperatures,
+  canUseManualMove,
+  getPrinterSupport,
+} from '@/features/printers/utils/printerSupport';
+import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 
 interface DetailedPrinterCardProps {
   printer: Printer;
+  backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
   onDismiss?: () => void;
 }
@@ -49,7 +68,7 @@ function toCamelCase(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss }: DetailedPrinterCardProps) {
+export function DetailedPrinterCard({ printer: initialPrinter, backendCapabilities, onEdit, onDismiss }: DetailedPrinterCardProps) {
   // Fetch from shared usePrinters() cache (same as table view/sidebar) to ensure consistency
   const { data: allPrinters = [] } = usePrinters();
   const apiPrinter = useMemo(
@@ -61,22 +80,36 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | string>('');
   const [bedTemp, setBedTemp] = useState<number | string>('');
   const [moveX, setMoveX] = useState<number | string>('');
   const [moveY, setMoveY] = useState<number | string>('');
   const [moveZ, setMoveZ] = useState<number | string>('');
   const [step, setStep] = useState(1);
-  const [expandedImageVisible, setExpandedImageVisible] = useState(false);
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
 
   // Determine colors based on state
   const state = printer.state ?? 'Unknown';
   const isOnline = printer.isOnline ?? false;
+  const isEnabled = printer.isEnabled ?? true;
   const isPrinting = isOnline && (state === 'Printing' || state === 'Busy');
   const isPaused = state === 'Paused';
   const isShutdown = state === 'Shutdown' || state === 'Halted';
+  const support = getPrinterSupport(backendCapabilities);
+
+  const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
+  const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, support });
+  const canSetStepNow = canSetStep({ isOnline, support });
+  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, support });
+  const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
+  const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
 
   const homedAxesRaw = printer.homedAxes;
   const isHomedStateKnown = typeof homedAxesRaw === 'string';
@@ -86,29 +119,6 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   const isZHomed = isHomedStateKnown && homedAxes.includes('z');
   const isXYHomed = isXHomed && isYHomed;
   const isAllHomed = isXYHomed && isZHomed;
-
-  const getHomeButtonStyle = (homingStateKnown: boolean, isHomed: boolean): { className?: string; style?: React.CSSProperties } => {
-    if (!homingStateKnown) {
-      return {};
-    }
-
-    if (isHomed) {
-      return {
-        className: '!text-white',
-        style: {
-          backgroundColor: '#2096f3',
-          backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
-        },
-      };
-    }
-    return {
-      className: '!text-white',
-      style: {
-        backgroundColor: '#fb8c00',
-        backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
-      },
-    };
-  };
 
   const statusDotClasses = (() => {
     if (!isOnline) return 'bg-slate-400';
@@ -139,6 +149,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
         case 'resume':
           result = await apiClient.resumePrint(printer.id);
           break;
+        case 'cancel':
+          result = await apiClient.cancelPrint(printer.id);
+          break;
         case 'stop':
           result = await apiClient.emergencyStop(printer.id);
           break;
@@ -152,6 +165,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
           console.warn(`Unknown action: ${action}`);
           return;
       }
+
       if (!result.success) {
         console.error(`Failed to ${action}:`, result.error);
       }
@@ -271,7 +285,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   };
 
   return (
-    <div className={`rounded-xl p-3 shadow-lg backdrop-blur-xl bg-white/5 border border-white/10 w-full min-w-92`}>
+    <div className="relative rounded-xl p-3 shadow-lg bg-white/5 border border-white/10 w-full min-w-92">
       {/* Header */}
       <div className="mb-4">
         {/* Top row: Name + Status Pill (match collapsed card) */}
@@ -317,23 +331,39 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               variant="ghost"
               size="sm"
               onClick={() => setShowCamera(!showCamera)}
-              disabled={!hasCameraUrls}
-              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+              disabled={!hasCameraUrls || !isEnabled}
+              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-              title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
+
+            {support.supportsHistory && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleViewHistory}
+                disabled={!canOpenHistoryNow}
+                className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+                title="View print history"
+                aria-label="View print history"
+                iconCenter={<HistoryIcon className="h-4 w-4" />}
+              >
+              </Button>
+            )}
 
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={handleViewHistory}
-              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
-              title="View print history"
-              aria-label="View print history"
-              iconCenter={<HistoryIcon className="h-4 w-4" />}
+              onClick={() => setShowFiles(true)}
+              disabled={!canOpenFilesNow}
+              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              title="View printer files"
+              aria-label="View printer files"
+              iconCenter={<FileIcon className="h-4 w-4" />}
             >
             </Button>
           </div>
@@ -344,7 +374,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               variant="ghost"
               size="sm"
               onClick={() => onEdit?.(printer)}
-              className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               title="Edit details"
               aria-label="Edit details"
               iconCenter={<EditIcon className="h-4 w-4" />}
@@ -356,7 +386,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 variant="ghost"
                 size="sm"
                 onClick={onDismiss}
-                className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+                className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
                 title="Close details sidebar"
                 aria-label="Close details sidebar"
                 iconCenter={<PanelRightOpen className="h-4 w-4" />}
@@ -368,13 +398,15 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
 
         {showCamera && (
           <div className="mt-3 w-52 aspect-video flex items-center justify-center bg-pf-bg-2/30 border border-pf-border rounded-md overflow-hidden">
-            {cameraStreamUrl && expandedImageVisible ? (
+            {cameraStreamUrl ? (
               <img
                 src={cameraStreamUrl}
-                alt="webcam snapshot"
+                alt="webcam stream"
                 className="w-full h-full object-cover"
-                onError={() => setExpandedImageVisible(false)}
-                onLoad={() => setExpandedImageVisible(true)}
+                onError={(e) => {
+                  // Avoid broken-image icon; fall back to "No camera" message.
+                  (e.currentTarget as HTMLImageElement).src = '';
+                }}
               />
             ) : (
               <div className="text-center text-pf-text-secondary p-4">
@@ -438,6 +470,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
+            disabled={!canSetTemperaturesNow}
             className="!w-full"
           />
           
@@ -445,6 +478,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
+            disabled={!canSetTemperaturesNow}
             className="!w-full"
           />
           
@@ -453,7 +487,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               type="button"
               variant="secondary"
               size="sm"
-              disabled={isPrinting}
+              disabled={!canCooldownNow}
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               aria-label="Cooldown"
@@ -463,6 +497,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
         </Button>
             <Select
               value=""
+              disabled={!canSetTemperaturesNow}
               onChange={(e) => {
                 const value = e.target.value;
                 if (value) {
@@ -497,7 +532,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
                 {/* Top row */}
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleHome()}
                   title="Home all axes"
                   padSize="small"
@@ -507,14 +542,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('Y', step)}
                   padSize="small"
                 >
                   ▲
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={!isOnline || isPrinting}
+                  disabled={!canDisableMotorsNow}
                   onClick={() => handleControlAction('disable-motors')}
                   title="Disable Motors (M84)"
                   padSize="small"
@@ -524,14 +559,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 
                 {/* Middle row */}
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('X', -step)}
                   padSize="small"
                 >
                   ◀
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleHome('xy')}
                   title="Home X/Y"
                   padSize="small"
@@ -541,7 +576,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('X', step)}
                   padSize="small"
                 >
@@ -551,7 +586,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 {/* Bottom row */}
                 <div></div>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('Y', -step)}
                   padSize="small"
                 >
@@ -563,14 +598,14 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               {/* Z Pad */}
               <div className="flex flex-col gap-1 w-fit">
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('Z', step)}
                   padSize="small"
                 >
                   Z+
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleHome('z')}
                   title="Home Z"
                   padSize="small"
@@ -580,7 +615,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   <HomeIcon className="h-4 w-4" />
                 </ControlPadButton>
                 <ControlPadButton
-                  disabled={isPrinting}
+                  disabled={!canMoveNow}
                   onClick={() => handleMove('Z', -step)}
                   padSize="small"
                 >
@@ -598,25 +633,24 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             <div className="grid grid-cols-3 gap-1 w-fit">
               {/* Control buttons row - 3 equal-sized buttons */}
               <ControlPadButton
-                disabled={!isPrinting}
-                onClick={() => handleControlAction('pause')}
-                title="Pause"
+                disabled={!canPauseOrResumeNow}
+                onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
+                title={isPaused ? 'Resume' : 'Pause'}
                 padSize="small"
               >
-                <PauseIcon className="h-4 w-4" />
+                {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
               </ControlPadButton>
               <ControlPadButton
-                variant="success"
-                disabled={!isPaused}
-                onClick={() => handleControlAction('resume')}
-                title="Resume"
+                disabled={!canCancelNow}
+                onClick={() => handleControlAction('cancel')}
+                title="Cancel"
                 padSize="small"
               >
-                <PlayIcon className="h-4 w-4" />
+                <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
               </ControlPadButton>
               <ControlPadButton
                 variant={isShutdown ? 'secondary' : 'danger'}
-                disabled={!isOnline}
+                disabled={!canEmergencyStopNow}
                 onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                 title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                 padSize="small"
@@ -637,6 +671,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                   <ControlPadButton
                     key={stepValue}
                     variant={step === stepValue ? 'primary' : 'secondary'}
+                    disabled={!canSetStepNow}
                     onClick={() => handleStepChange(stepValue)}
                     padSize="small"
                   >
@@ -667,21 +702,21 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
           {/* Row 2: Inputs */}
           <MovementInput
             axis="X"
-            disabled={isPrinting}
+            disabled={!canManualMoveNow}
             value={moveX}
             onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
             className="!w-full"
           />
           <MovementInput
             axis="Y"
-            disabled={isPrinting}
+            disabled={!canManualMoveNow}
             value={moveY}
             onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
             className="!w-full"
           />
           <MovementInput
             axis="Z"
-            disabled={isPrinting}
+            disabled={!canManualMoveNow}
             value={moveZ}
             onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
             className="!w-full"
@@ -690,7 +725,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             type="button"
             variant="primary"
             size="sm"
-            disabled={isPrinting}
+            disabled={!canManualMoveNow}
             onClick={() => {
               const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
               if (win.PrintFarmerDebug?.expandablePrinterCard) {
@@ -708,6 +743,12 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
       <PrinterHistoryModal
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
+        printer={printer}
+      />
+
+      <PrinterFilesModal
+        isOpen={showFiles}
+        onClose={() => setShowFiles(false)}
         printer={printer}
       />
     </div>

@@ -80,6 +80,11 @@ public class QueuedPrintJobDto
     public DateTime QueuedAtUtc { get; set; }
 
     /// <summary>
+    /// True when the job was imported from a printer history API.
+    /// </summary>
+    public bool WasSeededFromHistory { get; set; }
+
+    /// <summary>
     /// Notes/comments about this print job
     /// </summary>
     public string? Notes { get; set; }

@@ -646,6 +646,13 @@ export class ApiClient {
     return response.data;
   }
 
+  async cancelPrint(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/cancel`
+    );
+    return response.data;
+  }
+
   async emergencyStop(printerId: string): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/emergency-stop`
@@ -1671,8 +1678,11 @@ export class ApiClient {
    * @returns The updated job with Starting/Printing status
    */
   async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    // Dispatch can take longer than the global Axios timeout due to G-code upload time.
     const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
-      `/job-queue/${jobId}/dispatch`
+      `/job-queue/${jobId}/dispatch`,
+      undefined,
+      { timeout: 0 }
     );
     return response.data;
   }

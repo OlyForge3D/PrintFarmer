@@ -7,6 +7,7 @@ import {
   PauseIcon, 
   PlayIcon, 
   EmergencyStopIcon, 
+  XCircleIcon,
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
@@ -17,16 +18,27 @@ import { Button } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
-import { PrinterBackend, type Printer } from '@/types/api';
+import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
+import { apiClient } from '@/services/api';
+import {
+  canCancel,
+  canEmergencyStop,
+  canOpenFiles,
+  canOpenHistory,
+  canPauseOrResume,
+  getPrinterSupport,
+} from '@/features/printers/utils/printerSupport';
 
 interface CollapsedPrinterCardProps {
   printer: Printer;
+  backendCapabilities?: PrinterBackendCapabilitiesDto;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
 }
 
 export function CollapsedPrinterCard({
   printer: printerProp,
+  backendCapabilities,
   onExpand,
   onEdit
 }: CollapsedPrinterCardProps) {
@@ -40,10 +52,21 @@ export function CollapsedPrinterCard({
 
   // Use printer data directly (already contains merged realtime status from API)
   const isOnline = printer.isOnline ?? false;
+  const isEnabled = printer.isEnabled ?? true;
   const state = printer.state ?? 'Unknown';
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
+
+  const support = getPrinterSupport(backendCapabilities, {
+    supportsHistory: printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint,
+  });
+
+  const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
+  const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
+  const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
   // Check if printer has camera URLs - just verify if URLs have values from database
   const cameraSnapshotUrl = printer.cameraSnapshotUrl;
   const cameraStreamUrl = printer.cameraStreamUrl;
@@ -61,12 +84,32 @@ export function CollapsedPrinterCard({
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
+  const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart') => {
     try {
-      // Note: These endpoints would need to be added to apiClient
-      // For now, using direct POST
       if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { printerActions?: boolean } }).PrintFarmerDebug?.printerActions) {
         console.log(`Performing ${action} on printer ${printer.id}`);
+      }
+
+      switch (action) {
+        case 'pause':
+          await apiClient.pausePrint(printer.id);
+          break;
+        case 'resume':
+          await apiClient.resumePrint(printer.id);
+          break;
+        case 'cancel':
+          await apiClient.cancelPrint(printer.id);
+          break;
+        case 'stop':
+          await apiClient.emergencyStop(printer.id);
+          break;
+        case 'firmware-restart':
+          await apiClient.firmwareRestart(printer.id);
+          break;
+        default: {
+          const exhaustiveCheck: never = action;
+          return exhaustiveCheck;
+        }
       }
     } catch (error) {
       console.error(`Error performing ${action}:`, error);
@@ -78,7 +121,7 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="rounded-xl p-3 shadow-lg backdrop-blur-xl bg-gradient-to-b from-white/[0.06] to-white/[0.03] border border-white/10 hover:border-white/15 transition-colors w-full overflow-hidden flex flex-col min-h-0">
+    <div className="relative rounded-xl p-3 shadow-lg bg-white/5 border border-white/10 w-full">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">
@@ -116,7 +159,7 @@ export function CollapsedPrinterCard({
           variant="ghost"
           size="sm"
           onClick={onExpand}
-          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+          className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
           title="Open details sidebar"
           aria-label="Open details sidebar"
           iconCenter={<PanelRightOpen className="h-4 w-4" />}
@@ -141,22 +184,23 @@ export function CollapsedPrinterCard({
           variant="ghost"
           size="sm"
           onClick={() => setShowCamera(!showCamera)}
-          disabled={!hasCameraUrls}
-          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+          disabled={!hasCameraUrls || !isEnabled}
+          className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-          title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+          title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera available' : 'No camera configured'}
           iconCenter={<CameraIcon className="h-4 w-4" />}
         >
         </Button>
         
-        {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
-        {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
+        {/* History button - only show for backends that support it */}
+        {support.supportsHistory && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={handleViewHistory}
-            className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+            disabled={!canOpenHistoryNow}
+            className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             title="View print history"
             aria-label="View print history"
             iconCenter={<HistoryIcon className="h-4 w-4" />}
@@ -170,7 +214,8 @@ export function CollapsedPrinterCard({
           variant="ghost"
           size="sm"
           onClick={() => setShowFiles(true)}
-          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+          disabled={!canOpenFilesNow}
+          className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
           title="View printer files"
           aria-label="View printer files"
           iconCenter={<FileIcon className="h-4 w-4" />}
@@ -183,7 +228,7 @@ export function CollapsedPrinterCard({
           variant="ghost"
           size="sm"
           onClick={() => onEdit?.(printer)}
-          className="h-8 w-8 p-0 text-pf-text-secondary hover:text-pf-text-primary"
+          className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
           title="Edit details"
           aria-label="Edit details"
           iconCenter={<EditIcon className="h-4 w-4" />}
@@ -194,30 +239,29 @@ export function CollapsedPrinterCard({
       {/* Control buttons */}
       <div className="flex items-center justify-between gap-2 mb-2 w-full">
         <ControlPadButton
-          disabled={!isPrinting}
-          onClick={() => handleControlAction('pause')}
-          title="Pause"
+          disabled={!canPauseOrResumeNow}
+          onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
+          title={isPaused ? 'Resume' : 'Pause'}
           padSize="medium"
         >
-          <PauseIcon className="h-4 w-4" />
+          {isPaused ? <PlayIcon className="h-6 w-6" /> : <PauseIcon className="h-6 w-6" />}
         </ControlPadButton>
         <ControlPadButton
-          variant="success"
-          disabled={!isPaused}
-          onClick={() => handleControlAction('resume')}
-          title="Resume"
+          disabled={!canCancelNow}
+          onClick={() => handleControlAction('cancel')}
+          title="Cancel"
           padSize="medium"
         >
-          <PlayIcon className="h-4 w-4" />
+          <XCircleIcon className="h-6 w-6" ariaLabel="Cancel" />
         </ControlPadButton>
         <ControlPadButton
           variant={isShutdown ? 'secondary' : 'danger'}
-          disabled={!isOnline}
+          disabled={!canEmergencyStopNow}
           onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           padSize="medium"
         >
-          {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
+          {isShutdown ? <RefreshIcon className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
         </ControlPadButton>
       </div>
 

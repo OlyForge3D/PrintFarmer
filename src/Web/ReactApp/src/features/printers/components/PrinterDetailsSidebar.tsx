@@ -5,13 +5,27 @@ import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
-import type { TempTargets, MoveRequest } from '@/types/api';
+import type { MoveRequest, Printer, PrinterBackendCapabilitiesDto, TempTargets } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
+import {
+  canCancel,
+  canCooldown,
+  canDisableMotors,
+  canEmergencyStop,
+  canMove,
+  canOpenFiles,
+  canOpenHistory,
+  canPauseOrResume,
+  canSetStep,
+  canSetTemperatures,
+  canUseManualMove,
+  getPrinterSupport,
+} from '@/features/printers/utils/printerSupport';
+import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/common/components/ui';
-import type { Printer } from '@/types/api';
 import {
   NozzleIcon,
   BedIcon,
@@ -31,7 +45,7 @@ import {
   CloseIcon,
   MinusIcon,
   SnowflakeIcon,
-  // StopIcon removed - unused in this file
+  XCircleIcon,
 } from '@/common/components/icons/MdiIcons';
 
 // Animation styles
@@ -83,12 +97,13 @@ interface PrinterDetailsSidebarProps {
   printerId: string | null;
   /** Optional printer object - if provided, skips API fetch (useful when parent already has data) */
   printer?: Printer;
+  backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
   /** Layout mode: traditional right-side panel, or full-width content takeover */
   layout?: 'panel' | 'content';
 }
 
-export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
+export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
@@ -207,11 +222,26 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
 
   // State helpers - safe to access displayPrinter now (guaranteed by printer != null)
   const isOnline = displayPrinter?.isOnline ?? false;
+  const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
   const state = formatPrinterState(rawState);
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
   const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+
+  const support = getPrinterSupport(backendCapabilities);
+
+  const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
+  const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, support });
+  const canSetStepNow = canSetStep({ isOnline, support });
+  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, support });
+  const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
+  const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
@@ -265,37 +295,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
   const isZHomed = isHomedStateKnown && homedAxes.includes('z');
   const isXYHomed = isXHomed && isYHomed;
 
-  if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
-    console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
-  }
-
   // Printer is fully homed if all axes are homed
   const isAllHomed = isXYHomed && isZHomed;
 
-
-  // Get button class based on homed state
-  const getHomeButtonStyle = (homingStateKnown: boolean, isHomed: boolean): { className?: string; style?: React.CSSProperties } => {
-    if (!homingStateKnown) {
-      return {};
-    }
-
-    if (isHomed) {
-      return {
-        className: '!text-white',
-        style: {
-          backgroundColor: '#2096f3',
-          backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
-        },
-      };
-    }
-    return {
-      className: '!text-white',
-      style: {
-        backgroundColor: '#fb8c00',
-        backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
-      },
-    };
-  };
+  if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
+    console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
+  }
 
   const handleHome = async (axes?: 'all' | 'xy' | 'z') => {
     try {
@@ -325,7 +330,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
     }
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart' | 'disable-motors') => {
+  const handleControlAction = async (action: 'pause' | 'resume' | 'cancel' | 'stop' | 'firmware-restart' | 'disable-motors') => {
     try {
       let result;
       switch (action) {
@@ -334,6 +339,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
           break;
         case 'resume':
           result = await apiClient.resumePrint(printer.id);
+          break;
+        case 'cancel':
+          result = await apiClient.cancelPrint(printer.id);
           break;
         case 'stop':
           result = await apiClient.emergencyStop(printer.id);
@@ -600,27 +608,27 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={!isPrinting}
-                onClick={() => handleControlAction('pause')}
-                title="Pause print"
+                disabled={!canPauseOrResumeNow}
+                onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
+                title={isPaused ? 'Resume print' : 'Pause print'}
                 className="w-full h-full !p-0"
-                iconCenter={<PauseIcon className="h-6 w-6" />}
+                iconCenter={isPaused ? <PlayIcon className="h-6 w-6" /> : <PauseIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={!isPaused}
-                onClick={() => handleControlAction('resume')}
-                title="Resume print"
+                disabled={!canCancelNow}
+                onClick={() => handleControlAction('cancel')}
+                title="Cancel print"
                 className="w-full h-full !p-0"
-                iconCenter={<PlayIcon className="h-6 w-6" />}
+                iconCenter={<XCircleIcon className="h-6 w-6" ariaLabel="Cancel" />}
               ></Button>
               <Button
                 type="button"
                 variant={isShutdown ? 'secondary' : 'danger'}
                 size="sm"
-                disabled={!isOnline}
+                disabled={!canEmergencyStopNow}
                 onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                 title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                 className="w-full h-full !p-0"
@@ -637,6 +645,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
+                disabled={!canSetStepNow}
                 onClick={() => setStep(Math.max(1, step - 5))}
                 className="flex-1 p-0 text-xs"
                 iconCenter={<MinusIcon className="h-3 w-3" />}
@@ -646,6 +655,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
+                disabled={!canSetStepNow}
                 onClick={() => setStep(step + 5)}
                 className="flex-1 p-0 text-xs"
               >
@@ -668,7 +678,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isAllHomed).className ?? ''}`}
@@ -679,7 +689,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('Y', step)}
                 className="w-full h-full !p-0"
                 iconCenter={<ArrowUpIcon className="h-6 w-6" />}
@@ -688,7 +698,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={!isOnline || isPrinting}
+                disabled={!canDisableMotorsNow}
                 onClick={() => handleControlAction('disable-motors')}
                 title="Disable Motors (M84)"
                 className="w-full h-full !p-0"
@@ -700,7 +710,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('X', -step)}
                 className="w-full h-full !p-0"
                 iconCenter={<ArrowLeftIcon className="h-6 w-6" />}
@@ -709,7 +719,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isXYHomed).className ?? ''}`}
@@ -720,7 +730,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('X', step)}
                 className="w-full h-full !p-0"
                 iconCenter={<ArrowRightIcon className="h-6 w-6" />}
@@ -732,7 +742,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('Y', -step)}
                 className="w-full h-full !p-0"
                 iconCenter={<ArrowDownIcon className="h-6 w-6" />}
@@ -746,7 +756,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('Z', step)}
                 className="w-full h-full !p-0"
               >
@@ -756,7 +766,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleHome('z')}
                 title="Home Z"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isHomedStateKnown, isZHomed).className ?? ''}`}
@@ -767,7 +777,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canMoveNow}
                 onClick={() => handleMove('Z', -step)}
                 className="w-full h-full !p-0"
               >
@@ -787,6 +797,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               type="button"
               variant="secondary"
               size="sm"
+              disabled={!canOpenFilesNow}
               onClick={() => setShowFiles(true)}
               className="flex items-center justify-center gap-2"
               title="View printer files"
@@ -798,6 +809,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               type="button"
               variant="secondary"
               size="sm"
+              disabled={!canOpenHistoryNow}
               onClick={() => setShowHistory(true)}
               className="flex items-center justify-center gap-2"
               title="View print history"
@@ -826,6 +838,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
             {/* Row 2: Input Fields */}
             <MovementInput
               axis="X"
+              disabled={!canManualMoveNow}
               value={moveX}
               onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
@@ -833,6 +846,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
             />
             <MovementInput
               axis="Y"
+              disabled={!canManualMoveNow}
               value={moveY}
               onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
@@ -840,6 +854,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
             />
             <MovementInput
               axis="Z"
+              disabled={!canManualMoveNow}
               value={moveZ}
               onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
@@ -857,7 +872,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={isPrinting}
+                disabled={!canCooldownNow}
                 onClick={() => handleApplyPreset('cooldown')}
                 title="Cooldown"
                 className="shrink-0 px-2"
@@ -871,6 +886,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
                     handleApplyPreset(value);
                   }
                 }}
+                disabled={!canSetTemperaturesNow}
                 className="flex-1 text-xs"
               >
                 <option value="">Presets</option>
@@ -899,6 +915,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               value={hotendTemp}
               onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={handleHotendTempKeyDown}
+              disabled={!canSetTemperaturesNow}
               className="w-16"
             />
           </div>
@@ -918,6 +935,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, onClose
               value={bedTemp}
               onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
               onKeyDown={handleBedTempKeyDown}
+              disabled={!canSetTemperaturesNow}
               className="w-16"
             />
           </div>

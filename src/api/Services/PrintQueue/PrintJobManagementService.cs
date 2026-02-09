@@ -1,11 +1,15 @@
-﻿using Farm.Api.Services.Interfaces;
+﻿using System.Diagnostics;
+using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.DTOs.PrintQueue;
+using Farm.Web.Api.DTOs.SignalR;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Api.Services.PrintQueue;
 
@@ -18,6 +22,7 @@ public class PrintJobManagementService(
     ILogger<PrintJobManagementService> logger,
     IPrintersService printersService,
     IStoragePathService storagePathService,
+    IHubContext<PrinterHub> hubContext,
     INotificationService? notificationService = null,
     IRetryService? retryService = null) : IPrintJobManagementService
 {
@@ -25,6 +30,7 @@ public class PrintJobManagementService(
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
     private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+    private readonly IHubContext<PrinterHub> _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
     private readonly INotificationService? _notificationService = notificationService;
     private readonly IRetryService? _retryService = retryService;
 
@@ -530,10 +536,71 @@ public class PrintJobManagementService(
                 {
                     // Step 1: Upload the file to the printer
                     await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
+
+                    long totalBytes = 0;
+                    try
+                    {
+                        totalBytes = fileStream.Length;
+                    }
+                    catch
+                    {
+                        // best-effort: Length may not be available
+                    }
+
+                    long lastReportedBytes = 0;
+                    long lastReportAt = Stopwatch.GetTimestamp();
+                    var reportInterval = TimeSpan.FromMilliseconds(500);
+                    const long ReportEveryBytes = 512 * 1024; // 512KB
+
+                    async Task ReportProgressAsync(long bytesSent, bool force)
+                    {
+                        if (totalBytes <= 0)
+                        {
+                            return;
+                        }
+
+                        long now = Stopwatch.GetTimestamp();
+                        TimeSpan sinceLastReport = Stopwatch.GetElapsedTime(lastReportAt, now);
+                        bool hasMeaningfulDelta = bytesSent - lastReportedBytes >= ReportEveryBytes;
+                        bool intervalElapsed = sinceLastReport >= reportInterval;
+
+                        if (!force && !hasMeaningfulDelta && !intervalElapsed)
+                        {
+                            return;
+                        }
+
+                        lastReportedBytes = bytesSent;
+                        lastReportAt = now;
+
+                        var dto = new DispatchUploadProgressDto
+                        {
+                            JobId = jobId,
+                            PrinterId = job.AssignedPrinterId.Value.ToString(),
+                            FileName = printerFileName,
+                            BytesSent = Math.Min(bytesSent, totalBytes),
+                            TotalBytes = totalBytes,
+                            IsCompleted = force && bytesSent >= totalBytes,
+                            IsFailed = false,
+                        };
+
+                        // Broadcast to all clients (queue dashboard listeners)
+                        await _hubContext.Clients.All.SendAsync(
+                            "dispatchuploadprogress",
+                            dto,
+                            cancellationToken);
+                    }
+
+                    // Emit a 0% snapshot so the UI can immediately show progress.
+                    await ReportProgressAsync(0, force: true);
+
+                    using var progressStream = new ProgressReportingStream(
+                        fileStream,
+                        bytesSent => ReportProgressAsync(bytesSent, force: false));
+
                     bool uploadSuccess = await _printersService.UploadGcodeAsync(
                         job.AssignedPrinterId.Value,
                         printerFileName,
-                        fileStream,
+                        progressStream,
                         cancellationToken);
 
                     if (!uploadSuccess)
@@ -541,9 +608,33 @@ public class PrintJobManagementService(
                         job.Status = PrintJobStatus.Assigned;
                         job.FailureReason = "Failed to upload G-code file to printer";
                         _logger.LogWarning("Failed to upload G-code to printer for job {JobId}", jobId);
+
+                        // Best-effort: notify completion state so UI can stop showing upload progress.
+                        if (totalBytes > 0)
+                        {
+                            await _hubContext.Clients.All.SendAsync(
+                                "dispatchuploadprogress",
+                                new DispatchUploadProgressDto
+                                {
+                                    JobId = jobId,
+                                    PrinterId = job.AssignedPrinterId.Value.ToString(),
+                                    FileName = printerFileName,
+                                    BytesSent = lastReportedBytes,
+                                    TotalBytes = totalBytes,
+                                    IsCompleted = true,
+                                    IsFailed = true,
+                                },
+                                cancellationToken);
+                        }
                     }
                     else
                     {
+                        // Emit a forced 100% snapshot.
+                        if (totalBytes > 0)
+                        {
+                            await ReportProgressAsync(totalBytes, force: true);
+                        }
+
                         _logger.LogInformation(
                             "Successfully uploaded {FileName} to printer {PrinterId}",
                             printerFileName, job.AssignedPrinterId);
@@ -630,19 +721,19 @@ public class PrintJobManagementService(
 
                 bool cancelSuccess = await _printersService.CancelPrintAsync(job.AssignedPrinterId.Value, cancellationToken);
 
-                if (cancelSuccess)
-                {
-                    _logger.LogInformation(
-                        "Successfully sent cancel command to printer {PrinterId} for job {JobId}",
-                        job.AssignedPrinterId.Value, jobId);
-                }
-                else
+                if (!cancelSuccess)
                 {
                     _logger.LogWarning(
-                        "Failed to send cancel command to printer {PrinterId} for job {JobId}. " +
-                        "Job will be marked as cancelled in database but printer may still be printing.",
+                        "Failed to send cancel command to printer {PrinterId} for job {JobId}.",
                         job.AssignedPrinterId.Value, jobId);
+
+                    throw new InvalidOperationException(
+                        $"Failed to cancel the active print on printer {job.AssignedPrinterId.Value}. The printer may still be printing.");
                 }
+
+                _logger.LogInformation(
+                    "Successfully sent cancel command to printer {PrinterId} for job {JobId}",
+                    job.AssignedPrinterId.Value, jobId);
             }
 
             job.Status = PrintJobStatus.Cancelled;
@@ -993,6 +1084,16 @@ public class PrintJobManagementService(
             DateTime? endTimeUtc = historyJob.EndTime.HasValue
                 ? DateTimeOffset.FromUnixTimeSeconds((long)historyJob.EndTime.Value).UtcDateTime
                 : null;
+
+            // History seeding is intended for completed history/analytics. Skip non-terminal entries
+            // (e.g., in-progress/queued) to avoid creating duplicate active queue rows.
+            string statusNormalized = historyJob.Status?.ToLowerInvariant() ?? string.Empty;
+            bool isTerminalStatus = statusNormalized is "completed" or "cancelled" or "error";
+            if (!isTerminalStatus)
+            {
+                skipped++;
+                continue;
+            }
 
             // On incremental seed, skip jobs older than or equal to last seed timestamp.
             // This client-side filtering is needed for OctoPrint (which doesn't support server-side filtering).
@@ -1437,7 +1538,8 @@ public class PrintJobManagementService(
             Notes = job.Notes,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
-            QueuedAtUtc = job.QueuedAt
+            QueuedAtUtc = job.QueuedAt,
+            WasSeededFromHistory = job.WasSeededFromHistory
         };
     }
 

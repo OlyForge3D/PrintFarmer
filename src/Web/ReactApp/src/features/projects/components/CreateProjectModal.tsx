@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button } from '@/common/components/ui';
+import { Button, Select, Textarea } from '@/common/components/ui';
 import { 
   PlusIcon, 
   DeleteIcon,
@@ -194,10 +194,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Start from Template
             </label>
-            <select
+            <Select
               value={selectedTemplate}
               onChange={(e) => handleTemplateChange(e.target.value)}
-              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+              className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
             >
               <option value="">-- No template (blank project) --</option>
               {templates.map((template: PrintProjectTemplateListDto) => (
@@ -207,7 +207,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   {template.fileCount > 0 ? ` - ${template.fileCount} files` : ''}
                 </option>
               ))}
-            </select>
+            </Select>
             <p className="mt-1 text-xs text-pf-text-tertiary">
               Templates pre-fill project details and expected file entries
             </p>
@@ -234,12 +234,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
             Description
           </label>
-          <textarea
+          <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Brief description of the project..."
             rows={2}
-            className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent resize-none"
+            className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
           />
         </div>
 
@@ -249,16 +249,16 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Priority
             </label>
-            <select
+            <Select
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+              className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2"
             >
               <option value={0}>Normal</option>
               <option value={1}>High</option>
               <option value={2}>Urgent</option>
               <option value={-1}>Low</option>
-            </select>
+            </Select>
           </div>
 
           <div>
@@ -279,12 +279,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           <label className="block text-sm font-medium text-pf-text-primary mb-1">
             Notes
           </label>
-          <textarea
+          <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Additional notes about the project..."
             rows={2}
-            className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent resize-none"
+            className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 resize-none min-h-0"
           />
         </div>
 
@@ -325,14 +325,15 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   gcodeFiles
                     .filter(f => !selectedFiles.some(sf => sf.gcodeFileId === f.id))
                     .map((file) => (
-                      <button
+                      <Button
                         key={file.id}
                         type="button"
                         onClick={() => addFile(file)}
-                        className="w-full text-left px-3 py-2 rounded hover:bg-pf-bg-1 text-sm text-pf-text-primary truncate"
+                        variant="unstyled"
+                        className="w-full text-left px-3 py-2 rounded hover:bg-pf-bg-1 text-sm text-pf-text-primary truncate enabled:cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
                       >
                         {file.fileName}
-                      </button>
+                      </Button>
                     ))
                 )}
               </div>
@@ -393,16 +394,16 @@ const SelectedFileRow: React.FC<SelectedFileRowProps> = ({
       </div>
 
       {/* Color requirement */}
-      <select
+      <Select
         value={file.colorRequirement}
         onChange={(e) => onUpdate({ colorRequirement: e.target.value as PrintColorRequirement })}
-        className="px-2 py-1 text-xs bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary"
+        className="bg-pf-bg-1 border-pf-border rounded !px-2 !py-1 !text-xs"
         title="Color requirement"
       >
         <option value="Base">Base</option>
         <option value="Accent">Accent</option>
         <option value="Custom">Custom</option>
-      </select>
+      </Select>
 
       {/* Print count */}
       <div className="flex items-center gap-1">

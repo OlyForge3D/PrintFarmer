@@ -234,6 +234,20 @@ public class EfHarvestRepository(AppDbContext db) : IHarvestRepository
         // This prevents transaction issues with concurrent imports
     }
 
+    public async Task DeleteFileImportMappingsForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default)
+    {
+        List<HarvestFileGcodeFileMapping> mappings = await _db.HarvestFileGcodeFileMappings
+            .Where(m => m.GcodeFileId == gcodeFileId)
+            .ToListAsync(ct);
+
+        if (mappings.Count == 0)
+        {
+            return;
+        }
+
+        _db.HarvestFileGcodeFileMappings.RemoveRange(mappings);
+    }
+
     // Combined operations
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {

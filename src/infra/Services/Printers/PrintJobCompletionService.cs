@@ -97,17 +97,18 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             printerId,
             completionState);
 
-        // Find the currently printing job for this printer
-        PrintJob? job = await _db.PrintJobs
+        // A printer can only have one real "current job", but the DB may end up with
+        // multiple active rows (e.g., history seeding/import edge cases). Reconcile all.
+        List<PrintJob> activeJobs = await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
-            .FirstOrDefaultAsync(
-                j =>
+            .Where(j =>
                 j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
-                ct);
+                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
+            .ToListAsync(ct);
 
-        if (job == null)
+        if (activeJobs.Count == 0)
         {
             _logger.LogDebug(
                 "[PrintJobCompletionService] No active job found for printer {PrinterId}. Nothing to complete.",
@@ -115,23 +116,30 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             return false;
         }
 
-        // Update job status
-        job.Status = PrintJobStatus.Completed;
-        job.ActualEndTime = DateTime.UtcNow;
+        DateTime completedAtUtc = DateTime.UtcNow;
 
-        // Calculate actual duration if start time is set
-        if (job.ActualStartTime.HasValue)
+        foreach (PrintJob job in activeJobs)
         {
-            job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+            // Update job status
+            job.Status = PrintJobStatus.Completed;
+            job.ActualEndTime = completedAtUtc;
+
+            // Calculate actual duration if start time is set
+            if (job.ActualStartTime.HasValue)
+            {
+                job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+            }
         }
+
+        PrintJob primaryJob = activeJobs[0];
 
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as completed. Duration: {Duration}",
-            job.Id,
-            job.Name ?? job.GcodeFile?.Name ?? "Unknown",
-            job.ActualPrintTime);
+            primaryJob.Id,
+            primaryJob.Name ?? primaryJob.GcodeFile?.Name ?? "Unknown",
+            primaryJob.ActualPrintTime);
 
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
@@ -142,9 +150,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             try
             {
                 await _notificationService.SendJobCompletedAsync(
-                    job.Id.ToString(),
-                    job.Name ?? job.GcodeFile?.Name ?? "Print Job",
-                    job.AssignedPrinter?.Name,
+                    primaryJob.Id.ToString(),
+                    primaryJob.Name ?? primaryJob.GcodeFile?.Name ?? "Print Job",
+                    primaryJob.AssignedPrinter?.Name,
                     ct);
             }
             catch (Exception ex)
@@ -164,17 +172,18 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             printerId,
             failureReason);
 
-        // Find the currently printing job for this printer
-        PrintJob? job = await _db.PrintJobs
+        // A printer can only have one real "current job", but the DB may end up with
+        // multiple active rows (e.g., history seeding/import edge cases). Reconcile all.
+        List<PrintJob> activeJobs = await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
-            .FirstOrDefaultAsync(
-                j =>
+            .Where(j =>
                 j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
-                ct);
+                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
+            .ToListAsync(ct);
 
-        if (job == null)
+        if (activeJobs.Count == 0)
         {
             _logger.LogDebug(
                 "[PrintJobCompletionService] No active job found for printer {PrinterId}. Nothing to mark as failed.",
@@ -182,23 +191,30 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             return false;
         }
 
-        // Update job status
-        job.Status = PrintJobStatus.Failed;
-        job.ActualEndTime = DateTime.UtcNow;
-        job.FailureReason = failureReason;
+        DateTime failedAtUtc = DateTime.UtcNow;
 
-        // Calculate actual duration if start time is set
-        if (job.ActualStartTime.HasValue)
+        foreach (PrintJob job in activeJobs)
         {
-            job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+            // Update job status
+            job.Status = PrintJobStatus.Failed;
+            job.ActualEndTime = failedAtUtc;
+            job.FailureReason = failureReason;
+
+            // Calculate actual duration if start time is set
+            if (job.ActualStartTime.HasValue)
+            {
+                job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+            }
         }
+
+        PrintJob primaryJob = activeJobs[0];
 
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as failed. Reason: {FailureReason}",
-            job.Id,
-            job.Name ?? job.GcodeFile?.Name ?? "Unknown",
+            primaryJob.Id,
+            primaryJob.Name ?? primaryJob.GcodeFile?.Name ?? "Unknown",
             failureReason);
 
         // Broadcast job queue update via SignalR

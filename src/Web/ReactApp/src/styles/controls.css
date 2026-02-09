@@ -1563,7 +1563,7 @@
   }
 
   /* Direct button element styling */
-  button {
+  button:not([data-pf-button]) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1580,23 +1580,23 @@
     font-size: 0.875rem;
   }
 
-  button:focus-visible {
+  button:not([data-pf-button]):focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     box-shadow: 0 0 0 3px var(--pf-focus-ring);
   }
 
-  button:hover:not(:disabled) {
+  button:not([data-pf-button]):hover:not(:disabled) {
     background: linear-gradient(to bottom, var(--pf-gradient-secondary-start), var(--pf-gradient-secondary-end));
     border-color: var(--pf-accent-2);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   }
 
-  button:active:not(:disabled) {
+  button:not([data-pf-button]):active:not(:disabled) {
     transform: translateY(1px);
   }
 
-  button:disabled {
+  button:not([data-pf-button]):disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

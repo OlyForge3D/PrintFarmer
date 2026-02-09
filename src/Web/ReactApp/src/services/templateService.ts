@@ -22,8 +22,8 @@ export const templateService = {
 
     const queryString = params.toString();
     const url = queryString
-      ? `/api/project-templates?${queryString}`
-      : '/api/project-templates';
+      ? `/project-templates?${queryString}`
+      : '/project-templates';
 
     const response = await apiClient.request<PrintProjectTemplateListDto[]>({
       method: 'GET',
@@ -38,7 +38,7 @@ export const templateService = {
   async getCategories(): Promise<string[]> {
     const response = await apiClient.request<string[]>({
       method: 'GET',
-      url: '/api/project-templates/categories',
+      url: '/project-templates/categories',
     });
     return response.data;
   },
@@ -49,7 +49,7 @@ export const templateService = {
   async getTemplate(templateId: string): Promise<PrintProjectTemplateDetailDto> {
     const response = await apiClient.request<PrintProjectTemplateDetailDto>({
       method: 'GET',
-      url: `/api/project-templates/${templateId}`,
+      url: `/project-templates/${templateId}`,
     });
     return response.data;
   },
@@ -62,7 +62,7 @@ export const templateService = {
   ): Promise<PrintProjectTemplateDetailDto> {
     const response = await apiClient.request<PrintProjectTemplateDetailDto>({
       method: 'POST',
-      url: '/api/project-templates',
+      url: '/project-templates',
       data: request,
     });
     return response.data;
@@ -74,7 +74,7 @@ export const templateService = {
   async deleteTemplate(templateId: string): Promise<void> {
     await apiClient.request({
       method: 'DELETE',
-      url: `/api/project-templates/${templateId}`,
+      url: `/project-templates/${templateId}`,
     });
   },
 };

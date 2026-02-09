@@ -555,9 +555,14 @@ public class GcodeFilesController(
             bool success = await gcodeFilesService.DeleteFilesAsync(new[] { id }, HttpContext.RequestAborted);
             return !success ? NotFound(new { message = "File not found", fileId = id }) : NoContent();
         }
+        catch (InvalidOperationException ex)
+        {
+            // The file is still referenced by active queue jobs (or other constraints)
+            return Conflict(new { message = ex.Message, fileId = id });
+        }
         catch (Exception ex)
         {
-            logger.LogError($"Error deleting G-code file {id}: {ex.Message}");
+            logger.LogError(ex, $"Error deleting G-code file {id}");
             return Problem("Failed to delete file", statusCode: 500);
         }
     }

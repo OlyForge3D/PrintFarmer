@@ -77,7 +77,7 @@ describe('Button', () => {
       expect(screen.getByText('Click me')).toBeInTheDocument();
       
       const button = screen.getByRole('button');
-      expect(button).not.toHaveClass('justify-center');
+      expect(button).toHaveClass('justify-center');
     });
 
     it('renders button with iconRight and children', () => {

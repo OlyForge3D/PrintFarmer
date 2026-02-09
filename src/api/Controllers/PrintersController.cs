@@ -1741,8 +1741,19 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
         bool ok = await _printersService.PauseAsync(id, ct);
-        return !ok ? NotFound() : new CommandResult(true, null);
+
+        return ok
+            ? new CommandResult(true, null)
+            : StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "Pause failed. Printer may be offline or backend does not support pausing."));
     }
 
     [HttpPost("{id:guid}/resume")]
@@ -1751,8 +1762,40 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
         bool ok = await _printersService.ResumeAsync(id, ct);
-        return !ok ? NotFound() : new CommandResult(true, null);
+
+        return ok
+            ? new CommandResult(true, null)
+            : StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "Resume failed. Printer may be offline or backend does not support resuming."));
+    }
+
+    [HttpPost("{id:guid}/cancel")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> CancelAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        bool ok = await _printersService.CancelPrintAsync(id, ct);
+
+        return ok
+            ? new CommandResult(true, null)
+            : StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "Cancel failed. Printer may be offline or backend does not support cancel."));
     }
 
     [HttpPost("{id:guid}/emergency-stop")]
@@ -1761,8 +1804,19 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
         bool ok = await _printersService.EmergencyStopAsync(id, ct);
-        return !ok ? NotFound() : new CommandResult(true, null);
+
+        return ok
+            ? new CommandResult(true, null)
+            : StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "Emergency stop failed. Printer may be offline or backend does not support stop."));
     }
 
     /// <summary>

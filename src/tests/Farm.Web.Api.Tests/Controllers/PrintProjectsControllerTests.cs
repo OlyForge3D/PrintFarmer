@@ -93,7 +93,7 @@ public class PrintProjectsControllerTests
         // Arrange
         _projectServiceMock
             .Setup(s => s.GetProjectsAsync(null, null, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
         ActionResult<IReadOnlyList<PrintProjectListDto>> result = await _controller.GetProjectsAsync();

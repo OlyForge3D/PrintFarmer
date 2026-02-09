@@ -666,10 +666,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "PAUSE", ct);
+        => await PostPrintControlAsync(baseUrl, "/printer/print/pause", ct);
 
     public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "CANCEL_PRINT", ct);
+        => await PostPrintControlAsync(baseUrl, "/printer/print/cancel", ct);
 
     public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
     {
@@ -678,7 +678,68 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     public async Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "RESUME", ct);
+        => await PostPrintControlAsync(baseUrl, "/printer/print/resume", ct);
+
+    private async Task<bool> PostPrintControlAsync(string baseUrl, string relativePath, CancellationToken ct = default)
+    {
+        static Uri WithPort(Uri uri, int port)
+        {
+            UriBuilder ub = new(uri)
+            {
+                Port = port
+            };
+
+            return ub.Uri;
+        }
+
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            Uri baseUri = new(baseUrl);
+            Uri endpoint = new(baseUri, relativePath);
+
+            using HttpResponseMessage resp = await _http.PostAsync(endpoint, content: null, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                return true;
+            }
+
+            // Common misconfiguration: Moonraker is on 7125 but baseUrl points to a web UI port.
+            // Retry against 7125 when the first attempt fails and we're not already using 7125.
+            if (baseUri.Port != 7125)
+            {
+                Uri retryEndpoint = new(WithPort(baseUri, 7125), relativePath);
+                using HttpResponseMessage retryResp = await _http.PostAsync(retryEndpoint, content: null, cts.Token);
+                return retryResp.IsSuccessStatusCode;
+            }
+
+            return false;
+        }
+        catch
+        {
+            try
+            {
+                Uri baseUri = new(baseUrl);
+                if (baseUri.Port == 7125)
+                {
+                    return false;
+                }
+
+                using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+                Uri retryEndpoint = new(WithPort(baseUri, 7125), relativePath);
+                using HttpResponseMessage retryResp = await _http.PostAsync(retryEndpoint, content: null, cts.Token);
+                return retryResp.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
 
     public async Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "M112", ct);
@@ -892,8 +953,6 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     {
         try
         {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for file uploads
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/files/upload");
 
@@ -906,11 +965,13 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
-            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, cts.Token);
+            // IMPORTANT: don't use an absolute time limit for uploads here.
+            // We rely on caller cancellation and HttpClient is configured with an infinite Timeout.
+            using HttpResponseMessage resp = await _http.PostAsync(uri, formContent, ct);
 
             if (!resp.IsSuccessStatusCode)
             {
-                string responseBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                string responseBody = await resp.Content.ReadAsStringAsync(ct);
                 _logger.LogWarning($"[Moonraker] Upload failed with status {resp.StatusCode}: {responseBody}");
             }
             else
@@ -919,6 +980,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             }
 
             return resp.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

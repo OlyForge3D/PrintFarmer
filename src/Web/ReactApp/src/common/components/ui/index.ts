@@ -19,6 +19,7 @@ export { Radio, type RadioProps } from './Radio';
 export { RadioGroup, type RadioGroupProps, type RadioOption } from './RadioGroup';
 export { Select, type SelectProps } from './Select';
 export { Slider, type SliderProps } from './Slider';
+export { Spinner, type SpinnerProps } from './Spinner';
 export { 
   Table, 
   TableHead, 

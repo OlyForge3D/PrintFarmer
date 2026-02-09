@@ -115,6 +115,10 @@
   --pf-button-secondary-active: #0d1117;
   --pf-button-secondary-text: #e5e7eb;
   --pf-button-secondary-border: #334155;
+
+  /* Home buttons (axis homed state) */
+  --pf-home-homed-bg: #2096f3;
+  --pf-home-not-homed-bg: #fb8c00;
   
   /* Button States (Danger variant) */
   --pf-button-danger-bg: #dc2626;

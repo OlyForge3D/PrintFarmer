@@ -1,6 +1,8 @@
-import { Button, Checkbox, Select } from "@/common/components/ui";
+import { Button, Checkbox, Select, Spinner } from "@/common/components/ui";
 import { useState } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
+import type { DispatchUploadProgressDto } from "@/types/api";
+import { Download, Tractor } from "lucide-react";
 
 /**
  * Formats a duration in seconds to a human-readable string (e.g., "2h 30m" or "45m")
@@ -15,10 +17,25 @@ function formatDuration(seconds: number): string {
   return `${minutes}m`;
 }
 
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString(undefined, {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export interface QueueJobsTableProps {
   jobs: QueuedPrintJobWithFileMetaDto[];
   isLoading?: boolean;
   dispatchingJobId?: string | null;
+  cancelingJobId?: string | null;
+  dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
   onPause?: (jobId: string) => void;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -31,6 +48,8 @@ export function QueueJobsTable({
   jobs,
   isLoading = false,
   dispatchingJobId = null,
+  cancelingJobId = null,
+  dispatchUploadProgressByJobId,
   onPause,
   onResume,
   onCancel,
@@ -115,7 +134,7 @@ export function QueueJobsTable({
 
   return (
     <div className="overflow-x-auto border border-pf-border rounded-lg bg-pf-bg-1">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm whitespace-nowrap">
         <thead>
           <tr className="border-b border-pf-border bg-pf-bg-2">
             <th className="px-4 py-3 text-left">
@@ -124,16 +143,18 @@ export function QueueJobsTable({
                 onChange={handleSelectAll}
               />
             </th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">File</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Project</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Printer</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Model</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Material</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Est. Time</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Filament</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Status</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Priority</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Actions</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">File</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Project</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Printer</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Model</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Priority</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -160,6 +181,13 @@ export function QueueJobsTable({
               ? `${filamentGrams.toFixed(1)}g`
               : "-";
 
+            const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
+            const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
+            const dispatchProgressText =
+              dispatchProgress && !dispatchProgress.isCompleted
+                ? `Uploading ${dispatchProgress.percentage}%...`
+                : "Starting...";
+
             return (
               <tr
                 key={jobId}
@@ -174,16 +202,16 @@ export function QueueJobsTable({
                   }
                 }}
               >
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={selectedJobs.has(jobId)}
                     onChange={() => handleSelectJob(jobId)}
                   />
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
                   <div className="font-medium text-pf-text-primary">{fileName}</div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
                   {projectName ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-accent/10 text-pf-accent border border-pf-accent/20">
                       {projectName}
@@ -192,12 +220,34 @@ export function QueueJobsTable({
                     <span className="text-pf-text-tertiary">-</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-pf-text-secondary">{printerName}</td>
-                <td className="px-4 py-3 text-pf-text-secondary">{model}</td>
-                <td className="px-4 py-3 text-pf-text-secondary">{material}</td>
-                <td className="px-4 py-3 text-pf-text-secondary">{estimatedTimeDisplay}</td>
-                <td className="px-4 py-3 text-pf-text-secondary">{filamentDisplay}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{printerName}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{model}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{material}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {job.wasSeededFromHistory ? (
+                    <span
+                      role="img"
+                      aria-label="Imported"
+                      title="Imported"
+                      className="inline-flex items-center justify-center w-7 h-6 rounded text-xs font-medium bg-pf-bg-2 text-pf-text-secondary border border-pf-border"
+                    >
+                      <Download aria-hidden="true" className="h-4 w-4" />
+                    </span>
+                  ) : (
+                    <span
+                      role="img"
+                      aria-label="PrintFarmer"
+                      title="PrintFarmer"
+                      className="inline-flex items-center justify-center w-7 h-6 rounded text-xs font-medium bg-pf-bg-1 text-pf-text-tertiary border border-pf-border"
+                    >
+                      <Tractor aria-hidden="true" className="h-4 w-4" />
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
                       status
@@ -206,7 +256,7 @@ export function QueueJobsTable({
                     {status}
                   </span>
                 </td>
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <Select
                     value={priority}
                     onChange={(e) =>
@@ -220,7 +270,7 @@ export function QueueJobsTable({
                     <option value="-1">Low</option>
                   </Select>
                 </td>
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <div className="flex gap-2">
                     {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
                       <Button
@@ -234,11 +284,8 @@ export function QueueJobsTable({
                       >
                         {dispatchingJobId === jobId ? (
                           <span className="flex items-center gap-1">
-                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Starting...
+                            <Spinner className="h-4 w-4" />
+                            {dispatchProgressText}
                           </span>
                         ) : (
                           "Start Print"
@@ -277,6 +324,7 @@ export function QueueJobsTable({
                         }}
                         variant="danger"
                         size="sm"
+                        disabled={cancelingJobId === jobId}
                       >
                         Cancel
                       </Button>

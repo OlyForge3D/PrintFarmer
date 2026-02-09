@@ -295,4 +295,16 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
                         j.Status == PrintJobStatus.Printing))
             .CountAsync(ct);
     }
+
+    public async Task ClearGcodeFileReferencesAsync(Guid gcodeFileId, CancellationToken ct)
+    {
+        List<PrintJob> jobs = await _db.PrintJobs
+            .Where(j => j.GcodeFileId == gcodeFileId)
+            .ToListAsync(ct);
+
+        foreach (PrintJob job in jobs)
+        {
+            job.GcodeFileId = null;
+        }
+    }
 }

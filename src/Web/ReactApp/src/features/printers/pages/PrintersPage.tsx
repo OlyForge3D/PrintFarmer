@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
-import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -19,7 +19,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
-import type { Printer } from '@/types/api';
+import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
@@ -50,6 +50,15 @@ export function PrintersPage() {
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
+
+  const printerBackendCapabilitiesQuery = usePrinterBackendCapabilities();
+  const backendCapabilitiesByPrinterId = useMemo(() => {
+    const map: Record<string, PrinterBackendCapabilitiesDto> = {};
+    (printerBackendCapabilitiesQuery.data ?? []).forEach((caps) => {
+      map[caps.printerId] = caps;
+    });
+    return map;
+  }, [printerBackendCapabilitiesQuery.data]);
   
   // React 19: useTransition for async delete operations
   const [,startTransition] = useTransition();
@@ -63,7 +72,17 @@ export function PrintersPage() {
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('printerViewMode');
-    return (saved as ViewMode) || 'collapsed';
+
+    // Migrate legacy value (pre-rename) to the new name.
+    if (saved === 'expandable') {
+      return 'detailed';
+    }
+
+    if (saved === 'collapsed' || saved === 'detailed' || saved === 'table') {
+      return saved;
+    }
+
+    return 'collapsed';
   });
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -156,8 +175,7 @@ export function PrintersPage() {
     {
       key: 'v',
       handler: () => {
-        //const modes: ViewMode[] = ['collapsed', 'expandable', 'table', 'glass', 'segmented', 'statusGlow', 'dashboard', 'flip', 'drawer'];
-        const modes: ViewMode[] = ['collapsed', 'expandable', 'table'];
+        const modes: ViewMode[] = ['collapsed', 'detailed', 'table'];
         const currentIdx = modes.indexOf(viewMode);
         const nextMode = modes[(currentIdx + 1) % modes.length];
         setViewMode(nextMode);
@@ -343,6 +361,7 @@ export function PrintersPage() {
               <PrinterDetailsSidebar
                 printerId={expandedPrinterId}
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
+                backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
                 onClose={() => setExpandedPrinterId(null)}
                 layout="content"
               />
@@ -364,18 +383,20 @@ export function PrintersPage() {
                     <CollapsedPrinterCard
                       key={printer.id}
                       printer={printer}
+                      backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                       onExpand={() => setExpandedPrinterId(printer.id)}
                       onEdit={() => handleEditPrinter(printer)}
                     />
                   ))}
                 </div>
-              ) : viewMode === 'expandable' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,23rem)] gap-4 justify-center">
-                  {userPrinters.map((p) => (
+              ) : viewMode === 'detailed' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,23rem)] gap-4">
+                  {userPrinters.map((printer) => (
                     <DetailedPrinterCard
-                      key={p.id}
-                      printer={p}
-                      onEdit={() => handleEditPrinter(p)}
+                      key={printer.id}
+                      printer={printer}
+                      backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
+                      onEdit={() => handleEditPrinter(printer)}
                     />
                   ))}
                 </div>
@@ -422,6 +443,7 @@ export function PrintersPage() {
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
+              backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
               onClose={() => setExpandedPrinterId(null)}
             />
           </div>

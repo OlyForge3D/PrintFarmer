@@ -811,7 +811,9 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 try
                 {
-                    GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
+                    // IMPORTANT: Use UnitOfWork repo to ensure the same DbContext is used
+                    // for queue/harvest updates and the actual delete.
+                    GcodeFile? file = await _unitOfWork.GcodeFiles.GetByIdWithIncludesAsync(fileId, ct);
                     if (file != null)
                     {
                         filesToDelete.Add(file);
@@ -834,19 +836,39 @@ namespace Farm.Web.Api.Services.Gcode
                 return false;
             }
 
-            // Step 2: Delete database records first (before deleting physical files)
+            // Step 2: Validate that files aren't referenced by active queue jobs.
+            // If active jobs exist, we block deletion to avoid breaking in-flight operations.
+            foreach (GcodeFile file in filesToDelete)
+            {
+                int activeJobs = await _unitOfWork.Queue.CountActiveJobsUsingGcodeAsync(file.Id, ct);
+                if (activeJobs > 0)
+                {
+                    throw new InvalidOperationException($"Cannot delete G-code file {file.Id} because it is referenced by {activeJobs} active job(s)");
+                }
+            }
+
+            // Step 3: Clear FK references that would otherwise block deletion.
+            // - PrintJobs keep history; we null out the FK.
+            // - Harvest import mappings are safe to remove when deleting the library file.
+            foreach (GcodeFile file in filesToDelete)
+            {
+                await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
+                await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+            }
+
+            // Step 4: Delete database records first (before deleting physical files)
             _logger.LogInformation($"[DeleteFilesAsync] Deleting {filesToDelete.Count} record(s) from database");
 
             foreach (GcodeFile file in filesToDelete)
             {
                 _logger.LogInformation($"[DeleteFilesAsync]   - Removing from DB: {file.FileName} (ID: {file.Id})");
-                await _gcodeRepo.RemoveAsync(file, ct);
+                await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
             }
 
-            await _gcodeRepo.SaveChangesAsync(ct);
+            await _unitOfWork.SaveChangesAsync(ct);
             _logger.LogInformation($"[DeleteFilesAsync] Successfully saved database changes, {filesToDelete.Count} record(s) deleted from DB");
 
-            // Step 3: Delete physical files (gcode + thumbnails)
+            // Step 5: Delete physical files (gcode + thumbnails)
             // If a physical file is missing, we still count it as deleted since the DB record was removed
             int deleted = 0;
             foreach (GcodeFile file in filesToDelete)

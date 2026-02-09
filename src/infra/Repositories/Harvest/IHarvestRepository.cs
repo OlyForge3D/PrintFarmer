@@ -144,6 +144,14 @@ public interface IHarvestRepository
     /// <param name="ct">Cancellation token.</param>
     Task CreateFileImportMappingAsync(HarvestDiscoveredFile discoveredFile, GcodeFile gcodeFile, CancellationToken ct = default);
 
+    /// <summary>
+    /// Deletes any file import mappings that reference the specified G-code file.
+    /// This allows library file deletion without leaving FK references.
+    /// </summary>
+    /// <param name="gcodeFileId">The G-code file ID</param>
+    /// <param name="ct">Cancellation token</param>
+    Task DeleteFileImportMappingsForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default);
+
     // Combined operations
 
     /// <summary>Saves pending changes to the database.</summary>

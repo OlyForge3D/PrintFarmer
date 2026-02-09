@@ -12,6 +12,8 @@ import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import TimingTab from "../components/TimingTab";
 import { apiClient } from "@/services/api";
+import { printerSignalRService } from "@/services/printer-signalr";
+import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
@@ -32,6 +34,7 @@ export function PrintQueueDashboardPage() {
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
+  const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
   
   // Persist active tab to localStorage
   const [activeTab, setActiveTabState] = useState(() => {
@@ -48,6 +51,9 @@ export function PrintQueueDashboardPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showDetailPanel, setShowDetailPanel] = useState(false);
   const [dispatchingJobId, setDispatchingJobId] = useState<string | null>(null);
+  const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
+    Record<string, DispatchUploadProgressDto>
+  >({});
 
   // Keyboard navigation for job list (only for active tab)
   const { selectedIndex } = useKeyboardNavigation(
@@ -170,6 +176,7 @@ export function PrintQueueDashboardPage() {
     if (!jobToCancel) return;
 
     try {
+      setCancelingJobId(jobToCancel);
       await apiClient.cancelPrintQueueJob(jobToCancel);
       setShowCancelConfirmation(false);
       setJobToCancel(null);
@@ -180,6 +187,8 @@ export function PrintQueueDashboardPage() {
       setError(errorMessage);
       setShowCancelConfirmation(false);
       setJobToCancel(null);
+    } finally {
+      setCancelingJobId(null);
     }
   }, [jobToCancel, loadJobs]);
 
@@ -207,6 +216,11 @@ export function PrintQueueDashboardPage() {
 
   const handleDispatchJob = useCallback(async (jobId: string) => {
     setDispatchingJobId(jobId);
+    setDispatchUploadProgressByJobId((prev) => {
+      const copy = { ...prev };
+      delete copy[jobId];
+      return copy;
+    });
     try {
       await apiClient.dispatchPrintQueueJob(jobId);
       loadJobs(true);
@@ -216,8 +230,27 @@ export function PrintQueueDashboardPage() {
       setError(errorMessage);
     } finally {
       setDispatchingJobId(null);
+      setDispatchUploadProgressByJobId((prev) => {
+        const copy = { ...prev };
+        delete copy[jobId];
+        return copy;
+      });
     }
   }, [loadJobs]);
+
+  // Dispatch upload progress subscription (SignalR)
+  useEffect(() => {
+    printerSignalRService.connect();
+    const unsub = printerSignalRService.onDispatchUploadProgress((progress) => {
+      setDispatchUploadProgressByJobId((prev) => ({
+        ...prev,
+        [progress.jobId]: progress,
+      }));
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   const handleRerunJob = async (jobId: string) => {
     try {
@@ -328,6 +361,8 @@ export function PrintQueueDashboardPage() {
                   jobs={jobs}
                   isLoading={loading}
                   dispatchingJobId={dispatchingJobId}
+                  cancelingJobId={cancelingJobId}
+                  dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
                   onPause={handlePauseJob}
                   onResume={handleResumeJob}
                   onCancel={handleCancelJob}
@@ -395,6 +430,7 @@ export function PrintQueueDashboardPage() {
         confirmButtonText="Cancel Job"
         cancelButtonText="Keep Job"
         isDangerous={true}
+        isConfirming={cancelingJobId !== null}
         onConfirm={handleConfirmCancel}
         onCancel={() => {
           setShowCancelConfirmation(false);

@@ -1,5 +1,5 @@
 import { AlertIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Spinner } from '@/common/components/ui';
 import { Modal } from './Modal';
 
 export interface ConfirmationModalProps {
@@ -9,6 +9,7 @@ export interface ConfirmationModalProps {
   confirmButtonText?: string;
   cancelButtonText?: string;
   isDangerous?: boolean;
+  isConfirming?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   children?: React.ReactNode;
@@ -24,6 +25,7 @@ export function ConfirmationModal({
   confirmButtonText = 'Confirm',
   cancelButtonText = 'Cancel',
   isDangerous = false,
+  isConfirming = false,
   onConfirm,
   onCancel,
   children,
@@ -40,14 +42,24 @@ export function ConfirmationModal({
           <Button
             variant="secondary"
             onClick={onCancel}
+            disabled={isConfirming}
           >
             {cancelButtonText}
           </Button>
           <Button
             variant={isDangerous ? 'danger' : 'primary'}
             onClick={onConfirm}
+            disabled={isConfirming}
+            aria-busy={isConfirming}
           >
-            {confirmButtonText}
+            {isConfirming ? (
+              <span className="flex items-center gap-2">
+                <Spinner className="h-4 w-4" />
+                {confirmButtonText}
+              </span>
+            ) : (
+              confirmButtonText
+            )}
           </Button>
         </div>
       }

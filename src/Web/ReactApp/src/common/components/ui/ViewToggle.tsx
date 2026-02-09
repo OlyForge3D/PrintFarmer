@@ -70,7 +70,7 @@ function resolveIconPath(icon: string | ViewModeIconName): string {
  *   options={[
  *     { mode: 'compact', icon: 'compact', title: 'Compact Cards' },
  *     { mode: 'collapsed', icon: 'collapsed', title: 'Collapsed View' },
- *     { mode: 'expandable', icon: 'expandable', title: 'Expandable Cards' },
+ *     { mode: 'detailed', icon: 'expandable', title: 'Detailed Cards' },
  *     { mode: 'table', icon: 'quilt', title: 'Table View' },
  *   ]}
  * />

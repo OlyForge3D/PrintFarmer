@@ -17,6 +17,7 @@ describe("QueueJobsTable Component", () => {
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),
       queuedAtUtc: new Date().toISOString(),
+      wasSeededFromHistory: false,
     },
     gcodeFile: {
       id: "file-1",
@@ -48,6 +49,7 @@ describe("QueueJobsTable Component", () => {
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
+        wasSeededFromHistory: false,
       },
       gcodeFile: {
         id: "file-1",
@@ -69,6 +71,7 @@ describe("QueueJobsTable Component", () => {
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
         queuedAtUtc: new Date().toISOString(),
+        wasSeededFromHistory: true,
       },
       gcodeFile: {
         id: "file-2",
@@ -118,6 +121,7 @@ describe("QueueJobsTable Component", () => {
 
     expect(screen.getByText("test-print.gcode")).toBeInTheDocument();
     expect(screen.getByText("another-print.gcode")).toBeInTheDocument();
+    expect(screen.getByLabelText("Imported")).toBeInTheDocument();
   });
 
   it("should show pause button for printing jobs", () => {

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -308,10 +310,18 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(gcodeFile);
         repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var queueRepo = new Mock<IQueueRepository>(MockBehavior.Loose);
+        queueRepo.Setup(x => x.CountActiveJobsUsingGcodeAsync(fileId, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        queueRepo.Setup(x => x.ClearGcodeFileReferencesAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
+
+        var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
+        harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
+        mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
@@ -322,7 +332,7 @@ public class GcodeFilesServiceTests
         result.Should().BeTrue();
         File.Exists(fullPath).Should().BeFalse("file should be deleted from disk");
         repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Once, "file should be removed from database");
-        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+        mockUnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
     }
 
     [Fact]
@@ -371,10 +381,18 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(gcodeFile);
         repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var queueRepo = new Mock<IQueueRepository>(MockBehavior.Loose);
+        queueRepo.Setup(x => x.CountActiveJobsUsingGcodeAsync(fileId, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        queueRepo.Setup(x => x.ClearGcodeFileReferencesAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
+
+        var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
+        harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
+        mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
@@ -386,7 +404,7 @@ public class GcodeFilesServiceTests
         File.Exists(fullPath).Should().BeFalse("file should be deleted from disk");
         File.Exists(thumbnailPath).Should().BeFalse("thumbnail should be deleted from disk");
         repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Once, "file should be removed from database");
-        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+        mockUnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
     }
 
     [Fact]
@@ -450,10 +468,19 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(gcodeFile2);
         repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var queueRepo = new Mock<IQueueRepository>(MockBehavior.Loose);
+        queueRepo.Setup(x => x.CountActiveJobsUsingGcodeAsync(file1Id, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        queueRepo.Setup(x => x.CountActiveJobsUsingGcodeAsync(file2Id, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        queueRepo.Setup(x => x.ClearGcodeFileReferencesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
+
+        var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
+        harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
+        mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
@@ -466,7 +493,7 @@ public class GcodeFilesServiceTests
         File.Exists(file2Path).Should().BeFalse("file2 should be deleted from disk");
         repo.Verify(x => x.GetByIdWithIncludesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Exactly(2), "should retrieve both files by ID");
         repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Exactly(2), "both files should be removed from database");
-        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+        mockUnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
     }
 
     // Note: Test for orphaned files skipped due to lambda expression constraints with CancellationToken optional parameters

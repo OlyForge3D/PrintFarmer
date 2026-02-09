@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectService } from '@/services/projectService';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button } from '@/common/components/ui';
+import { Button, Select } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
 import { 
@@ -118,10 +118,10 @@ export const ProjectsPage: React.FC = () => {
           {/* Status filter */}
           <div className="flex items-center gap-2">
             <FilterIcon className="w-4 h-4 text-pf-text-tertiary" />
-            <select
+            <Select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as PrintProjectStatus | '')}
-              className="bg-pf-bg-2 border border-pf-border rounded-lg px-3 py-2 text-sm text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+              className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 !text-sm"
             >
               <option value="">All Status</option>
               <option value="Open">Open</option>
@@ -129,7 +129,7 @@ export const ProjectsPage: React.FC = () => {
               <option value="Completed">Completed</option>
               <option value="OnHold">On Hold</option>
               <option value="Cancelled">Cancelled</option>
-            </select>
+            </Select>
           </div>
 
           {/* Create button */}

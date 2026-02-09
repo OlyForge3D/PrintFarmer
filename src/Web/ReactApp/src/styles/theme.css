@@ -93,6 +93,10 @@
   --pf-skeleton-bg-alt: #30363d;
   --pf-skeleton-accent: #484f58;
   --pf-focus-outline: var(--pf-accent);
+
+  /* Home buttons (axis homed state) */
+  --pf-home-homed-bg: #2096f3;
+  --pf-home-not-homed-bg: #fb8c00;
   color-scheme: dark;
 }
 
@@ -166,6 +170,10 @@
   --pf-skeleton-bg-alt: #f1f5f9;
   --pf-skeleton-accent: #cbd5e1;
   --pf-focus-outline: var(--pf-accent-2);
+
+  /* Home buttons (axis homed state) */
+  --pf-home-homed-bg: #2096f3;
+  --pf-home-not-homed-bg: #fb8c00;
   color-scheme: light;
 }
 

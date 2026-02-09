@@ -15,7 +15,7 @@ import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
 
 export type ViewMode = 
   | 'collapsed' 
-  | 'expandable' 
+  | 'detailed'
   | 'table';
   // | 'glass' 
   // | 'segmented' 
@@ -34,7 +34,7 @@ interface ViewModeToggleProps {
  */
 const coreViewModes: ViewModeOption<ViewMode>[] = [
   { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
-  { mode: 'expandable', icon: mdiViewComfy, title: 'Expandable Cards' },
+  { mode: 'detailed', icon: mdiViewComfy, title: 'Detailed Cards' },
   { mode: 'table', icon: mdiViewGrid, title: 'Table View' },
 ];
 
@@ -54,7 +54,7 @@ const coreViewModes: ViewModeOption<ViewMode>[] = [
  * ViewModeToggle - Printers page view mode selector
  * 
  * Uses the generic ViewToggle component with two rows of options:
- * - Core modes (compact, collapsed, expandable, table)
+ * - Core modes (collapsed, detailed, table)
  * - Experimental modes (glass, segmented, statusGlow, dashboard, flip, drawer)
  */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
