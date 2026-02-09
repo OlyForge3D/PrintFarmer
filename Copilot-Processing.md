@@ -1,28 +1,36 @@
-# Copilot Processing: SDCP File List Parsing (Cmd 258)
+# Copilot Processing: SDCP History Name Mismatches (Cmd 320/321)
 
-**Session**: PFarm1-97.1 - Replace stubbed file list with real SDCP Cmd 258 parsing
+**Session**: Fix SDCP history field name mismatches vs official CBD-Tech SDCP V3.0.0 spec
 **Date**: 2026-02-09
+
+## Mismatches Found (Official Spec vs Our Code)
+
+| Layer | Spec Field | Our Field | Impact |
+|-------|-----------|-----------|--------|
+| Cmd 320 response | `HistoryData` | `TaskIdList` | IDs not parsed |
+| Cmd 321 request | `{ "Id": ["id1"] }` | `{ "TaskId": "id1" }` | Printer rejects request |
+| Cmd 321 response | `HistoryDetailList` array | Single object | Details not parsed |
+| Detail field | `TaskName` | `Filename` | Name not mapped |
+| Detail field | `BeginTime` | `StartTime` | Start time null |
+| Detail field | `TaskStatus` | `Status` | Status not mapped |
+| Status values | 1=Complete,2=Error,3=Stopped | 0=Complete,1=Cancel,2=Error | Wrong statuses |
 
 ## Action Plan
 
-### Phase 1: Add SDCP File List Response DTOs
-- [x] Add SdcpFileListAckResponse, SdcpFileListAckData, SdcpFileListResult, SdcpFileEntry models
+### Phase 1: Fix DTOs
+- [x] `SdcpHistoryIdsResult.TaskIdList` → `HistoryData`
+- [x] New `SdcpHistoryDetailResult` wrapper with `Ack` + `HistoryDetailList`
+- [x] `SdcpHistoryDetail` fields: `TaskName`, `BeginTime`, `TaskStatus`
+- [x] Remove `Ack` from `SdcpHistoryDetail` (moved to wrapper)
 
-### Phase 2: Fix Request Payload
-- [x] Send `{ Url = "/local" }` instead of `{}` per SDCP spec
+### Phase 2: Fix client logic
+- [x] Cmd 321 request: `{ Id = [taskId] }` not `{ TaskId = taskId }`
+- [x] Cmd 321 response: Parse `HistoryDetailList` array
+- [x] Status mapping: 1=completed, 2=error, 3=cancelled, 0=other
 
-### Phase 3: Implement Response Parsing
-- [x] Replace placeholder return with actual JSON deserialization
-- [x] Handle Ack != 0 error responses
-- [x] Handle folder vs file types
+### Phase 3: Fix tests
+- [x] Update test response builders and assertions
 
-### Phase 4: Update ISupportsFileList Implementation
-- [x] Map usedSize to PrinterFileInfo.Size
-- [x] Remove TODO/placeholder comments
-
-### Phase 5: Build & Test
+### Phase 4: Build & verify
 - [ ] Build solution
 - [ ] Run tests
-
-### Phase 6: Commit & Push
-- [ ] Commit, close bead, push

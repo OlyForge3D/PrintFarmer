@@ -1,6 +1,7 @@
 ﻿#pragma warning disable S1006, CA2213, S1939 // Default parameters, HttpClient disposal, and interface inheritance are intentional
 
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
@@ -238,7 +239,8 @@ public class SdcpHistoryIdsResult
 {
     public int Ack { get; set; }
 
-    public List<string>? TaskIdList { get; set; }
+    /// <summary>Ordered list of task IDs (UUIDs). Spec field name: HistoryData.</summary>
+    public List<string>? HistoryData { get; set; }
 }
 
 /// <summary>
@@ -257,7 +259,7 @@ public class SdcpHistoryDetailAckData
 {
     public int Cmd { get; set; }
 
-    public SdcpHistoryDetail? Data { get; set; }
+    public SdcpHistoryDetailResult? Data { get; set; }
 
     public string? RequestID { get; set; }
 
@@ -267,27 +269,95 @@ public class SdcpHistoryDetailAckData
 }
 
 /// <summary>
-/// SDCP history detail for a single print job.
+/// Inner data wrapper for Cmd 321 response containing Ack and the detail list.
+/// </summary>
+public class SdcpHistoryDetailResult
+{
+    public int Ack { get; set; }
+
+    /// <summary>Array of history detail records. Spec field: HistoryDetailList.</summary>
+    public List<SdcpHistoryDetail>? HistoryDetailList { get; set; }
+}
+
+/// <summary>
+/// SDCP history detail for a single print job per SDCP V3.0.0 spec.
 /// Unknown fields are tolerated via case-insensitive deserialization.
 /// </summary>
 public class SdcpHistoryDetail
 {
-    public int Ack { get; set; }
-
     /// <summary>The unique task identifier.</summary>
     public string? TaskId { get; set; }
 
-    /// <summary>The printed filename.</summary>
-    public string? Filename { get; set; }
+    /// <summary>The task/file name. Spec field: TaskName.</summary>
+    public string? TaskName { get; set; }
 
-    /// <summary>Job status: 0 = Completed, 1 = Cancelled, 2 = Error.</summary>
-    public int Status { get; set; }
-
-    /// <summary>Start time as Unix timestamp (seconds).</summary>
-    public double StartTime { get; set; }
+    /// <summary>Start time as Unix timestamp (seconds). Spec field: BeginTime.</summary>
+    public double BeginTime { get; set; }
 
     /// <summary>End time as Unix timestamp (seconds), or 0 if not finished.</summary>
     public double EndTime { get; set; }
+
+    /// <summary>Task status per SDCP spec: 0 = Other, 1 = Completed, 2 = Exceptional, 3 = Stopped.</summary>
+    public int TaskStatus { get; set; }
+
+    /// <summary>Thumbnail address (URL or path).</summary>
+    public string? Thumbnail { get; set; }
+
+    /// <summary>Number of layers already printed.</summary>
+    public int AlreadyPrintLayer { get; set; }
+
+    /// <summary>Error status reason code (0 = OK).</summary>
+    public int ErrorStatusReason { get; set; }
+}
+
+/// <summary>
+/// SDCP Attributes response envelope.
+/// Published on the sdcp/attributes/${MainboardID} topic when attribute information changes
+/// or upon receiving Cmd 1 (Request for attribute message).
+/// </summary>
+public class SdcpAttributesResponse
+{
+    public SdcpAttributes? Attributes { get; set; }
+
+    public string? MainboardID { get; set; }
+
+    public long TimeStamp { get; set; }
+
+    public string? Topic { get; set; }
+}
+
+/// <summary>
+/// SDCP machine attribute information containing printer identification, firmware version,
+/// capabilities, and hardware status per SDCP V3.0.0 spec.
+/// </summary>
+public class SdcpAttributes
+{
+    /// <summary>Machine Name (user-configurable printer name).</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Machine Model (hardware model identifier).</summary>
+    public string? MachineName { get; set; }
+
+    /// <summary>Brand Name (manufacturer brand, e.g., "CBD", "Elegoo").</summary>
+    public string? BrandName { get; set; }
+
+    /// <summary>Protocol Version (e.g., "V3.0.0").</summary>
+    public string? ProtocolVersion { get; set; }
+
+    /// <summary>Firmware Version (e.g., "V1.0.0").</summary>
+    public string? FirmwareVersion { get; set; }
+
+    /// <summary>Screen resolution (e.g., "7680x4320").</summary>
+    public string? Resolution { get; set; }
+
+    /// <summary>Maximum printing dimensions in XYZ, in millimeters (e.g., "210x140x100").</summary>
+    public string? XYZsize { get; set; }
+
+    /// <summary>Motherboard IP Address.</summary>
+    public string? MainboardIP { get; set; }
+
+    /// <summary>Motherboard ID (16-bit identifier).</summary>
+    public string? MainboardID { get; set; }
 }
 
 public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
@@ -297,7 +367,8 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     ISupportsControlOperations,
     ISupportsCamera,
     ISupportsHistory,
-    ISupportsFileDelete
+    ISupportsFileDelete,
+    ISupportsPrinterInformation
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -316,6 +387,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     private static class SdcpCommandIds
     {
         public const int GetStatus = 0;
+        public const int GetAttributes = 1;
         public const int StartPrint = 128;
         public const int PausePrint = 129;
         public const int CancelPrint = 130;
@@ -336,6 +408,49 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
+    /// <summary>
+    /// Static cache of MainboardID by normalized printer host.
+    /// Populated from status/ack responses; used in subsequent requests for protocol correctness.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, string> MainboardIdCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the cached MainboardID for the given base URL, or empty string if not yet known.
+    /// </summary>
+    private static string GetCachedMainboardId(string baseUrl)
+    {
+        try
+        {
+            string host = new Uri(NormalizeBaseUrl(baseUrl, 80)).Host;
+            return MainboardIdCache.TryGetValue(host, out string? id) ? id : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Caches the MainboardID from a response if it is non-empty.
+    /// </summary>
+    private static void CacheMainboardId(string baseUrl, string? mainboardId)
+    {
+        if (string.IsNullOrWhiteSpace(mainboardId))
+        {
+            return;
+        }
+
+        try
+        {
+            string host = new Uri(NormalizeBaseUrl(baseUrl, 80)).Host;
+            MainboardIdCache[host] = mainboardId;
+        }
+        catch
+        {
+            // Best-effort caching; do not let URI parse failures affect operations
+        }
+    }
 
     // SDCP status codes based on documentation
     private static readonly Dictionary<int, string> StatusCodeMap = new()
@@ -531,7 +646,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetStatus,
                         Data: new { },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -556,6 +671,19 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 }
 
                 bool responded = !string.IsNullOrWhiteSpace(responseJson);
+                if (responded)
+                {
+                    try
+                    {
+                        var ack = JsonSerializer.Deserialize<SdcpAckResponse>(responseJson!, JsonOptions);
+                        CacheMainboardId(baseUrl, ack?.Data?.MainboardID);
+                    }
+                    catch
+                    {
+                        // best-effort caching
+                    }
+                }
+
                 LogSdcp(LogLevel.Debug, responded ? "SDCP test connection succeeded" : "SDCP test connection got no response", requestId, new { operation = "TestConnection", wsUrl });
                 return responded;
             }
@@ -598,7 +726,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetStatus,
                         Data: new { },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -615,6 +743,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                     try
                     {
                         SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                        CacheMainboardId(baseUrl, statusResponse?.MainboardID);
                         if (statusResponse?.Status?.PrintInfo != null)
                         {
                             string state = StatusCodeMap.GetValueOrDefault(statusResponse.Status.PrintInfo.Status, "unknown");
@@ -693,7 +822,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetStatus,
                         Data: new { },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -707,6 +836,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 if (!string.IsNullOrWhiteSpace(responseJson))
                 {
                     SdcpStatusResponse? statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                    CacheMainboardId(baseUrl, statusResponse?.MainboardID);
 
                     if (statusResponse?.Status?.PrintInfo != null)
                     {
@@ -765,7 +895,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetStatus,
                         Data: new { },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -782,6 +912,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                     try
                     {
                         statusResponse = JsonSerializer.Deserialize<SdcpStatusResponse>(responseJson, JsonOptions);
+                        CacheMainboardId(baseUrl, statusResponse?.MainboardID);
                     }
                     catch (JsonException ex)
                     {
@@ -1146,7 +1277,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetFileList,
                         Data: new { Url = "/local" },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -1228,7 +1359,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: cmd,
                         Data: data,
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -1458,7 +1589,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                         Cmd: SdcpCommandIds.GetHistoryIds,
                         Data: new { },
                         RequestID: requestId,
-                        MainboardID: string.Empty,
+                        MainboardID: GetCachedMainboardId(baseUrl),
                         TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
                     string.Empty);
 
@@ -1475,12 +1606,12 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 var idsResponse = JsonSerializer.Deserialize<SdcpHistoryIdsAckResponse>(idsResponseJson, JsonOptions);
                 var idsResult = idsResponse?.Data?.Data;
 
-                if (idsResult is null || idsResult.Ack != 0 || idsResult.TaskIdList is null or { Count: 0 })
+                if (idsResult is null || idsResult.Ack != 0 || idsResult.HistoryData is null or { Count: 0 })
                 {
                     return new HistoryListResponse { Count = 0, Jobs = [] };
                 }
 
-                List<string> taskIds = idsResult.TaskIdList;
+                List<string> taskIds = idsResult.HistoryData;
 
                 // Apply since filter client-side (SDCP has no server-side date filter)
                 // Apply start/limit pagination client-side
@@ -1492,7 +1623,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
                 List<HistoryJob> jobs = [];
                 foreach (string taskId in pageIds)
                 {
-                    HistoryJob? job = await RequestHistoryDetailAsync(ws, taskId, requestId, since, cts.Token);
+                    HistoryJob? job = await RequestHistoryDetailAsync(ws, baseUrl, taskId, requestId, since, cts.Token);
                     if (job is not null)
                     {
                         jobs.Add(job);
@@ -1521,16 +1652,16 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     /// Returns null if the job doesn't match the since filter.
     /// </summary>
     private async Task<HistoryJob?> RequestHistoryDetailAsync(
-        ClientWebSocket ws, string taskId, string correlationId, DateTime? since, CancellationToken ct)
+        ClientWebSocket ws, string baseUrl, string taskId, string correlationId, DateTime? since, CancellationToken ct)
     {
         string detailRequestId = Guid.NewGuid().ToString("N");
         SdcpMessage<object> detailRequest = new(
             string.Empty,
             new SdcpData<object>(
                 Cmd: SdcpCommandIds.GetHistoryDetail,
-                Data: new { TaskId = taskId },
+                Data: new { Id = new[] { taskId } },
                 RequestID: detailRequestId,
-                MainboardID: string.Empty,
+                MainboardID: GetCachedMainboardId(baseUrl),
                 TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
             string.Empty);
 
@@ -1547,17 +1678,20 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         try
         {
             var detailResponse = JsonSerializer.Deserialize<SdcpHistoryDetailAckResponse>(detailJson, JsonOptions);
-            var detail = detailResponse?.Data?.Data;
-            if (detail is null || detail.Ack != 0)
+            var detailResult = detailResponse?.Data?.Data;
+            if (detailResult is null || detailResult.Ack != 0 ||
+                detailResult.HistoryDetailList is null or { Count: 0 })
             {
                 return null;
             }
 
+            var detail = detailResult.HistoryDetailList[0];
+
             // Apply client-side since filter
-            if (since.HasValue && detail.StartTime > 0)
+            if (since.HasValue && detail.BeginTime > 0)
             {
                 double sinceUnix = new DateTimeOffset(since.Value.ToUniversalTime()).ToUnixTimeSeconds();
-                if (detail.StartTime < sinceUnix)
+                if (detail.BeginTime < sinceUnix)
                 {
                     return null;
                 }
@@ -1579,25 +1713,26 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     /// </summary>
     private static HistoryJob MapSdcpHistoryToJob(SdcpHistoryDetail detail)
     {
-        string status = detail.Status switch
+        // SDCP V3.0.0 spec: 0 = Other, 1 = Completed, 2 = Exceptional, 3 = Stopped
+        string status = detail.TaskStatus switch
         {
-            0 => "completed",
-            1 => "cancelled",
+            1 => "completed",
             2 => "error",
-            _ => $"unknown({detail.Status})"
+            3 => "cancelled",
+            _ => $"unknown({detail.TaskStatus})"
         };
 
-        double duration = detail.EndTime > 0 && detail.StartTime > 0
-            ? detail.EndTime - detail.StartTime
+        double duration = detail.EndTime > 0 && detail.BeginTime > 0
+            ? detail.EndTime - detail.BeginTime
             : 0;
 
         return new HistoryJob
         {
             JobId = detail.TaskId ?? string.Empty,
             Exists = true,
-            Filename = detail.Filename ?? string.Empty,
+            Filename = detail.TaskName ?? string.Empty,
             Status = status,
-            StartTime = detail.StartTime,
+            StartTime = detail.BeginTime,
             EndTime = detail.EndTime > 0 ? detail.EndTime : null,
             PrintDuration = duration,
             TotalDuration = duration,
@@ -1618,7 +1753,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             var (ws, _) = await ConnectWebSocketAsync(baseUrl, operation: "GetHistoryDetail", correlationId: requestId, cts.Token);
             using (ws)
             {
-                HistoryJob? job = await RequestHistoryDetailAsync(ws, jobId, requestId, since: null, cts.Token);
+                HistoryJob? job = await RequestHistoryDetailAsync(ws, baseUrl, jobId, requestId, null, cts.Token);
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
                 return job;
             }
@@ -1646,6 +1781,111 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     {
         // SDCP protocol does not support deleting individual history entries
         return Task.FromResult(false);
+    }
+
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(
+        string baseUrl, PrinterCredential? credential, CancellationToken ct)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(DefaultOperationTimeoutSeconds));
+            string requestId = Guid.NewGuid().ToString("N");
+
+            var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetAttributes", correlationId: requestId, cts.Token);
+            using (ws)
+            {
+                string wsUrl = wsUri.ToString();
+
+                // Send Cmd 1 (Request for attribute message) per SDCP V3.0.0 spec.
+                // The printer responds with an ack on sdcp/response topic, then publishes
+                // the full attributes payload on sdcp/attributes topic.
+                SdcpMessage<object> request = new(
+                    string.Empty,
+                    new SdcpData<object>(
+                        Cmd: SdcpCommandIds.GetAttributes,
+                        Data: new { },
+                        RequestID: requestId,
+                        MainboardID: GetCachedMainboardId(baseUrl),
+                        TimeStamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    string.Empty);
+
+                string json = JsonSerializer.Serialize(request, JsonOptions);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
+
+                LogSdcp(LogLevel.Debug, "SDCP WS attributes request sent", requestId,
+                    new { operation = "GetAttributes", cmd = SdcpCommandIds.GetAttributes, bytes = bytes.Length, wsUrl });
+
+                // Read up to 3 messages looking for the attributes response.
+                // Cmd 1 triggers an ack first, then the actual attributes message.
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    string? responseJson = await ReceiveTextMessageAsync(ws, operation: "GetAttributes", correlationId: requestId, cts.Token);
+                    if (string.IsNullOrWhiteSpace(responseJson))
+                    {
+                        continue;
+                    }
+
+                    // Try parsing as attributes response
+                    SdcpAttributesResponse? attrResponse = JsonSerializer.Deserialize<SdcpAttributesResponse>(responseJson, JsonOptions);
+                    if (attrResponse?.Attributes is not null)
+                    {
+                        CacheMainboardId(baseUrl, attrResponse.MainboardID);
+                        SdcpAttributes attrs = attrResponse.Attributes;
+
+                        LogSdcp(LogLevel.Debug, "SDCP attributes parsed", requestId,
+                            new { operation = "GetAttributes", name = attrs.Name, model = attrs.MachineName, brand = attrs.BrandName, firmware = attrs.FirmwareVersion });
+
+                        try
+                        {
+                            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                        }
+                        catch
+                        {
+                            // best-effort close
+                        }
+
+                        return new StandardPrinterInfo
+                        {
+                            Name = attrs.Name ?? string.Empty,
+                            Model = attrs.MachineName ?? string.Empty,
+                            Firmware = attrs.FirmwareVersion ?? string.Empty,
+                            BackendVersion = attrs.ProtocolVersion,
+                            ApiVersion = attrs.ProtocolVersion
+                        };
+                    }
+
+                    // Not the attributes message (likely the ack); try reading the next one
+                    LogSdcp(LogLevel.Debug, "SDCP received non-attributes message, reading next", requestId,
+                        new { operation = "GetAttributes", attempt, responseLength = responseJson.Length });
+                }
+
+                // Exhausted attempts without getting attributes
+                try
+                {
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
+                }
+                catch
+                {
+                    // best-effort close
+                }
+
+                LogSdcp(LogLevel.Warning, "SDCP attributes not received after multiple reads", requestId,
+                    new { operation = "GetAttributes", wsUrl });
+                return new StandardPrinterInfo();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP get printer information failed", correlationId: null,
+                new { operation = "GetAttributes" }, ex);
+            return new StandardPrinterInfo();
+        }
     }
 }
 

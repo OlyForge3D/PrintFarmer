@@ -10,7 +10,7 @@ namespace Farm.Backend.Plugin.Sdcp;
 /// Supports printer status monitoring, job control, camera operations, and file management for Elegoo and other SDCP printers.
 /// Implements IDisposable to properly cleanup WebSocket connections.
 /// </summary>
-public interface ISdcpClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations, ISupportsHistory, ISupportsFileDelete, IDisposable
+public interface ISdcpClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint, ISupportsControlOperations, ISupportsHistory, ISupportsFileDelete, ISupportsPrinterInformation, IDisposable
 {
     /// <summary>
     /// Tests connectivity to an SDCP printer by opening a WebSocket and requesting a status payload.

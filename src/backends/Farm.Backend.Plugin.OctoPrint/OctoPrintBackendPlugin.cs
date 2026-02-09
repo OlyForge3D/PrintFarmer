@@ -97,6 +97,7 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
             typeof(ISupportsFileList),
             typeof(ISupportsFileDownload),
             typeof(ISupportsFileUpload),
+            typeof(ISupportsFileDelete),
             typeof(ISupportsStartPrint),
             typeof(ISupportsHistory),
             typeof(ISupportsTemperatureControl),

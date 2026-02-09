@@ -12,7 +12,7 @@ namespace Farm.Backend.Plugin.OctoPrint
     /// Interface for OctoPrint client providing communication with OctoPrint 3D printer management servers.
     /// Supports printer status monitoring, job control, file management, temperature control, and system operations.
     /// </summary>
-    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload, ISupportsControlOperations
+    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload, ISupportsFileDelete, ISupportsControlOperations
     {
         /// <summary>
         /// Tests the connection to an OctoPrint server.

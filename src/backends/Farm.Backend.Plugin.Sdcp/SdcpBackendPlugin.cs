@@ -102,7 +102,8 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
             typeof(ISupportsControlOperations),
             typeof(ISupportsCamera),
             typeof(ISupportsHistory),
-            typeof(ISupportsFileDelete)
+            typeof(ISupportsFileDelete),
+            typeof(ISupportsPrinterInformation)
         };
     }
 

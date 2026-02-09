@@ -461,6 +461,12 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                     case BackendCapabilities.PrinterInformation:
                         implementsRequiredInterface = client is ISupportsPrinterInformation;
                         break;
+                    case BackendCapabilities.History:
+                        implementsRequiredInterface = client is ISupportsHistory;
+                        break;
+                    case BackendCapabilities.FileDelete:
+                        implementsRequiredInterface = client is ISupportsFileDelete;
+                        break;
                 }
 
                 _logger.LogWarning(

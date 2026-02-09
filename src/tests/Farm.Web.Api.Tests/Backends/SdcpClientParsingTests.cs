@@ -114,7 +114,7 @@ public sealed class SdcpClientParsingTests
         string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
         string detailResponse = BuildHistoryDetailResponse(
             ack: 0, taskId: taskId, filename: "benchy.gcode",
-            status: 0, startTime: 1700000000, endTime: 1700003600);
+            status: 1, startTime: 1700000000, endTime: 1700003600);
 
         await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
         {
@@ -148,7 +148,7 @@ public sealed class SdcpClientParsingTests
         string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
         string detailResponse = BuildHistoryDetailResponse(
             ack: 0, taskId: taskId, filename: "failed.gcode",
-            status: 1, startTime: 1700000000, endTime: 1700001800);
+            status: 3, startTime: 1700000000, endTime: 1700001800);
 
         await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
         {
@@ -250,8 +250,8 @@ public sealed class SdcpClientParsingTests
 
         var details = new Dictionary<string, string>
         {
-            ["task-a"] = BuildHistoryDetailResponse(0, "task-a", "a.gcode", 0, 1700000000, 1700001000),
-            ["task-b"] = BuildHistoryDetailResponse(0, "task-b", "b.gcode", 1, 1700002000, 1700002500),
+            ["task-a"] = BuildHistoryDetailResponse(0, "task-a", "a.gcode", 1, 1700000000, 1700001000),
+            ["task-b"] = BuildHistoryDetailResponse(0, "task-b", "b.gcode", 3, 1700002000, 1700002500),
             ["task-c"] = BuildHistoryDetailResponse(0, "task-c", "c.gcode", 2, 1700003000, 1700003100),
         };
 
@@ -276,7 +276,7 @@ public sealed class SdcpClientParsingTests
         string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
         string detailResponse = BuildHistoryDetailResponse(
             ack: 0, taskId: taskId, filename: "inprogress.gcode",
-            status: 0, startTime: 1700000000, endTime: 0);
+            status: 1, startTime: 1700000000, endTime: 0);
 
         await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
         {
@@ -307,13 +307,19 @@ public sealed class SdcpClientParsingTests
                 Data = new
                 {
                     Ack = 0,
-                    TaskId = taskId,
-                    Filename = "extras.gcode",
-                    Status = 0,
-                    StartTime = 1700000000.0,
-                    EndTime = 1700001000.0,
-                    SomeUnknownField = "should be ignored",
-                    AnotherField = 42
+                    HistoryDetailList = new[]
+                    {
+                        new
+                        {
+                            TaskId = taskId,
+                            TaskName = "extras.gcode",
+                            TaskStatus = 1,
+                            BeginTime = 1700000000.0,
+                            EndTime = 1700001000.0,
+                            SomeUnknownField = "should be ignored",
+                            AnotherField = 42
+                        }
+                    }
                 },
                 RequestID = "req-1",
                 MainboardID = "mb-1",
@@ -349,8 +355,8 @@ public sealed class SdcpClientParsingTests
         // task-new: started at Jun 1, 2024 (unix 1717200000)
         var details = new Dictionary<string, string>
         {
-            ["task-old"] = BuildHistoryDetailResponse(0, "task-old", "old.gcode", 0, 1704067200, 1704070800),
-            ["task-new"] = BuildHistoryDetailResponse(0, "task-new", "new.gcode", 0, 1717200000, 1717203600),
+            ["task-old"] = BuildHistoryDetailResponse(0, "task-old", "old.gcode", 1, 1704067200, 1704070800),
+            ["task-new"] = BuildHistoryDetailResponse(0, "task-new", "new.gcode", 1, 1717200000, 1717203600),
         };
 
         await using var env = await CreateSdcpHistoryServer(idsResponse, details);
@@ -513,7 +519,7 @@ public sealed class SdcpClientParsingTests
                 Data = new
                 {
                     Ack = ack,
-                    TaskIdList = taskIds
+                    HistoryData = taskIds
                 },
                 RequestID = "req-ids",
                 MainboardID = "mb-1",
@@ -535,11 +541,20 @@ public sealed class SdcpClientParsingTests
                 Data = new
                 {
                     Ack = ack,
-                    TaskId = taskId,
-                    Filename = filename,
-                    Status = status,
-                    StartTime = startTime,
-                    EndTime = endTime
+                    HistoryDetailList = new[]
+                    {
+                        new
+                        {
+                            TaskId = taskId,
+                            TaskName = filename,
+                            TaskStatus = status,
+                            BeginTime = startTime,
+                            EndTime = endTime,
+                            Thumbnail = (string?)null,
+                            AlreadyPrintLayer = 0,
+                            ErrorStatusReason = 0
+                        }
+                    }
                 },
                 RequestID = "req-detail",
                 MainboardID = "mb-1",
@@ -679,18 +694,22 @@ public sealed class SdcpClientParsingTests
     }
 
     /// <summary>
-    /// Extracts the TaskId from a Cmd 321 request JSON.
+    /// Extracts the first task ID from a Cmd 321 request JSON (Id array).
     /// </summary>
     private static string? ExtractTaskIdFromRequest(string json)
     {
         try
         {
             using JsonDocument doc = JsonDocument.Parse(json);
-            return doc.RootElement
+            var idArray = doc.RootElement
                 .GetProperty("Data")
                 .GetProperty("Data")
-                .GetProperty("TaskId")
-                .GetString();
+                .GetProperty("Id");
+            if (idArray.GetArrayLength() > 0)
+            {
+                return idArray[0].GetString();
+            }
+            return null;
         }
         catch
         {

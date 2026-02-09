@@ -18,6 +18,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
+    ISupportsFileDelete,
     ISupportsCamera,
     ISupportsPrinterInformation,
     ISupportsHistory,
@@ -1900,4 +1901,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
         => await CancelJobAsync(baseUrl, credential);
+
+    async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
+        => await DeleteFileAsync(baseUrl, credential, filePath);
 }

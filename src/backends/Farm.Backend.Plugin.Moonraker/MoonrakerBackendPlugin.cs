@@ -114,7 +114,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             "ISupportsControlOperations",
             "ISupportsCamera",
             "ISupportsFileMetadata",
-            "ISupportsPrinterInformation"
+            "ISupportsPrinterInformation",
+            "ISupportsFileDelete"
         };
 
         return capabilityNames

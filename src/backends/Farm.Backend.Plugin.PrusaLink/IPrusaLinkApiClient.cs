@@ -75,4 +75,8 @@ public interface IPrusaLinkApiClient
 
     /// <summary>Homes specified axes via legacy /api/printer/printhead endpoint (requires digest auth).</summary>
     Task<bool> HomePrintHeadLegacyAsync(string baseUrl, bool homeX, bool homeY, bool homeZ, PrinterCredential? credentials, CancellationToken ct = default);
+
+    /// <summary>Deletes a file from the printer's storage via PrusaLink API v1.</summary>
+    Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
+        bool force = false, CancellationToken ct = default);
 }

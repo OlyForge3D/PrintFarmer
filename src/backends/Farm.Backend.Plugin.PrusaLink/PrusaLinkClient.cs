@@ -14,6 +14,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFileList,
     ISupportsFileUpload,
+    ISupportsFileDelete,
     ISupportsStartPrint,
     ISupportsCamera,
     ISupportsPrinterInformation,
@@ -681,6 +682,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
     async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
         => await UploadGcodeAsync(baseUrl, fileName, fileContent, credential, ct);
+
+    async Task<bool> ISupportsFileDelete.DeleteFileAsync(string baseUrl, string filePath, PrinterCredential? credential, CancellationToken ct)
+        => await _apiClient.DeleteFileAsync(baseUrl, "/local/", filePath.TrimStart('/'), credential, force: false, ct);
 
     async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
         => await StartPrintAsync(baseUrl, fileName, credential, ct);
