@@ -1306,14 +1306,12 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
-        return Task.FromResult<string?>(null);
+        return GetCameraUrlAsync(baseUrl, ct);
     }
 
     Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
-        return Task.FromResult<string?>(null);
+        return GetCameraSnapshotUrlAsync(baseUrl, ct);
     }
 }
 
