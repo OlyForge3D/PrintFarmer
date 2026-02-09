@@ -292,6 +292,9 @@ public class SdcpHistoryDetail
 
 public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
+    ISupportsFileUpload,
+    ISupportsStartPrint,
+    ISupportsControlOperations,
     ISupportsCamera,
     ISupportsHistory
 {
@@ -922,50 +925,50 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
     }
 
-    // Print control methods
-    public async Task<bool> StartPrintAsync(string baseUrl, string filename, CancellationToken ct = default)
+    // Print control methods (ISupportsStartPrint + ISupportsControlOperations)
+    public async Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = filename, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
+        return await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint, new { Filename = fileName, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 }, ct);
     }
 
-    public Task<bool> StartPrintAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        ArgumentNullException.ThrowIfNull(filename);
-        return StartPrintAsync(baseUrl.ToString(), filename, ct);
+        ArgumentNullException.ThrowIfNull(fileName);
+        return StartPrintAsync(baseUrl.ToString(), fileName, credential, ct);
     }
 
-    public async Task<bool> PausePrintAsync(string baseUrl, CancellationToken ct = default)
+    public async Task<bool> PauseAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, SdcpCommandIds.PausePrint, new { }, ct);
     }
 
-    public Task<bool> PausePrintAsync(Uri baseUrl, CancellationToken ct = default)
+    public Task<bool> PauseAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return PausePrintAsync(baseUrl.ToString(), ct);
+        return PauseAsync(baseUrl.ToString(), credential, ct);
     }
 
-    public async Task<bool> CancelPrintAsync(string baseUrl, CancellationToken ct = default)
+    public async Task<bool> CancelAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, SdcpCommandIds.CancelPrint, new { }, ct);
     }
 
-    public Task<bool> CancelPrintAsync(Uri baseUrl, CancellationToken ct = default)
+    public Task<bool> CancelAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return CancelPrintAsync(baseUrl.ToString(), ct);
+        return CancelAsync(baseUrl.ToString(), credential, ct);
     }
 
-    public async Task<bool> ResumePrintAsync(string baseUrl, CancellationToken ct = default)
+    public async Task<bool> ResumeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         return await SendCommandAsync(baseUrl, SdcpCommandIds.ResumePrint, new { }, ct);
     }
 
-    public Task<bool> ResumePrintAsync(Uri baseUrl, CancellationToken ct = default)
+    public Task<bool> ResumeAsync(Uri baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
-        return ResumePrintAsync(baseUrl.ToString(), ct);
+        return ResumeAsync(baseUrl.ToString(), credential, ct);
     }
 
     // Camera control methods
@@ -1265,7 +1268,7 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
     }
 
     // File upload and management methods
-    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         try
         {
@@ -1361,12 +1364,12 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         }
     }
 
-    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, CancellationToken ct = default)
+    public Task<bool> UploadGcodeAsync(Uri baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         ArgumentNullException.ThrowIfNull(fileName);
         ArgumentNullException.ThrowIfNull(fileContent);
-        return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, ct);
+        return UploadGcodeAsync(baseUrl.ToString(), fileName, fileContent, credential, ct);
     }
 
     public void Dispose()

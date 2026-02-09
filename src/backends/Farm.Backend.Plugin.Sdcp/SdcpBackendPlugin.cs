@@ -97,6 +97,10 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
         return new[]
         {
             typeof(ISupportsFileList),
+            typeof(ISupportsFileUpload),
+            typeof(ISupportsStartPrint),
+            typeof(ISupportsControlOperations),
+            typeof(ISupportsCamera),
             typeof(ISupportsHistory)
         };
     }
