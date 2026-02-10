@@ -106,6 +106,19 @@ public class SpoolmanController(
         => Ok(await spoolman.ListSpoolsAsync(ct));
 
     /// <summary>
+    /// Gets all filament types (product definitions) from the connected Spoolman server.
+    /// Filaments represent the product class (e.g., "PolyTerra PLA Charcoal Black"),
+    /// while spools represent physical instances.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>List of all filament types from Spoolman</returns>
+    /// <response code="200">Returns the list of filament types</response>
+    [HttpGet("filaments")]
+    [ProducesResponseType(typeof(IEnumerable<SpoolmanFilamentDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<SpoolmanFilamentDto>>> GetFilamentsAsync(CancellationToken ct)
+        => Ok(await spoolman.ListFilamentsAsync(ct));
+
+    /// <summary>
     /// Performs a lightweight health probe against the configured Spoolman instance.
     /// Returns basic status information (success flag and optional message) without enumerating all spools.
     /// </summary>

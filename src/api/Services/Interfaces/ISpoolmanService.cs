@@ -40,6 +40,23 @@ public interface ISpoolmanService
     Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Gets a list of all filament types (product definitions) from the configured Spoolman server.
+    /// Filaments represent the product/class (e.g., "PolyTerra PLA Charcoal Black"),
+    /// while spools represent physical instances of a filament.
+    /// </summary>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing a read-only list of all filament types</returns>
+    Task<IReadOnlyList<SpoolmanFilamentDto>> ListFilamentsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets a specific filament type by its ID from the configured Spoolman server.
+    /// </summary>
+    /// <param name="filamentId">The unique identifier of the filament type to retrieve</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the filament information, or null if not found</returns>
+    Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
     /// Gets detailed information about a specific filament spool by its ID.
     /// </summary>
     /// <param name="spoolId">The unique identifier of the spool to retrieve</param>

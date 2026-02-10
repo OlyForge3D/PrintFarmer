@@ -24,10 +24,10 @@ public class PrintProjectFile
     public GcodeFile? GcodeFile { get; set; }
 
     /// <summary>
-    /// Optional Spoolman spool ID for filament assignment.
-    /// Links this file to a specific spool in the Spoolman inventory.
+    /// Optional Spoolman filament ID for filament type assignment.
+    /// Links this file to a specific filament product in the Spoolman inventory.
     /// </summary>
-    public int? SpoolmanSpoolId { get; set; }
+    public int? SpoolmanFilamentId { get; set; }
 
     /// <summary>
     /// Optional material requirement override (e.g., "PLA", "ABS").

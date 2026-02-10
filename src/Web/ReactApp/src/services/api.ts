@@ -67,6 +67,7 @@ import {
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
+  SpoolmanFilament,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -2340,6 +2341,15 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/spools');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanSpool[] || [];
+  }
+
+  /**
+   * Get filament types/products from Spoolman (product definitions, not physical spools)
+   */
+  async getFilaments(): Promise<SpoolmanFilament[]> {
+    const response = await this.client.get('/spoolman/filaments');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
   }
 
   // ============ Settings API methods ============

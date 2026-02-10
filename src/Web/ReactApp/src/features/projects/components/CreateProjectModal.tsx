@@ -18,7 +18,7 @@ import type {
   PrintProjectDetailDto,
   PrintProjectStatus,
   PrintProjectTemplateListDto,
-  SpoolmanSpool,
+  SpoolmanFilament,
 } from '@/types/api';
 
 interface CreateProjectModalProps {
@@ -52,8 +52,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [fileSearch, setFileSearch] = useState('');
   // Cache gcode file metadata so it persists after picker closes
   const [gcodeFileCache, setGcodeFileCache] = useState<Record<string, GcodeFile>>({});
-  // Track which spool is assigned to each file (keyed by gcodeFileId)
-  const [spoolAssignments, setSpoolAssignments] = useState<Record<string, number>>({});
+  // Track which filament is assigned to each file (keyed by gcodeFileId)
+  const [filamentAssignments, setFilamentAssignments] = useState<Record<string, number>>({});
 
   // Initialize form when modal opens
   useEffect(() => {
@@ -88,13 +88,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           notes: f.notes || undefined,
         });
 
-        if (f.spoolmanSpoolId) {
-          assignments[f.gcodeFileId] = f.spoolmanSpoolId;
+        if (f.spoolmanFilamentId) {
+          assignments[f.gcodeFileId] = f.spoolmanFilamentId;
         }
       }
 
       setGcodeFileCache(cache);
-      setSpoolAssignments(assignments);
+      setFilamentAssignments(assignments);
       setSelectedFiles(files);
     } else if (initialFileIds.length > 0) {
       // Create mode with pre-selected files
@@ -128,21 +128,21 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     staleTime: 30 * 1000,
   });
 
-  // Fetch available spools from Spoolman
-  const { data: spools = [] } = useQuery({
-    queryKey: ['spoolman-spools-for-project'],
-    queryFn: () => apiClient.getSpools(),
+  // Fetch available filaments from Spoolman
+  const { data: filaments = [] } = useQuery({
+    queryKey: ['spoolman-filaments-for-project'],
+    queryFn: () => apiClient.getFilaments(),
     staleTime: 60 * 1000,
   });
 
-  // Index spools by ID for quick lookup
-  const spoolsById = useMemo(() => {
-    const map = new Map<number, SpoolmanSpool>();
-    for (const spool of spools) {
-      map.set(spool.id, spool);
+  // Index filaments by ID for quick lookup
+  const filamentsById = useMemo(() => {
+    const map = new Map<number, SpoolmanFilament>();
+    for (const filament of filaments) {
+      map.set(filament.id, filament);
     }
     return map;
-  }, [spools]);
+  }, [filaments]);
 
   // Create project mutation
   const createMutation = useMutation({
@@ -184,7 +184,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         if (!originalMap.has(file.gcodeFileId)) {
           await projectService.addFileToProject(editProject.id, {
             ...file,
-            spoolmanSpoolId: spoolAssignments[file.gcodeFileId] ?? undefined,
+            spoolmanFilamentId: filamentAssignments[file.gcodeFileId] ?? undefined,
           });
         }
       }
@@ -194,15 +194,15 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         const orig = originalMap.get(file.gcodeFileId);
         if (!orig) continue; // new file, already handled above
 
-        const newSpoolId = spoolAssignments[file.gcodeFileId] ?? null;
+        const newFilamentId = filamentAssignments[file.gcodeFileId] ?? null;
         const changed =
           file.printCount !== orig.printCount ||
-          newSpoolId !== orig.spoolmanSpoolId ||
+          newFilamentId !== orig.spoolmanFilamentId ||
           (file.materialRequirement || null) !== (orig.materialRequirement || null);
 
         if (changed) {
           await projectService.updateProjectFile(editProject.id, orig.id, {
-            spoolmanSpoolId: newSpoolId,
+            spoolmanFilamentId: newFilamentId,
             printCount: file.printCount,
             materialRequirement: file.materialRequirement,
           });
@@ -229,7 +229,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setShowFilePicker(false);
     setFileSearch('');
     setGcodeFileCache({});
-    setSpoolAssignments({});
+    setFilamentAssignments({});
   };
 
   const handleTemplateChange = async (templateId: string) => {
@@ -270,10 +270,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       return;
     }
 
-    // Merge spool assignments into the file requests
-    const filesWithSpools = selectedFiles.map(f => ({
+    // Merge filament assignments into the file requests
+    const filesWithFilaments = selectedFiles.map(f => ({
       ...f,
-      spoolmanSpoolId: spoolAssignments[f.gcodeFileId] ?? undefined,
+      spoolmanFilamentId: filamentAssignments[f.gcodeFileId] ?? undefined,
     }));
 
     const request: CreatePrintProjectRequest = {
@@ -282,7 +282,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       priority,
       dueDate: dueDate || undefined,
       notes: notes.trim() || undefined,
-      files: filesWithSpools.length > 0 ? filesWithSpools : undefined,
+      files: filesWithFilaments.length > 0 ? filesWithFilaments : undefined,
     };
 
     createMutation.mutate(request);
@@ -517,7 +517,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   <tr className="border-b border-pf-border bg-pf-bg-2">
                     <th className="px-3 py-2 text-left font-medium text-pf-text-primary">File</th>
                     <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Material</th>
-                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Spool</th>
+                    <th className="px-3 py-2 text-left font-medium text-pf-text-primary">Filament</th>
                     <th className="px-3 py-2 text-center font-medium text-pf-text-primary w-16">Qty</th>
                     <th className="px-3 py-2 text-right font-medium text-pf-text-primary w-24">Est. Cost</th>
                     <th className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
@@ -529,10 +529,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                       || gcodeFileCache[file.gcodeFileId];
                     const fileName = gcodeFile?.name || gcodeFile?.fileName || file.gcodeFileId;
                     const material = gcodeFile?.extractedMaterial || file.materialRequirement || '—';
-                    const assignedSpoolId = spoolAssignments[file.gcodeFileId];
-                    const assignedSpool = assignedSpoolId ? spoolsById.get(assignedSpoolId) : undefined;
+                    const assignedFilamentId = filamentAssignments[file.gcodeFileId];
+                    const assignedFilament = assignedFilamentId ? filamentsById.get(assignedFilamentId) : undefined;
                     const filamentLengthMm = gcodeFile?.extractedFilamentLength;
-                    const estimatedCost = computeEstimatedCost(assignedSpool, filamentLengthMm, file.printCount);
+                    const estimatedCost = computeEstimatedCost(assignedFilament, filamentLengthMm, file.printCount);
 
                     return (
                       <tr key={file.gcodeFileId}>
@@ -561,27 +561,27 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                           {material}
                         </td>
 
-                        {/* Spool selector */}
+                        {/* Filament selector */}
                         <td className="px-3 py-2">
-                          <SpoolSelector
-                            spools={spools}
+                          <FilamentSelector
+                            filaments={filaments}
                             materialFilter={gcodeFile?.extractedMaterial || undefined}
-                            selectedSpoolId={assignedSpoolId}
-                            onChange={(spoolId) => {
-                              setSpoolAssignments(prev => {
+                            selectedFilamentId={assignedFilamentId}
+                            onChange={(filamentId) => {
+                              setFilamentAssignments(prev => {
                                 const next = { ...prev };
-                                if (spoolId) {
-                                  next[file.gcodeFileId] = spoolId;
+                                if (filamentId) {
+                                  next[file.gcodeFileId] = filamentId;
                                 } else {
                                   delete next[file.gcodeFileId];
                                 }
                                 return next;
                               });
-                              // Auto-fill material requirement from spool
-                              if (spoolId) {
-                                const spool = spoolsById.get(spoolId);
-                                if (spool?.material) {
-                                  updateFileSettings(file.gcodeFileId, { materialRequirement: spool.material });
+                              // Auto-fill material requirement from filament
+                              if (filamentId) {
+                                const filament = filamentsById.get(filamentId);
+                                if (filament?.material) {
+                                  updateFileSettings(file.gcodeFileId, { materialRequirement: filament.material });
                                 }
                               }
                             }}
@@ -648,92 +648,76 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 };
 
 /**
- * Estimate material cost from spool price and gcode filament usage.
- * Uses filament length (mm) and spool weight/length to derive per-unit cost.
+ * Estimate material cost from filament price and gcode filament usage.
+ * Uses filament length (mm) and filament weight to derive per-unit cost.
  */
 function computeEstimatedCost(
-  spool: SpoolmanSpool | undefined,
+  filament: SpoolmanFilament | undefined,
   filamentLengthMm: number | undefined,
   printCount: number | undefined,
 ): number | null {
-  if (!spool?.price || !filamentLengthMm || filamentLengthMm <= 0) return null;
+  if (!filament?.price || !filamentLengthMm || filamentLengthMm <= 0) return null;
   const count = Math.max(1, printCount ?? 1);
 
-  // If spool has remaining/used length data, use total length for cost-per-mm
-  // Total spool length ≈ remaining + used (or estimate from initial weight assuming ~1.24 g/cm³ PLA density, 1.75mm dia → ~2.98 g/m)
-  let totalLengthMm: number | null = null;
-  if (spool.remainingLengthMm && spool.usedLengthMm) {
-    totalLengthMm = spool.remainingLengthMm + spool.usedLengthMm;
-  } else if (spool.remainingLengthMm && spool.initialWeightG && spool.remainingWeightG && spool.remainingWeightG > 0) {
-    // Estimate total length from weight ratio
-    totalLengthMm = spool.remainingLengthMm * (spool.initialWeightG / spool.remainingWeightG);
-  }
-
-  if (totalLengthMm && totalLengthMm > 0) {
-    const costPerMm = spool.price / totalLengthMm;
-    return costPerMm * filamentLengthMm * count;
-  }
-
-  // Fallback: if we have initial weight, estimate using standard 1.75mm filament density
-  // ~2.98 g/m for PLA (conservative estimate works for most materials)
-  if (spool.initialWeightG && spool.initialWeightG > 0) {
+  // Use filament weight (g per spool) to estimate total length
+  // Standard 1.75mm diameter filament density ~2.98 g/m for PLA
+  const weight = filament.weight; // grams per spool
+  if (weight && weight > 0) {
     const gramsPerMeter = 2.98; // approximate for 1.75mm filament
-    const totalLengthM = spool.initialWeightG / gramsPerMeter;
-    const totalLengthEstMm = totalLengthM * 1000;
-    const costPerMm = spool.price / totalLengthEstMm;
+    const totalLengthM = weight / gramsPerMeter;
+    const totalLengthMm = totalLengthM * 1000;
+    const costPerMm = filament.price / totalLengthMm;
     return costPerMm * filamentLengthMm * count;
   }
 
   return null;
 }
 
-/** Compact spool selector with color swatch, filtered by material type */
-interface SpoolSelectorProps {
-  spools: SpoolmanSpool[];
-  /** When set, spools are filtered to match this material (case-insensitive). */
+/** Compact filament selector with color swatch, filtered by material type */
+interface FilamentSelectorProps {
+  filaments: SpoolmanFilament[];
+  /** When set, filaments are filtered to match this material (case-insensitive). */
   materialFilter?: string;
-  selectedSpoolId?: number;
-  onChange: (spoolId: number | null) => void;
+  selectedFilamentId?: number;
+  onChange: (filamentId: number | null) => void;
 }
 
-const SpoolSelector: React.FC<SpoolSelectorProps> = ({ spools, materialFilter, selectedSpoolId, onChange }) => {
-  const selectedSpool = selectedSpoolId ? spools.find(s => s.id === selectedSpoolId) : undefined;
+const FilamentSelector: React.FC<FilamentSelectorProps> = ({ filaments, materialFilter, selectedFilamentId, onChange }) => {
+  const selectedFilament = selectedFilamentId ? filaments.find(f => f.id === selectedFilamentId) : undefined;
 
-  // Only show non-archived spools with remaining material, filtered by material type
-  const availableSpools = useMemo(() => {
-    const base = spools.filter(s => !s.archived && s.remainingWeightG !== 0);
-    if (!materialFilter) return base;
+  // Filter filaments by material type
+  const availableFilaments = useMemo(() => {
+    if (!materialFilter) return filaments;
     const needle = materialFilter.toLowerCase();
-    return base.filter(s => s.material?.toLowerCase() === needle);
-  }, [spools, materialFilter]);
+    return filaments.filter(f => f.material?.toLowerCase() === needle);
+  }, [filaments, materialFilter]);
 
-  if (availableSpools.length === 0) {
-    return <span className="text-xs text-pf-text-tertiary italic">No spools</span>;
+  if (availableFilaments.length === 0) {
+    return <span className="text-xs text-pf-text-tertiary italic">No filaments</span>;
   }
 
   return (
     <div className="flex items-center gap-1.5">
-      {selectedSpool?.colorHex && (
+      {selectedFilament?.colorHex && (
         <ColorSwatch
-          color={`#${selectedSpool.colorHex.replace('#', '')}`}
-          label={selectedSpool.material}
+          color={`#${selectedFilament.colorHex.replace('#', '')}`}
+          label={selectedFilament.material ?? undefined}
           className="shrink-0"
         />
       )}
       <Select
-        value={selectedSpoolId ?? ''}
+        value={selectedFilamentId ?? ''}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
         className="bg-pf-bg-2 border-pf-border rounded !px-2 !py-1 !text-xs !w-auto"
         containerClassName="!w-auto"
-        title="Assign filament spool"
+        title="Assign filament type"
       >
         <option value="">— None —</option>
-        {availableSpools.map(spool => (
-          <option key={spool.id} value={spool.id}>
-            {spool.filamentName || spool.name}
-            {spool.material ? ` (${spool.material})` : ''}
-            {spool.vendor ? ` — ${spool.vendor}` : ''}
-            {spool.remainingPercent != null ? ` [${Math.round(spool.remainingPercent)}%]` : ''}
+        {availableFilaments.map(filament => (
+          <option key={filament.id} value={filament.id}>
+            {filament.name ?? 'Unnamed'}
+            {filament.material ? ` (${filament.material})` : ''}
+            {filament.vendor ? ` — ${filament.vendor}` : ''}
           </option>
         ))}
       </Select>

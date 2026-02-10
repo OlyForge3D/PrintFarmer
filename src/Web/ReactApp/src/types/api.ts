@@ -2098,7 +2098,7 @@ export interface PrintProjectFileDto {
   gcodeFileId: string;
   fileName: string;
   thumbnailUrl?: string;
-  spoolmanSpoolId?: number | null;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount: number;
   printedCount: number;
@@ -2148,7 +2148,7 @@ export interface UpdatePrintProjectRequest {
  */
 export interface AddFileToProjectRequest {
   gcodeFileId: string;
-  spoolmanSpoolId?: number | null;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
@@ -2158,7 +2158,7 @@ export interface AddFileToProjectRequest {
  * Request to update a file within a project
  */
 export interface UpdateProjectFileRequest {
-  spoolmanSpoolId?: number | null;
+  spoolmanFilamentId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   printedCount?: number;
@@ -2311,4 +2311,28 @@ export interface SpoolmanSpool {
   usedPercent?: number | null;
   remainingPercent?: number | null;
   price?: number | null;
+}
+
+/**
+ * Spoolman filament type/product definition (matches backend SpoolmanFilamentDto).
+ * Represents the filament product class (e.g., "PolyTerra PLA Charcoal Black"),
+ * not a physical spool instance.
+ */
+export interface SpoolmanFilament {
+  id: number;
+  name?: string | null;
+  material?: string | null;
+  colorHex?: string | null;
+  vendor?: string | null;
+  density?: number | null;
+  diameter?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  price?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  articleNumber?: string | null;
+  comment?: string | null;
+  multiColorHexes?: string | null;
+  externalId?: string | null;
 }

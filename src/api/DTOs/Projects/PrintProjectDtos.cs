@@ -65,7 +65,7 @@ public record PrintProjectFileDto(
     Guid GcodeFileId,
     string FileName,
     string? ThumbnailUrl,
-    int? SpoolmanSpoolId,
+    int? SpoolmanFilamentId,
     string? MaterialRequirement,
     int PrintCount,
     int PrintedCount,
@@ -128,7 +128,7 @@ public record UpdatePrintProjectRequest(
 /// </summary>
 public record AddFileToProjectRequest(
     Guid GcodeFileId,
-    int? SpoolmanSpoolId = null,
+    int? SpoolmanFilamentId = null,
     string? MaterialRequirement = null,
     int PrintCount = 1,
     string? Notes = null);
@@ -137,7 +137,7 @@ public record AddFileToProjectRequest(
 /// Request to update a file within a project.
 /// </summary>
 public record UpdateProjectFileRequest(
-    int? SpoolmanSpoolId = null,
+    int? SpoolmanFilamentId = null,
     string? MaterialRequirement = null,
     int? PrintCount = null,
     int? PrintedCount = null,

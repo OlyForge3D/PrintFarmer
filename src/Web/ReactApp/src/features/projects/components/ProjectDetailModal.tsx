@@ -16,7 +16,7 @@ import type {
   PrintProjectFileDto,
   PrintProjectStatus,
   PrintProjectFileStatus,
-  SpoolmanSpool,
+  SpoolmanFilament,
   QueueProjectRequest,
   QueueProjectResultDto,
 } from '@/types/api';
@@ -65,23 +65,23 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const [showQueueConfirm, setShowQueueConfirm] = useState(false);
   const [queueResult, setQueueResult] = useState<QueueProjectResultDto | null>(null);
 
-  // Fetch Spoolman spools for filament display
-  const { data: spools } = useQuery({
-    queryKey: ['spoolman-spools-project-detail'],
-    queryFn: () => apiClient.getSpools(),
+  // Fetch Spoolman filaments for display
+  const { data: filaments } = useQuery({
+    queryKey: ['spoolman-filaments-project-detail'],
+    queryFn: () => apiClient.getFilaments(),
     staleTime: 60_000,
   });
 
-  // Build spool lookup map
-  const spoolMap = React.useMemo(() => {
-    const map = new Map<number, SpoolmanSpool>();
-    if (spools) {
-      for (const spool of spools) {
-        map.set(spool.id, spool);
+  // Build filament lookup map
+  const filamentMap = React.useMemo(() => {
+    const map = new Map<number, SpoolmanFilament>();
+    if (filaments) {
+      for (const filament of filaments) {
+        map.set(filament.id, filament);
       }
     }
     return map;
-  }, [spools]);
+  }, [filaments]);
 
   // Mark file as printed mutation
   const markPrintedMutation = useMutation({
@@ -274,7 +274,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 <FileRow
                   key={file.id}
                   file={file}
-                  spool={file.spoolmanSpoolId ? spoolMap.get(file.spoolmanSpoolId) : undefined}
+                  filament={file.spoolmanFilamentId ? filamentMap.get(file.spoolmanFilamentId) : undefined}
                   onMarkPrinted={() => handleMarkPrinted(file.id)}
                   onRemove={() => handleRemoveFile(file.id)}
                   isMarkingPrinted={markPrintedMutation.isPending}
@@ -350,7 +350,7 @@ const ProjectInfo: React.FC<{ project: PrintProjectDetailDto; totalEstimatedMinu
 // File row component
 interface FileRowProps {
   file: PrintProjectFileDto;
-  spool?: SpoolmanSpool;
+  filament?: SpoolmanFilament;
   onMarkPrinted: () => void;
   onRemove: () => void;
   isMarkingPrinted: boolean;
@@ -358,7 +358,7 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   file,
-  spool,
+  filament,
   onMarkPrinted,
   onRemove,
   isMarkingPrinted,
@@ -399,27 +399,27 @@ const FileRow: React.FC<FileRowProps> = ({
           </Badge>
         )}
         {/* Spoolman filament info with color swatch */}
-        {spool ? (
+        {filament ? (
           <span className="inline-flex items-center gap-1 text-xs text-pf-text-secondary">
-            {spool.colorHex && (
+            {filament.colorHex && (
               <span
                 className="inline-block w-3 h-3 rounded-full border border-pf-border"
-                style={{ backgroundColor: spool.colorHex }}
-                title={spool.colorHex}
+                style={{ backgroundColor: `#${filament.colorHex.replace('#', '')}` }}
+                title={filament.colorHex}
                 role="img"
-                aria-label={`Filament color ${spool.colorHex}`}
+                aria-label={`Filament color ${filament.colorHex}`}
               />
             )}
-            <span className="truncate max-w-[140px]" title={`${spool.filamentName ?? spool.name}${spool.vendor ? ` (${spool.vendor})` : ''}`}>
-              {spool.filamentName ?? spool.name}
-              {spool.vendor ? ` · ${spool.vendor}` : ''}
+            <span className="truncate max-w-[140px]" title={`${filament.name ?? 'Unnamed'}${filament.vendor ? ` (${filament.vendor})` : ''}`}>
+              {filament.name ?? 'Unnamed'}
+              {filament.vendor ? ` · ${filament.vendor}` : ''}
             </span>
-            {spool.remainingWeightG != null && (
-              <span className="text-pf-text-tertiary">({Math.round(spool.remainingWeightG)}g left)</span>
+            {filament.material && (
+              <span className="text-pf-text-tertiary">({filament.material})</span>
             )}
           </span>
-        ) : file.spoolmanSpoolId ? (
-          <span className="text-xs text-pf-text-tertiary">Spool #{file.spoolmanSpoolId}</span>
+        ) : file.spoolmanFilamentId ? (
+          <span className="text-xs text-pf-text-tertiary">Filament #{file.spoolmanFilamentId}</span>
         ) : null}
         {/* Estimated print time */}
         {file.estimatedPrintTimeMinutes && file.estimatedPrintTimeMinutes > 0 && (

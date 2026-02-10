@@ -54,6 +54,6 @@ public class PrintProjectFileConfiguration : IEntityTypeConfiguration<PrintProje
         builder.HasIndex(pf => pf.PrintProjectId);
         builder.HasIndex(pf => pf.GcodeFileId);
         builder.HasIndex(pf => pf.Status);
-        builder.HasIndex(pf => pf.SpoolmanSpoolId);
+        builder.HasIndex(pf => pf.SpoolmanFilamentId);
     }
 }

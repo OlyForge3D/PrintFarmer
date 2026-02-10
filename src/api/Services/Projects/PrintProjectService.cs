@@ -113,7 +113,7 @@ public class PrintProjectService(
                     Id = Guid.NewGuid(),
                     PrintProjectId = project.Id,
                     GcodeFileId = fileRequest.GcodeFileId,
-                    SpoolmanSpoolId = fileRequest.SpoolmanSpoolId,
+                    SpoolmanFilamentId = fileRequest.SpoolmanFilamentId,
                     MaterialRequirement = fileRequest.MaterialRequirement,
                     PrintCount = Math.Max(1, fileRequest.PrintCount),
                     PrintedCount = 0,
@@ -241,7 +241,7 @@ public class PrintProjectService(
                 Id = Guid.NewGuid(),
                 PrintProjectId = projectId,
                 GcodeFileId = fileRequest.GcodeFileId,
-                SpoolmanSpoolId = fileRequest.SpoolmanSpoolId,
+                SpoolmanFilamentId = fileRequest.SpoolmanFilamentId,
                 MaterialRequirement = fileRequest.MaterialRequirement,
                 PrintCount = Math.Max(1, fileRequest.PrintCount),
                 PrintedCount = 0,
@@ -312,10 +312,10 @@ public class PrintProjectService(
 
         var now = DateTime.UtcNow;
 
-        if (request.SpoolmanSpoolId.HasValue)
+        if (request.SpoolmanFilamentId.HasValue)
         {
             // Allow clearing by sending 0 or by having a value
-            projectFile.SpoolmanSpoolId = request.SpoolmanSpoolId.Value == 0 ? null : request.SpoolmanSpoolId.Value;
+            projectFile.SpoolmanFilamentId = request.SpoolmanFilamentId.Value == 0 ? null : request.SpoolmanFilamentId.Value;
         }
 
         if (request.MaterialRequirement is not null)
@@ -438,23 +438,23 @@ public class PrintProjectService(
             return new QueueProjectResultDto(projectId, project.Name, 0, 0, 0, []);
         }
 
-        // Fetch Spoolman spool data for color grouping (best-effort)
-        Dictionary<int, SpoolmanSpoolDto> spoolLookup = [];
+        // Fetch Spoolman filament data for color grouping (best-effort)
+        Dictionary<int, SpoolmanFilamentDto> filamentLookup = [];
         if (request.GroupByColor)
         {
             try
             {
-                var spools = await spoolmanService.ListSpoolsAsync(ct);
-                spoolLookup = spools.ToDictionary(s => s.Id);
+                var filaments = await spoolmanService.ListFilamentsAsync(ct);
+                filamentLookup = filaments.ToDictionary(f => f.Id);
             }
             catch (Exception ex)
             {
-                logger.LogWarning($"Could not fetch Spoolman spools for project queue ordering: {ex.Message}");
+                logger.LogWarning($"Could not fetch Spoolman filaments for project queue ordering: {ex.Message}");
             }
         }
 
         // Smart ordering: group by material type, then by color
-        var orderedFiles = OrderFilesForPrinting(pendingFiles, spoolLookup, request.GroupByMaterial, request.GroupByColor);
+        var orderedFiles = OrderFilesForPrinting(pendingFiles, filamentLookup, request.GroupByMaterial, request.GroupByColor);
 
         var queuedFiles = new List<QueuedProjectFileDto>();
         var queueOrder = 0;
@@ -468,9 +468,9 @@ public class PrintProjectService(
             {
                 var materialType = file.MaterialRequirement ?? file.GcodeFile?.RequiredMaterial;
                 string? colorHex = null;
-                if (file.SpoolmanSpoolId.HasValue && spoolLookup.TryGetValue(file.SpoolmanSpoolId.Value, out var spool))
+                if (file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filament))
                 {
-                    colorHex = spool.ColorHex;
+                    colorHex = filament.ColorHex;
                 }
 
                 var queueRequest = new QueuePrintJobDto
@@ -534,7 +534,7 @@ public class PrintProjectService(
     /// </summary>
     private static List<PrintProjectFile> OrderFilesForPrinting(
         List<PrintProjectFile> files,
-        Dictionary<int, SpoolmanSpoolDto> spoolLookup,
+        Dictionary<int, SpoolmanFilamentDto> filamentLookup,
         bool groupByMaterial,
         bool groupByColor)
     {
@@ -542,14 +542,15 @@ public class PrintProjectService(
 
         if (groupByMaterial && groupByColor)
         {
-            // Primary: material type, Secondary: color (spool color hex), Tertiary: sort order
+            // Primary: material type, Secondary: color (filament color hex), Tertiary: sort order
             ordered = files.OrderBy(f => f.MaterialRequirement ?? f.GcodeFile?.RequiredMaterial ?? "zzz")
                 .ThenBy(f =>
                 {
-                    if (f.SpoolmanSpoolId.HasValue && spoolLookup.TryGetValue(f.SpoolmanSpoolId.Value, out var spool))
+                    if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
                     {
-                        return spool.ColorHex ?? "zzz";
+                        return filament.ColorHex ?? "zzz";
                     }
+
                     return "zzz";
                 })
                 .ThenBy(f => f.SortOrder);
@@ -562,13 +563,14 @@ public class PrintProjectService(
         else if (groupByColor)
         {
             ordered = files.OrderBy(f =>
+            {
+                if (f.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(f.SpoolmanFilamentId.Value, out var filament))
                 {
-                    if (f.SpoolmanSpoolId.HasValue && spoolLookup.TryGetValue(f.SpoolmanSpoolId.Value, out var spool))
-                    {
-                        return spool.ColorHex ?? "zzz";
-                    }
-                    return "zzz";
-                })
+                    return filament.ColorHex ?? "zzz";
+                }
+
+                return "zzz";
+            })
                 .ThenBy(f => f.SortOrder);
         }
         else
@@ -667,7 +669,7 @@ public class PrintProjectService(
             file.GcodeFileId,
             file.GcodeFile?.Name ?? "Unknown",
             file.GcodeFile?.ThumbnailFileName is not null ? $"/api/gcode-files/thumbnail/{file.GcodeFileId}" : null,
-            file.SpoolmanSpoolId,
+            file.SpoolmanFilamentId,
             file.MaterialRequirement,
             file.PrintCount,
             file.PrintedCount,

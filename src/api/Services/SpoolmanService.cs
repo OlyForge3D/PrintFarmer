@@ -233,6 +233,103 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return [];
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanFilamentDto>> ListFilamentsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug($"Spoolman not configured – returning empty filament list", null, null);
+            return [];
+        }
+
+        string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        string[] candidates =
+        [
+            "/api/v1/filament",
+            "/api/v1/filament/",
+            "/api/v1/filaments",
+            "/api/v1/filaments/"
+        ];
+
+        foreach (string ep in candidates)
+        {
+            string full = baseUrl + ep;
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(20));
+
+                HttpResponseMessage response = await http.GetAsync(full, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogDebug($"Spoolman filament endpoint {ep} returned status {(int)response.StatusCode}; trying next candidate", null, null);
+                    continue;
+                }
+
+                string json = await response.Content.ReadAsStringAsync(cts.Token);
+                using JsonDocument doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    logger.LogDebug($"Spoolman filament endpoint {ep} did not return an array; trying next candidate", null, null);
+                    continue;
+                }
+
+                var filaments = new List<SpoolmanFilamentDto>();
+                foreach (JsonElement el in doc.RootElement.EnumerateArray())
+                {
+                    filaments.Add(ParseFilament(el));
+                }
+
+                logger.LogDebug($"Retrieved {filaments.Count} filament types via endpoint {ep}", null, null);
+                return filaments;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, $"Exception when querying Spoolman filament endpoint {ep}; trying next candidate", null, null);
+            }
+        }
+
+        logger.LogWarning($"All candidate Spoolman filament endpoints failed – returning empty list", null, null);
+        return [];
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return null;
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning($"Spoolman filament {filamentId} returned status {(int)response.StatusCode}", null, null);
+                return null;
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            return ParseFilament(doc.RootElement);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, $"Exception fetching Spoolman filament {filamentId}", null, null);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Gets all material types directly from Spoolman's /api/v1/material endpoint.
     /// This is the correct endpoint for getting material definitions like PLA, ABS, PETG, etc.
@@ -600,6 +697,50 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return false;
     }
 
+    private static SpoolmanFilamentDto ParseFilament(JsonElement el)
+    {
+        int id = TryGetInt(el, "id", "filament_id");
+        string? name = TryGetString(el, "name", "display_name");
+        string? material = TryGetString(el, "material");
+
+        string? colorHex = TryGetString(el, "color_hex", "hex_color", "color");
+        colorHex = NormalizeHexColor(colorHex);
+
+        // Vendor can be a nested object or a direct string
+        string? vendor = TryGetStringAtPath(el, "vendor", "name")
+            ?? TryGetString(el, "vendor", "manufacturer");
+
+        double? density = TryGetDoubleNullable(el, "density");
+        double? diameter = TryGetDoubleNullable(el, "diameter");
+        double? weight = TryGetDoubleNullable(el, "weight");
+        double? spoolWeight = TryGetDoubleNullable(el, "spool_weight");
+        double? price = TryGetDoubleNullable(el, "price");
+        int? extruderTemp = TryGetIntNullable(el, "settings_extruder_temp");
+        int? bedTemp = TryGetIntNullable(el, "settings_bed_temp");
+        string? articleNumber = TryGetString(el, "article_number");
+        string? comment = TryGetString(el, "comment");
+        string? multiColorHexes = TryGetString(el, "multi_color_hexes");
+        string? externalId = TryGetString(el, "external_id");
+
+        return new SpoolmanFilamentDto(
+            Id: id,
+            Name: name,
+            Material: material,
+            ColorHex: colorHex,
+            Vendor: vendor,
+            Density: density,
+            Diameter: diameter,
+            Weight: weight,
+            SpoolWeight: spoolWeight,
+            Price: price,
+            SettingsExtruderTemp: extruderTemp,
+            SettingsBedTemp: bedTemp,
+            ArticleNumber: articleNumber,
+            Comment: comment,
+            MultiColorHexes: multiColorHexes,
+            ExternalId: externalId);
+    }
+
     private static SpoolmanSpoolDto ParseSpool(JsonElement el)
     {
         int id = TryGetInt(el, "id", "spool_id");
@@ -716,6 +857,33 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         return 0;
+    }
+
+    private static int? TryGetIntNullable(JsonElement el, params string[] names)
+    {
+        foreach (string n in names)
+        {
+            if (el.TryGetProperty(n, out JsonElement v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out int i))
+            {
+                return i;
+            }
+        }
+
+        if (el.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty p in el.EnumerateObject())
+            {
+                foreach (string n in names)
+                {
+                    if (string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out int i))
+                    {
+                        return i;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private static double? TryGetDoubleNullable(JsonElement el, params string[] names)

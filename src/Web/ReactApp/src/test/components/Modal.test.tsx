@@ -257,7 +257,7 @@ describe('Modal', () => {
         </Modal>
       );
 
-      const contentDiv = screen.getByTestId('content').closest('.max-w-4xl');
+      const contentDiv = screen.getByTestId('content').closest('.max-w-7xl');
       expect(contentDiv).toBeInTheDocument();
     });
   });

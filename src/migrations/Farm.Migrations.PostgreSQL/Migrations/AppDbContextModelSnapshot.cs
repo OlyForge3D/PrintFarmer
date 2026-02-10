@@ -2325,7 +2325,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
-                    b.Property<int?>("SpoolmanSpoolId")
+                    b.Property<int?>("SpoolmanFilamentId")
                         .HasColumnType("integer");
 
                     b.Property<int>("Status")
@@ -2344,7 +2344,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrintProjectId");
 
-                    b.HasIndex("SpoolmanSpoolId");
+                    b.HasIndex("SpoolmanFilamentId");
 
                     b.HasIndex("Status");
 

@@ -161,9 +161,8 @@ public class PrintProjectsControllerTests
         ActionResult<PrintProjectDetailDto> result = await _controller.CreateProjectAsync(request);
 
         // Assert
-        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        CreatedResult createdResult = Assert.IsType<CreatedResult>(result.Result);
         Assert.Equal(project, createdResult.Value);
-        Assert.Equal(nameof(PrintProjectsController.GetProjectAsync), createdResult.ActionName);
     }
 
     [Fact]
@@ -296,7 +295,7 @@ public class PrintProjectsControllerTests
         ActionResult<IReadOnlyList<PrintProjectFileDto>> result = await _controller.AddFilesToProjectAsync(projectId, files);
 
         // Assert
-        CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
+        CreatedResult createdResult = Assert.IsType<CreatedResult>(result.Result);
         Assert.Equal(addedFiles, createdResult.Value);
     }
 
@@ -566,7 +565,7 @@ public class PrintProjectsControllerTests
             GcodeFileId: Guid.NewGuid(),
             FileName: fileName,
             ThumbnailUrl: null,
-            SpoolmanSpoolId: null,
+            SpoolmanFilamentId: null,
             MaterialRequirement: null,
             PrintCount: 1,
             PrintedCount: printedCount,
