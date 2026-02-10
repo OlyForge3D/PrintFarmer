@@ -1,8 +1,8 @@
-import { Button, Checkbox, Select, Spinner } from "@/common/components/ui";
-import { useState } from "react";
+import { Button, Select, Spinner } from "@/common/components/ui";
+import { useState, useRef, useCallback } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
-import { Download, Tractor } from "lucide-react";
+import { Download, GripVertical, Tractor } from "lucide-react";
 
 /**
  * Formats a duration in seconds to a human-readable string (e.g., "2h 30m" or "45m")
@@ -42,6 +42,7 @@ export interface QueueJobsTableProps {
   onPriority?: (jobId: string, priority: number) => void;
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
+  onReorder?: (moves: { jobId: string; newPosition: number }[]) => void;
 }
 
 export function QueueJobsTable({
@@ -56,26 +57,71 @@ export function QueueJobsTable({
   onPriority,
   onEdit,
   onDispatch,
+  onReorder,
 }: QueueJobsTableProps) {
-  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dragCounter = useRef(0);
 
-  const handleSelectJob = (jobId: string) => {
-    const newSelected = new Set(selectedJobs);
-    if (newSelected.has(jobId)) {
-      newSelected.delete(jobId);
-    } else {
-      newSelected.add(jobId);
-    }
-    setSelectedJobs(newSelected);
-  };
+  const handleDragStart = useCallback((e: React.DragEvent<HTMLTableRowElement>, index: number) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+    // Make the dragged row semi-transparent
+    requestAnimationFrame(() => {
+      (e.target as HTMLElement).style.opacity = "0.4";
+    });
+  }, []);
 
-  const handleSelectAll = () => {
-    if (selectedJobs.size === jobs.length) {
-      setSelectedJobs(new Set());
-    } else {
-      setSelectedJobs(new Set(jobs.map((job) => job.job.id)));
+  const handleDragEnd = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+    (e.target as HTMLElement).style.opacity = "1";
+    setDragIndex(null);
+    setDropIndex(null);
+    dragCounter.current = 0;
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLTableRowElement>, index: number) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setDropIndex(index);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setDropIndex(null);
     }
-  };
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLTableRowElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLTableRowElement>, targetIndex: number) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDropIndex(null);
+
+    if (dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null);
+      return;
+    }
+
+    // Build the reordered list and compute new positions
+    const reordered = [...jobs];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+
+    const moves = reordered.map((j, i) => ({
+      jobId: j.job.id,
+      newPosition: i + 1,
+    }));
+
+    setDragIndex(null);
+    onReorder?.(moves);
+  }, [dragIndex, jobs, onReorder]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -137,12 +183,10 @@ export function QueueJobsTable({
       <table className="w-full text-sm whitespace-nowrap">
         <thead>
           <tr className="border-b border-pf-border bg-pf-bg-2">
-            <th className="px-4 py-3 text-left">
-              <Checkbox
-                checked={selectedJobs.size === jobs.length && jobs.length > 0}
-                onChange={handleSelectAll}
-              />
+            <th className="w-10 px-2 py-3" aria-label="Reorder">
+              <span className="sr-only">Drag to reorder</span>
             </th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">File</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Project</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Printer</th>
@@ -150,7 +194,6 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Priority</th>
@@ -158,7 +201,7 @@ export function QueueJobsTable({
           </tr>
         </thead>
         <tbody>
-          {jobs.map((jobWrapper) => {
+          {jobs.map((jobWrapper, index) => {
             const job = jobWrapper.job;
             const jobId = job.id;
             const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
@@ -179,7 +222,7 @@ export function QueueJobsTable({
             const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
             const filamentDisplay = job.filamentName
               ? (
-                <span className="inline-flex items-center gap-1.5 max-w-[160px]" title={`${job.filamentVendor ? job.filamentVendor + ' — ' : ''}${job.filamentName}`}>
+                <span className="inline-flex items-center gap-1.5" title={`${job.filamentVendor ? job.filamentVendor + ' — ' : ''}${job.filamentName}`}>
                   {job.filamentColor && (
                     <span
                       className="inline-block w-3 h-3 rounded-full border border-pf-border shrink-0"
@@ -187,7 +230,7 @@ export function QueueJobsTable({
                       aria-hidden="true"
                     />
                   )}
-                  <span className="truncate">{job.filamentName}</span>
+                  <span>{job.filamentName}</span>
                 </span>
               )
               : filamentGrams 
@@ -201,10 +244,21 @@ export function QueueJobsTable({
                 ? `Uploading ${dispatchProgress.percentage}%...`
                 : "Starting...";
 
+            const isDragTarget = dropIndex === index && dragIndex !== index;
+
             return (
               <tr
                 key={jobId}
-                className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-pointer"
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragEnd={handleDragEnd}
+                onDragEnter={(e) => handleDragEnter(e, index)}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, index)}
+                className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-pointer ${
+                  isDragTarget ? "border-t-2 border-t-pf-accent" : ""
+                }`}
                 onClick={() => onEdit?.(jobId)}
                 role="button"
                 tabIndex={0}
@@ -215,12 +269,14 @@ export function QueueJobsTable({
                   }
                 }}
               >
-                <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={selectedJobs.has(jobId)}
-                    onChange={() => handleSelectJob(jobId)}
-                  />
+                <td
+                  className="w-10 px-2 py-3 cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Drag to reorder"
+                >
+                  <GripVertical className="h-4 w-4" aria-hidden="true" />
                 </td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="font-medium text-pf-text-primary">{fileName}</div>
                 </td>
@@ -238,7 +294,6 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{material}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   {job.wasSeededFromHistory ? (
                     <span
@@ -275,7 +330,7 @@ export function QueueJobsTable({
                     onChange={(e) =>
                       onPriority?.(jobId, parseInt(e.target.value))
                     }
-                    className="text-xs w-24"
+                    className="text-xs w-28"
                   >
                     <option value="0">Normal</option>
                     <option value="1">High</option>

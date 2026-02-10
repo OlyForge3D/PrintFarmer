@@ -276,6 +276,17 @@ export function PrintQueueDashboardPage() {
     }
   };
 
+  const handleReorder = async (moves: { jobId: string; newPosition: number }[]) => {
+    try {
+      await apiClient.reorderQueueJobs(moves);
+      loadJobs(true);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to reorder jobs";
+      setError(errorMessage);
+    }
+  };
+
   const handleCloseJobDetailsModal = () => {
     setIsJobDetailsModalOpen(false);
     setSelectedJobId(null);
@@ -368,6 +379,7 @@ export function PrintQueueDashboardPage() {
                   onCancel={handleCancelJob}
                   onPriority={handlePriorityChange}
                   onDispatch={handleDispatchJob}
+                  onReorder={handleReorder}
                   onEdit={(jobId) => {
                     setSelectedJobId(jobId);
                     setIsJobDetailsModalOpen(true);

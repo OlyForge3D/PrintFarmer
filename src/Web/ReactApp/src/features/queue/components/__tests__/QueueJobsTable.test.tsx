@@ -155,7 +155,7 @@ describe("QueueJobsTable Component", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
-  it("should render select all checkbox", () => {
+  it("should render drag handles for reordering", () => {
     const mockHandlers = {
       onPause: vi.fn(),
       onResume: vi.fn(),
@@ -165,11 +165,11 @@ describe("QueueJobsTable Component", () => {
 
     render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes.length).toBeGreaterThan(0);
+    const dragHandles = screen.getAllByLabelText("Drag to reorder");
+    expect(dragHandles.length).toBe(mockJobs.length);
   });
 
-  it("should select all jobs when select all checkbox is clicked", () => {
+  it("should render rows as draggable", () => {
     const mockHandlers = {
       onPause: vi.fn(),
       onResume: vi.fn(),
@@ -177,16 +177,12 @@ describe("QueueJobsTable Component", () => {
       onPriority: vi.fn(),
     };
 
-    render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const checkboxes = screen.getAllByRole("checkbox");
-    const selectAllCheckbox = checkboxes[0];
-
-    fireEvent.click(selectAllCheckbox);
-
-    const jobCheckboxes = checkboxes.slice(1);
-    jobCheckboxes.forEach((checkbox) => {
-      expect(checkbox).toBeChecked();
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows.length).toBe(mockJobs.length);
+    rows.forEach((row) => {
+      expect(row).toHaveAttribute("draggable", "true");
     });
   });
 });

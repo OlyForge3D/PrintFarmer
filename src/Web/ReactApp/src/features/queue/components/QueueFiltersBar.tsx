@@ -1,4 +1,4 @@
-import { RefreshIcon, ClearFiltersIcon, ChevronDownIcon, ChevronUpIcon } from "@/common/components/icons/MdiIcons";
+import { RefreshIcon, ClearFiltersIcon } from "@/common/components/icons/MdiIcons";
 import { Button, Select, Input } from "@/common/components/ui";
 import { useState, useCallback } from "react";
 
@@ -39,7 +39,6 @@ export function TableFiltersBar({
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
 
   const handleStatusChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -77,94 +76,68 @@ export function TableFiltersBar({
     onModelChange(null);
   }, [onStatusChange, onMaterialChange, onModelChange]);
 
+  const hasActiveFilters = selectedStatus || selectedMaterial || selectedModel;
+
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
-      {/* Header with Collapse/Expand Toggle */}
-      <Button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4 bg-pf-bg-2 hover:bg-pf-bg-1 transition-colors"
-        type="button"
-        variant="subtle"
-        iconRight={isExpanded ? (
-          <ChevronUpIcon className="w-5 h-5 text-pf-text-secondary" />
-        ) : (
-          <ChevronDownIcon className="w-5 h-5 text-pf-text-secondary" />
-        )}
+    <div className="flex items-center gap-3 bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
+      <Select
+        value={selectedStatus || ""}
+        onChange={handleStatusChange}
+        className="w-36 text-sm"
+        aria-label="Filter by status"
       >
-        <h3 className="font-semibold text-pf-text-primary flex-1 text-left">FILTERS</h3>
-      </Button>
+        <option value="">Active Jobs</option>
+        {STATUS_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
 
-      {/* Collapsible Filter Content */}
-      {isExpanded && (
-        <div className="p-4 space-y-4 border-t border-pf-border">
-          {/* Status Filter */}
-          <div className="flex items-center justify-between gap-4">
-            <label className="text-sm font-medium text-pf-text-primary w-32">Status</label>
-            <Select
-              value={selectedStatus || ""}
-              onChange={handleStatusChange}
-              className="flex-1"
-            >
-              <option value="">Active Jobs</option>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </div>
+      <Input
+        type="text"
+        value={selectedModel || ""}
+        onChange={handleModelChange}
+        placeholder="Printer model..."
+        className="w-40 text-sm"
+        aria-label="Filter by printer model"
+      />
 
-          {/* Model Filter */}
-          <div className="flex items-center justify-between gap-4">
-            <label className="text-sm font-medium text-pf-text-primary w-32">Printer Model</label>
-            <Input
-              type="text"
-              value={selectedModel || ""}
-              onChange={handleModelChange}
-              placeholder="Search by model..."
-              className="flex-1"
-            />
-          </div>
+      <Select
+        value={selectedMaterial || ""}
+        onChange={handleMaterialChange}
+        className="w-36 text-sm"
+        aria-label="Filter by material"
+      >
+        <option value="">All Materials</option>
+        {MATERIAL_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
 
-          {/* Material Filter */}
-          <div className="flex items-center justify-between gap-4">
-            <label className="text-sm font-medium text-pf-text-primary w-32">Material</label>
-            <Select
-              value={selectedMaterial || ""}
-              onChange={handleMaterialChange}
-              className="flex-1"
-            >
-              <option value="">All Materials</option>
-              {MATERIAL_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2 pt-2 border-t border-pf-border">
-            <Button
-              onClick={onRefresh}
-              disabled={isLoading}
-              variant="secondary"
-              className="flex-1"
-              iconCenter={<RefreshIcon />}
-              title="Refresh data"
-            >
-            </Button>
-            <Button
-              onClick={handleClearFilters}
-              variant="secondary"
-              className="flex-1"
-              iconCenter={<ClearFiltersIcon />}
-              title="Reset all filters"
-            >
-            </Button>
-          </div>
-        </div>
-      )}
+      <div className="flex items-center gap-1 ml-auto">
+        <Button
+          onClick={onRefresh}
+          disabled={isLoading}
+          variant="subtle"
+          size="sm"
+          iconCenter={<RefreshIcon />}
+          title="Refresh data"
+          aria-label="Refresh data"
+        />
+        {hasActiveFilters && (
+          <Button
+            onClick={handleClearFilters}
+            variant="subtle"
+            size="sm"
+            iconCenter={<ClearFiltersIcon />}
+            title="Reset all filters"
+            aria-label="Reset all filters"
+          />
+        )}
+      </div>
     </div>
   );
 }

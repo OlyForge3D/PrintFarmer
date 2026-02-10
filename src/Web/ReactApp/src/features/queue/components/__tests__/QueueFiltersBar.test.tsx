@@ -13,9 +13,9 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    expect(screen.getByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Printer Model")).toBeInTheDocument();
-    expect(screen.getByText("Material")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by status")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by printer model")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by material")).toBeInTheDocument();
     expect(screen.getByTitle("Refresh data")).toBeInTheDocument();
   });
 
@@ -47,7 +47,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const modelInput = screen.getByPlaceholderText("Search by model...") as HTMLInputElement;
+    const modelInput = screen.getByPlaceholderText("Printer model...") as HTMLInputElement;
     fireEvent.change(modelInput, { target: { value: "Prusa CORE One" } });
 
     expect(onModelChange).toHaveBeenCalledWith("Prusa CORE One");
@@ -99,6 +99,10 @@ describe("TableFiltersBar Component", () => {
     };
 
     render(<TableFiltersBar {...mockHandlers} />);
+
+    // Set a filter first so the clear button appears
+    const statusSelect = screen.getByDisplayValue("Active Jobs") as HTMLSelectElement;
+    fireEvent.change(statusSelect, { target: { value: "Queued" } });
 
     // Click clear button (Reset all filters)
     const clearButton = screen.getByTitle("Reset all filters");
