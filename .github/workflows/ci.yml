@@ -65,7 +65,7 @@ jobs:
         working-directory: src
         run: |
           dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
-            --filter "Category!=DbHeavy&Category!=Docker" \
+            --filter "Category!=DbHeavy&Category!=Docker"
 
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
