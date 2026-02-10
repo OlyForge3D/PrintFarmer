@@ -483,6 +483,12 @@ public class PrintProjectService(
                         ? (decimal)file.GcodeFile.RequiredNozzleDiameter.Value
                         : null,
                     RequiredPrinterModel = file.GcodeFile?.ExtractedPrinterModelName,
+                    ProjectId = projectId,
+                    ProjectName = project.Name,
+                    SpoolmanFilamentId = file.SpoolmanFilamentId,
+                    FilamentName = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var fil) ? fil.Name : null,
+                    FilamentVendor = file.SpoolmanFilamentId.HasValue && filamentLookup.TryGetValue(file.SpoolmanFilamentId.Value, out var filV) ? filV.Vendor : null,
+                    FilamentColor = colorHex,
                 };
 
                 var job = await queueService.AddJobToQueueAsync(queueRequest, ct);

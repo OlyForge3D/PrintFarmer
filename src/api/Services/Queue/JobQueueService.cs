@@ -254,6 +254,12 @@ namespace Farm.Web.Api.Services.Queue
                 RequiredMaterialType = request.RequiredMaterialType,
                 EstimatedPrintTime = gcode.EstimatedPrintTimeMinutes.HasValue ? TimeSpan.FromMinutes(gcode.EstimatedPrintTimeMinutes.Value) : null,
                 EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
+                ProjectId = request.ProjectId,
+                ProjectName = request.ProjectName,
+                SpoolmanFilamentId = request.SpoolmanFilamentId,
+                FilamentName = request.FilamentName,
+                FilamentVendor = request.FilamentVendor,
+                FilamentColor = request.FilamentColor,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow

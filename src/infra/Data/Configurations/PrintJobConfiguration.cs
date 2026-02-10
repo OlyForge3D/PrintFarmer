@@ -60,6 +60,12 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
             .HasForeignKey(h => h.JobId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Project tracking fields
+        builder.Property(pj => pj.ProjectName).HasMaxLength(255);
+        builder.Property(pj => pj.FilamentName).HasMaxLength(255);
+        builder.Property(pj => pj.FilamentVendor).HasMaxLength(128);
+        builder.Property(pj => pj.FilamentColor).HasMaxLength(32);
+
         // History seeding fields
         builder.Property(pj => pj.ExternalJobId).HasMaxLength(255);
         builder.Property(pj => pj.WasSeededFromHistory).HasDefaultValue(false);
