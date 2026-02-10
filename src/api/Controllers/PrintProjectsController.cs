@@ -80,7 +80,7 @@ public class PrintProjectsController(IPrintProjectService projectService, IUnifi
             }
 
             var project = await projectService.CreateProjectAsync(request);
-            return CreatedAtAction(nameof(GetProjectAsync), new { id = project.Id }, project);
+            return Created($"/api/projects/{project.Id}", project);
         }
         catch (Exception ex)
         {
@@ -156,7 +156,7 @@ public class PrintProjectsController(IPrintProjectService projectService, IUnifi
             }
 
             var addedFiles = await projectService.AddFilesToProjectAsync(id, files);
-            return CreatedAtAction(nameof(GetProjectAsync), new { id }, addedFiles);
+            return Created($"/api/projects/{id}", addedFiles);
         }
         catch (KeyNotFoundException ex)
         {
@@ -265,6 +265,43 @@ public class PrintProjectsController(IPrintProjectService projectService, IUnifi
         {
             logger.LogError(ex, $"Error retrieving progress for project {id}");
             return Problem("An error occurred while retrieving project progress", statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Queue all pending files from a project to the print job queue.
+    /// Files are automatically ordered by material type and color to minimize filament changes.
+    /// </summary>
+    /// <param name="id">The project ID.</param>
+    /// <param name="request">Queue configuration options.</param>
+    [HttpPost("{id:guid}/queue")]
+    [ProducesResponseType(typeof(QueueProjectResultDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<QueueProjectResultDto>> QueueProjectAsync(Guid id, [FromBody] QueueProjectRequest? request = null)
+    {
+        try
+        {
+            var effectiveRequest = request ?? new QueueProjectRequest();
+            var result = await projectService.QueueProjectAsync(id, effectiveRequest);
+
+            if (result is null)
+            {
+                return NotFound($"Project {id} not found");
+            }
+
+            if (result.TotalJobsQueued == 0)
+            {
+                return BadRequest("No pending files to queue in this project");
+            }
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, $"Error queuing project {id}");
+            return Problem("An error occurred while queuing the project", statusCode: 500);
         }
     }
 }

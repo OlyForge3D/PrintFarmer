@@ -66,6 +66,7 @@ import {
   DiscoveredGcodeFileDto,
   GcodeHarvestResultDto,
   BulkImportResponse,
+  SpoolmanSpool,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -2335,9 +2336,10 @@ export class ApiClient {
   /**
    * Get spools from Spoolman
    */
-  async getSpools(): Promise<Record<string, unknown>> {
+  async getSpools(): Promise<SpoolmanSpool[]> {
     const response = await this.client.get('/spoolman/spools');
-    return response.data;
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanSpool[] || [];
   }
 
   // ============ Settings API methods ============

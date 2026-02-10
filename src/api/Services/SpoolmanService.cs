@@ -658,6 +658,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         string? lotNumber = TryGetString(el, "lot_nr", "lot", "batch", "batch_nr");
         bool? archivedFlag = TryGetBool(el, "archived");
 
+        // Price: may be a direct field or nested under filament
+        double? price = TryGetDoubleNullable(el, "price")
+            ?? TryGetDoubleNullableFromObject(el, ["filament", "profile"], ["price", "cost", "spool_price"]);
+
         // Dates: registered, first used, last used (tolerant to various names and formats)
         DateTime? registeredAt = TryGetDateTime(el, "registered");
         DateTime? firstUsedAt = TryGetDateTime(el, "first_used");
@@ -682,7 +686,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             UsedLengthMm: usedLength,
             Location: location,
             LotNumber: lotNumber,
-            Archived: archivedFlag);
+            Archived: archivedFlag,
+            Price: price);
     }
 
     private static int TryGetInt(JsonElement el, params string[] names)
@@ -817,6 +822,23 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 if (!string.IsNullOrEmpty(s))
                 {
                     return s;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static double? TryGetDoubleNullableFromObject(JsonElement el, string[] objPathCandidates, string[] fieldCandidates)
+    {
+        foreach (string objName in objPathCandidates)
+        {
+            if (TryGetObject(el, out JsonElement nested, objName))
+            {
+                double? d = TryGetDoubleNullable(nested, fieldCandidates);
+                if (d.HasValue)
+                {
+                    return d;
                 }
             }
         }

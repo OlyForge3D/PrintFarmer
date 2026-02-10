@@ -65,7 +65,7 @@ public record PrintProjectFileDto(
     Guid GcodeFileId,
     string FileName,
     string? ThumbnailUrl,
-    PrintColorRequirement ColorRequirement,
+    int? SpoolmanSpoolId,
     string? MaterialRequirement,
     int PrintCount,
     int PrintedCount,
@@ -73,7 +73,15 @@ public record PrintProjectFileDto(
     int SortOrder,
     string? Notes,
     DateTime? LastPrintedAt,
-    Guid? LastPrintJobId)
+    Guid? LastPrintJobId,
+
+    // Gcode metadata for time/material estimation
+    double? EstimatedPrintTimeMinutes = null,
+    double? EstimatedFilamentLengthMm = null,
+    double? EstimatedFilamentWeightG = null,
+    string? RequiredMaterial = null,
+    double? RequiredNozzleDiameter = null,
+    string? ExtractedPrinterModelName = null)
 {
     /// <summary>
     /// Whether all required prints have been completed.
@@ -84,6 +92,13 @@ public record PrintProjectFileDto(
     /// Remaining prints needed.
     /// </summary>
     public int RemainingPrints => Math.Max(0, PrintCount - PrintedCount);
+
+    /// <summary>
+    /// Total estimated time for remaining prints of this file (minutes).
+    /// </summary>
+    public double? RemainingPrintTimeMinutes => EstimatedPrintTimeMinutes.HasValue
+        ? EstimatedPrintTimeMinutes.Value * RemainingPrints
+        : null;
 }
 
 /// <summary>
@@ -113,7 +128,7 @@ public record UpdatePrintProjectRequest(
 /// </summary>
 public record AddFileToProjectRequest(
     Guid GcodeFileId,
-    PrintColorRequirement ColorRequirement = PrintColorRequirement.Base,
+    int? SpoolmanSpoolId = null,
     string? MaterialRequirement = null,
     int PrintCount = 1,
     string? Notes = null);
@@ -122,7 +137,7 @@ public record AddFileToProjectRequest(
 /// Request to update a file within a project.
 /// </summary>
 public record UpdateProjectFileRequest(
-    PrintColorRequirement? ColorRequirement = null,
+    int? SpoolmanSpoolId = null,
     string? MaterialRequirement = null,
     int? PrintCount = null,
     int? PrintedCount = null,
@@ -150,8 +165,41 @@ public record PrintProjectProgressDto(
 public record FileProgressDto(
     Guid FileId,
     string FileName,
-    PrintColorRequirement ColorRequirement,
     PrintProjectFileStatus Status,
     int PrintCount,
     int PrintedCount,
     bool IsComplete);
+
+/// <summary>
+/// Request to queue all pending files from a project to the job queue.
+/// Files are auto-ordered by material type and color to minimize filament changes.
+/// </summary>
+public record QueueProjectRequest(
+    Guid? AssignedPrinterId = null,
+    bool GroupByMaterial = true,
+    bool GroupByColor = true,
+    int Priority = 1);
+
+/// <summary>
+/// Result of queueing a project's files.
+/// </summary>
+public record QueueProjectResultDto(
+    Guid ProjectId,
+    string ProjectName,
+    int TotalJobsQueued,
+    int TotalPrintsQueued,
+    double? EstimatedTotalTimeMinutes,
+    IReadOnlyList<QueuedProjectFileDto> QueuedFiles);
+
+/// <summary>
+/// A single file that was queued from a project.
+/// </summary>
+public record QueuedProjectFileDto(
+    Guid ProjectFileId,
+    Guid PrintJobId,
+    string FileName,
+    string? MaterialType,
+    string? ColorHex,
+    int PrintCount,
+    double? EstimatedPrintTimeMinutes,
+    int QueueOrder);

@@ -44,6 +44,7 @@ export const ProjectsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<PrintProjectStatus | ''>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<PrintProjectDetailDto | null>(null);
+  const [editingProject, setEditingProject] = useState<PrintProjectDetailDto | null>(null);
 
   // Fetch projects with auto-refresh for real-time-like updates
   const { data: projects = [], isLoading, error } = useQuery({
@@ -199,14 +200,19 @@ export const ProjectsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Create Project Modal */}
+      {/* Create / Edit Project Modal */}
       <CreateProjectModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        isOpen={showCreateModal || !!editingProject}
+        onClose={() => {
+          setShowCreateModal(false);
+          setEditingProject(null);
+        }}
         onSuccess={() => {
           setShowCreateModal(false);
+          setEditingProject(null);
           queryClient.invalidateQueries({ queryKey: ['projects'] });
         }}
+        editProject={editingProject ?? undefined}
       />
 
       {/* Project Detail Modal */}
@@ -219,6 +225,11 @@ export const ProjectsPage: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['projects'] });
             // Refresh the selected project
             projectService.getProject(selectedProject.id).then(setSelectedProject);
+          }}
+          onEdit={() => {
+            const proj = selectedProject;
+            setSelectedProject(null);
+            setEditingProject(proj);
           }}
         />
       )}

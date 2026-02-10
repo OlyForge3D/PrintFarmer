@@ -9,6 +9,8 @@ import type {
   UpdateProjectFileRequest,
   PrintProjectStatus,
   PrintProjectFileDto,
+  QueueProjectRequest,
+  QueueProjectResultDto,
 } from '@/types/api';
 
 /**
@@ -126,5 +128,17 @@ export const projectService = {
   async getProjectProgress(projectId: string): Promise<PrintProjectProgressDto> {
     const response = await apiClient.genericGet(`/projects/${projectId}/progress`);
     return response as unknown as PrintProjectProgressDto;
+  },
+
+  /**
+   * Queue all pending files from a project to the job queue.
+   * Files are automatically ordered by material type and color to minimize filament changes.
+   */
+  async queueProject(projectId: string, request?: QueueProjectRequest): Promise<QueueProjectResultDto> {
+    const response = await apiClient.genericPost(
+      `/projects/${projectId}/queue`,
+      (request ?? {}) as unknown as Record<string, unknown>
+    );
+    return response as unknown as QueueProjectResultDto;
   },
 };

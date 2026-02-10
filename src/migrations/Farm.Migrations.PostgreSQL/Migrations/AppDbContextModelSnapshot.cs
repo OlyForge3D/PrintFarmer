@@ -2282,11 +2282,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int>("ColorRequirement")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2330,6 +2325,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("SpoolmanSpoolId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -2340,13 +2338,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ColorRequirement");
-
                     b.HasIndex("GcodeFileId");
 
                     b.HasIndex("LastPrintJobId");
 
                     b.HasIndex("PrintProjectId");
+
+                    b.HasIndex("SpoolmanSpoolId");
 
                     b.HasIndex("Status");
 

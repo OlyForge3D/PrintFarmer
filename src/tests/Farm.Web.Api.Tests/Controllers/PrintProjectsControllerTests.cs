@@ -281,7 +281,7 @@ public class PrintProjectsControllerTests
         var projectId = Guid.NewGuid();
         var files = new List<AddFileToProjectRequest>
         {
-            new(Guid.NewGuid(), PrintColorRequirement.Base, null, 1, null)
+            new(Guid.NewGuid(), null, null, 1, null)
         };
         var addedFiles = new List<PrintProjectFileDto>
         {
@@ -321,7 +321,7 @@ public class PrintProjectsControllerTests
         var projectId = Guid.NewGuid();
         var files = new List<AddFileToProjectRequest>
         {
-            new(Guid.NewGuid(), PrintColorRequirement.Base, null, 1, null)
+            new(Guid.NewGuid(), null, null, 1, null)
         };
 
         _projectServiceMock
@@ -385,7 +385,7 @@ public class PrintProjectsControllerTests
         // Arrange
         var projectId = Guid.NewGuid();
         var fileId = Guid.NewGuid();
-        var request = new UpdateProjectFileRequest(PrintColorRequirement.Accent, null, 2, null, null, null, null);
+        var request = new UpdateProjectFileRequest(null, null, 2, null, null, null, null);
         var file = CreateProjectFileDto(fileId, "test.gcode");
 
         _projectServiceMock
@@ -566,7 +566,7 @@ public class PrintProjectsControllerTests
             GcodeFileId: Guid.NewGuid(),
             FileName: fileName,
             ThumbnailUrl: null,
-            ColorRequirement: PrintColorRequirement.Base,
+            SpoolmanSpoolId: null,
             MaterialRequirement: null,
             PrintCount: 1,
             PrintedCount: printedCount,
@@ -590,8 +590,8 @@ public class PrintProjectsControllerTests
             ProgressPercent: 40,
             FileProgress: new List<FileProgressDto>
             {
-                new(Guid.NewGuid(), "file1.gcode", PrintColorRequirement.Base, PrintProjectFileStatus.Completed, 2, 2, true),
-                new(Guid.NewGuid(), "file2.gcode", PrintColorRequirement.Accent, PrintProjectFileStatus.Printing, 3, 1, false)
+                new(Guid.NewGuid(), "file1.gcode", PrintProjectFileStatus.Completed, 2, 2, true),
+                new(Guid.NewGuid(), "file2.gcode", PrintProjectFileStatus.Printing, 3, 1, false)
             });
     }
 

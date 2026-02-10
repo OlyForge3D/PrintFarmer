@@ -2098,7 +2098,7 @@ export interface PrintProjectFileDto {
   gcodeFileId: string;
   fileName: string;
   thumbnailUrl?: string;
-  colorRequirement: PrintColorRequirement;
+  spoolmanSpoolId?: number | null;
   materialRequirement?: string;
   printCount: number;
   printedCount: number;
@@ -2109,6 +2109,14 @@ export interface PrintProjectFileDto {
   lastPrintJobId?: string;
   isComplete: boolean;
   remainingPrints: number;
+  // Gcode metadata for time/material estimation
+  estimatedPrintTimeMinutes?: number | null;
+  estimatedFilamentLengthMm?: number | null;
+  estimatedFilamentWeightG?: number | null;
+  requiredMaterial?: string | null;
+  requiredNozzleDiameter?: number | null;
+  extractedPrinterModelName?: string | null;
+  remainingPrintTimeMinutes?: number | null;
 }
 
 /**
@@ -2140,7 +2148,7 @@ export interface UpdatePrintProjectRequest {
  */
 export interface AddFileToProjectRequest {
   gcodeFileId: string;
-  colorRequirement?: PrintColorRequirement;
+  spoolmanSpoolId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
@@ -2150,7 +2158,7 @@ export interface AddFileToProjectRequest {
  * Request to update a file within a project
  */
 export interface UpdateProjectFileRequest {
-  colorRequirement?: PrintColorRequirement;
+  spoolmanSpoolId?: number | null;
   materialRequirement?: string;
   printCount?: number;
   printedCount?: number;
@@ -2180,11 +2188,46 @@ export interface PrintProjectProgressDto {
 export interface FileProgressDto {
   fileId: string;
   fileName: string;
-  colorRequirement: PrintColorRequirement;
   status: PrintProjectFileStatus;
   printCount: number;
   printedCount: number;
   isComplete: boolean;
+}
+
+/**
+ * Request to queue all pending files from a project to the job queue
+ */
+export interface QueueProjectRequest {
+  assignedPrinterId?: string | null;
+  groupByMaterial?: boolean;
+  groupByColor?: boolean;
+  priority?: number;
+}
+
+/**
+ * Result of queueing a project's files
+ */
+export interface QueueProjectResultDto {
+  projectId: string;
+  projectName: string;
+  totalJobsQueued: number;
+  totalPrintsQueued: number;
+  estimatedTotalTimeMinutes?: number | null;
+  queuedFiles: QueuedProjectFileDto[];
+}
+
+/**
+ * A single file that was queued from a project
+ */
+export interface QueuedProjectFileDto {
+  projectFileId: string;
+  printJobId: string;
+  fileName: string;
+  materialType?: string | null;
+  colorHex?: string | null;
+  printCount: number;
+  estimatedPrintTimeMinutes?: number | null;
+  queueOrder: number;
 }
 
 // Print Project Templates
@@ -2240,4 +2283,32 @@ export interface CreateTemplateFileRequest {
   materialRequirement?: string;
   printCount?: number;
   notes?: string;
+}
+
+/**
+ * Spoolman spool (matches backend SpoolmanSpoolDto serialized with camelCase)
+ */
+export interface SpoolmanSpool {
+  id: number;
+  name: string;
+  material: string;
+  remainingWeightG?: number | null;
+  colorHex?: string | null;
+  inUse: boolean;
+  filamentName?: string | null;
+  vendor?: string | null;
+  registeredAt?: string | null;
+  firstUsedAt?: string | null;
+  lastUsedAt?: string | null;
+  initialWeightG?: number | null;
+  usedWeightG?: number | null;
+  spoolWeightG?: number | null;
+  remainingLengthMm?: number | null;
+  usedLengthMm?: number | null;
+  location?: string | null;
+  lotNumber?: string | null;
+  archived?: boolean | null;
+  usedPercent?: number | null;
+  remainingPercent?: number | null;
+  price?: number | null;
 }

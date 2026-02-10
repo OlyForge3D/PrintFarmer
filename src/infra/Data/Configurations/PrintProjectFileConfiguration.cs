@@ -17,7 +17,6 @@ public class PrintProjectFileConfiguration : IEntityTypeConfiguration<PrintProje
         builder.Property(pf => pf.RowVersion).IsRowVersion();
 
         // Basic properties
-        builder.Property(pf => pf.ColorRequirement).HasConversion<int>().HasDefaultValue(PrintColorRequirement.Base);
         builder.Property(pf => pf.MaterialRequirement).HasMaxLength(64);
         builder.Property(pf => pf.Status).HasConversion<int>().HasDefaultValue(PrintProjectFileStatus.Pending);
         builder.Property(pf => pf.PrintCount).HasDefaultValue(1);
@@ -55,6 +54,6 @@ public class PrintProjectFileConfiguration : IEntityTypeConfiguration<PrintProje
         builder.HasIndex(pf => pf.PrintProjectId);
         builder.HasIndex(pf => pf.GcodeFileId);
         builder.HasIndex(pf => pf.Status);
-        builder.HasIndex(pf => pf.ColorRequirement);
+        builder.HasIndex(pf => pf.SpoolmanSpoolId);
     }
 }

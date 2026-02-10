@@ -30,7 +30,8 @@ public record SpoolmanSpoolDto(
     double? UsedLengthMm = null,
     string? Location = null,
     string? LotNumber = null,
-    bool? Archived = null)
+    bool? Archived = null,
+    double? Price = null)
 {
     public double? UsedPercent
     {
