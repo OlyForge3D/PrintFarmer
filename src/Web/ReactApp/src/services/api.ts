@@ -1058,6 +1058,46 @@ export class ApiClient {
     return response.data;
   }
 
+  async exportFilamentTypesCsv(): Promise<Blob> {
+    const response = await this.client.get("/filament-types/export", {
+      responseType: "blob",
+    });
+    return response.data;
+  }
+
+  async importFilamentTypesCsv(file: File): Promise<FilamentCsvImportResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await this.client.post<FilamentCsvImportResult>(
+      "/filament-types/import",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  }
+
+  async getSpoolmanDbFilaments(): Promise<SpoolmanDbFilamentEntry[]> {
+    const response = await this.client.get<SpoolmanDbFilamentEntry[]>(
+      "/filament-types/spoolmandb/filaments"
+    );
+    return response.data;
+  }
+
+  async getSpoolmanDbMaterials(): Promise<SpoolmanDbMaterialEntry[]> {
+    const response = await this.client.get<SpoolmanDbMaterialEntry[]>(
+      "/filament-types/spoolmandb/materials"
+    );
+    return response.data;
+  }
+
+  async importFromSpoolmanDb(request: SpoolmanDbImportRequest): Promise<SpoolmanDbImportResult> {
+    const response = await this.client.post<SpoolmanDbImportResult>(
+      "/filament-types/spoolmandb/import",
+      request
+    );
+    return response.data;
+  }
+
   async scanNetworkForSpoolman(): Promise<SpoolmanDiscoveryResult[]> {
     const response = await this.client.post<SpoolmanDiscoveryResult[]>(
       "/spoolman/scan-network"

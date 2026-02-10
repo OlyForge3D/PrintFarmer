@@ -1095,6 +1095,53 @@ export interface SpoolmanDiscoveryResult {
   responseTime?: number; // in milliseconds
 }
 
+// CSV Import/Export
+export interface FilamentCsvImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  totalRows: number;
+  errors: string[];
+}
+
+// SpoolmanDB community database types
+export interface SpoolmanDbFilamentEntry {
+  id: string;
+  manufacturer: string;
+  name: string;
+  material: string;
+  density?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  spoolType?: string | null;
+  diameter?: number | null;
+  colorHex?: string | null;
+  colorHexes?: string | null;
+  extruderTemp?: number | null;
+  bedTemp?: number | null;
+  finish?: string | null;
+  translucent?: boolean;
+  glow?: boolean;
+}
+
+export interface SpoolmanDbMaterialEntry {
+  material: string;
+  density?: number | null;
+  extruderTemp?: number | null;
+  bedTemp?: number | null;
+}
+
+export interface SpoolmanDbImportRequest {
+  filamentIds: string[];
+}
+
+export interface SpoolmanDbImportResult {
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+}
+
 export interface UpdateModelRequest {
   name: string;
   motionType?: MotionTypeString;
