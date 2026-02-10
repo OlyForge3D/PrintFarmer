@@ -8,6 +8,14 @@ export interface EnqueuePrintJobRequest {
   requiredMaterialType?: string;
   /** Required printer model for auto-assign filtering (e.g., "QIDI X-Plus 4", "COREONEL") */
   requiredPrinterModel?: string;
+  /** Spoolman filament ID */
+  spoolmanFilamentId?: number;
+  /** Filament name from Spoolman */
+  filamentName?: string;
+  /** Filament vendor from Spoolman */
+  filamentVendor?: string;
+  /** Filament color hex from Spoolman */
+  filamentColor?: string;
 }
 
 export interface PrintJobDto {

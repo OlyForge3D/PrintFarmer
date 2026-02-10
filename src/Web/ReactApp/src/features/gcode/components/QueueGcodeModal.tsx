@@ -1,9 +1,9 @@
-import React, { use, Suspense, useState, useMemo } from 'react';
+import React, { use, Suspense, useState, useMemo, useEffect } from 'react';
 import { Button, Checkbox, Select, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { printJobQueueService, EnqueuePrintJobRequest } from '@/services/printJobQueueService';
-import { GcodeFile } from '@/types/api';
+import { GcodeFile, SpoolmanFilament } from '@/types/api';
 import { CheckCircleIcon, PrinterIcon, ClockIcon } from '@/common/components/icons/MdiIcons';
 
 interface Props {
@@ -94,6 +94,42 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const [error, setError] = useState<string | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
 
+  // Filament picker state
+  const [filaments, setFilaments] = useState<SpoolmanFilament[]>([]);
+  // undefined = user hasn't chosen yet; null = user explicitly cleared
+  const [userSelectedFilamentId, setUserSelectedFilamentId] = useState<number | null | undefined>(undefined);
+
+  // Load filaments from Spoolman (graceful fallback if not configured)
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getFilaments()
+      .then(data => { if (!cancelled) setFilaments(data); })
+      .catch(() => { /* Spoolman not configured — no filaments available */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Filter filaments by the G-code file's required material type
+  const filteredFilaments = useMemo(() => {
+    if (!file.extractedMaterial) return filaments;
+    const needle = file.extractedMaterial.toLowerCase();
+    return filaments.filter(f => f.material?.toLowerCase() === needle);
+  }, [filaments, file.extractedMaterial]);
+
+  // Auto-select filament matching extracted material (only when user hasn't chosen)
+  const effectiveFilamentId = useMemo(() => {
+    if (userSelectedFilamentId !== undefined) return userSelectedFilamentId ?? undefined;
+    // Auto-select: find first filament matching extracted material
+    if (filteredFilaments.length > 0 && file.extractedMaterial) {
+      return filteredFilaments[0]?.id;
+    }
+    return undefined;
+  }, [filteredFilaments, file.extractedMaterial, userSelectedFilamentId]);
+
+  const selectedFilament = useMemo(
+    () => filaments.find(f => f.id === effectiveFilamentId),
+    [filaments, effectiveFilamentId]
+  );
+
   const buildRequest = (): EnqueuePrintJobRequest => {
     const req: EnqueuePrintJobRequest = {
       gcodeFileId: file.id,
@@ -109,6 +145,14 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
     if (typeof requiredNozzle === 'number') req.requiredNozzleDiameter = requiredNozzle;
     if (typeof requiredMaterial === 'string' && requiredMaterial.length > 0) req.requiredMaterialType = requiredMaterial;
     if (typeof requiredModelValue === 'string' && requiredModelValue.length > 0) req.requiredPrinterModel = requiredModelValue;
+
+    // Include selected Spoolman filament
+    if (selectedFilament) {
+      req.spoolmanFilamentId = selectedFilament.id;
+      req.filamentName = selectedFilament.name || undefined;
+      req.filamentVendor = selectedFilament.vendor || undefined;
+      req.filamentColor = selectedFilament.colorHex || undefined;
+    }
 
     return req;
   };
@@ -355,6 +399,37 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
                 ))}
               </Select>
             </div>
+          </div>
+        )}
+
+        {/* Filament picker (optional, loads from Spoolman) — filtered by required material */}
+        {filaments.length > 0 && (
+          <div>
+            <label htmlFor="filament-select" className="text-sm text-pf-text-secondary mb-2 block">
+              Filament{file.extractedMaterial ? ` (${file.extractedMaterial})` : ''} {selectedFilament && (
+                <span
+                  className="inline-block w-3 h-3 rounded-full ml-1 align-middle border border-pf-border"
+                  style={{ backgroundColor: selectedFilament.colorHex || '#888' }}
+                  aria-hidden="true"
+                />
+              )}
+            </label>
+            <Select
+              id="filament-select"
+              aria-label={`Select filament for ${file.name}`}
+              value={effectiveFilamentId?.toString() ?? ''}
+              onChange={(e) => {
+                const val = (e.target as HTMLSelectElement).value;
+                setUserSelectedFilamentId(val ? parseInt(val, 10) : null);
+              }}
+            >
+              <option value="">-- No filament --</option>
+              {filteredFilaments.map(f => (
+                <option key={f.id} value={f.id.toString()}>
+                  {f.vendor ? `${f.vendor} — ` : ''}{f.name || 'Unnamed'}{f.material ? ` (${f.material})` : ''}
+                </option>
+              ))}
+            </Select>
           </div>
         )}
 

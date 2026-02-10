@@ -95,6 +95,26 @@ public class QueuedPrintJobDto
     public string[]? Tags { get; set; }
 
     /// <summary>
+    /// Spoolman filament ID (if assigned)
+    /// </summary>
+    public int? SpoolmanFilamentId { get; set; }
+
+    /// <summary>
+    /// Filament name from Spoolman (denormalized for display)
+    /// </summary>
+    public string? FilamentName { get; set; }
+
+    /// <summary>
+    /// Filament vendor from Spoolman (denormalized for display)
+    /// </summary>
+    public string? FilamentVendor { get; set; }
+
+    /// <summary>
+    /// Filament color hex from Spoolman (denormalized for display)
+    /// </summary>
+    public string? FilamentColor { get; set; }
+
+    /// <summary>
     /// ID of the project this job belongs to (if any)
     /// </summary>
     public Guid? ProjectId { get; set; }
@@ -367,6 +387,17 @@ public class UpdateJobDetailsRequest
     public string? RequiredMaterialType { get; set; }
 
     public decimal? RequiredNozzleDiameter { get; set; }
+
+    /// <summary>
+    /// Spoolman filament ID. Set to 0 to clear.
+    /// </summary>
+    public int? SpoolmanFilamentId { get; set; }
+
+    public string? FilamentName { get; set; }
+
+    public string? FilamentVendor { get; set; }
+
+    public string? FilamentColor { get; set; }
 }
 
 /// <summary>

@@ -148,8 +148,8 @@ export function QueueJobsTable({
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Printer</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Model</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Material</th>
-            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Filament</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Est. Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Time</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Source</th>
             <th className="px-4 py-3 text-left font-medium text-pf-text-primary whitespace-nowrap">Status</th>
@@ -177,9 +177,22 @@ export function QueueJobsTable({
             
             // Get filament usage from job or gcode file metadata (convert grams to display)
             const filamentGrams = job.estimatedFilamentUsageGrams || jobWrapper.gcodeFile?.estimatedFilamentUsageGrams;
-            const filamentDisplay = filamentGrams 
-              ? `${filamentGrams.toFixed(1)}g`
-              : "-";
+            const filamentDisplay = job.filamentName
+              ? (
+                <span className="inline-flex items-center gap-1.5 max-w-[160px]" title={`${job.filamentVendor ? job.filamentVendor + ' — ' : ''}${job.filamentName}`}>
+                  {job.filamentColor && (
+                    <span
+                      className="inline-block w-3 h-3 rounded-full border border-pf-border shrink-0"
+                      style={{ backgroundColor: job.filamentColor }}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="truncate">{job.filamentName}</span>
+                </span>
+              )
+              : filamentGrams 
+                ? `${filamentGrams.toFixed(1)}g`
+                : "-";
 
             const timeDisplay = formatDateTime(job.actualStartTimeUtc ?? job.queuedAtUtc);
             const dispatchProgress = dispatchUploadProgressByJobId?.[jobId];
@@ -223,8 +236,8 @@ export function QueueJobsTable({
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{printerName}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{model}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{material}</td>
-                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{filamentDisplay}</td>
+                <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{estimatedTimeDisplay}</td>
                 <td className="px-4 py-3 text-pf-text-secondary whitespace-nowrap">{timeDisplay}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   {job.wasSeededFromHistory ? (

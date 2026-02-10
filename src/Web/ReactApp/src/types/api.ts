@@ -1770,6 +1770,14 @@ export interface QueuedPrintJobDto {
   tags?: string[];
   projectId?: string;
   projectName?: string;
+  /** Spoolman filament ID */
+  spoolmanFilamentId?: number;
+  /** Filament name from Spoolman */
+  filamentName?: string;
+  /** Filament vendor from Spoolman */
+  filamentVendor?: string;
+  /** Filament color hex from Spoolman */
+  filamentColor?: string;
 }
 
 export interface QueueGcodeFileMetaDto {

@@ -61,25 +61,22 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
   }, [jobDetails]);
 
   const handleFieldChange = useCallback((field: keyof JobDetails, value: string | number | undefined) => {
-    const updated = { ...editedDetails, [field]: value };
-    setEditedDetails(updated);
+    setEditedDetails(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
     setError(null);
-  }, [editedDetails]);
+  }, []);
 
   const handleTagsChange = useCallback((tags: string[]) => {
-    const updated = { ...editedDetails, tags };
-    setEditedDetails(updated);
+    setEditedDetails(prev => ({ ...prev, tags }));
     setHasChanges(true);
     setError(null);
-  }, [editedDetails]);
+  }, []);
 
   const handleNotesChange = useCallback((notes: string) => {
-    const updated = { ...editedDetails, notes };
-    setEditedDetails(updated);
+    setEditedDetails(prev => ({ ...prev, notes }));
     setHasChanges(true);
     setError(null);
-  }, [editedDetails]);
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!hasChanges) {
@@ -181,7 +178,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         isOpen={isOpen}
         onClose={handleClose}
         title="Job Details"
-        size="lg"
+        size="xl"
         footer={footerContent}
         closeOnBackdrop={false}
         closeOnEscape={!hasChanges}
@@ -246,17 +243,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
           >
             Details
           </Button>
-          <Button
-            variant="tab"
-            active={activeTab === 'history'}
-            className="px-4 py-2 text-sm font-medium"
-            onClick={() => setActiveTab('history')}
-            role="tab"
-            aria-selected={activeTab === 'history'}
-            aria-controls="tab-history"
-          >
-            History
-          </Button>
+
         </div>
 
         {/* Tab Content */}
@@ -442,46 +429,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
                 );
               })()}
 
-              {/* History Tab */}
-              {activeTab === 'history' && (() => {
-                // Helper for formatting dates safely
-                const formatDate = (date: string | undefined | null): string => {
-                  if (!date) return 'Not available';
-                  return new Date(date).toLocaleString();
-                };
-                // Get dates from either new or legacy field names
-                const createdAt = displayDetails.createdAtUtc || displayDetails.createdAt;
-                const queuedAt = displayDetails.queuedAtUtc || displayDetails.queuedAt;
-                const startedAt = displayDetails.actualStartTimeUtc || displayDetails.startedAt;
-                const completedAt = displayDetails.actualEndTimeUtc || displayDetails.completedAt;
 
-                return (
-                <div id="tab-history" role="tabpanel" className="space-y-2">
-                  <div className="flex justify-between py-2 border-b border-pf-border">
-                    <span className="font-medium text-pf-text-secondary">Created</span>
-                    <span className="text-pf-text-primary">{formatDate(createdAt)}</span>
-                  </div>
-                  {queuedAt && (
-                    <div className="flex justify-between py-2 border-b border-pf-border">
-                      <span className="font-medium text-pf-text-secondary">Queued</span>
-                      <span className="text-pf-text-primary">{formatDate(queuedAt)}</span>
-                    </div>
-                  )}
-                  {startedAt && (
-                    <div className="flex justify-between py-2 border-b border-pf-border">
-                      <span className="font-medium text-pf-text-secondary">Started</span>
-                      <span className="text-pf-text-primary">{formatDate(startedAt)}</span>
-                    </div>
-                  )}
-                  {completedAt && (
-                    <div className="flex justify-between py-2 border-b border-pf-border">
-                      <span className="font-medium text-pf-text-secondary">Completed</span>
-                      <span className="text-pf-text-primary">{formatDate(completedAt)}</span>
-                    </div>
-                  )}
-                </div>
-                );
-              })()}
             </div>
       </Modal>
 
@@ -522,7 +470,7 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   return (
     // React 19 Suspense boundary shows fallback while promise resolves
     <Suspense fallback={
-      <Modal isOpen={true} onClose={onClose} title="Job Details" size="lg">
+      <Modal isOpen={true} onClose={onClose} title="Job Details" size="xl">
         <div className="flex flex-col items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent mb-4"></div>
           <p className="text-pf-text-muted">Loading job details...</p>
