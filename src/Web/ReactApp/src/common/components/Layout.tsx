@@ -86,7 +86,7 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'printers', action: 'read' }
   },
   { 
-    name: 'Spools', 
+    name: 'Filament Inventory', 
     href: '/spools', 
     icon: SpoolIcon
   },

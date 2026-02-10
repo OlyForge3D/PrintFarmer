@@ -1,7 +1,7 @@
-# Copilot Processing: SDCP History Name Mismatches (Cmd 320/321)
+# Copilot Processing — PFarm1-j4g: Split SpoolsPage into Filaments and Spools tabs
 
-**Session**: Fix SDCP history field name mismatches vs official CBD-Tech SDCP V3.0.0 spec
-**Date**: 2026-02-09
+**Session**: Split SpoolsPage into tabbed Filaments + Spools view
+**Date**: 2026-02-10
 
 ## Mismatches Found (Official Spec vs Our Code)
 
