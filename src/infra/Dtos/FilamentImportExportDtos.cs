@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 /// <summary>
 /// Result of importing filament types from a CSV file.
@@ -41,15 +41,15 @@ public record SpoolmanDbFilamentEntry
 
     public string? ColorHex { get; init; }
 
-    public string? ColorHexes { get; init; }
+    public string[]? ColorHexes { get; init; }
 
     public int? ExtruderTemp { get; init; }
 
-    public string? ExtruderTempRange { get; init; }
+    public int[]? ExtruderTempRange { get; init; }
 
     public int? BedTemp { get; init; }
 
-    public string? BedTempRange { get; init; }
+    public int[]? BedTempRange { get; init; }
 
     public string? Finish { get; init; }
 

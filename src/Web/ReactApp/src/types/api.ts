@@ -1116,9 +1116,11 @@ export interface SpoolmanDbFilamentEntry {
   spoolType?: string | null;
   diameter?: number | null;
   colorHex?: string | null;
-  colorHexes?: string | null;
+  colorHexes?: string[] | null;
   extruderTemp?: number | null;
+  extruderTempRange?: number[] | null;
   bedTemp?: number | null;
+  bedTempRange?: number[] | null;
   finish?: string | null;
   translucent?: boolean;
   glow?: boolean;

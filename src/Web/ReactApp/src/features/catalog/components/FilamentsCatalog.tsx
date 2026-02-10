@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { 
   Button, 
   Input, 
@@ -12,7 +12,7 @@ import {
   gridTableOptions,
 } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
-import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon, UploadIcon, DatabaseIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { 
   useFilamentTypes, 
@@ -20,12 +20,9 @@ import {
   useUpdateFilamentType, 
   useDeleteFilamentType,
   useImportFilamentTypesFromSpoolman,
-  useExportFilamentTypesCsv,
-  useImportFilamentTypesCsv,
 } from '@/common/hooks/useApi';
 import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequest, TempTargets } from '@/types/api';
-import { SpoolmanDbBrowserModal } from './SpoolmanDbBrowserModal';
-import { toast } from 'sonner';
+
 
 /**
  * Card display for filament type - uses consistent Card styling with other catalog tabs
@@ -196,14 +193,6 @@ export function FilamentsCatalog() {
   const updateMutation = useUpdateFilamentType();
   const deleteMutation = useDeleteFilamentType();
   const importMutation = useImportFilamentTypesFromSpoolman();
-  const exportCsvMutation = useExportFilamentTypesCsv();
-  const importCsvMutation = useImportFilamentTypesCsv();
-
-  // CSV file input ref
-  const csvFileInputRef = useRef<HTMLInputElement>(null);
-
-  // SpoolmanDB browser modal state
-  const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
 
   // Modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -403,40 +392,6 @@ export function FilamentsCatalog() {
     }
   }, [importMutation]);
 
-  // Handle CSV export
-  const handleExportCsv = useCallback(async () => {
-    try {
-      const blob = await exportCsvMutation.mutateAsync();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'filament-types.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('Filament types exported to CSV.');
-    } catch {
-      toast.error('Failed to export filament types.');
-    }
-  }, [exportCsvMutation]);
-
-  // Handle CSV import
-  const handleImportCsv = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const result = await importCsvMutation.mutateAsync(file);
-      toast.success(`CSV import: ${result.createdCount} created, ${result.updatedCount} updated, ${result.errorCount} errors.`);
-    } catch {
-      toast.error('Failed to import filament types from CSV.');
-    }
-    // Reset the file input so the same file can be re-imported
-    if (csvFileInputRef.current) {
-      csvFileInputRef.current.value = '';
-    }
-  }, [importCsvMutation]);
-
   // Handle form field changes
   const handleFieldChange = useCallback((field: keyof FilamentFormState, value: string | boolean) => {
     setFormState(prev => ({ ...prev, [field]: value }));
@@ -465,51 +420,12 @@ export function FilamentsCatalog() {
 
   return (
     <div className="space-y-4">
-      {/* Hidden file input for CSV import */}
-      <input
-        ref={csvFileInputRef}
-        type="file"
-        accept=".csv"
-        className="hidden"
-        onChange={handleImportCsv}
-        aria-label="Import filament types from CSV file"
-      />
-
       {/* Header with action buttons */}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Filament Types ({filaments.length})
         </h2>
         <div className="flex items-center gap-2">
-          <Button 
-            onClick={handleExportCsv}
-            title="Export filament types to CSV"
-            size="sm"
-            variant="secondary"
-            disabled={exportCsvMutation.isPending || filaments.length === 0}
-            iconLeft={<DownloadIcon className="w-4 h-4 mr-1" />}
-          >
-            Export CSV
-          </Button>
-          <Button 
-            onClick={() => csvFileInputRef.current?.click()}
-            title="Import filament types from CSV file"
-            size="sm"
-            variant="secondary"
-            disabled={importCsvMutation.isPending}
-            iconLeft={<UploadIcon className="w-4 h-4 mr-1" />}
-          >
-            {importCsvMutation.isPending ? 'Importing...' : 'Import CSV'}
-          </Button>
-          <Button 
-            onClick={() => setIsSpoolmanDbOpen(true)}
-            title="Browse and import from SpoolmanDB community database"
-            size="sm"
-            variant="secondary"
-            iconLeft={<DatabaseIcon className="w-4 h-4 mr-1" />}
-          >
-            SpoolmanDB
-          </Button>
           <Button 
             onClick={handleImportFromSpoolman}
             title="Import filament types from Spoolman"
@@ -653,11 +569,6 @@ export function FilamentsCatalog() {
         </div>
       </Modal>
 
-      {/* SpoolmanDB Browser Modal */}
-      <SpoolmanDbBrowserModal
-        isOpen={isSpoolmanDbOpen}
-        onClose={() => setIsSpoolmanDbOpen(false)}
-      />
     </div>
   );
 }

@@ -41,11 +41,9 @@ import {
   FileHealthAuditDto,
   FileIssuesSummaryDto,
   FileHealthDetailDto,
-  FilamentCsvImportResult,
   SpoolmanDbFilamentEntry,
   SpoolmanDbMaterialEntry,
   SpoolmanDbImportRequest,
-  SpoolmanDbImportResult,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -790,6 +788,18 @@ export function useImportFromSpoolmanDb() {
 
   return useMutation({
     mutationFn: (request: SpoolmanDbImportRequest) => apiClient.importFromSpoolmanDb(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
+      queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });
+    },
+  });
+}
+
+export function useSyncExternalMaterials() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.syncExternalMaterials(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentTypes });
       queryClient.invalidateQueries({ queryKey: queryKeys.filamentPresets });

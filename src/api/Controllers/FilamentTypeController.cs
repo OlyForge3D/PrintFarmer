@@ -393,6 +393,31 @@ public class FilamentTypeController(
         }
     }
 
+    /// <summary>
+    /// Syncs all external materials from Spoolman's SpoolmanDB endpoint as local filament types (upsert).
+    /// Creates new filament types for unknown materials and updates temperatures for existing ones.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Sync result with create/update/error counts</returns>
+    /// <response code="200">Returns sync result summary</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("spoolmandb/sync-materials")]
+    [ProducesResponseType(typeof(SpoolmanDbImportResult), 200)]
+    public async Task<ActionResult<SpoolmanDbImportResult>> SyncExternalMaterialsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<SpoolmanDbMaterialEntry> materials = await _spoolmanDbService.GetMaterialsAsync(ct);
+            SpoolmanDbImportResult result = await _filamentService.SyncExternalMaterialsAsync(materials, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error syncing external materials: {Message}", ex.Message);
+            return StatusCode(502, new { message = $"Failed to sync external materials: {ex.Message}" });
+        }
+    }
+
     // Default temperature heuristics are implemented in FilamentTypeService; controller-local
     // copies were unused and removed to satisfy analyzer warnings.
 }

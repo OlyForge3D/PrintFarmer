@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
-import { Button, Input, Checkbox } from '@/common/components/ui';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { Button, Input, Checkbox, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { SearchIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { useSpoolmanDbFilaments, useImportFromSpoolmanDb } from '@/common/hooks/useApi';
@@ -24,7 +24,6 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
   const [manufacturerFilter, setManufacturerFilter] = useState('');
   const [materialFilter, setMaterialFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const selectAllRef = useRef<HTMLInputElement>(null);
 
   // Load data when modal opens
   const handleOpen = useCallback(() => {
@@ -34,7 +33,7 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
   }, [isFetched, refetch]);
 
   // Trigger load on open
-  useMemo(() => {
+  useEffect(() => {
     if (isOpen) {
       handleOpen();
     }
@@ -111,7 +110,6 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
   }, [onClose]);
 
   const allSelected = filtered.length > 0 && selectedIds.size === filtered.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < filtered.length;
 
   return (
     <Modal
@@ -143,33 +141,33 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
           </div>
           <div>
             <label htmlFor="spoolmandb-manufacturer" className="sr-only">Filter by manufacturer</label>
-            <select
+            <Select
               id="spoolmandb-manufacturer"
               value={manufacturerFilter}
               onChange={(e) => setManufacturerFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-pf-border bg-pf-surface text-pf-text-primary text-sm"
+              className="px-3 py-2 rounded-lg text-sm"
               aria-label="Filter by manufacturer"
             >
               <option value="">All Manufacturers</option>
               {manufacturers.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <label htmlFor="spoolmandb-material" className="sr-only">Filter by material</label>
-            <select
+            <Select
               id="spoolmandb-material"
               value={materialFilter}
               onChange={(e) => setMaterialFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-pf-border bg-pf-surface text-pf-text-primary text-sm"
+              className="px-3 py-2 rounded-lg text-sm"
               aria-label="Filter by material"
             >
               <option value="">All Materials</option>
               {materials.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -190,9 +188,7 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
                   <tr>
                     <th className="px-3 py-2 text-left w-10">
                       <Checkbox
-                        ref={selectAllRef}
                         checked={allSelected}
-                        indeterminate={someSelected}
                         onChange={toggleSelectAll}
                         label=""
                         aria-label={allSelected ? 'Deselect all filaments' : 'Select all filaments'}
@@ -267,7 +263,7 @@ function FilamentRow({
       }`}
       onClick={() => onToggle(filament.id)}
     >
-      <td className="px-3 py-2">
+      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
         <Checkbox
           checked={isSelected}
           onChange={() => onToggle(filament.id)}

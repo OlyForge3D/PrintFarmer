@@ -85,4 +85,36 @@ public interface ISpoolmanService
     /// </summary>
     /// <param name="ct">The cancellation token.</param>
     Task<SpoolmanProbeResult> HealthProbeAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Lists all vendors from the configured Spoolman server.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Creates a new vendor in Spoolman. Returns the created vendor with its ID.
+    /// </summary>
+    Task<SpoolmanVendorDto> CreateVendorAsync(string name, string? externalId, CancellationToken ct);
+
+    /// <summary>
+    /// Creates a new filament in Spoolman. Returns the created filament with its ID.
+    /// </summary>
+    Task<SpoolmanFilamentDto> CreateFilamentInSpoolmanAsync(SpoolmanCreateFilamentRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Updates an existing filament in Spoolman by its ID.
+    /// </summary>
+    Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Gets all filaments from Spoolman's external (SpoolmanDB) endpoint: /api/v1/external/filament.
+    /// Spoolman periodically syncs this data from the SpoolmanDB community database.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanDbFilamentEntry>> GetExternalFilamentsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets all materials from Spoolman's external (SpoolmanDB) endpoint: /api/v1/external/material.
+    /// Returns material definitions with density, extruder temp, and bed temp.
+    /// </summary>
+    Task<IReadOnlyList<SpoolmanDbMaterialEntry>> GetExternalMaterialsAsync(CancellationToken ct);
 }

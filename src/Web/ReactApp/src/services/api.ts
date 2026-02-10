@@ -1098,6 +1098,13 @@ export class ApiClient {
     return response.data;
   }
 
+  async syncExternalMaterials(): Promise<SpoolmanDbImportResult> {
+    const response = await this.client.post<SpoolmanDbImportResult>(
+      "/filament-types/spoolmandb/sync-materials"
+    );
+    return response.data;
+  }
+
   async scanNetworkForSpoolman(): Promise<SpoolmanDiscoveryResult[]> {
     const response = await this.client.post<SpoolmanDiscoveryResult[]>(
       "/spoolman/scan-network"

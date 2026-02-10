@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -328,6 +329,192 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             logger.LogWarning(ex, $"Exception fetching Spoolman filament {filamentId}", null, null);
             return null;
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/vendor";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning($"Spoolman vendor list returned status {(int)response.StatusCode}", null, null);
+                return [];
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            var vendors = new List<SpoolmanVendorDto>();
+            foreach (JsonElement el in doc.RootElement.EnumerateArray())
+            {
+                int id = TryGetInt(el, "id");
+                string name = TryGetString(el, "name") ?? string.Empty;
+                string? externalId = TryGetString(el, "external_id");
+                vendors.Add(new SpoolmanVendorDto(id, name, externalId));
+            }
+
+            return vendors;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Exception fetching Spoolman vendors", null, null);
+            return [];
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanVendorDto> CreateVendorAsync(string name, string? externalId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/vendor";
+        var body = new Dictionary<string, object?> { ["name"] = name };
+        if (!string.IsNullOrWhiteSpace(externalId))
+        {
+            body["external_id"] = externalId;
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        string jsonBody = JsonSerializer.Serialize(body);
+        using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        int id = TryGetInt(doc.RootElement, "id");
+        string vendorName = TryGetString(doc.RootElement, "name") ?? name;
+        string? extId = TryGetString(doc.RootElement, "external_id");
+        return new SpoolmanVendorDto(id, vendorName, extId);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto> CreateFilamentInSpoolmanAsync(SpoolmanCreateFilamentRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament";
+        string jsonBody = BuildFilamentJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return ParseFilament(doc.RootElement);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+        string jsonBody = BuildFilamentJson(request);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Patch, url)
+        {
+            Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
+        };
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        string json = await response.Content.ReadAsStringAsync(cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return ParseFilament(doc.RootElement);
+    }
+
+    private static string BuildFilamentJson(SpoolmanCreateFilamentRequest request)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["density"] = request.Density,
+            ["diameter"] = request.Diameter
+        };
+
+        if (request.Name != null)
+        {
+            body["name"] = request.Name;
+        }
+
+        if (request.VendorId.HasValue)
+        {
+            body["vendor_id"] = request.VendorId.Value;
+        }
+
+        if (request.Material != null)
+        {
+            body["material"] = request.Material;
+        }
+
+        if (request.Weight.HasValue)
+        {
+            body["weight"] = request.Weight.Value;
+        }
+
+        if (request.SpoolWeight.HasValue)
+        {
+            body["spool_weight"] = request.SpoolWeight.Value;
+        }
+
+        if (request.SettingsExtruderTemp.HasValue)
+        {
+            body["settings_extruder_temp"] = request.SettingsExtruderTemp.Value;
+        }
+
+        if (request.SettingsBedTemp.HasValue)
+        {
+            body["settings_bed_temp"] = request.SettingsBedTemp.Value;
+        }
+
+        if (request.ColorHex != null)
+        {
+            body["color_hex"] = request.ColorHex;
+        }
+
+        if (request.ExternalId != null)
+        {
+            body["external_id"] = request.ExternalId;
+        }
+
+        if (request.Comment != null)
+        {
+            body["comment"] = request.Comment;
+        }
+
+        return JsonSerializer.Serialize(body);
     }
 
     /// <summary>
@@ -1317,4 +1504,75 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return new SpoolmanDiscoveryResult(url, false, ex.Message);
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanDbFilamentEntry>> GetExternalFilamentsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – cannot fetch external filaments", null, null);
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/external/filament";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            List<SpoolmanDbFilamentEntry>? filaments = await response.Content.ReadFromJsonAsync<List<SpoolmanDbFilamentEntry>>(ExternalJsonOptions, cts.Token);
+            IReadOnlyList<SpoolmanDbFilamentEntry> result = filaments?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbFilamentEntry>)Array.Empty<SpoolmanDbFilamentEntry>();
+
+            logger.LogDebug($"Retrieved {result.Count} external filaments from Spoolman", null, null);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", url);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SpoolmanDbMaterialEntry>> GetExternalMaterialsAsync(CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            logger.LogDebug("Spoolman not configured – cannot fetch external materials", null, null);
+            return [];
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/external/material";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            List<SpoolmanDbMaterialEntry>? materials = await response.Content.ReadFromJsonAsync<List<SpoolmanDbMaterialEntry>>(ExternalJsonOptions, cts.Token);
+            IReadOnlyList<SpoolmanDbMaterialEntry> result = materials?.AsReadOnly() ?? (IReadOnlyList<SpoolmanDbMaterialEntry>)Array.Empty<SpoolmanDbMaterialEntry>();
+
+            logger.LogDebug($"Retrieved {result.Count} external materials from Spoolman", null, null);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", url);
+            throw;
+        }
+    }
+
+    private static readonly JsonSerializerOptions ExternalJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
 }

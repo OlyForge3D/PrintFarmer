@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useTransition, useCallback } from 'react';
+import { useState, useEffect, useMemo, useTransition, useCallback, useRef } from 'react';
 import {
   FilterIcon,
   RefreshIcon,
@@ -6,14 +6,20 @@ import {
   GridIcon,
   TableIcon,
   ArrowUpIcon,
-  ArrowDownIcon
+  ArrowDownIcon,
+  DownloadIcon,
+  UploadIcon,
+  DatabaseIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Select } from '@/common/components/ui';
+import { Button, Select, FileUpload } from '@/common/components/ui';
 import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
+import { SpoolmanDbBrowserModal } from '@/features/catalog/components/SpoolmanDbBrowserModal';
 import { apiClient } from '@/services/api';
+import { useExportFilamentTypesCsv, useImportFilamentTypesCsv } from '@/common/hooks/useApi';
 import type { SpoolmanFilament } from '@/types/api';
+import { toast } from 'sonner';
 
 interface FilterState {
   material: string;
@@ -36,6 +42,10 @@ export function FilamentsTab() {
   const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', search: '' });
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
+  const exportCsvMutation = useExportFilamentTypesCsv();
+  const importCsvMutation = useImportFilamentTypesCsv();
 
   // Load filaments on mount
   const loadFilaments = useCallback(async () => {
@@ -152,9 +162,72 @@ export function FilamentsTab() {
         </div>
       )}
 
+      {/* Hidden file input for CSV import */}
+      <FileUpload
+        ref={csvFileInputRef}
+        accept=".csv"
+        className="hidden"
+        label="Import filament types from CSV file"
+        onChange={(files) => {
+          const file = files?.[0];
+          if (!file) return;
+          importCsvMutation.mutateAsync(file).then((result) => {
+            toast.success(`CSV import: ${result.createdCount} created, ${result.updatedCount} updated, ${result.errorCount} errors.`);
+            reload();
+          }).catch(() => {
+            toast.error('Failed to import filament types from CSV.');
+          });
+          if (csvFileInputRef.current) csvFileInputRef.current.value = '';
+        }}
+      />
+
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-pf-text-primary">Filaments ({sortedFilaments.length})</h2>
         <div className="flex gap-2 items-center">
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Export filament types to CSV"
+            disabled={exportCsvMutation.isPending || filaments.length === 0}
+            onClick={async () => {
+              try {
+                const blob = await exportCsvMutation.mutateAsync();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'filament-types.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.success('Filament types exported to CSV.');
+              } catch {
+                toast.error('Failed to export filament types.');
+              }
+            }}
+            iconLeft={<DownloadIcon className="h-4 w-4 mr-1" />}
+          >
+            Export CSV
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Import filament types from CSV file"
+            disabled={importCsvMutation.isPending}
+            onClick={() => csvFileInputRef.current?.click()}
+            iconLeft={<UploadIcon className="h-4 w-4 mr-1" />}
+          >
+            {importCsvMutation.isPending ? 'Importing...' : 'Import CSV'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Browse and import from SpoolmanDB community database"
+            onClick={() => setIsSpoolmanDbOpen(true)}
+            iconLeft={<DatabaseIcon className="h-4 w-4 mr-1" />}
+          >
+            SpoolmanDB
+          </Button>
           <div className="flex rounded-sm overflow-hidden border border-pf-border">
             <Button
               variant={viewMode === 'cards' ? 'primary' : 'secondary'}
@@ -338,10 +411,8 @@ export function FilamentsTab() {
                       className={`px-3 py-2 font-medium ${col.sortable ? 'cursor-pointer select-none' : ''}`}
                       onClick={() => {
                         if (!col.sortable) return;
-                        if (col.id !== 'color') {
-                          setSortField(col.id);
-                          setSortDir(prev => (isSorted ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
-                        }
+                        setSortField(col.id);
+                        setSortDir(prev => (isSorted ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
                       }}
                       {...(ariaSort ? { 'aria-sort': ariaSort } : {})}
                     >
@@ -389,6 +460,12 @@ export function FilamentsTab() {
           </div>
         </div>
       )}
+
+      {/* SpoolmanDB Browser Modal */}
+      <SpoolmanDbBrowserModal
+        isOpen={isSpoolmanDbOpen}
+        onClose={() => { setIsSpoolmanDbOpen(false); reload(); }}
+      />
     </div>
   );
 }

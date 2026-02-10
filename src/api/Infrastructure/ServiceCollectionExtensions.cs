@@ -435,12 +435,8 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
 
-        // SpoolmanDB community database service (external HTTP with caching)
-        _ = services.AddHttpClient<Services.ISpoolmanDbService, Services.SpoolmanDbService>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(30);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
-        });
+        // SpoolmanDB community database service (GitHub Pages primary for temp ranges, Spoolman external fallback)
+        _ = services.AddHttpClient<Services.ISpoolmanDbService, Services.SpoolmanDbService>();
     }
 
     #endregion
