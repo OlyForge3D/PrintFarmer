@@ -12,6 +12,12 @@ Conventions for building React components in PrintFarmer. Covers both general Re
 - **Functional components with hooks** — no class components
 - **Naming**: PascalCase for components/types, camelCase for functions/variables
 - **Hooks**: Always provide correct `useEffect` dependency arrays; add cleanup functions to prevent memory leaks; follow rules of hooks (top-level only)
+- **No magic values**: Assign unexplained numbers/strings to named constants — never inline them
+- **Destructure props**: Always destructure props in the function signature for clarity
+- **Immutability**: Never mutate state or props directly — always create new objects/arrays
+- **Stable keys**: Always provide unique, stable `key` props in lists — never use array index for dynamic lists
+- **Path aliases**: Always use `@/` path aliases for imports — never use relative `../` paths
+- **Custom hooks location**: Extract reusable hooks to `hooks/` folders — don't define hooks inline in component files
 - **Performance**: Use `React.memo`, `useMemo`, `useCallback` judiciously — profile first with React DevTools before optimizing
 - **Code splitting**: Use `React.lazy` + `Suspense` for route-level splitting
 - **Error Boundaries**: Wrap feature sections in Error Boundaries for graceful degradation
