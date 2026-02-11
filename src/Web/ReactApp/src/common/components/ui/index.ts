@@ -7,6 +7,7 @@ export { Badge, type BadgeProps, type BadgeVariant, type BadgeSize } from './Bad
 export { Button, type ButtonVariant, type ButtonSize } from './Button';
 export { Card, type CardProps, type CardHeaderProps, type CardBodyProps, type CardFooterProps } from './Card';
 export { Checkbox, type CheckboxProps } from './Checkbox';
+export { ColorPicker, type ColorPickerProps } from './ColorPicker';
 export { ControlPadButton, type ControlPadButtonProps } from './ControlPadButton';
 export { DataTable, type DataTableProps, type DataTableColumn } from './DataTable';
 export { FileUpload, type FileUploadProps } from './FileUpload';

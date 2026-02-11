@@ -68,6 +68,11 @@ import {
   BulkImportResponse,
   SpoolmanSpool,
   SpoolmanFilament,
+  SpoolmanVendor,
+  SpoolmanMaterial,
+  SpoolmanBulkUpdateFilamentsRequest,
+  SpoolmanBulkUpdateResult,
+  SpoolmanUpdateFilamentRequest,
 } from "@/types/api";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
@@ -2397,6 +2402,91 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/filaments');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
+  }
+
+  /**
+   * Create a new filament in Spoolman.
+   */
+  async createFilament(request: SpoolmanUpdateFilamentRequest): Promise<SpoolmanFilament> {
+    const response = await this.client.post<SpoolmanFilament>('/spoolman/filaments', request);
+    return response.data;
+  }
+
+  /**
+   * Get all vendors from Spoolman
+   */
+  async getVendors(): Promise<SpoolmanVendor[]> {
+    const response = await this.client.get('/spoolman/vendors');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanVendor[] || [];
+  }
+
+  /**
+   * Get all material types from Spoolman (e.g. PLA, PETG, ASA)
+   */
+  async getMaterials(): Promise<SpoolmanMaterial[]> {
+    const response = await this.client.get('/spoolman/materials');
+    const data = response.data;
+    return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanMaterial[] || [];
+  }
+
+  /**
+   * Bulk-update multiple filaments in Spoolman.
+   * Only non-null fields are applied.
+   */
+  async bulkUpdateFilaments(request: SpoolmanBulkUpdateFilamentsRequest): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.patch<SpoolmanBulkUpdateResult>('/spoolman/filaments/bulk', request);
+    return response.data;
+  }
+
+  /**
+   * Update a single filament in Spoolman by ID.
+   * Only non-null fields are applied (PATCH semantics).
+   */
+  async updateFilament(id: number, request: SpoolmanUpdateFilamentRequest): Promise<SpoolmanFilament> {
+    const response = await this.client.patch<SpoolmanFilament>(`/spoolman/filaments/${id}`, request);
+    return response.data;
+  }
+
+  /**
+   * Delete a single filament from Spoolman by ID.
+   */
+  async deleteFilament(id: number): Promise<void> {
+    await this.client.delete(`/spoolman/filaments/${id}`);
+  }
+
+  /**
+   * Bulk-delete multiple filaments from Spoolman.
+   */
+  async bulkDeleteFilaments(filamentIds: number[]): Promise<SpoolmanBulkUpdateResult> {
+    const response = await this.client.delete<SpoolmanBulkUpdateResult>('/spoolman/filaments/bulk', {
+      data: { filamentIds },
+    });
+    return response.data;
+  }
+
+  /**
+   * Export all Spoolman filaments as a CSV file download.
+   */
+  async exportSpoolmanFilamentsCsv(): Promise<Blob> {
+    const response = await this.client.get('/spoolman/filaments/export', {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  /**
+   * Import filaments from a CSV file into Spoolman.
+   */
+  async importSpoolmanFilamentsCsv(file: File): Promise<SpoolmanBulkUpdateResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.client.post<SpoolmanBulkUpdateResult>(
+      '/spoolman/filaments/import',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
   }
 
   // ============ Settings API methods ============

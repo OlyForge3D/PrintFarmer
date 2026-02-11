@@ -42,9 +42,9 @@ public record SpoolmanCreateFilamentRequest
 
     public string? Material { get; init; }
 
-    public double Density { get; init; } = 1.24;
+    public double? Density { get; init; }
 
-    public double Diameter { get; init; } = 1.75;
+    public double? Diameter { get; init; }
 
     public double? Weight { get; init; }
 
@@ -59,4 +59,55 @@ public record SpoolmanCreateFilamentRequest
     public string? ExternalId { get; init; }
 
     public string? Comment { get; init; }
+
+    public double? Price { get; init; }
+
+    public string? ArticleNumber { get; init; }
+
+    public string? MultiColorHexes { get; init; }
+}
+
+/// <summary>
+/// Request to bulk-update a set of filaments in Spoolman.
+/// Only non-null fields are applied to each filament.
+/// </summary>
+public record SpoolmanBulkUpdateFilamentsRequest
+{
+    /// <summary>IDs of filaments to update (required).</summary>
+    public int[] FilamentIds { get; init; } = [];
+
+    /// <summary>Vendor ID to set on all selected filaments (null = no change).</summary>
+    public int? VendorId { get; init; }
+
+    /// <summary>Material to set (null = no change).</summary>
+    public string? Material { get; init; }
+
+    /// <summary>Price to set (null = no change).</summary>
+    public double? Price { get; init; }
+
+    /// <summary>Extruder temp to set (null = no change).</summary>
+    public int? SettingsExtruderTemp { get; init; }
+
+    /// <summary>Bed temp to set (null = no change).</summary>
+    public int? SettingsBedTemp { get; init; }
+
+    /// <summary>Comment to set (null = no change).</summary>
+    public string? Comment { get; init; }
+}
+
+/// <summary>
+/// Result of a bulk filament update operation.
+/// </summary>
+public record SpoolmanBulkUpdateResult(
+    int UpdatedCount,
+    int ErrorCount,
+    string[] Errors);
+
+/// <summary>
+/// Request to bulk-delete a set of filaments from Spoolman.
+/// </summary>
+public record SpoolmanBulkDeleteRequest
+{
+    /// <summary>IDs of filaments to delete (required).</summary>
+    public int[] FilamentIds { get; init; } = [];
 }

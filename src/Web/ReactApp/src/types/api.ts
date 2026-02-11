@@ -2393,3 +2393,74 @@ export interface SpoolmanFilament {
   multiColorHexes?: string | null;
   externalId?: string | null;
 }
+
+/**
+ * Spoolman vendor record.
+ */
+export interface SpoolmanVendor {
+  id: number;
+  name: string;
+  externalId?: string | null;
+}
+
+/**
+ * Spoolman material definition (e.g. PLA, PETG, ASA).
+ */
+export interface SpoolmanMaterial {
+  id: number;
+  name: string;
+  density?: number | null;
+  colorHex?: string | null;
+}
+
+/**
+ * Request to bulk-update a set of filaments in Spoolman.
+ * Only non-null/undefined fields are applied to each filament.
+ */
+export interface SpoolmanBulkUpdateFilamentsRequest {
+  filamentIds: number[];
+  vendorId?: number | null;
+  material?: string | null;
+  price?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  comment?: string | null;
+}
+
+/**
+ * Result of a bulk filament update.
+ */
+export interface SpoolmanBulkUpdateResult {
+  updatedCount: number;
+  errorCount: number;
+  errors: string[];
+}
+
+/**
+ * Request to bulk-delete filaments from Spoolman.
+ */
+export interface SpoolmanBulkDeleteRequest {
+  filamentIds: number[];
+}
+
+/**
+ * Request to update (PATCH) a single filament in Spoolman.
+ * Only non-null/undefined fields are applied.
+ */
+export interface SpoolmanUpdateFilamentRequest {
+  name?: string | null;
+  vendorId?: number | null;
+  material?: string | null;
+  density?: number | null;
+  diameter?: number | null;
+  weight?: number | null;
+  spoolWeight?: number | null;
+  settingsExtruderTemp?: number | null;
+  settingsBedTemp?: number | null;
+  colorHex?: string | null;
+  externalId?: string | null;
+  comment?: string | null;
+  price?: number | null;
+  articleNumber?: string | null;
+  multiColorHexes?: string | null;
+}

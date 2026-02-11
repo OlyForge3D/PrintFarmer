@@ -468,19 +468,17 @@ namespace Farm.Web.Api.Services.Filament
                 .Where(f => !string.IsNullOrWhiteSpace(f.ExternalId))
                 .ToDictionary(f => f.ExternalId!, f => f, StringComparer.OrdinalIgnoreCase);
 
-            // Secondary lookup: match by (name, material, vendor) for filaments without external_id
-            // This prevents duplicates when a filament was manually created before importing from SpoolmanDB
+            // Secondary lookup: match by (name, material, vendor) as fallback.
+            // This prevents duplicates when external_id isn't returned by Spoolman
+            // or when a filament was manually created before importing from SpoolmanDB.
             static string MakeCompositeKey(string? name, string? material, string? vendor) =>
                 $"{name?.Trim()}|{material?.Trim()}|{vendor?.Trim()}".ToUpperInvariant();
 
             Dictionary<string, SpoolmanFilamentDto> byComposite = new(StringComparer.OrdinalIgnoreCase);
             foreach (SpoolmanFilamentDto f in existingFilaments)
             {
-                if (string.IsNullOrWhiteSpace(f.ExternalId))
-                {
-                    string key = MakeCompositeKey(f.Name, f.Material, f.Vendor);
-                    byComposite.TryAdd(key, f);
-                }
+                string key = MakeCompositeKey(f.Name, f.Material, f.Vendor);
+                byComposite.TryAdd(key, f);
             }
 
             // Load existing Spoolman vendors and build lookup by name (first-wins for duplicates)
@@ -561,8 +559,8 @@ namespace Farm.Web.Api.Services.Filament
                         Name = entry.Name,
                         VendorId = vendorId,
                         Material = entry.Material,
-                        Density = entry.Density ?? 1.24,
-                        Diameter = entry.Diameter ?? 1.75,
+                        Density = entry.Density ?? 1.24d,
+                        Diameter = entry.Diameter ?? 1.75d,
                         Weight = entry.Weight,
                         SpoolWeight = entry.SpoolWeight,
                         SettingsExtruderTemp = extruderTemp,

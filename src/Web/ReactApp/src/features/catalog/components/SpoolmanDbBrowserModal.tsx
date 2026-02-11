@@ -23,6 +23,8 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
   const [search, setSearch] = useState('');
   const [manufacturerFilter, setManufacturerFilter] = useState('');
   const [materialFilter, setMaterialFilter] = useState('');
+  const [weightFilter, setWeightFilter] = useState('');
+  const [diameterFilter, setDiameterFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Load data when modal opens
@@ -52,6 +54,18 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
     return Array.from(set).sort();
   }, [filaments]);
 
+  const weights = useMemo(() => {
+    if (!filaments) return [];
+    const set = new Set(filaments.map(f => f.weight).filter((w): w is number => w != null));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [filaments]);
+
+  const diameters = useMemo(() => {
+    if (!filaments) return [];
+    const set = new Set(filaments.map(f => f.diameter).filter((d): d is number => d != null));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [filaments]);
+
   // Filter filaments
   const filtered = useMemo(() => {
     if (!filaments) return [];
@@ -59,13 +73,15 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
     return filaments.filter(f => {
       if (manufacturerFilter && f.manufacturer !== manufacturerFilter) return false;
       if (materialFilter && f.material !== materialFilter) return false;
+      if (weightFilter && String(f.weight) !== weightFilter) return false;
+      if (diameterFilter && String(f.diameter) !== diameterFilter) return false;
       if (lowerSearch) {
         const haystack = `${f.manufacturer} ${f.material} ${f.name} ${f.colorHex ?? ''}`.toLowerCase();
         if (!haystack.includes(lowerSearch)) return false;
       }
       return true;
     });
-  }, [filaments, search, manufacturerFilter, materialFilter]);
+  }, [filaments, search, manufacturerFilter, materialFilter, weightFilter, diameterFilter]);
 
   const toggleSelection = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -106,6 +122,8 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
     setSearch('');
     setManufacturerFilter('');
     setMaterialFilter('');
+    setWeightFilter('');
+    setDiameterFilter('');
     onClose();
   }, [onClose]);
 
@@ -169,6 +187,36 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
               ))}
             </Select>
           </div>
+          <div>
+            <label htmlFor="spoolmandb-weight" className="sr-only">Filter by weight</label>
+            <Select
+              id="spoolmandb-weight"
+              value={weightFilter}
+              onChange={(e) => setWeightFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg text-sm"
+              aria-label="Filter by weight"
+            >
+              <option value="">All Weights</option>
+              {weights.map(w => (
+                <option key={w} value={String(w)}>{w}g</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <label htmlFor="spoolmandb-diameter" className="sr-only">Filter by diameter</label>
+            <Select
+              id="spoolmandb-diameter"
+              value={diameterFilter}
+              onChange={(e) => setDiameterFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg text-sm"
+              aria-label="Filter by diameter"
+            >
+              <option value="">All Diameters</option>
+              {diameters.map(d => (
+                <option key={d} value={String(d)}>{d}mm</option>
+              ))}
+            </Select>
+          </div>
         </div>
 
         {/* Results */}
@@ -200,12 +248,14 @@ export function SpoolmanDbBrowserModal({ isOpen, onClose }: SpoolmanDbBrowserMod
                     <th className="px-3 py-2 text-left text-pf-text-secondary font-medium">Color</th>
                     <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Hotend</th>
                     <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Bed</th>
+                    <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Weight</th>
+                    <th className="px-3 py-2 text-right text-pf-text-secondary font-medium">Diameter</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-8 text-center text-pf-text-muted">
+                      <td colSpan={9} className="px-3 py-8 text-center text-pf-text-muted">
                         No filaments match your filters.
                       </td>
                     </tr>
@@ -293,6 +343,12 @@ function FilamentRow({
       </td>
       <td className="px-3 py-2 text-right text-pf-text-secondary">
         {filament.bedTemp ?? '—'}°C
+      </td>
+      <td className="px-3 py-2 text-right text-pf-text-secondary">
+        {filament.weight ? `${filament.weight}g` : '—'}
+      </td>
+      <td className="px-3 py-2 text-right text-pf-text-secondary">
+        {filament.diameter ? `${filament.diameter}mm` : '—'}
       </td>
     </tr>
   );

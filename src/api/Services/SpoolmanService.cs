@@ -456,13 +456,107 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         return ParseFilament(doc.RootElement);
     }
 
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkUpdateFilamentsAsync(SpoolmanBulkUpdateFilamentsRequest request, CancellationToken ct)
+    {
+        if (request.FilamentIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        // Build a partial update request with only the fields the caller wants to change
+        var patch = new SpoolmanCreateFilamentRequest
+        {
+            VendorId = request.VendorId,
+            Material = request.Material,
+            Price = request.Price,
+            SettingsExtruderTemp = request.SettingsExtruderTemp,
+            SettingsBedTemp = request.SettingsBedTemp,
+            Comment = request.Comment,
+        };
+
+        int updated = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        foreach (int id in request.FilamentIds)
+        {
+            try
+            {
+                await UpdateFilamentInSpoolmanAsync(id, patch, ct);
+                updated++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Filament {id}: {ex.Message}");
+                errorCount++;
+            }
+        }
+
+        return new SpoolmanBulkUpdateResult(updated, errorCount, [.. errors]);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
+        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanBulkUpdateResult> BulkDeleteFilamentsAsync(int[] filamentIds, CancellationToken ct)
+    {
+        if (filamentIds is not { Length: > 0 })
+        {
+            return new SpoolmanBulkUpdateResult(0, 0, []);
+        }
+
+        int deleted = 0;
+        int errorCount = 0;
+        List<string> errors = [];
+
+        foreach (int id in filamentIds)
+        {
+            try
+            {
+                await DeleteFilamentFromSpoolmanAsync(id, ct);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Filament {id}: {ex.Message}");
+                errorCount++;
+            }
+        }
+
+        return new SpoolmanBulkUpdateResult(deleted, errorCount, [.. errors]);
+    }
+
     private static string BuildFilamentJson(SpoolmanCreateFilamentRequest request)
     {
-        var body = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>();
+
+        if (request.Density.HasValue)
         {
-            ["density"] = request.Density,
-            ["diameter"] = request.Diameter
-        };
+            body["density"] = request.Density.Value;
+        }
+
+        if (request.Diameter.HasValue)
+        {
+            body["diameter"] = request.Diameter.Value;
+        }
 
         if (request.Name != null)
         {
@@ -512,6 +606,21 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         if (request.Comment != null)
         {
             body["comment"] = request.Comment;
+        }
+
+        if (request.Price.HasValue)
+        {
+            body["price"] = request.Price.Value;
+        }
+
+        if (request.ArticleNumber != null)
+        {
+            body["article_number"] = request.ArticleNumber;
+        }
+
+        if (request.MultiColorHexes != null)
+        {
+            body["multi_color_hexes"] = request.MultiColorHexes;
         }
 
         return JsonSerializer.Serialize(body);

@@ -107,6 +107,21 @@ public interface ISpoolmanService
     Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
 
     /// <summary>
+    /// Bulk-updates multiple filaments in Spoolman. Only non-null fields in the request are applied.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkUpdateFilamentsAsync(SpoolmanBulkUpdateFilamentsRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a filament from Spoolman by its ID.
+    /// </summary>
+    Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
+    /// Bulk-deletes multiple filaments from Spoolman. Returns success/error counts.
+    /// </summary>
+    Task<SpoolmanBulkUpdateResult> BulkDeleteFilamentsAsync(int[] filamentIds, CancellationToken ct);
+
+    /// <summary>
     /// Gets all filaments from Spoolman's external (SpoolmanDB) endpoint: /api/v1/external/filament.
     /// Spoolman periodically syncs this data from the SpoolmanDB community database.
     /// </summary>

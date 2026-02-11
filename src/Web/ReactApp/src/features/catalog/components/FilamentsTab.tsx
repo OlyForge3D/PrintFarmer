@@ -10,14 +10,24 @@ import {
   DownloadIcon,
   UploadIcon,
   DatabaseIcon,
+  EditIcon,
+  CloseIcon,
+  DeleteIcon,
+  PlusIcon,
+  CopyIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button, Select, FileUpload } from '@/common/components/ui';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { SpoolmanDbBrowserModal } from '@/features/catalog/components/SpoolmanDbBrowserModal';
+import { BulkEditFilamentsModal } from '@/features/catalog/components/BulkEditFilamentsModal';
+import { EditFilamentModal } from '@/features/catalog/components/EditFilamentModal';
+import { AddFilamentModal } from '@/features/catalog/components/AddFilamentModal';
+import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
-import { useExportFilamentTypesCsv, useImportFilamentTypesCsv } from '@/common/hooks/useApi';
+import { useExportSpoolmanFilamentsCsv, useImportSpoolmanFilamentsCsv, useDeleteFilament, useBulkDeleteFilaments } from '@/common/hooks/useApi';
 import type { SpoolmanFilament } from '@/types/api';
 import { toast } from 'sonner';
 
@@ -38,14 +48,30 @@ export function FilamentsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    const saved = localStorage.getItem('filaments-view-mode');
+    return saved === 'table' ? 'table' : 'cards';
+  });
+
+  // Persist view mode preference
+  useEffect(() => {
+    localStorage.setItem('filaments-view-mode', viewMode);
+  }, [viewMode]);
   const [filters, setFilters] = useState<FilterState>({ material: '', vendor: '', search: '' });
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [isSpoolmanDbOpen, setIsSpoolmanDbOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [editingFilament, setEditingFilament] = useState<SpoolmanFilament | null>(null);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [cloningFilament, setCloningFilament] = useState<SpoolmanFilament | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'single'; filament: SpoolmanFilament } | { type: 'bulk' } | null>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
-  const exportCsvMutation = useExportFilamentTypesCsv();
-  const importCsvMutation = useImportFilamentTypesCsv();
+  const exportCsvMutation = useExportSpoolmanFilamentsCsv();
+  const importCsvMutation = useImportSpoolmanFilamentsCsv();
+  const deleteFilamentMutation = useDeleteFilament();
+  const bulkDeleteMutation = useBulkDeleteFilaments();
 
   // Load filaments on mount
   const loadFilaments = useCallback(async () => {
@@ -70,7 +96,17 @@ export function FilamentsTab() {
 
   const reload = () => {
     setLoading(true);
+    setSelectedIds(new Set());
     loadFilaments();
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const materialOptions = useMemo(() =>
@@ -126,6 +162,46 @@ export function FilamentsTab() {
     });
   }, [filteredFilaments, sortField, sortDir]);
 
+  // These MUST be defined after sortedFilaments to avoid TDZ errors in production builds
+  const toggleSelectAll = () => {
+    if (selectedIds.size === sortedFilaments.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sortedFilaments.map(f => f.id)));
+    }
+  };
+
+  const allSelected = sortedFilaments.length > 0 && selectedIds.size === sortedFilaments.length;
+  const someSelected = selectedIds.size > 0;
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirm) return;
+    if (deleteConfirm.type === 'single') {
+      try {
+        await deleteFilamentMutation.mutateAsync(deleteConfirm.filament.id);
+        toast.success(`Deleted "${deleteConfirm.filament.name || 'filament'}".`);
+        reload();
+      } catch {
+        toast.error('Failed to delete filament.');
+      }
+    } else {
+      try {
+        const result = await bulkDeleteMutation.mutateAsync([...selectedIds]);
+        if (result.errorCount > 0) {
+          toast.error(`Deleted ${result.updatedCount}, failed ${result.errorCount}.`);
+        } else {
+          toast.success(`Deleted ${result.updatedCount} filament${result.updatedCount !== 1 ? 's' : ''}.`);
+        }
+        reload();
+      } catch {
+        toast.error('Bulk delete failed.');
+      }
+    }
+    setDeleteConfirm(null);
+  };
+
+  const isDeleting = deleteFilamentMutation.isPending || bulkDeleteMutation.isPending;
+
   const formatTemp = (temp?: number | null): string => temp != null ? `${temp}°C` : '—';
   const formatWeight = (w?: number | null): string => w != null ? `${w}g` : '—';
   const formatPrice = (p?: number | null): string => p != null ? `$${p.toFixed(2)}` : '—';
@@ -167,15 +243,15 @@ export function FilamentsTab() {
         ref={csvFileInputRef}
         accept=".csv"
         className="hidden"
-        label="Import filament types from CSV file"
+        label="Import filaments from CSV file"
         onChange={(files) => {
           const file = files?.[0];
           if (!file) return;
           importCsvMutation.mutateAsync(file).then((result) => {
-            toast.success(`CSV import: ${result.createdCount} created, ${result.updatedCount} updated, ${result.errorCount} errors.`);
+            toast.success(`CSV import: ${result.updatedCount} imported, ${result.errorCount} errors.`);
             reload();
           }).catch(() => {
-            toast.error('Failed to import filament types from CSV.');
+            toast.error('Failed to import filaments from CSV.');
           });
           if (csvFileInputRef.current) csvFileInputRef.current.value = '';
         }}
@@ -187,7 +263,7 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             size="sm"
-            title="Export filament types to CSV"
+            title="Export Spoolman filaments to CSV"
             disabled={exportCsvMutation.isPending || filaments.length === 0}
             onClick={async () => {
               try {
@@ -195,14 +271,14 @@ export function FilamentsTab() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'filament-types.csv';
+                a.download = 'spoolman-filaments.csv';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                toast.success('Filament types exported to CSV.');
+                toast.success('Filaments exported to CSV.');
               } catch {
-                toast.error('Failed to export filament types.');
+                toast.error('Failed to export filaments.');
               }
             }}
             iconLeft={<DownloadIcon className="h-4 w-4 mr-1" />}
@@ -212,7 +288,7 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             size="sm"
-            title="Import filament types from CSV file"
+            title="Import filaments from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
             iconLeft={<UploadIcon className="h-4 w-4 mr-1" />}
@@ -227,6 +303,15 @@ export function FilamentsTab() {
             iconLeft={<DatabaseIcon className="h-4 w-4 mr-1" />}
           >
             SpoolmanDB
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            title="Add a new filament"
+            onClick={() => setIsAddOpen(true)}
+            iconLeft={<PlusIcon className="h-4 w-4 mr-1" />}
+          >
+            Add
           </Button>
           <div className="flex rounded-sm overflow-hidden border border-pf-border">
             <Button
@@ -346,19 +431,88 @@ export function FilamentsTab() {
         </div>
       )}
 
+      {/* Bulk edit toolbar */}
+      {someSelected && (
+        <div className="bg-blue-900/30 border border-blue-700/50 rounded-xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-blue-200">
+              {selectedIds.size} filament{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+              iconLeft={<CloseIcon className="h-3 w-3 mr-1" />}
+            >
+              Clear
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setIsBulkEditOpen(true)}
+              iconLeft={<EditIcon className="h-4 w-4 mr-1" />}
+            >
+              Bulk Edit
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setDeleteConfirm({ type: 'bulk' })}
+              iconLeft={<DeleteIcon className="h-4 w-4 mr-1" />}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Card view */}
       {viewMode === 'cards' && sortedFilaments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {sortedFilaments.map(f => (
             <div
               key={f.id}
-              className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors"
+              className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${selectedIds.has(f.id) ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-pf-border'}`}
             >
               <div className="flex items-center gap-2 mb-3">
+                <Checkbox
+                  checked={selectedIds.has(f.id)}
+                  onChange={() => toggleSelect(f.id)}
+                  aria-label={`Select ${f.name || 'filament'}`}
+                />
                 <ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} />
-                <div className="text-sm font-medium text-pf-text-primary truncate">
+                <div className="text-sm font-medium text-pf-text-primary truncate flex-1">
                   {f.name || 'Unnamed'}
                 </div>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => setEditingFilament(f)}
+                  aria-label={`Edit ${f.name || 'filament'}`}
+                  title="Edit filament"
+                >
+                  <EditIcon className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => setCloningFilament(f)}
+                  aria-label={`Clone ${f.name || 'filament'}`}
+                  title="Clone filament"
+                >
+                  <CopyIcon className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  onClick={() => setDeleteConfirm({ type: 'single', filament: f })}
+                  aria-label={`Delete ${f.name || 'filament'}`}
+                  title="Delete filament"
+                >
+                  <DeleteIcon className="h-3.5 w-3.5" />
+                </Button>
               </div>
               <div className="space-y-1.5">
                 <div className="text-xs text-pf-text-secondary">{f.vendor || 'Unknown Vendor'}</div>
@@ -392,6 +546,13 @@ export function FilamentsTab() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-left bg-pf-bg-2">
+                <th className="px-3 py-2 w-10">
+                  <Checkbox
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    aria-label={allSelected ? 'Deselect all filaments' : 'Select all filaments'}
+                  />
+                </th>
                 {([
                   { id: 'color' as const, label: 'Color', sortable: false },
                   { id: 'name' as const, label: 'Name', sortable: true },
@@ -425,11 +586,19 @@ export function FilamentsTab() {
                     </th>
                   );
                 })}
+                <th className="px-3 py-2 font-medium w-16">Actions</th>
               </tr>
             </thead>
             <tbody>
               {sortedFilaments.map(f => (
-                <SelectableRow key={f.id} className="border-t border-pf-border" isSelected={false}>
+                <SelectableRow key={f.id} className="border-t border-pf-border" isSelected={selectedIds.has(f.id)}>
+                  <td className="px-3 py-2">
+                    <Checkbox
+                      checked={selectedIds.has(f.id)}
+                      onChange={() => toggleSelect(f.id)}
+                      aria-label={`Select ${f.name || 'filament'}`}
+                    />
+                  </td>
                   <td className="px-3 py-2"><ColorSwatch color={f.colorHex || '#888888'} label={f.name || 'Unknown'} /></td>
                   <td className="px-3 py-2">{f.name || '—'}</td>
                   <td className="px-3 py-2">{f.vendor || '—'}</td>
@@ -439,6 +608,37 @@ export function FilamentsTab() {
                   <td className="px-3 py-2">{formatTemp(f.settingsExtruderTemp)}</td>
                   <td className="px-3 py-2">{formatTemp(f.settingsBedTemp)}</td>
                   <td className="px-3 py-2">{formatPrice(f.price)}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => setEditingFilament(f)}
+                        aria-label={`Edit ${f.name || 'filament'}`}
+                        title="Edit filament"
+                      >
+                        <EditIcon className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => setCloningFilament(f)}
+                        aria-label={`Clone ${f.name || 'filament'}`}
+                        title="Clone filament"
+                      >
+                        <CopyIcon className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => setDeleteConfirm({ type: 'single', filament: f })}
+                        aria-label={`Delete ${f.name || 'filament'}`}
+                        title="Delete filament"
+                      >
+                        <DeleteIcon className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </td>
                 </SelectableRow>
               ))}
             </tbody>
@@ -466,6 +666,58 @@ export function FilamentsTab() {
         isOpen={isSpoolmanDbOpen}
         onClose={() => { setIsSpoolmanDbOpen(false); reload(); }}
       />
+
+      {/* Bulk Edit Modal */}
+      <BulkEditFilamentsModal
+        isOpen={isBulkEditOpen}
+        onClose={() => setIsBulkEditOpen(false)}
+        selectedIds={[...selectedIds]}
+        onSuccess={reload}
+      />
+
+      {/* Individual Edit Modal */}
+      <EditFilamentModal
+        isOpen={editingFilament !== null}
+        onClose={() => setEditingFilament(null)}
+        filament={editingFilament}
+        onSuccess={reload}
+      />
+
+      {/* Add / Clone Filament Modal */}
+      <AddFilamentModal
+        isOpen={isAddOpen || cloningFilament !== null}
+        onClose={() => { setIsAddOpen(false); setCloningFilament(null); }}
+        sourceFilament={cloningFilament ?? undefined}
+        onSuccess={reload}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteConfirm !== null}
+        onClose={() => setDeleteConfirm(null)}
+        title={deleteConfirm?.type === 'bulk' ? 'Delete Filaments?' : 'Delete Filament?'}
+        width="max-w-sm"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setDeleteConfirm(null)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        }
+      >
+        {deleteConfirm?.type === 'single' ? (
+          <p className="text-pf-text-secondary">
+            Are you sure you want to delete <strong>{deleteConfirm.filament.name || 'this filament'}</strong>? This action cannot be undone.
+          </p>
+        ) : deleteConfirm?.type === 'bulk' ? (
+          <p className="text-pf-text-secondary">
+            Are you sure you want to delete <strong>{selectedIds.size}</strong> filament{selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }
