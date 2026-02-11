@@ -1,6 +1,5 @@
 ---
 description: 'Automatically update README.md and documentation files when application code changes require documentation updates'
-applyTo: '**/*.{md,js,mjs,cjs,ts,tsx,jsx,py,java,cs,go,rb,php,rs,cpp,c,h,hpp}'
 ---
 
 # Update Documentation on Code Change
